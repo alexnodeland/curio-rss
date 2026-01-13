@@ -463,6 +463,73 @@ impl Database {
         Ok(articles)
     }
 
+    /// Add article to read later queue
+    pub fn add_to_read_later(&self, id: Uuid) -> Result<i32, InfraError> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+
+        // Get the next position (max + 1)
+        let max_pos: Option<i32> = conn
+            .query_row(
+                "SELECT MAX(read_later_position) FROM articles WHERE is_read_later = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
+        let new_position = max_pos.unwrap_or(0) + 1;
+
+        conn.execute(
+            "UPDATE articles SET is_read_later = 1, read_later_at = ?, read_later_position = ? WHERE id = ?",
+            params![now, new_position, id.to_string()],
+        )?;
+
+        Ok(new_position)
+    }
+
+    /// Remove article from read later queue
+    pub fn remove_from_read_later(&self, id: Uuid) -> Result<(), InfraError> {
+        let conn = self.conn.lock().unwrap();
+
+        conn.execute(
+            "UPDATE articles SET is_read_later = 0, read_later_at = NULL, read_later_position = NULL WHERE id = ?",
+            params![id.to_string()],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get all articles in read later queue ordered by position
+    pub fn get_read_later(&self) -> Result<Vec<Article>, InfraError> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT * FROM articles WHERE is_read_later = 1 ORDER BY read_later_position ASC",
+        )?;
+
+        let articles: Vec<Article> = stmt
+            .query_map([], |row| self.row_to_article(row))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(articles)
+    }
+
+    /// Reorder read later queue
+    pub fn reorder_read_later(&self, article_ids: &[Uuid]) -> Result<(), InfraError> {
+        let conn = self.conn.lock().unwrap();
+
+        for (index, id) in article_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE articles SET read_later_position = ? WHERE id = ? AND is_read_later = 1",
+                params![index as i32 + 1, id.to_string()],
+            )?;
+        }
+
+        Ok(())
+    }
+
     // =========================================================================
     // Folder Operations
     // =========================================================================

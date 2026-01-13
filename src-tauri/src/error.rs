@@ -129,6 +129,15 @@ impl CommandError {
             source: Some(Box::new(source)),
         }
     }
+
+    /// Create an I/O error
+    pub fn io(message: impl Into<String>) -> Self {
+        Self::User {
+            message: message.into(),
+            code: ErrorCode::StorageError,
+            recoverable: false,
+        }
+    }
 }
 
 impl From<CoreError> for CommandError {

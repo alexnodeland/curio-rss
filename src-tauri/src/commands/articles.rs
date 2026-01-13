@@ -87,6 +87,54 @@ pub async fn search_articles(
     Ok(articles)
 }
 
+/// Add article to read later queue
+#[tauri::command]
+pub async fn add_to_read_later(
+    state: State<'_, AppState>,
+    article_id: String,
+) -> Result<i32, CommandError> {
+    let id = Uuid::parse_str(&article_id)
+        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    let position = state.db.add_to_read_later(id)?;
+    Ok(position)
+}
+
+/// Remove article from read later queue
+#[tauri::command]
+pub async fn remove_from_read_later(
+    state: State<'_, AppState>,
+    article_id: String,
+) -> Result<(), CommandError> {
+    let id = Uuid::parse_str(&article_id)
+        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    state.db.remove_from_read_later(id)?;
+    Ok(())
+}
+
+/// Get all articles in read later queue
+#[tauri::command]
+pub async fn get_read_later(
+    state: State<'_, AppState>,
+) -> Result<Vec<Article>, CommandError> {
+    let articles = state.db.get_read_later()?;
+    Ok(articles)
+}
+
+/// Reorder read later queue
+#[tauri::command]
+pub async fn reorder_read_later(
+    state: State<'_, AppState>,
+    article_ids: Vec<String>,
+) -> Result<(), CommandError> {
+    let ids: Result<Vec<Uuid>, _> = article_ids.iter().map(|s| Uuid::parse_str(s)).collect();
+    let ids = ids.map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    state.db.reorder_read_later(&ids)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

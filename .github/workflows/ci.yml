@@ -47,6 +47,17 @@ jobs:
         if: matrix.check == 'clippy'
         run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Setup Node (for tests)
+        if: matrix.check == 'test'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build frontend (for tests)
+        if: matrix.check == 'test'
+        run: npm ci && npm run build
+
       - name: Tests
         if: matrix.check == 'test'
         run: cd src-tauri && cargo test --all-features

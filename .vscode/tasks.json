@@ -1,0 +1,89 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "npm: dev",
+            "type": "npm",
+            "script": "dev",
+            "problemMatcher": [],
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "npm: build",
+            "type": "npm",
+            "script": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "npm: test",
+            "type": "npm",
+            "script": "test",
+            "problemMatcher": [],
+            "group": "test"
+        },
+        {
+            "label": "cargo: build",
+            "type": "cargo",
+            "command": "build",
+            "problemMatcher": ["$rustc"],
+            "options": {
+                "cwd": "${workspaceFolder}/src-tauri"
+            },
+            "group": "build"
+        },
+        {
+            "label": "cargo: test",
+            "type": "cargo",
+            "command": "test",
+            "problemMatcher": ["$rustc"],
+            "options": {
+                "cwd": "${workspaceFolder}/src-tauri"
+            },
+            "group": "test"
+        },
+        {
+            "label": "cargo: clippy",
+            "type": "cargo",
+            "command": "clippy",
+            "args": ["--all-targets", "--all-features", "--", "-D", "warnings"],
+            "problemMatcher": ["$rustc"],
+            "options": {
+                "cwd": "${workspaceFolder}/src-tauri"
+            }
+        },
+        {
+            "label": "make: dev",
+            "type": "shell",
+            "command": "make dev",
+            "problemMatcher": [],
+            "isBackground": true
+        },
+        {
+            "label": "make: test",
+            "type": "shell",
+            "command": "make test",
+            "problemMatcher": [],
+            "group": "test"
+        },
+        {
+            "label": "make: lint",
+            "type": "shell",
+            "command": "make lint",
+            "problemMatcher": []
+        },
+        {
+            "label": "make: check",
+            "type": "shell",
+            "command": "make check",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        }
+    ]
+}

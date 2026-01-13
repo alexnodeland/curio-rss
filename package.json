@@ -16,10 +16,12 @@
         "lint": "biome check .",
         "lint:fix": "biome check --write .",
         "format": "biome format --write .",
-        "tauri": "tauri"
+        "tauri": "tauri",
+        "prepare": "lefthook install"
     },
     "devDependencies": {
         "@biomejs/biome": "^1.9.0",
+        "lefthook": "^1.6.0",
         "@playwright/test": "^1.40.0",
         "@sveltejs/adapter-static": "^3.0.1",
         "@sveltejs/kit": "^2.0.0",

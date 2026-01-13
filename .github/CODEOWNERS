@@ -1,0 +1,20 @@
+# Default owners for everything
+*       @alexnodeland
+
+# Rust backend
+/src-tauri/     @alexnodeland
+
+# Frontend
+/src/           @alexnodeland
+
+# Documentation
+/docs/          @alexnodeland
+*.md            @alexnodeland
+
+# CI/CD
+/.github/       @alexnodeland
+
+# Configuration
+*.toml          @alexnodeland
+*.json          @alexnodeland
+*.yml           @alexnodeland

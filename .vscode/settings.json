@@ -1,0 +1,80 @@
+{
+    // Editor settings
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.rulers": [100],
+    "editor.wordWrap": "off",
+
+    // Rust settings
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+        "editor.formatOnSave": true
+    },
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.check.extraArgs": ["--all-features"],
+    "rust-analyzer.cargo.features": "all",
+    "rust-analyzer.cargo.buildScripts.enable": true,
+    "rust-analyzer.procMacro.enable": true,
+    "rust-analyzer.linkedProjects": ["src-tauri/Cargo.toml"],
+
+    // TypeScript settings
+    "[typescript]": {
+        "editor.defaultFormatter": "biomejs.biome"
+    },
+    "[javascript]": {
+        "editor.defaultFormatter": "biomejs.biome"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "biomejs.biome"
+    },
+    "[jsonc]": {
+        "editor.defaultFormatter": "biomejs.biome"
+    },
+
+    // Svelte settings
+    "[svelte]": {
+        "editor.defaultFormatter": "svelte.svelte-vscode"
+    },
+    "svelte.enable-ts-plugin": true,
+
+    // TypeScript preferences
+    "typescript.preferences.importModuleSpecifier": "relative",
+    "typescript.updateImportsOnFileMove.enabled": "always",
+    "typescript.suggest.autoImports": true,
+
+    // File associations
+    "files.associations": {
+        "*.css": "css",
+        "*.svelte": "svelte"
+    },
+
+    // File exclusions
+    "files.exclude": {
+        "**/target": true,
+        "**/node_modules": true,
+        "**/.svelte-kit": true,
+        "**/build": true,
+        "**/coverage": true
+    },
+
+    // Search exclusions
+    "search.exclude": {
+        "**/target": true,
+        "**/node_modules": true,
+        "**/.svelte-kit": true,
+        "**/build": true,
+        "**/coverage": true,
+        "**/*.lock": true
+    },
+
+    // Workspace trust
+    "security.workspace.trust.untrustedFiles": "open",
+
+    // Terminal settings
+    "terminal.integrated.cwd": "${workspaceFolder}",
+
+    // Testing
+    "testing.automaticallyOpenPeekView": "failureInVisibleDocument"
+}

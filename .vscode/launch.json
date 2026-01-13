@@ -1,0 +1,52 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Tauri Development",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path=${workspaceFolder}/src-tauri/Cargo.toml",
+                    "--no-default-features"
+                ]
+            },
+            "preLaunchTask": "npm: dev"
+        },
+        {
+            "name": "Debug Rust Tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--manifest-path=${workspaceFolder}/src-tauri/Cargo.toml",
+                    "--no-run"
+                ],
+                "filter": {
+                    "kind": "test"
+                }
+            },
+            "cwd": "${workspaceFolder}/src-tauri"
+        },
+        {
+            "name": "Debug Current Rust Test",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--manifest-path=${workspaceFolder}/src-tauri/Cargo.toml",
+                    "--no-run",
+                    "--",
+                    "${selectedText}"
+                ],
+                "filter": {
+                    "kind": "test"
+                }
+            },
+            "cwd": "${workspaceFolder}/src-tauri"
+        }
+    ]
+}

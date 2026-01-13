@@ -1,0 +1,34 @@
+{
+    "recommendations": [
+        // Rust development
+        "rust-lang.rust-analyzer",
+
+        // Svelte development
+        "svelte.svelte-vscode",
+
+        // Linting and formatting
+        "biomejs.biome",
+
+        // Tauri development
+        "tauri-apps.tauri-vscode",
+
+        // Git integration
+        "eamodio.gitlens",
+
+        // Testing
+        "vitest.explorer",
+
+        // Editor enhancements
+        "aaron-bond.better-comments",
+        "usernamehw.errorlens",
+
+        // Productivity
+        "christian-kohler.path-intellisense",
+        "mikestead.dotenv"
+    ],
+    "unwantedRecommendations": [
+        // Avoid conflicting formatters
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+    ]
+}

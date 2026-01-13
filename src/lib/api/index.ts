@@ -97,6 +97,26 @@ export async function searchArticles(query: string, limit?: number): Promise<Art
 }
 
 // ============================================================================
+// Read Later Operations
+// ============================================================================
+
+export async function addToReadLater(articleId: string): Promise<number> {
+    return typedInvoke<number>('add_to_read_later', { article_id: articleId });
+}
+
+export async function removeFromReadLater(articleId: string): Promise<void> {
+    return typedInvoke<void>('remove_from_read_later', { article_id: articleId });
+}
+
+export async function getReadLater(): Promise<Article[]> {
+    return typedInvoke<Article[]>('get_read_later');
+}
+
+export async function reorderReadLater(articleIds: string[]): Promise<void> {
+    return typedInvoke<void>('reorder_read_later', { article_ids: articleIds });
+}
+
+// ============================================================================
 // Folder Operations
 // ============================================================================
 
@@ -154,4 +174,40 @@ export async function checkYtdlpVersion(): Promise<string> {
 
 export async function parseYouTubeUrl(url: string): Promise<YouTubeUrlInfo> {
     return typedInvoke<YouTubeUrlInfo>('parse_youtube_url', { url });
+}
+
+// ============================================================================
+// Export Operations
+// ============================================================================
+
+export async function exportToMarkdown(
+    articleId: string,
+    destinationPath?: string,
+): Promise<string> {
+    return typedInvoke<string>('export_to_markdown', {
+        article_id: articleId,
+        destination_path: destinationPath,
+    });
+}
+
+export async function copyAsMarkdown(articleId: string): Promise<string> {
+    return typedInvoke<string>('copy_as_markdown', { article_id: articleId });
+}
+
+export async function generateExportFilename(articleId: string): Promise<string> {
+    return typedInvoke<string>('generate_export_filename', { article_id: articleId });
+}
+
+export async function exportToObsidian(articleId: string): Promise<string> {
+    return typedInvoke<string>('export_to_obsidian', { article_id: articleId });
+}
+
+export async function batchExportMarkdown(
+    articleIds: string[],
+    destinationDir: string,
+): Promise<string[]> {
+    return typedInvoke<string[]>('batch_export_markdown', {
+        article_ids: articleIds,
+        destination_dir: destinationDir,
+    });
 }

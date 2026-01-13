@@ -47,6 +47,10 @@ fn main() {
             commands::mark_unread,
             commands::toggle_starred,
             commands::search_articles,
+            commands::add_to_read_later,
+            commands::remove_from_read_later,
+            commands::get_read_later,
+            commands::reorder_read_later,
             // Folder commands
             commands::create_folder,
             commands::get_folders,
@@ -60,6 +64,12 @@ fn main() {
             commands::fetch_youtube_comments,
             commands::check_ytdlp_version,
             commands::parse_youtube_url,
+            // Export commands
+            commands::export_to_markdown,
+            commands::copy_as_markdown,
+            commands::generate_export_filename,
+            commands::export_to_obsidian,
+            commands::batch_export_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

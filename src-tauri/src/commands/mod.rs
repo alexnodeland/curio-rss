@@ -8,12 +8,14 @@ mod articles;
 mod folders;
 mod reddit;
 mod youtube;
+mod export;
 
 pub use feeds::*;
 pub use articles::*;
 pub use folders::*;
 pub use reddit::*;
 pub use youtube::*;
+pub use export::*;
 
 use std::path::PathBuf;
 use std::sync::Arc;

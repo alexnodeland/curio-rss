@@ -143,7 +143,8 @@ impl FaviconService {
             .headers()
             .get("content-type")
             .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
-            .unwrap_or("image/x-icon");
+            .unwrap_or("image/x-icon")
+            .to_string();
 
         let bytes = response
             .bytes()
@@ -151,7 +152,7 @@ impl FaviconService {
             .map_err(|e: reqwest::Error| InfraError::Network(e.to_string()))?;
 
         // Determine file extension
-        let ext = match content_type {
+        let ext = match content_type.as_str() {
             t if t.contains("png") => "png",
             t if t.contains("jpeg") || t.contains("jpg") => "jpg",
             t if t.contains("svg") => "svg",

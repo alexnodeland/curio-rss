@@ -163,7 +163,7 @@ impl FaviconService {
         // Create cache directory if needed
         let icons_dir = self.cache_dir.join("icons");
         std::fs::create_dir_all(&icons_dir)
-            .map_err(|e| InfraError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| InfraError::Io(std::io::Error::other(e)))?;
 
         // Hash the URL for filename
         let hash = format!("{:x}", md5::compute(base_url.as_bytes()));
@@ -171,7 +171,7 @@ impl FaviconService {
         let cache_path = icons_dir.join(&filename);
 
         // Write to cache
-        std::fs::write(&cache_path, &bytes).map_err(|e| InfraError::Io(e))?;
+        std::fs::write(&cache_path, &bytes).map_err(InfraError::Io)?;
 
         Ok(cache_path.to_string_lossy().to_string())
     }

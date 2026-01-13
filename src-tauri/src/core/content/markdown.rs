@@ -285,8 +285,10 @@ mod tests {
     #[test]
     fn test_article_to_markdown_without_frontmatter() {
         let article = make_test_article();
-        let mut settings = ExportSettings::default();
-        settings.include_frontmatter = false;
+        let settings = ExportSettings {
+            include_frontmatter: false,
+            ..Default::default()
+        };
 
         let result = article_to_markdown(&article, &settings);
 
@@ -335,8 +337,10 @@ mod tests {
 
     #[test]
     fn test_html_to_markdown_strip_images() {
-        let mut settings = ExportSettings::default();
-        settings.image_handling = ImageExportMode::Strip;
+        let settings = ExportSettings {
+            image_handling: ImageExportMode::Strip,
+            ..Default::default()
+        };
 
         let html = r#"<p>Text</p><img src="https://example.com/img.jpg"><p>More text</p>"#;
         let result = html_to_markdown(html, &settings);

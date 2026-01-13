@@ -17,7 +17,7 @@ pub struct OpmlDocument {
 }
 
 /// OPML outline element (folder or feed)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpmlOutline {
     pub text: String,
     pub outline_type: Option<String>,
@@ -501,25 +501,5 @@ mod tests {
     fn test_parse_invalid_opml() {
         let result = parse_opml("not valid xml");
         assert!(result.is_err());
-    }
-}
-
-impl Default for OpmlOutline {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            outline_type: None,
-            xml_url: None,
-            html_url: None,
-            view_mode: None,
-            tags: None,
-            icon: None,
-            color: None,
-            refresh_interval: None,
-            notify: None,
-            channel_id: None,
-            subreddit: None,
-            children: Vec::new(),
-        }
     }
 }

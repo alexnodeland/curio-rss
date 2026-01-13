@@ -56,7 +56,7 @@ impl PlaybackQueue {
     }
 
     /// Move to next episode
-    pub fn next(&mut self) -> Option<&PodcastEpisode> {
+    pub fn advance(&mut self) -> Option<&PodcastEpisode> {
         if let Some(index) = self.current_index {
             if index + 1 < self.episodes.len() {
                 self.current_index = Some(index + 1);
@@ -115,7 +115,7 @@ mod tests {
         queue.current_index = Some(0);
         assert_eq!(queue.current().unwrap().title, "Episode 1");
 
-        queue.next();
+        queue.advance();
         assert_eq!(queue.current().unwrap().title, "Episode 2");
 
         queue.previous();
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(queue.current_index, Some(0));
 
         // Can't go next at end
-        assert!(queue.next().is_none());
+        assert!(queue.advance().is_none());
         assert_eq!(queue.current_index, Some(0));
     }
 

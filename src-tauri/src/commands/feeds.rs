@@ -123,7 +123,7 @@ pub async fn refresh_feed(
         .header("User-Agent", "Curio Reader/0.1 (RSS Desktop Client)")
         .send()
         .await
-        .map_err(|e| CommandError::internal(e))?;
+        .map_err(CommandError::internal)?;
 
     // Handle 304 Not Modified
     if response.status() == reqwest::StatusCode::NOT_MODIFIED {
@@ -171,11 +171,8 @@ pub async fn refresh_feed(
         .map(String::from);
 
     // Parse feed content
-    let content = response
-        .text()
-        .await
-        .map_err(|e| CommandError::internal(e))?;
-    let parsed = parse_feed(&content, id).map_err(|e| CommandError::internal(e))?;
+    let content = response.text().await.map_err(CommandError::internal)?;
+    let parsed = parse_feed(&content, id).map_err(CommandError::internal)?;
 
     // Update feed metadata if changed
     if feed.title != parsed.title || feed.description != parsed.description {

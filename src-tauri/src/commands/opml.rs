@@ -96,7 +96,7 @@ async fn import_outline(
         }
 
         // Create feed
-        let view_mode = outline.view_mode.clone().unwrap_or(ViewMode::Article);
+        let view_mode = outline.view_mode.unwrap_or(ViewMode::Article);
         let tags = outline.tags.clone().unwrap_or_default();
 
         // Use the text as title initially
@@ -184,7 +184,7 @@ fn build_opml_document(feeds: &[Feed], folders: &[Folder]) -> OpmlDocument {
             outline_type: Some("rss".to_string()),
             xml_url: Some(feed.url.clone()),
             html_url: feed.site_url.clone(),
-            view_mode: Some(feed.view_mode.clone()),
+            view_mode: Some(feed.view_mode),
             tags: if feed.tags.is_empty() {
                 None
             } else {
@@ -217,7 +217,7 @@ fn build_opml_document(feeds: &[Feed], folders: &[Folder]) -> OpmlDocument {
             outline_type: None,
             xml_url: None,
             html_url: None,
-            view_mode: folder.view_mode.clone(),
+            view_mode: folder.view_mode,
             tags: None,
             icon: folder.icon.clone(),
             color: folder.color.clone(),

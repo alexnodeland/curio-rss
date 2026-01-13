@@ -43,20 +43,20 @@ jobs:
         if: matrix.check == 'fmt'
         run: cd src-tauri && cargo fmt -- --check
 
-      - name: Clippy
-        if: matrix.check == 'clippy'
-        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Setup Node (for tests)
-        if: matrix.check == 'test'
+      - name: Setup Node (for clippy/tests)
+        if: matrix.check == 'clippy' || matrix.check == 'test'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Build frontend (for tests)
-        if: matrix.check == 'test'
+      - name: Build frontend (for clippy/tests)
+        if: matrix.check == 'clippy' || matrix.check == 'test'
         run: npm ci && npm run build
+
+      - name: Clippy
+        if: matrix.check == 'clippy'
+        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Tests
         if: matrix.check == 'test'

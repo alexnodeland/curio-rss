@@ -22,7 +22,7 @@ pub struct ImportResult {
 pub async fn import_opml(
     state: State<'_, AppState>,
     path: String,
-    merge: bool,
+    _merge: bool,
 ) -> Result<ImportResult, CommandError> {
     let content = tokio::fs::read_to_string(&path)
         .await

@@ -1,0 +1,97 @@
+[package]
+name = "curio-reader"
+version = "0.1.0"
+description = "A fast, themeable RSS reader with native YouTube, Reddit, and podcast experiences"
+authors = ["Curio Team"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+name = "curio_reader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli"] }
+
+# RSS/Atom parsing
+feed-rs = "2"
+
+# XML parsing for OPML
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# HTML sanitization
+ammonia = "4"
+
+# HTML to Markdown
+htmd = "0.1"
+
+# HTML parsing
+scraper = "0.20"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
+
+# UUIDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# DateTime handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# URL parsing
+url = "2"
+
+# Regex
+regex = "1"
+
+# Directory paths
+dirs = "5"
+
+# Async trait support
+async-trait = "0.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Image processing
+image = "0.25"
+
+# Type generation for TypeScript
+ts-rs = { version = "9", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+mockall = "0.13"
+tokio-test = "0.4"
+pretty_assertions = "1"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+ts-rs = ["dep:ts-rs"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -89,8 +89,8 @@ fn entry_to_article(entry: Entry, feed_id: Uuid) -> Article {
         .collect();
 
     // Timestamps
-    article.published_at = entry.published.map(DateTime::<Utc>::from);
-    article.updated_at = entry.updated.map(DateTime::<Utc>::from);
+    article.published_at = entry.published;
+    article.updated_at = entry.updated;
 
     // Platform-specific: Reddit score from extensions
     // Reddit includes score in the content, we'll parse it later if needed

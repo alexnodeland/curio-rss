@@ -249,9 +249,10 @@ mod tests {
 
     #[test]
     fn test_settings_transparency() {
-        let mut settings = Settings::default();
-
-        settings.window_transparency = 100;
+        let mut settings = Settings {
+            window_transparency: 100,
+            ..Default::default()
+        };
         assert!(!settings.has_transparency());
 
         settings.window_transparency = 80;
@@ -260,9 +261,10 @@ mod tests {
 
     #[test]
     fn test_settings_blur() {
-        let mut settings = Settings::default();
-
-        settings.window_blur = 0;
+        let mut settings = Settings {
+            window_blur: 0,
+            ..Default::default()
+        };
         assert!(!settings.has_blur());
 
         settings.window_blur = 10;

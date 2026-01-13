@@ -108,10 +108,10 @@ impl ImageCache {
             if path.exists() {
                 if let Ok(entries) = std::fs::read_dir(&path) {
                     for entry in entries.flatten() {
-                        if entry.metadata().map(|m| m.is_file()).unwrap_or(false) {
-                            if std::fs::remove_file(entry.path()).is_ok() {
-                                deleted += 1;
-                            }
+                        if entry.metadata().map(|m| m.is_file()).unwrap_or(false)
+                            && std::fs::remove_file(entry.path()).is_ok()
+                        {
+                            deleted += 1;
                         }
                     }
                 }
@@ -134,10 +134,10 @@ impl ImageCache {
                         if let Ok(metadata) = entry.metadata() {
                             if metadata.is_file() {
                                 if let Ok(modified) = metadata.modified() {
-                                    if modified < cutoff {
-                                        if std::fs::remove_file(entry.path()).is_ok() {
-                                            deleted += 1;
-                                        }
+                                    if modified < cutoff
+                                        && std::fs::remove_file(entry.path()).is_ok()
+                                    {
+                                        deleted += 1;
                                     }
                                 }
                             }

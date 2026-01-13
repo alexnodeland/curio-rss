@@ -1,5 +1,7 @@
 <script lang="ts">
-export const compact = false;
+import { THEMES, currentTheme, setTheme } from '$lib/stores/ui';
+
+export let compact = false;
 </script>
 
 <div class="theme-picker" class:compact>

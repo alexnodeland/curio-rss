@@ -1,8 +1,18 @@
 <script lang="ts">
-import { markArticlesRead } from '$lib/stores/feeds';
+import {
+    currentArticles,
+    selectedFeed,
+    selectedArticleId,
+    isLoading,
+    markArticlesRead,
+    refreshFeed,
+    selectArticle,
+} from '$lib/stores/feeds';
+import { formatRelativeTime } from '$lib/utils/format';
+import type { Article } from '$lib/types';
 
 function handleMarkAllRead() {
-    const unreadIds = $currentArticles.filter((a) => !a.is_read).map((a) => a.id);
+    const unreadIds = $currentArticles.filter((a: Article) => !a.is_read).map((a: Article) => a.id);
     if (unreadIds.length > 0) {
         markArticlesRead(unreadIds);
     }

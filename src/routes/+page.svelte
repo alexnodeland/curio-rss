@@ -1,6 +1,10 @@
 <script lang="ts">
-import { refreshAllFeeds } from '$lib/stores/feeds';
-import { closeModal, openModal, sidebarCollapsed } from '$lib/stores/ui';
+import { refreshAllFeeds, selectedArticle, isRefreshing } from '$lib/stores/feeds';
+import { closeModal, openModal, sidebarCollapsed, activeModal } from '$lib/stores/ui';
+import Sidebar from '$lib/components/sidebar/Sidebar.svelte';
+import ArticleList from '$lib/components/article/ArticleList.svelte';
+import ReaderPane from '$lib/components/article/ReaderPane.svelte';
+import AddFeedModal from '$lib/components/common/AddFeedModal.svelte';
 
 function handleKeydown(e: KeyboardEvent) {
     // Global keyboard shortcuts

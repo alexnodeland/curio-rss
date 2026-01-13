@@ -1,6 +1,17 @@
 <script lang="ts">
-import { selectFeed } from '$lib/stores/feeds';
-import { clearFilter, setFilter } from '$lib/stores/ui';
+import {
+    selectFeed,
+    clearFilter,
+    setFilter,
+    refreshAllFeeds,
+    isRefreshing,
+    selectedFeedId,
+    selectedFolderId,
+    totalUnreadCount,
+    folderTree,
+} from '$lib/stores/feeds';
+import { sidebarCollapsed, toggleSidebar, openModal } from '$lib/stores/ui';
+import FolderItem from './FolderItem.svelte';
 
 function handleAllItems() {
     clearFilter();

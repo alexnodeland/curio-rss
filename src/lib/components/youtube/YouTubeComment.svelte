@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { YouTubeComment as YTComment } from '$lib/types';
-import { formatRelativeTime } from '$lib/utils/format';
+import { formatRelativeTime, formatNumber } from '$lib/utils/format';
 
 export let comment: YTComment;
 

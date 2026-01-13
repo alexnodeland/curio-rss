@@ -1,7 +1,8 @@
 <script lang="ts">
 import { fetchYouTubeComments, fetchYouTubeMetadata } from '$lib/api';
 import type { Article, YouTubeComment as YTComment, YouTubeMetadata } from '$lib/types';
-import { formatRelativeTime } from '$lib/utils/format';
+import { formatRelativeTime, formatNumber, formatDuration } from '$lib/utils/format';
+import YouTubeComment from './YouTubeComment.svelte';
 
 export let article: Article;
 

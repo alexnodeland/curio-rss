@@ -77,7 +77,7 @@ pub async fn get_folder_tree(state: State<'_, AppState>) -> Result<Vec<FolderNod
     }
 
     // Build hierarchy
-    let folder_ids: Vec<Uuid> = folders.iter().map(|f| f.id).collect();
+    let _folder_ids: Vec<Uuid> = folders.iter().map(|f| f.id).collect();
     for folder in &folders {
         if let Some(parent_id) = folder.parent_id {
             let child_node = folder_map.remove(&folder.id);
@@ -99,7 +99,7 @@ pub async fn get_folder_tree(state: State<'_, AppState>) -> Result<Vec<FolderNod
     }
 
     // Add feeds without folders to a virtual root
-    let orphan_feeds: Vec<FolderFeedItem> = feeds
+    let _orphan_feeds: Vec<FolderFeedItem> = feeds
         .iter()
         .filter(|f| f.folder_id.is_none())
         .map(|f| FolderFeedItem {
@@ -132,5 +132,6 @@ pub async fn delete_folder(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 }

@@ -36,8 +36,8 @@ pub fn check_ytdlp_version() -> Result<String, CommandError> {
 /// Extract YouTube video ID from various URL formats
 #[tauri::command]
 pub fn parse_youtube_url(url: &str) -> Result<YouTubeUrlInfo, CommandError> {
-    let info = extract_youtube_info(url)
-        .ok_or_else(|| CommandError::Validation("Invalid YouTube URL".to_string()))?;
+    let info =
+        extract_youtube_info(url).ok_or_else(|| CommandError::validation("Invalid YouTube URL"))?;
     Ok(info)
 }
 

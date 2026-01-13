@@ -74,7 +74,7 @@ impl FaviconService {
         let html = response
             .text()
             .await
-            .map_err(|e| InfraError::Network(e.to_string()))?;
+            .map_err(|e: reqwest::Error| InfraError::Network(e.to_string()))?;
 
         let document = Html::parse_document(&html);
 
@@ -142,13 +142,13 @@ impl FaviconService {
         let content_type = response
             .headers()
             .get("content-type")
-            .and_then(|v| v.to_str().ok())
+            .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
             .unwrap_or("image/x-icon");
 
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| InfraError::Network(e.to_string()))?;
+            .map_err(|e: reqwest::Error| InfraError::Network(e.to_string()))?;
 
         // Determine file extension
         let ext = match content_type {

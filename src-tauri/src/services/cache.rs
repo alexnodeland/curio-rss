@@ -1,6 +1,5 @@
 //! Image caching service.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 

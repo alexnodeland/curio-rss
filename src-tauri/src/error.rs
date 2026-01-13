@@ -46,6 +46,9 @@ pub enum InfraError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("Network error: {0}")]
+    Network(String),
+
     #[error("yt-dlp error: {0}")]
     YtDlp(String),
 
@@ -130,6 +133,14 @@ impl CommandError {
         }
     }
 
+    /// Create an internal error from a message string
+    pub fn internal_msg(message: impl Into<String>) -> Self {
+        Self::Internal {
+            message: message.into(),
+            source: None,
+        }
+    }
+
     /// Create an I/O error
     pub fn io(message: impl Into<String>) -> Self {
         Self::User {
@@ -197,6 +208,11 @@ impl From<InfraError> for CommandError {
             },
             InfraError::Http(err) => Self::User {
                 message: format!("Network error: {}", err),
+                code: ErrorCode::NetworkError,
+                recoverable: true,
+            },
+            InfraError::Network(msg) => Self::User {
+                message: format!("Network error: {}", msg),
                 code: ErrorCode::NetworkError,
                 recoverable: true,
             },

@@ -4,10 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use futures::stream::{self, StreamExt};
 use tokio::sync::{broadcast, RwLock};
-use uuid::Uuid;
 
 use crate::core::feeds::parse_feed;
 use crate::core::models::{Feed, FeedUpdate, RefreshResult, Settings};
@@ -299,6 +297,7 @@ impl RefreshService {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     // Integration tests would go here with a mock database

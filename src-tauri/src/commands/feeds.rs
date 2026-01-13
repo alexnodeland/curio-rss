@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::commands::AppState;
 use crate::core::feeds::{detect_view_mode, parse_feed, validate_feed_url};
-use crate::core::models::{Feed, FeedUpdate, RefreshResult, ViewMode};
+use crate::core::models::{Feed, FeedUpdate, RefreshResult};
 use crate::error::CommandError;
 
 /// Add a new feed
@@ -235,6 +235,7 @@ pub async fn refresh_all_feeds(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     // Integration tests would go here

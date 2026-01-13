@@ -1,13 +1,12 @@
 //! Settings management commands.
 
-use std::path::PathBuf;
 use tauri::State;
 
 use crate::commands::AppState;
 use crate::core::models::Settings;
 use crate::core::themes::{get_builtin_themes, get_theme, Theme};
 use crate::error::CommandError;
-use crate::services::cache::{CacheStats, ImageCache};
+use crate::services::{CacheStats, ImageCache};
 
 /// Get current settings
 #[tauri::command]
@@ -25,7 +24,7 @@ pub async fn update_settings(
     // Write to file
     let settings_path = state.config_dir.join("settings.json");
     let json = serde_json::to_string_pretty(&settings)
-        .map_err(|e| CommandError::internal(format!("Failed to serialize settings: {}", e)))?;
+        .map_err(|e| CommandError::internal_msg(format!("Failed to serialize settings: {}", e)))?;
 
     tokio::fs::write(&settings_path, json)
         .await
@@ -49,7 +48,7 @@ pub async fn load_settings(state: State<'_, AppState>) -> Result<Settings, Comma
             .map_err(|e| CommandError::io(format!("Failed to read settings: {}", e)))?;
 
         let settings: Settings = serde_json::from_str(&json)
-            .map_err(|e| CommandError::internal(format!("Failed to parse settings: {}", e)))?;
+            .map_err(|e| CommandError::internal_msg(format!("Failed to parse settings: {}", e)))?;
 
         // Update in-memory settings
         let mut current = state.settings.write().await;
@@ -86,7 +85,7 @@ pub async fn save_custom_theme(
 
     let theme_path = themes_dir.join(format!("{}.json", theme.id));
     let json = serde_json::to_string_pretty(&theme)
-        .map_err(|e| CommandError::internal(format!("Failed to serialize theme: {}", e)))?;
+        .map_err(|e| CommandError::internal_msg(format!("Failed to serialize theme: {}", e)))?;
 
     tokio::fs::write(&theme_path, json)
         .await

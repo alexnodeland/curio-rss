@@ -1,11 +1,11 @@
 //! RSS/Atom feed parsing using feed-rs.
 
 use chrono::{DateTime, Utc};
-use feed_rs::model::{Entry, Feed as FeedRsModel};
+use feed_rs::model::Entry;
 use feed_rs::parser;
 use uuid::Uuid;
 
-use crate::core::models::{Article, Feed, MediaAttachment, ViewMode};
+use crate::core::models::{Article, MediaAttachment, ViewMode};
 use crate::error::{CoreError, InfraError};
 
 /// Result of parsing a feed

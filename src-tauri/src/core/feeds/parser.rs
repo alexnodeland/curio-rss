@@ -1,6 +1,5 @@
 //! RSS/Atom feed parsing using feed-rs.
 
-use chrono::{DateTime, Utc};
 use feed_rs::model::Entry;
 use feed_rs::parser;
 use uuid::Uuid;

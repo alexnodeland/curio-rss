@@ -18,23 +18,64 @@ pub fn sanitize_html(html: &str) -> String {
 fn allowed_tags() -> HashSet<&'static str> {
     [
         // Block elements
-        "p", "div", "br", "hr",
+        "p",
+        "div",
+        "br",
+        "hr",
         // Headings
-        "h1", "h2", "h3", "h4", "h5", "h6",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
         // Lists
-        "ul", "ol", "li",
+        "ul",
+        "ol",
+        "li",
         // Text formatting
-        "strong", "b", "em", "i", "u", "s", "strike", "del", "ins", "mark",
+        "strong",
+        "b",
+        "em",
+        "i",
+        "u",
+        "s",
+        "strike",
+        "del",
+        "ins",
+        "mark",
         // Code
-        "code", "pre", "kbd", "samp", "var",
+        "code",
+        "pre",
+        "kbd",
+        "samp",
+        "var",
         // Links and media
-        "a", "img",
+        "a",
+        "img",
         // Quotes and semantic
-        "blockquote", "q", "cite", "abbr", "dfn",
+        "blockquote",
+        "q",
+        "cite",
+        "abbr",
+        "dfn",
         // Tables
-        "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "colgroup", "col",
+        "table",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
+        "th",
+        "td",
+        "caption",
+        "colgroup",
+        "col",
         // Other
-        "figure", "figcaption", "details", "summary", "time",
+        "figure",
+        "figcaption",
+        "details",
+        "summary",
+        "time",
         // Allow spans for basic styling
         "span",
     ]
@@ -47,7 +88,12 @@ fn tag_attributes() -> std::collections::HashMap<&'static str, HashSet<&'static 
     let mut map = std::collections::HashMap::new();
 
     map.insert("a", ["href", "title", "rel"].into_iter().collect());
-    map.insert("img", ["src", "alt", "title", "width", "height", "loading"].into_iter().collect());
+    map.insert(
+        "img",
+        ["src", "alt", "title", "width", "height", "loading"]
+            .into_iter()
+            .collect(),
+    );
     map.insert("td", ["colspan", "rowspan"].into_iter().collect());
     map.insert("th", ["colspan", "rowspan", "scope"].into_iter().collect());
     map.insert("time", ["datetime"].into_iter().collect());

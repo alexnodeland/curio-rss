@@ -127,11 +127,19 @@ pub async fn fetch_metadata(video_url: &str) -> Result<YouTubeMetadata, crate::e
         duration: json["duration"].as_i64().unwrap_or(0),
         categories: json["categories"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
         tags: json["tags"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
         chapters: json["chapters"].as_array().map(|chapters| {
             chapters
@@ -165,7 +173,9 @@ pub async fn fetch_metadata(video_url: &str) -> Result<YouTubeMetadata, crate::e
 }
 
 /// Fetch video comments using yt-dlp
-pub async fn fetch_comments(video_url: &str) -> Result<Vec<YouTubeComment>, crate::error::InfraError> {
+pub async fn fetch_comments(
+    video_url: &str,
+) -> Result<Vec<YouTubeComment>, crate::error::InfraError> {
     let output = tokio::task::spawn_blocking({
         let url = video_url.to_string();
         move || {

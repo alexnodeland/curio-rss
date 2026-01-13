@@ -1,36 +1,26 @@
 <script lang="ts">
-    import {
-        folderTree,
-        selectedFeedId,
-        selectedFolderId,
-        selectFeed,
-        selectFolder,
-        totalUnreadCount,
-        refreshAllFeeds,
-        isRefreshing,
-    } from '$lib/stores/feeds';
-    import { sidebarCollapsed, toggleSidebar, openModal, setFilter, clearFilter } from '$lib/stores/ui';
-    import FolderItem from './FolderItem.svelte';
+import { selectFeed } from '$lib/stores/feeds';
+import { clearFilter, setFilter } from '$lib/stores/ui';
 
-    function handleAllItems() {
-        clearFilter();
-        selectFeed(null);
-    }
+function handleAllItems() {
+    clearFilter();
+    selectFeed(null);
+}
 
-    function handleUnread() {
-        setFilter({ unread_only: true });
-        selectFeed(null);
-    }
+function handleUnread() {
+    setFilter({ unread_only: true });
+    selectFeed(null);
+}
 
-    function handleStarred() {
-        setFilter({ starred_only: true });
-        selectFeed(null);
-    }
+function handleStarred() {
+    setFilter({ starred_only: true });
+    selectFeed(null);
+}
 
-    function handleReadLater() {
-        setFilter({ read_later_only: true });
-        selectFeed(null);
-    }
+function handleReadLater() {
+    setFilter({ read_later_only: true });
+    selectFeed(null);
+}
 </script>
 
 <aside class="sidebar" class:collapsed={$sidebarCollapsed}>

@@ -1,26 +1,22 @@
 <script lang="ts">
-    import Sidebar from '$lib/components/sidebar/Sidebar.svelte';
-    import ArticleList from '$lib/components/article/ArticleList.svelte';
-    import ReaderPane from '$lib/components/article/ReaderPane.svelte';
-    import { sidebarCollapsed, activeModal, closeModal, openModal } from '$lib/stores/ui';
-    import { selectedArticle, isRefreshing, refreshAllFeeds } from '$lib/stores/feeds';
-    import AddFeedModal from '$lib/components/common/AddFeedModal.svelte';
+import { refreshAllFeeds } from '$lib/stores/feeds';
+import { closeModal, openModal, sidebarCollapsed } from '$lib/stores/ui';
 
-    function handleKeydown(e: KeyboardEvent) {
-        // Global keyboard shortcuts
-        if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
-            // Show keyboard shortcuts
-        } else if (e.key === 't' && !e.ctrlKey && !e.metaKey) {
-            sidebarCollapsed.update((v) => !v);
-        } else if (e.key === 'r' && e.shiftKey) {
-            refreshAllFeeds();
-        } else if (e.key === 'Escape') {
-            closeModal();
-        } else if (e.key === 'a' && e.ctrlKey) {
-            e.preventDefault();
-            openModal('add_feed');
-        }
+function handleKeydown(e: KeyboardEvent) {
+    // Global keyboard shortcuts
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+        // Show keyboard shortcuts
+    } else if (e.key === 't' && !e.ctrlKey && !e.metaKey) {
+        sidebarCollapsed.update((v) => !v);
+    } else if (e.key === 'r' && e.shiftKey) {
+        refreshAllFeeds();
+    } else if (e.key === 'Escape') {
+        closeModal();
+    } else if (e.key === 'a' && e.ctrlKey) {
+        e.preventDefault();
+        openModal('add_feed');
     }
+}
 </script>
 
 <svelte:window on:keydown={handleKeydown} />

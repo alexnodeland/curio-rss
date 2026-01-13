@@ -88,19 +88,13 @@ impl Article {
     /// Check if this article is a podcast episode
     pub fn is_podcast_episode(&self) -> bool {
         self.podcast_duration.is_some()
-            || self
-                .media
-                .iter()
-                .any(|m| m.mime_type.starts_with("audio/"))
+            || self.media.iter().any(|m| m.mime_type.starts_with("audio/"))
     }
 
     /// Check if this article is a video
     pub fn is_video(&self) -> bool {
         self.youtube_duration.is_some()
-            || self
-                .media
-                .iter()
-                .any(|m| m.mime_type.starts_with("video/"))
+            || self.media.iter().any(|m| m.mime_type.starts_with("video/"))
     }
 
     /// Get the primary URL (article URL or first media URL)
@@ -150,6 +144,7 @@ impl Article {
 /// Media attachment (audio, video, image)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaAttachment {
+    pub id: Uuid,
     pub url: String,
     pub mime_type: String,
     pub size_bytes: Option<i64>,
@@ -162,6 +157,7 @@ impl MediaAttachment {
     /// Create a new media attachment
     pub fn new(url: impl Into<String>, mime_type: impl Into<String>) -> Self {
         Self {
+            id: Uuid::new_v4(),
             url: url.into(),
             mime_type: mime_type.into(),
             size_bytes: None,
@@ -432,11 +428,17 @@ mod tests {
 
     #[test]
     fn test_pagination() {
-        let page1 = Pagination { page: 1, per_page: 50 };
+        let page1 = Pagination {
+            page: 1,
+            per_page: 50,
+        };
         assert_eq!(page1.offset(), 0);
         assert_eq!(page1.limit(), 50);
 
-        let page3 = Pagination { page: 3, per_page: 20 };
+        let page3 = Pagination {
+            page: 3,
+            per_page: 20,
+        };
         assert_eq!(page3.offset(), 40);
         assert_eq!(page3.limit(), 20);
     }
@@ -447,7 +449,10 @@ mod tests {
             Article::new(Uuid::new_v4(), "1", "Article 1"),
             Article::new(Uuid::new_v4(), "2", "Article 2"),
         ];
-        let pagination = Pagination { page: 1, per_page: 10 };
+        let pagination = Pagination {
+            page: 1,
+            per_page: 10,
+        };
         let page = ArticlePage::new(articles, 25, &pagination);
 
         assert_eq!(page.items.len(), 2);
@@ -462,7 +467,10 @@ mod tests {
     #[test]
     fn test_article_page_last_page() {
         let articles = vec![Article::new(Uuid::new_v4(), "1", "Article 1")];
-        let pagination = Pagination { page: 3, per_page: 10 };
+        let pagination = Pagination {
+            page: 3,
+            per_page: 10,
+        };
         let page = ArticlePage::new(articles, 25, &pagination);
 
         assert!(!page.has_next());

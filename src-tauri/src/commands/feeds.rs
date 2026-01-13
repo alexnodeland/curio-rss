@@ -54,10 +54,7 @@ pub async fn get_feeds(state: State<'_, AppState>) -> Result<Vec<Feed>, CommandE
 
 /// Get a single feed by ID
 #[tauri::command]
-pub async fn get_feed(
-    state: State<'_, AppState>,
-    feed_id: String,
-) -> Result<Feed, CommandError> {
+pub async fn get_feed(state: State<'_, AppState>, feed_id: String) -> Result<Feed, CommandError> {
     let id = Uuid::parse_str(&feed_id).map_err(|_| CommandError::validation("Invalid feed ID"))?;
 
     state
@@ -90,10 +87,7 @@ pub async fn update_feed(
 
 /// Delete a feed
 #[tauri::command]
-pub async fn delete_feed(
-    state: State<'_, AppState>,
-    feed_id: String,
-) -> Result<(), CommandError> {
+pub async fn delete_feed(state: State<'_, AppState>, feed_id: String) -> Result<(), CommandError> {
     let id = Uuid::parse_str(&feed_id).map_err(|_| CommandError::validation("Invalid feed ID"))?;
 
     state.db.delete_feed(id)?;
@@ -133,7 +127,12 @@ pub async fn refresh_feed(
 
     // Handle 304 Not Modified
     if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-        state.db.update_feed_fetch(id, feed.etag.as_deref(), feed.last_modified.as_deref(), None)?;
+        state.db.update_feed_fetch(
+            id,
+            feed.etag.as_deref(),
+            feed.last_modified.as_deref(),
+            None,
+        )?;
 
         return Ok(RefreshResult {
             feed_id: id,
@@ -146,7 +145,9 @@ pub async fn refresh_feed(
 
     if !response.status().is_success() {
         let error_msg = format!("HTTP {}", response.status());
-        state.db.update_feed_fetch(id, None, None, Some(&error_msg))?;
+        state
+            .db
+            .update_feed_fetch(id, None, None, Some(&error_msg))?;
 
         return Ok(RefreshResult {
             feed_id: id,
@@ -170,7 +171,10 @@ pub async fn refresh_feed(
         .map(String::from);
 
     // Parse feed content
-    let content = response.text().await.map_err(|e| CommandError::internal(e))?;
+    let content = response
+        .text()
+        .await
+        .map_err(|e| CommandError::internal(e))?;
     let parsed = parse_feed(&content, id).map_err(|e| CommandError::internal(e))?;
 
     // Update feed metadata if changed
@@ -189,7 +193,9 @@ pub async fn refresh_feed(
     let (new_count, updated_count) = state.db.upsert_articles(&parsed.articles)?;
 
     // Update fetch metadata
-    state.db.update_feed_fetch(id, new_etag.as_deref(), new_last_modified.as_deref(), None)?;
+    state
+        .db
+        .update_feed_fetch(id, new_etag.as_deref(), new_last_modified.as_deref(), None)?;
 
     Ok(RefreshResult {
         feed_id: id,

@@ -70,6 +70,26 @@ fn main() {
             commands::generate_export_filename,
             commands::export_to_obsidian,
             commands::batch_export_markdown,
+            // OPML commands
+            commands::import_opml,
+            commands::export_opml_file,
+            commands::export_opml_string,
+            // Settings commands
+            commands::get_settings,
+            commands::update_settings,
+            commands::load_settings,
+            commands::get_themes,
+            commands::get_theme_by_id,
+            commands::save_custom_theme,
+            commands::delete_custom_theme,
+            commands::get_cache_stats,
+            commands::clear_image_cache,
+            // Podcast commands
+            commands::download_episode,
+            commands::delete_download,
+            commands::update_playback_progress,
+            commands::get_playback_progress,
+            commands::is_episode_downloaded,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

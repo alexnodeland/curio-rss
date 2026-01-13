@@ -1,29 +1,29 @@
 <script lang="ts">
-    import type { RedditComment } from '$lib/types';
-    import { formatRelativeTime, formatNumber } from '$lib/utils/format';
+import type { RedditComment } from '$lib/types';
+import { formatNumber, formatRelativeTime } from '$lib/utils/format';
 
-    export let comment: RedditComment;
-    export let collapsed = false;
+export let comment: RedditComment;
+export const collapsed = false;
 
-    let isCollapsed = collapsed || comment.is_collapsed;
+let isCollapsed = collapsed || comment.is_collapsed;
 
-    function toggleCollapse() {
-        isCollapsed = !isCollapsed;
-    }
+function toggleCollapse() {
+    isCollapsed = !isCollapsed;
+}
 
-    function getRelativeTime(): string {
-        const date = new Date(comment.created_utc * 1000);
-        return formatRelativeTime(date.toISOString());
-    }
+function getRelativeTime(): string {
+    const date = new Date(comment.created_utc * 1000);
+    return formatRelativeTime(date.toISOString());
+}
 
-    function getScoreDisplay(): string {
-        if (comment.score === 0) return '0';
-        return formatNumber(comment.score);
-    }
+function getScoreDisplay(): string {
+    if (comment.score === 0) return '0';
+    return formatNumber(comment.score);
+}
 
-    // Depth-based indentation with max
-    const MAX_DEPTH = 10;
-    const effectiveDepth = Math.min(comment.depth, MAX_DEPTH);
+// Depth-based indentation with max
+const MAX_DEPTH = 10;
+const effectiveDepth = Math.min(comment.depth, MAX_DEPTH);
 </script>
 
 <div

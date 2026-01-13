@@ -4,7 +4,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::commands::AppState;
-use crate::core::models::{Folder, FolderNode, FolderFeedItem};
+use crate::core::models::{Folder, FolderFeedItem, FolderNode};
 use crate::error::CommandError;
 
 /// Create a new folder
@@ -51,7 +51,8 @@ pub async fn get_folder_tree(state: State<'_, AppState>) -> Result<Vec<FolderNod
 
     // Build tree
     let mut root_nodes: Vec<FolderNode> = Vec::new();
-    let mut folder_map: std::collections::HashMap<Uuid, FolderNode> = std::collections::HashMap::new();
+    let mut folder_map: std::collections::HashMap<Uuid, FolderNode> =
+        std::collections::HashMap::new();
 
     // Create nodes for all folders
     for folder in &folders {
@@ -122,8 +123,8 @@ pub async fn delete_folder(
     state: State<'_, AppState>,
     folder_id: String,
 ) -> Result<(), CommandError> {
-    let id = Uuid::parse_str(&folder_id)
-        .map_err(|_| CommandError::validation("Invalid folder ID"))?;
+    let id =
+        Uuid::parse_str(&folder_id).map_err(|_| CommandError::validation("Invalid folder ID"))?;
 
     state.db.delete_folder(id)?;
     Ok(())

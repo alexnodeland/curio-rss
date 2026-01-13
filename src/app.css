@@ -53,9 +53,9 @@ h6 {
 
 /* Theme Variables */
 :root {
-    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
         sans-serif;
-    --font-mono: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
+    --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace;
 
     /* Spacing */
     --space-1: 4px;
@@ -84,7 +84,7 @@ h6 {
 }
 
 /* Dark Theme (Default) */
-[data-theme='dark'] {
+[data-theme="dark"] {
     --bg: #1a1b1e;
     --bg-secondary: #25262b;
     --bg-tertiary: #2c2e33;
@@ -109,7 +109,7 @@ h6 {
 }
 
 /* Light Theme */
-[data-theme='light'] {
+[data-theme="light"] {
     --bg: #ffffff;
     --bg-secondary: #f8f9fa;
     --bg-tertiary: #f1f3f5;
@@ -134,7 +134,7 @@ h6 {
 }
 
 /* Nord Theme */
-[data-theme='nord'] {
+[data-theme="nord"] {
     --bg: #2e3440;
     --bg-secondary: #3b4252;
     --bg-tertiary: #434c5e;
@@ -159,7 +159,7 @@ h6 {
 }
 
 /* Catppuccin Mocha Theme */
-[data-theme='catppuccin'] {
+[data-theme="catppuccin"] {
     --bg: #1e1e2e;
     --bg-secondary: #313244;
     --bg-tertiary: #45475a;
@@ -184,7 +184,7 @@ h6 {
 }
 
 /* Dracula Theme */
-[data-theme='dracula'] {
+[data-theme="dracula"] {
     --bg: #282a36;
     --bg-secondary: #44475a;
     --bg-tertiary: #4d5066;
@@ -209,7 +209,7 @@ h6 {
 }
 
 /* Gruvbox Dark Theme */
-[data-theme='gruvbox'] {
+[data-theme="gruvbox"] {
     --bg: #282828;
     --bg-secondary: #3c3836;
     --bg-tertiary: #504945;
@@ -234,7 +234,7 @@ h6 {
 }
 
 /* Tokyo Night Theme */
-[data-theme='tokyo-night'] {
+[data-theme="tokyo-night"] {
     --bg: #1a1b26;
     --bg-secondary: #24283b;
     --bg-tertiary: #414868;
@@ -259,7 +259,7 @@ h6 {
 }
 
 /* Solarized Dark Theme */
-[data-theme='solarized-dark'] {
+[data-theme="solarized-dark"] {
     --bg: #002b36;
     --bg-secondary: #073642;
     --bg-tertiary: #094452;
@@ -284,7 +284,7 @@ h6 {
 }
 
 /* Solarized Light Theme */
-[data-theme='solarized-light'] {
+[data-theme="solarized-light"] {
     --bg: #fdf6e3;
     --bg-secondary: #eee8d5;
     --bg-tertiary: #e4dcc8;

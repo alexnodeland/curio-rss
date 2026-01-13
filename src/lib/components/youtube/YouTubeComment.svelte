@@ -1,14 +1,14 @@
 <script lang="ts">
-    import type { YouTubeComment as YTComment } from '$lib/types';
-    import { formatRelativeTime, formatNumber } from '$lib/utils/format';
+import type { YouTubeComment as YTComment } from '$lib/types';
+import { formatRelativeTime } from '$lib/utils/format';
 
-    export let comment: YTComment;
+export let comment: YTComment;
 
-    function getCommentTime(): string {
-        if (!comment.timestamp) return '';
-        const date = new Date(comment.timestamp * 1000);
-        return formatRelativeTime(date.toISOString());
-    }
+function getCommentTime(): string {
+    if (!comment.timestamp) return '';
+    const date = new Date(comment.timestamp * 1000);
+    return formatRelativeTime(date.toISOString());
+}
 </script>
 
 <div class="youtube-comment" class:pinned={comment.is_pinned}>

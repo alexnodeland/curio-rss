@@ -27,10 +27,7 @@ pub fn article_to_markdown(article: &Article, settings: &ExportSettings) -> Stri
                 }
                 "published" => {
                     if let Some(published) = article.published_at {
-                        output.push_str(&format!(
-                            "published: {}\n",
-                            published.format("%Y-%m-%d")
-                        ));
+                        output.push_str(&format!("published: {}\n", published.format("%Y-%m-%d")));
                     }
                 }
                 "saved" => {
@@ -99,12 +96,20 @@ pub fn html_to_markdown(html: &str, settings: &ExportSettings) -> String {
     // Links
     match settings.link_style {
         LinkStyle::Inline => {
-            result = regex_replace(&result, r#"<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#, "[$2]($1)");
+            result = regex_replace(
+                &result,
+                r#"<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#,
+                "[$2]($1)",
+            );
         }
         LinkStyle::Reference => {
             // For reference style, we'd need to collect links and add at bottom
             // For simplicity, use inline for now
-            result = regex_replace(&result, r#"<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#, "[$2]($1)");
+            result = regex_replace(
+                &result,
+                r#"<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#,
+                "[$2]($1)",
+            );
         }
     }
 
@@ -136,7 +141,11 @@ pub fn html_to_markdown(html: &str, settings: &ExportSettings) -> String {
         r#"<pre[^>]*><code[^>]*class="language-([^"]*)"[^>]*>(.*?)</code></pre>"#,
         "```$1\n$2\n```\n\n",
     );
-    result = regex_replace(&result, r"<pre[^>]*><code[^>]*>(.*?)</code></pre>", "```\n$1\n```\n\n");
+    result = regex_replace(
+        &result,
+        r"<pre[^>]*><code[^>]*>(.*?)</code></pre>",
+        "```\n$1\n```\n\n",
+    );
     result = regex_replace(&result, r"<pre[^>]*>(.*?)</pre>", "```\n$1\n```\n\n");
 
     // Lists (simple)
@@ -196,8 +205,8 @@ fn decode_html_entities(s: &str) -> String {
         .replace("&hellip;", "...")
         .replace("&rsquo;", "'")
         .replace("&lsquo;", "'")
-        .replace("&rdquo;", """)
-        .replace("&ldquo;", """)
+        .replace("&rdquo;", "\u{201D}")
+        .replace("&ldquo;", "\u{201C}")
 }
 
 /// Generate a filename from article and template
@@ -355,7 +364,10 @@ mod tests {
     fn test_sanitize_filename() {
         assert_eq!(sanitize_filename("Normal Title"), "Normal Title");
         assert_eq!(sanitize_filename("Title: With Colon"), "Title- With Colon");
-        assert_eq!(sanitize_filename("Title/With/Slashes"), "Title-With-Slashes");
+        assert_eq!(
+            sanitize_filename("Title/With/Slashes"),
+            "Title-With-Slashes"
+        );
         assert_eq!(sanitize_filename("  Spaces  "), "Spaces");
     }
 

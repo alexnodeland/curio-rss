@@ -1,21 +1,12 @@
 <script lang="ts">
-    import {
-        currentArticles,
-        selectedArticleId,
-        selectArticle,
-        selectedFeed,
-        isLoading,
-        markArticlesRead,
-        refreshFeed,
-    } from '$lib/stores/feeds';
-    import { formatRelativeTime } from '$lib/utils/format';
+import { markArticlesRead } from '$lib/stores/feeds';
 
-    function handleMarkAllRead() {
-        const unreadIds = $currentArticles.filter((a) => !a.is_read).map((a) => a.id);
-        if (unreadIds.length > 0) {
-            markArticlesRead(unreadIds);
-        }
+function handleMarkAllRead() {
+    const unreadIds = $currentArticles.filter((a) => !a.is_read).map((a) => a.id);
+    if (unreadIds.length > 0) {
+        markArticlesRead(unreadIds);
     }
+}
 </script>
 
 <div class="article-list">

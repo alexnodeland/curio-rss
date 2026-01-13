@@ -1,7 +1,7 @@
 // UI state management
 
-import { writable, derived } from 'svelte/store';
 import type { ViewMode } from '$lib/types';
+import { writable } from 'svelte/store';
 
 // ============================================================================
 // View State
@@ -104,7 +104,10 @@ function getStoredTheme(): ThemeId {
         return stored as ThemeId;
     }
     // Check system preference
-    if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    if (
+        typeof window !== 'undefined' &&
+        window.matchMedia('(prefers-color-scheme: light)').matches
+    ) {
         return 'light';
     }
     return 'dark';
@@ -171,11 +174,7 @@ export const toasts = writable<Toast[]>([]);
 
 let toastId = 0;
 
-export function showToast(
-    message: string,
-    type: Toast['type'] = 'info',
-    duration: number = 3000,
-): void {
+export function showToast(message: string, type: Toast['type'] = 'info', duration = 3000): void {
     const id = `toast-${++toastId}`;
     const toast: Toast = { id, message, type, duration };
 

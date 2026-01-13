@@ -1,45 +1,45 @@
 <script lang="ts">
-    import { createEventDispatcher } from 'svelte';
-    import { addFeed, folders } from '$lib/stores/feeds';
+import { addFeed } from '$lib/stores/feeds';
+import { createEventDispatcher } from 'svelte';
 
-    const dispatch = createEventDispatcher<{ close: void }>();
+const dispatch = createEventDispatcher<{ close: void }>();
 
-    let feedUrl = '';
-    let title = '';
-    let selectedFolderId: string | null = null;
-    let isLoading = false;
-    let error = '';
+const feedUrl = '';
+const title = '';
+const selectedFolderId: string | null = null;
+let isLoading = false;
+let error = '';
 
-    async function handleSubmit() {
-        if (!feedUrl.trim()) {
-            error = 'Please enter a feed URL';
-            return;
-        }
-
-        isLoading = true;
-        error = '';
-
-        try {
-            await addFeed(feedUrl.trim(), title.trim() || undefined, selectedFolderId);
-            dispatch('close');
-        } catch (e) {
-            error = e instanceof Error ? e.message : 'Failed to add feed';
-        } finally {
-            isLoading = false;
-        }
+async function handleSubmit() {
+    if (!feedUrl.trim()) {
+        error = 'Please enter a feed URL';
+        return;
     }
 
-    function handleKeydown(event: KeyboardEvent) {
-        if (event.key === 'Escape') {
-            dispatch('close');
-        }
-    }
+    isLoading = true;
+    error = '';
 
-    function handleBackdropClick(event: MouseEvent) {
-        if (event.target === event.currentTarget) {
-            dispatch('close');
-        }
+    try {
+        await addFeed(feedUrl.trim(), title.trim() || undefined, selectedFolderId);
+        dispatch('close');
+    } catch (e) {
+        error = e instanceof Error ? e.message : 'Failed to add feed';
+    } finally {
+        isLoading = false;
     }
+}
+
+function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+        dispatch('close');
+    }
+}
+
+function handleBackdropClick(event: MouseEvent) {
+    if (event.target === event.currentTarget) {
+        dispatch('close');
+    }
+}
 </script>
 
 <svelte:window on:keydown={handleKeydown} />

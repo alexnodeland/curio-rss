@@ -1,110 +1,109 @@
 <script lang="ts">
-    import type { Article, YouTubeMetadata, YouTubeComment as YTComment } from '$lib/types';
-    import { fetchYouTubeMetadata, fetchYouTubeComments } from '$lib/api';
-    import { formatDuration, formatNumber, formatRelativeTime } from '$lib/utils/format';
-    import YouTubeComment from './YouTubeComment.svelte';
+import { fetchYouTubeComments, fetchYouTubeMetadata } from '$lib/api';
+import type { Article, YouTubeComment as YTComment, YouTubeMetadata } from '$lib/types';
+import { formatRelativeTime } from '$lib/utils/format';
 
-    export let article: Article;
+export let article: Article;
 
-    let metadata: YouTubeMetadata | null = null;
-    let comments: YTComment[] = [];
-    let isLoadingMetadata = true;
-    let isLoadingComments = false;
-    let error = '';
-    let showComments = false;
+let metadata: YouTubeMetadata | null = null;
+let comments: YTComment[] = [];
+let isLoadingMetadata = true;
+let isLoadingComments = false;
+let error = '';
+let showComments = false;
 
-    // Extract video ID from article URL
-    function extractVideoId(url: string): string | null {
-        const patterns = [
-            /youtube\.com\/watch\?v=([^&]+)/,
-            /youtu\.be\/([^?]+)/,
-            /youtube\.com\/embed\/([^?]+)/,
-        ];
+// Extract video ID from article URL
+function extractVideoId(url: string): string | null {
+    const patterns = [
+        /youtube\.com\/watch\?v=([^&]+)/,
+        /youtu\.be\/([^?]+)/,
+        /youtube\.com\/embed\/([^?]+)/,
+    ];
 
-        for (const pattern of patterns) {
-            const match = url.match(pattern);
-            if (match) return match[1];
-        }
-        return null;
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+async function loadMetadata() {
+    if (!article.url) {
+        error = 'No video URL available';
+        isLoadingMetadata = false;
+        return;
     }
 
-    async function loadMetadata() {
-        if (!article.url) {
-            error = 'No video URL available';
-            isLoadingMetadata = false;
-            return;
-        }
+    isLoadingMetadata = true;
+    error = '';
 
-        isLoadingMetadata = true;
-        error = '';
-
-        try {
-            metadata = await fetchYouTubeMetadata(article.url);
-        } catch (e) {
-            error = e instanceof Error ? e.message : 'Failed to load video metadata';
-        } finally {
-            isLoadingMetadata = false;
-        }
+    try {
+        metadata = await fetchYouTubeMetadata(article.url);
+    } catch (e) {
+        error = e instanceof Error ? e.message : 'Failed to load video metadata';
+    } finally {
+        isLoadingMetadata = false;
     }
+}
 
-    async function loadComments() {
-        if (!article.url || isLoadingComments) return;
+async function loadComments() {
+    if (!article.url || isLoadingComments) return;
 
-        isLoadingComments = true;
+    isLoadingComments = true;
 
-        try {
-            comments = await fetchYouTubeComments(article.url);
-            showComments = true;
-        } catch (e) {
-            // Comments might not be available - not a critical error
-            console.error('Failed to load comments:', e);
-        } finally {
-            isLoadingComments = false;
-        }
+    try {
+        comments = await fetchYouTubeComments(article.url);
+        showComments = true;
+    } catch (e) {
+        // Comments might not be available - not a critical error
+        console.error('Failed to load comments:', e);
+    } finally {
+        isLoadingComments = false;
     }
+}
 
-    function toggleComments() {
-        if (!showComments && comments.length === 0) {
-            loadComments();
-        } else {
-            showComments = !showComments;
-        }
+function toggleComments() {
+    if (!showComments && comments.length === 0) {
+        loadComments();
+    } else {
+        showComments = !showComments;
     }
+}
 
-    function formatUploadDate(dateStr: string): string {
-        // YouTube returns date as YYYYMMDD
-        if (dateStr.length === 8) {
-            const year = dateStr.slice(0, 4);
-            const month = dateStr.slice(4, 6);
-            const day = dateStr.slice(6, 8);
-            const date = new Date(`${year}-${month}-${day}`);
-            return formatRelativeTime(date.toISOString());
-        }
-        return dateStr;
+function formatUploadDate(dateStr: string): string {
+    // YouTube returns date as YYYYMMDD
+    if (dateStr.length === 8) {
+        const year = dateStr.slice(0, 4);
+        const month = dateStr.slice(4, 6);
+        const day = dateStr.slice(6, 8);
+        const date = new Date(`${year}-${month}-${day}`);
+        return formatRelativeTime(date.toISOString());
     }
+    return dateStr;
+}
 
-    function getBestThumbnail(): string | null {
-        if (!metadata?.thumbnails.length) return article.thumbnail_url;
+function getBestThumbnail(): string | null {
+    if (!metadata?.thumbnails.length) return article.thumbnail_url;
 
-        // Prefer maxres, then hq, then any available
-        const priorities = ['maxresdefault', 'sddefault', 'hqdefault', 'mqdefault'];
-        for (const id of priorities) {
-            const thumb = metadata.thumbnails.find(t => t.id === id);
-            if (thumb) return thumb.url;
-        }
-        return metadata.thumbnails[0]?.url || article.thumbnail_url;
+    // Prefer maxres, then hq, then any available
+    const priorities = ['maxresdefault', 'sddefault', 'hqdefault', 'mqdefault'];
+    for (const id of priorities) {
+        const thumb = metadata.thumbnails.find((t) => t.id === id);
+        if (thumb) return thumb.url;
     }
+    return metadata.thumbnails[0]?.url || article.thumbnail_url;
+}
 
-    function openInYouTube() {
-        if (article.url) {
-            window.open(article.url, '_blank');
-        }
+function openInYouTube() {
+    if (article.url) {
+        window.open(article.url, '_blank');
     }
+}
 
-    // Load metadata when article changes
-    $: if (article) loadMetadata();
+// Load metadata when article changes
+$: if (article) loadMetadata();
 
-    $: videoId = article.url ? extractVideoId(article.url) : null;
+$: videoId = article.url ? extractVideoId(article.url) : null;
 </script>
 
 <div class="youtube-viewer">

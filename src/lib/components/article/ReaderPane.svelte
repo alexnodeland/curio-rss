@@ -1,24 +1,22 @@
 <script lang="ts">
-    import type { Article } from '$lib/types';
-    import { toggleArticleStarred, markArticlesUnread } from '$lib/stores/feeds';
-    import { readerFontSize, readerLineHeight, readerMaxWidth } from '$lib/stores/ui';
-    import { formatDate } from '$lib/utils/format';
+import { markArticlesUnread, toggleArticleStarred } from '$lib/stores/feeds';
+import type { Article } from '$lib/types';
 
-    export let article: Article;
+export let article: Article;
 
-    async function handleToggleStarred() {
-        await toggleArticleStarred(article.id);
+async function handleToggleStarred() {
+    await toggleArticleStarred(article.id);
+}
+
+async function handleMarkUnread() {
+    await markArticlesUnread([article.id]);
+}
+
+function openInBrowser() {
+    if (article.url) {
+        window.open(article.url, '_blank');
     }
-
-    async function handleMarkUnread() {
-        await markArticlesUnread([article.id]);
-    }
-
-    function openInBrowser() {
-        if (article.url) {
-            window.open(article.url, '_blank');
-        }
-    }
+}
 </script>
 
 <article

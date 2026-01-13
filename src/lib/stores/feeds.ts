@@ -1,8 +1,8 @@
 // Feed and article state management
 
-import { writable, derived, get } from 'svelte/store';
-import type { Feed, Article, Folder, FolderNode, ArticleFilter, Pagination } from '$lib/types';
 import * as api from '$lib/api';
+import type { Article, ArticleFilter, Feed, Folder, FolderNode, Pagination } from '$lib/types';
+import { derived, get, writable } from 'svelte/store';
 
 // ============================================================================
 // Base Stores (Source of Truth)
@@ -68,13 +68,10 @@ export const currentArticles = derived(
     },
 );
 
-export const selectedArticle = derived(
-    [articles, selectedArticleId],
-    ([$articles, $articleId]) => {
-        if (!$articleId) return null;
-        return $articles.get($articleId) ?? null;
-    },
-);
+export const selectedArticle = derived([articles, selectedArticleId], ([$articles, $articleId]) => {
+    if (!$articleId) return null;
+    return $articles.get($articleId) ?? null;
+});
 
 export const selectedFeed = derived([feeds, selectedFeedId], ([$feeds, $feedId]) => {
     if (!$feedId) return null;
@@ -87,8 +84,7 @@ export const unreadCounts = derived([articles, feeds], ([$articles, $feeds]) => 
     for (const [feedId] of $feeds) {
         counts.set(
             feedId,
-            Array.from($articles.values()).filter((a) => a.feed_id === feedId && !a.is_read)
-                .length,
+            Array.from($articles.values()).filter((a) => a.feed_id === feedId && !a.is_read).length,
         );
     }
 

@@ -130,7 +130,9 @@ fn parse_post(listing: &serde_json::Value) -> Result<RedditPost, crate::error::I
 }
 
 /// Parse comments from Reddit JSON
-fn parse_comments(listing: &serde_json::Value) -> Result<Vec<RedditComment>, crate::error::InfraError> {
+fn parse_comments(
+    listing: &serde_json::Value,
+) -> Result<Vec<RedditComment>, crate::error::InfraError> {
     let children = &listing["data"]["children"];
 
     if !children.is_array() {
@@ -149,7 +151,10 @@ fn parse_comments(listing: &serde_json::Value) -> Result<Vec<RedditComment>, cra
 }
 
 /// Parse a single comment (recursive)
-fn parse_comment(data: &serde_json::Value, depth: i32) -> Result<RedditComment, crate::error::InfraError> {
+fn parse_comment(
+    data: &serde_json::Value,
+    depth: i32,
+) -> Result<RedditComment, crate::error::InfraError> {
     let replies = if let Some(replies_data) = data["replies"]["data"]["children"].as_array() {
         replies_data
             .iter()

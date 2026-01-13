@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Rust Checks
+  # ─────────────────────────────────────────────────────────────
+  rust:
+    name: Rust ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [fmt, clippy, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Check formatting
+        if: matrix.check == 'fmt'
+        run: cd src-tauri && cargo fmt -- --check
+
+      - name: Clippy
+        if: matrix.check == 'clippy'
+        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        if: matrix.check == 'test'
+        run: cd src-tauri && cargo test --all-features
+
+  # ─────────────────────────────────────────────────────────────
+  # Frontend Checks
+  # ─────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [lint, typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        if: matrix.check == 'lint'
+        run: npm run lint
+
+      - name: Typecheck
+        if: matrix.check == 'typecheck'
+        run: npm run check
+
+      - name: Test
+        if: matrix.check == 'test'
+        run: npm test
+
+  # ─────────────────────────────────────────────────────────────
+  # Build Verification
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.os }})
+    needs: [rust, frontend]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Tauri app
+        run: |
+          cd src-tauri
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/curio*
+            !src-tauri/target/${{ matrix.target }}/release/*.d
+          retention-days: 7
+          if-no-files-found: ignore

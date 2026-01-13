@@ -1,0 +1,66 @@
+# Lefthook Git Hooks Configuration
+# https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    rust-fmt:
+      glob: "src-tauri/**/*.rs"
+      run: cd src-tauri && cargo fmt -- --check
+      skip:
+        - merge
+        - rebase
+
+    rust-clippy:
+      glob: "src-tauri/**/*.rs"
+      run: cd src-tauri && cargo clippy --all-targets -- -D warnings
+      skip:
+        - merge
+        - rebase
+
+    biome-check:
+      glob: "*.{ts,js,svelte,json}"
+      run: npx biome check --staged --no-errors-on-unmatched
+      skip:
+        - merge
+        - rebase
+
+    typescript:
+      glob: "*.{ts,svelte}"
+      run: npx svelte-check --tsconfig ./tsconfig.json
+      skip:
+        - merge
+        - rebase
+
+pre-push:
+  parallel: true
+  commands:
+    rust-tests:
+      run: cd src-tauri && cargo test --lib
+      skip:
+        - merge
+        - rebase
+
+    ts-tests:
+      run: npm test
+      skip:
+        - merge
+        - rebase
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        message=$(cat {1})
+        if ! echo "$message" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .{1,100}"; then
+          echo "Commit message must follow Conventional Commits format:"
+          echo "  type(scope): description"
+          echo ""
+          echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert"
+          echo ""
+          echo "Examples:"
+          echo "  feat(feeds): add OPML import support"
+          echo "  fix(player): resolve audio playback issue"
+          echo "  docs: update README with setup instructions"
+          exit 1
+        fi

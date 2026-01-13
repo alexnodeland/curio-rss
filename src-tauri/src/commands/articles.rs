@@ -1,0 +1,95 @@
+//! Article management commands.
+
+use tauri::State;
+use uuid::Uuid;
+
+use crate::commands::AppState;
+use crate::core::models::{Article, ArticleFilter, ArticlePage, Pagination};
+use crate::error::CommandError;
+
+/// Get articles with filtering and pagination
+#[tauri::command]
+pub async fn get_articles(
+    state: State<'_, AppState>,
+    filter: ArticleFilter,
+    pagination: Pagination,
+) -> Result<ArticlePage, CommandError> {
+    let page = state.db.get_articles(&filter, &pagination)?;
+    Ok(page)
+}
+
+/// Get a single article by ID
+#[tauri::command]
+pub async fn get_article(
+    state: State<'_, AppState>,
+    article_id: String,
+) -> Result<Article, CommandError> {
+    let id = Uuid::parse_str(&article_id)
+        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    state
+        .db
+        .get_article(id)?
+        .ok_or_else(|| CommandError::not_found("Article not found"))
+}
+
+/// Mark articles as read
+#[tauri::command]
+pub async fn mark_read(
+    state: State<'_, AppState>,
+    article_ids: Vec<String>,
+) -> Result<(), CommandError> {
+    let ids: Result<Vec<Uuid>, _> = article_ids.iter().map(|s| Uuid::parse_str(s)).collect();
+    let ids = ids.map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    state.db.mark_read(&ids)?;
+    Ok(())
+}
+
+/// Mark articles as unread
+#[tauri::command]
+pub async fn mark_unread(
+    state: State<'_, AppState>,
+    article_ids: Vec<String>,
+) -> Result<(), CommandError> {
+    let ids: Result<Vec<Uuid>, _> = article_ids.iter().map(|s| Uuid::parse_str(s)).collect();
+    let ids = ids.map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    state.db.mark_unread(&ids)?;
+    Ok(())
+}
+
+/// Toggle starred status for an article
+#[tauri::command]
+pub async fn toggle_starred(
+    state: State<'_, AppState>,
+    article_id: String,
+) -> Result<bool, CommandError> {
+    let id = Uuid::parse_str(&article_id)
+        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+
+    let is_starred = state.db.toggle_starred(id)?;
+    Ok(is_starred)
+}
+
+/// Search articles
+#[tauri::command]
+pub async fn search_articles(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<i32>,
+) -> Result<Vec<Article>, CommandError> {
+    if query.trim().is_empty() {
+        return Err(CommandError::validation("Search query cannot be empty"));
+    }
+
+    let articles = state.db.search_articles(&query, limit.unwrap_or(50))?;
+    Ok(articles)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Integration tests would use a mock state
+}

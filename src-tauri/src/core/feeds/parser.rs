@@ -20,8 +20,8 @@ pub struct ParsedFeed {
 
 /// Parse a feed from raw XML/JSON content
 pub fn parse_feed(content: &str, feed_id: Uuid) -> Result<ParsedFeed, InfraError> {
-    let parsed = parser::parse(content.as_bytes())
-        .map_err(|e| InfraError::FeedParse(e.to_string()))?;
+    let parsed =
+        parser::parse(content.as_bytes()).map_err(|e| InfraError::FeedParse(e.to_string()))?;
 
     let articles = parsed
         .entries
@@ -210,10 +210,7 @@ pub fn youtube_feed_url(channel_id: &str) -> String {
 
 /// Build Reddit RSS feed URL from subreddit
 pub fn reddit_feed_url(subreddit: &str, sort: &str) -> String {
-    format!(
-        "https://www.reddit.com/r/{}/.rss?sort={}",
-        subreddit, sort
-    )
+    format!("https://www.reddit.com/r/{}/.rss?sort={}", subreddit, sort)
 }
 
 #[cfg(test)]

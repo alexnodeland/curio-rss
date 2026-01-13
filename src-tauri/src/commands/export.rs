@@ -16,8 +16,8 @@ pub async fn export_to_markdown(
     article_id: String,
     destination_path: Option<String>,
 ) -> Result<String, CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     let article = state
         .db
@@ -55,8 +55,8 @@ pub async fn copy_as_markdown(
     state: State<'_, AppState>,
     article_id: String,
 ) -> Result<String, CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     let article = state
         .db
@@ -79,8 +79,8 @@ pub async fn generate_export_filename(
     state: State<'_, AppState>,
     article_id: String,
 ) -> Result<String, CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     let article = state
         .db
@@ -106,8 +106,8 @@ pub async fn export_to_obsidian(
         .as_ref()
         .ok_or_else(|| CommandError::validation("Obsidian vault path not configured"))?;
 
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     let article = state
         .db

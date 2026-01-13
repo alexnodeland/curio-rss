@@ -1,24 +1,24 @@
 // Type-safe Tauri command wrappers
 
-import { invoke } from '@tauri-apps/api/core';
 import type {
-    Feed,
-    FeedUpdate,
     Article,
     ArticleFilter,
     ArticlePage,
-    Pagination,
+    CommandError,
+    CommentSort,
+    Feed,
+    FeedUpdate,
     Folder,
     FolderNode,
-    RefreshResult,
-    CommandError,
+    Pagination,
     RedditThread,
     RedditUrlInfo,
-    CommentSort,
-    YouTubeMetadata,
+    RefreshResult,
     YouTubeComment,
+    YouTubeMetadata,
     YouTubeUrlInfo,
 } from '$lib/types';
+import { invoke } from '@tauri-apps/api/core';
 
 // Generic invoke wrapper with error handling
 async function typedInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -33,11 +33,7 @@ async function typedInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
 // Feed Operations
 // ============================================================================
 
-export async function addFeed(
-    url: string,
-    folderId?: string,
-    tags?: string[],
-): Promise<Feed> {
+export async function addFeed(url: string, folderId?: string, tags?: string[]): Promise<Feed> {
     return typedInvoke<Feed>('add_feed', { url, folder_id: folderId, tags });
 }
 

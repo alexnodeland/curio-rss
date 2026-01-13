@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-    formatRelativeTime,
     formatDate,
     formatDateTime,
     formatDuration,
-    formatNumber,
     formatFileSize,
-    truncateText,
+    formatNumber,
+    formatRelativeTime,
     stripHtml,
+    truncateText,
 } from './format';
 
 describe('formatRelativeTime', () => {

@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::commands::AppState;
 use crate::error::CommandError;
-use crate::platform::youtube::{YouTubeMetadata, YouTubeComment};
+use crate::platform::youtube::{YouTubeComment, YouTubeMetadata};
 
 /// Fetch YouTube video metadata
 #[tauri::command]
@@ -207,9 +207,10 @@ mod tests {
 
     #[test]
     fn test_parse_playlist_url() {
-        let info =
-            extract_youtube_info("https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf")
-                .unwrap();
+        let info = extract_youtube_info(
+            "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+        )
+        .unwrap();
         assert_eq!(
             info.playlist_id,
             Some("PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf".to_string())

@@ -75,6 +75,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Image processing
 image = "0.25"
 
+# MD5 hashing for cache keys
+md5 = "0.7"
+
+# Futures utilities
+futures = "0.3"
+
 # Type generation for TypeScript
 ts-rs = { version = "9", optional = true }
 

@@ -1,7 +1,7 @@
 // Podcast player state management
 
-import { writable, derived, get } from 'svelte/store';
 import type { Article } from '$lib/types';
+import { derived, get, writable } from 'svelte/store';
 
 // ============================================================================
 // Player State
@@ -118,11 +118,11 @@ export function seekRelative(delta: number): void {
     }));
 }
 
-export function skipForward(seconds: number = 30): void {
+export function skipForward(seconds = 30): void {
     seekRelative(seconds);
 }
 
-export function skipBack(seconds: number = 15): void {
+export function skipBack(seconds = 15): void {
     seekRelative(-seconds);
 }
 
@@ -180,7 +180,7 @@ export function removeFromQueue(articleId: string): void {
     playerQueue.update((queue) =>
         queue
             .filter((item) => item.article.id !== articleId)
-            .map((item, index) => ({ ...item, position: index }))
+            .map((item, index) => ({ ...item, position: index })),
     );
 }
 
@@ -198,9 +198,7 @@ export function playNext(): void {
     }
 
     const nextItem = queue[0];
-    playerQueue.update((q) =>
-        q.slice(1).map((item, index) => ({ ...item, position: index }))
-    );
+    playerQueue.update((q) => q.slice(1).map((item, index) => ({ ...item, position: index })));
 
     playEpisode(nextItem.article);
 }
@@ -244,7 +242,7 @@ export function savePlayerState(): void {
                 currentTime: state.currentTime,
                 volume: state.volume,
                 playbackRate: state.playbackRate,
-            })
+            }),
         );
     }
 }
@@ -257,7 +255,12 @@ export function saveQueue(): void {
     localStorage.setItem(QUEUE_KEY, JSON.stringify(queueIds));
 }
 
-export function loadSavedState(): { episodeId?: string; currentTime?: number; volume?: number; playbackRate?: number } | null {
+export function loadSavedState(): {
+    episodeId?: string;
+    currentTime?: number;
+    volume?: number;
+    playbackRate?: number;
+} | null {
     if (typeof localStorage === 'undefined') return null;
 
     const saved = localStorage.getItem(PLAYER_STATE_KEY);

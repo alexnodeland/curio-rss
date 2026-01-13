@@ -24,8 +24,8 @@ pub async fn get_article(
     state: State<'_, AppState>,
     article_id: String,
 ) -> Result<Article, CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     state
         .db
@@ -65,8 +65,8 @@ pub async fn toggle_starred(
     state: State<'_, AppState>,
     article_id: String,
 ) -> Result<bool, CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     let is_starred = state.db.toggle_starred(id)?;
     Ok(is_starred)
@@ -93,8 +93,8 @@ pub async fn add_to_read_later(
     state: State<'_, AppState>,
     article_id: String,
 ) -> Result<i32, CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     let position = state.db.add_to_read_later(id)?;
     Ok(position)
@@ -106,8 +106,8 @@ pub async fn remove_from_read_later(
     state: State<'_, AppState>,
     article_id: String,
 ) -> Result<(), CommandError> {
-    let id = Uuid::parse_str(&article_id)
-        .map_err(|_| CommandError::validation("Invalid article ID"))?;
+    let id =
+        Uuid::parse_str(&article_id).map_err(|_| CommandError::validation("Invalid article ID"))?;
 
     state.db.remove_from_read_later(id)?;
     Ok(())
@@ -115,9 +115,7 @@ pub async fn remove_from_read_later(
 
 /// Get all articles in read later queue
 #[tauri::command]
-pub async fn get_read_later(
-    state: State<'_, AppState>,
-) -> Result<Vec<Article>, CommandError> {
+pub async fn get_read_later(state: State<'_, AppState>) -> Result<Vec<Article>, CommandError> {
     let articles = state.db.get_read_later()?;
     Ok(articles)
 }

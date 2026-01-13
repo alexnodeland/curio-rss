@@ -1,27 +1,26 @@
 <script lang="ts">
-    import type { FolderNode } from '$lib/types';
-    import { selectedFeedId, selectFeed, unreadCounts } from '$lib/stores/feeds';
+import type { FolderNode } from '$lib/types';
 
-    export let node: FolderNode;
+export let node: FolderNode;
 
-    let expanded = true;
+let expanded = true;
 
-    function toggleExpand() {
-        expanded = !expanded;
+function toggleExpand() {
+    expanded = !expanded;
+}
+
+function getTotalUnread(node: FolderNode): number {
+    let count = node.unread_count;
+    for (const feed of node.feeds) {
+        count += $unreadCounts.get(feed.id) ?? 0;
     }
-
-    function getTotalUnread(node: FolderNode): number {
-        let count = node.unread_count;
-        for (const feed of node.feeds) {
-            count += $unreadCounts.get(feed.id) ?? 0;
-        }
-        for (const child of node.children) {
-            count += getTotalUnread(child);
-        }
-        return count;
+    for (const child of node.children) {
+        count += getTotalUnread(child);
     }
+    return count;
+}
 
-    $: totalUnread = getTotalUnread(node);
+$: totalUnread = getTotalUnread(node);
 </script>
 
 <div class="folder-item">

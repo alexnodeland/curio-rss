@@ -177,6 +177,17 @@ impl Database {
         Ok(())
     }
 
+    /// Create a new feed (alias for insert_feed, returns the feed)
+    pub fn create_feed(&self, feed: &Feed) -> Result<Feed, InfraError> {
+        self.insert_feed(feed)?;
+        Ok(feed.clone())
+    }
+
+    /// Get all feeds (alias)
+    pub fn get_feeds(&self) -> Result<Vec<Feed>, InfraError> {
+        self.get_all_feeds()
+    }
+
     /// Update feed fetch metadata
     pub fn update_feed_fetch(
         &self,
@@ -588,6 +599,110 @@ impl Database {
         Ok(())
     }
 
+    /// Create a new folder
+    pub fn create_folder(&self, name: &str, parent_id: Option<Uuid>) -> Result<Folder, InfraError> {
+        let folder = Folder {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            parent_id,
+            icon: None,
+            color: None,
+            view_mode: None,
+            position: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        self.insert_folder(&folder)?;
+        Ok(folder)
+    }
+
+    /// Get all folders (alias)
+    pub fn get_folders(&self) -> Result<Vec<Folder>, InfraError> {
+        self.get_all_folders()
+    }
+
+    /// Update a folder
+    pub fn update_folder(
+        &self,
+        id: Uuid,
+        updates: &std::collections::HashMap<String, String>,
+    ) -> Result<(), InfraError> {
+        let conn = self.conn.lock().unwrap();
+
+        for (key, value) in updates {
+            match key.as_str() {
+                "icon" => {
+                    conn.execute(
+                        "UPDATE folders SET icon = ?, updated_at = ? WHERE id = ?",
+                        params![value, Utc::now().to_rfc3339(), id.to_string()],
+                    )?;
+                }
+                "color" => {
+                    conn.execute(
+                        "UPDATE folders SET color = ?, updated_at = ? WHERE id = ?",
+                        params![value, Utc::now().to_rfc3339(), id.to_string()],
+                    )?;
+                }
+                "name" => {
+                    conn.execute(
+                        "UPDATE folders SET name = ?, updated_at = ? WHERE id = ?",
+                        params![value, Utc::now().to_rfc3339(), id.to_string()],
+                    )?;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    // =========================================================================
+    // Media Attachment Operations
+    // =========================================================================
+
+    /// Get media attachments for an article (public version)
+    pub fn get_media_attachments(
+        &self,
+        article_id: Uuid,
+    ) -> Result<Vec<MediaAttachment>, InfraError> {
+        let conn = self.conn.lock().unwrap();
+        self.get_media_for_article(&conn, article_id)
+    }
+
+    /// Mark a media attachment as downloaded
+    pub fn mark_media_downloaded(&self, id: Uuid, local_path: &str) -> Result<(), InfraError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE media_attachments SET is_downloaded = 1, local_path = ? WHERE id = ?",
+            params![local_path, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a media attachment as not downloaded
+    pub fn mark_media_not_downloaded(&self, id: Uuid) -> Result<(), InfraError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE media_attachments SET is_downloaded = 0, local_path = NULL WHERE id = ?",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Update podcast playback progress
+    pub fn update_podcast_progress(
+        &self,
+        article_id: Uuid,
+        progress: i32,
+    ) -> Result<(), InfraError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE articles SET podcast_progress = ? WHERE id = ?",
+            params![progress, article_id.to_string()],
+        )?;
+        Ok(())
+    }
+
     // =========================================================================
     // Helper Methods
     // =========================================================================
@@ -612,7 +727,11 @@ impl Database {
             folder_id: folder_id_str.and_then(|s| Uuid::parse_str(&s).ok()),
             etag: row.get("etag")?,
             last_modified: row.get("last_modified")?,
-            last_fetched: last_fetched_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+            last_fetched: last_fetched_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
             last_error: row.get("last_error")?,
             refresh_interval: row.get("refresh_interval")?,
             notify_new: row.get::<_, i32>("notify_new")? != 0,
@@ -645,8 +764,16 @@ impl Database {
             author: row.get("author")?,
             thumbnail_url: row.get("thumbnail_url")?,
             media: Vec::new(), // Loaded separately
-            published_at: published_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-            updated_at: updated_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+            published_at: published_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
+            updated_at: updated_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
             fetched_at: DateTime::parse_from_rfc3339(&fetched_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
@@ -654,8 +781,16 @@ impl Database {
             is_starred: row.get::<_, i32>("is_starred")? != 0,
             is_read_later: row.get::<_, i32>("is_read_later")? != 0,
             is_archived: row.get::<_, i32>("is_archived")? != 0,
-            read_at: read_at_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
-            read_later_at: read_later_at_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc))),
+            read_at: read_at_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
+            read_later_at: read_later_at_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc))
+            }),
             read_later_position: row.get("read_later_position")?,
             reddit_score: row.get("reddit_score")?,
             reddit_num_comments: row.get("reddit_num_comments")?,
@@ -694,12 +829,14 @@ impl Database {
         article_id: Uuid,
     ) -> Result<Vec<MediaAttachment>, InfraError> {
         let mut stmt = conn.prepare(
-            "SELECT url, mime_type, size_bytes, title, is_downloaded, local_path FROM media_attachments WHERE article_id = ?",
+            "SELECT id, url, mime_type, size_bytes, title, is_downloaded, local_path FROM media_attachments WHERE article_id = ?",
         )?;
 
         let media = stmt
             .query_map(params![article_id.to_string()], |row| {
+                let id_str: String = row.get("id")?;
                 Ok(MediaAttachment {
+                    id: Uuid::parse_str(&id_str).unwrap_or_default(),
                     url: row.get("url")?,
                     mime_type: row.get("mime_type")?,
                     size_bytes: row.get("size_bytes")?,
@@ -743,7 +880,9 @@ mod tests {
 
         db.insert_feed(&feed).unwrap();
 
-        let retrieved = db.get_feed_by_url("https://example.com/unique.xml").unwrap();
+        let retrieved = db
+            .get_feed_by_url("https://example.com/unique.xml")
+            .unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().title, "Unique Feed");
     }
@@ -752,9 +891,12 @@ mod tests {
     fn test_get_all_feeds() {
         let db = setup_db();
 
-        db.insert_feed(&Feed::new("https://example.com/1.xml", "Feed 1")).unwrap();
-        db.insert_feed(&Feed::new("https://example.com/2.xml", "Feed 2")).unwrap();
-        db.insert_feed(&Feed::new("https://example.com/3.xml", "Feed 3")).unwrap();
+        db.insert_feed(&Feed::new("https://example.com/1.xml", "Feed 1"))
+            .unwrap();
+        db.insert_feed(&Feed::new("https://example.com/2.xml", "Feed 2"))
+            .unwrap();
+        db.insert_feed(&Feed::new("https://example.com/3.xml", "Feed 3"))
+            .unwrap();
 
         let feeds = db.get_all_feeds().unwrap();
         assert_eq!(feeds.len(), 3);

@@ -249,7 +249,10 @@ fn write_outline<W: std::io::Write>(
     // Extended attributes (only if extended mode)
     if extended {
         if let Some(ref mode) = outline.view_mode {
-            elem.push_attribute(("curio:viewMode", format!("{:?}", mode).to_lowercase().as_str()));
+            elem.push_attribute((
+                "curio:viewMode",
+                format!("{:?}", mode).to_lowercase().as_str(),
+            ));
         }
         if let Some(ref tags) = outline.tags {
             elem.push_attribute(("curio:tags", tags.join(",").as_str()));
@@ -382,7 +385,10 @@ mod tests {
         // YouTube channel feed
         let channel = &youtube.children[0];
         assert_eq!(channel.channel_id, Some("UC123".to_string()));
-        assert_eq!(channel.tags, Some(vec!["tech".to_string(), "tutorials".to_string()]));
+        assert_eq!(
+            channel.tags,
+            Some(vec!["tech".to_string(), "tutorials".to_string()])
+        );
 
         // Reddit folder
         let reddit = &result.outlines[1];

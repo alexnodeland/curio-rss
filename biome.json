@@ -42,6 +42,13 @@
         }
     },
     "files": {
-        "ignore": ["node_modules", "dist", "target", "coverage", "src/lib/types/generated", ".svelte-kit"]
+        "ignore": [
+            "node_modules",
+            "dist",
+            "target",
+            "coverage",
+            "src/lib/types/generated",
+            ".svelte-kit"
+        ]
     }
 }

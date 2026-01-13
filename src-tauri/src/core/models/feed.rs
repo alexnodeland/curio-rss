@@ -102,8 +102,7 @@ impl Feed {
 
     /// Check if this feed appears to be a YouTube feed
     pub fn is_youtube(&self) -> bool {
-        self.url.contains("youtube.com/feeds")
-            || self.view_mode == ViewMode::YouTube
+        self.url.contains("youtube.com/feeds") || self.view_mode == ViewMode::YouTube
     }
 
     /// Check if this feed appears to be a Reddit feed
@@ -133,7 +132,10 @@ impl Feed {
             return None;
         }
         // URL pattern: https://www.reddit.com/r/rust/.rss
-        self.url.split("/r/").nth(1).and_then(|s| s.split('/').next())
+        self.url
+            .split("/r/")
+            .nth(1)
+            .and_then(|s| s.split('/').next())
     }
 }
 

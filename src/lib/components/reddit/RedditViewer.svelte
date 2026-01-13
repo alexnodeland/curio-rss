@@ -1,72 +1,71 @@
 <script lang="ts">
-    import type { Article, RedditThread, CommentSort } from '$lib/types';
-    import { fetchRedditThread } from '$lib/api';
-    import { formatRelativeTime, formatNumber } from '$lib/utils/format';
-    import RedditComment from './RedditComment.svelte';
+import { fetchRedditThread } from '$lib/api';
+import type { Article, CommentSort, RedditThread } from '$lib/types';
+import { formatRelativeTime } from '$lib/utils/format';
 
-    export let article: Article;
+export let article: Article;
 
-    let thread: RedditThread | null = null;
-    let isLoading = true;
-    let error = '';
-    let commentSort: CommentSort = 'best';
+let thread: RedditThread | null = null;
+let isLoading = true;
+let error = '';
+let commentSort: CommentSort = 'best';
 
-    // Extract post info from article URL
-    function extractPostInfo(url: string): { subreddit: string; postId: string } | null {
-        const match = url.match(/reddit\.com\/r\/([^/]+)\/comments\/([^/]+)/);
-        if (match) {
-            return { subreddit: match[1], postId: match[2] };
-        }
-        return null;
+// Extract post info from article URL
+function extractPostInfo(url: string): { subreddit: string; postId: string } | null {
+    const match = url.match(/reddit\.com\/r\/([^/]+)\/comments\/([^/]+)/);
+    if (match) {
+        return { subreddit: match[1], postId: match[2] };
+    }
+    return null;
+}
+
+async function loadThread() {
+    if (!article.url) {
+        error = 'No Reddit URL available';
+        isLoading = false;
+        return;
     }
 
-    async function loadThread() {
-        if (!article.url) {
-            error = 'No Reddit URL available';
-            isLoading = false;
-            return;
-        }
-
-        const postInfo = extractPostInfo(article.url);
-        if (!postInfo) {
-            error = 'Invalid Reddit URL';
-            isLoading = false;
-            return;
-        }
-
-        isLoading = true;
-        error = '';
-
-        try {
-            thread = await fetchRedditThread(postInfo.subreddit, postInfo.postId, commentSort);
-        } catch (e) {
-            error = e instanceof Error ? e.message : 'Failed to load Reddit thread';
-        } finally {
-            isLoading = false;
-        }
+    const postInfo = extractPostInfo(article.url);
+    if (!postInfo) {
+        error = 'Invalid Reddit URL';
+        isLoading = false;
+        return;
     }
 
-    async function changeSort(newSort: CommentSort) {
-        commentSort = newSort;
-        await loadThread();
-    }
+    isLoading = true;
+    error = '';
 
-    function getPostTime(): string {
-        if (!thread) return '';
-        const date = new Date(thread.post.created_utc * 1000);
-        return formatRelativeTime(date.toISOString());
+    try {
+        thread = await fetchRedditThread(postInfo.subreddit, postInfo.postId, commentSort);
+    } catch (e) {
+        error = e instanceof Error ? e.message : 'Failed to load Reddit thread';
+    } finally {
+        isLoading = false;
     }
+}
 
-    function openInReddit() {
-        if (thread?.post.permalink) {
-            window.open(`https://reddit.com${thread.post.permalink}`, '_blank');
-        } else if (article.url) {
-            window.open(article.url, '_blank');
-        }
+async function changeSort(newSort: CommentSort) {
+    commentSort = newSort;
+    await loadThread();
+}
+
+function getPostTime(): string {
+    if (!thread) return '';
+    const date = new Date(thread.post.created_utc * 1000);
+    return formatRelativeTime(date.toISOString());
+}
+
+function openInReddit() {
+    if (thread?.post.permalink) {
+        window.open(`https://reddit.com${thread.post.permalink}`, '_blank');
+    } else if (article.url) {
+        window.open(article.url, '_blank');
     }
+}
 
-    // Load thread when article changes
-    $: if (article) loadThread();
+// Load thread when article changes
+$: if (article) loadThread();
 </script>
 
 <div class="reddit-viewer">

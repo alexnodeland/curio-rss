@@ -1,5 +1,7 @@
 <script lang="ts">
 import { markArticlesUnread, toggleArticleStarred } from '$lib/stores/feeds';
+import { readerFontSize, readerLineHeight, readerMaxWidth } from '$lib/stores/ui';
+import { formatDate } from '$lib/utils/format';
 import type { Article } from '$lib/types';
 
 export let article: Article;

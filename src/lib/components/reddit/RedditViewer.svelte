@@ -1,7 +1,8 @@
 <script lang="ts">
 import { fetchRedditThread } from '$lib/api';
 import type { Article, CommentSort, RedditThread } from '$lib/types';
-import { formatRelativeTime } from '$lib/utils/format';
+import { formatRelativeTime, formatNumber } from '$lib/utils/format';
+import RedditComment from './RedditComment.svelte';
 
 export let article: Article;
 

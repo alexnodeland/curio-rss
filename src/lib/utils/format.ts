@@ -21,19 +21,23 @@ export function formatRelativeTime(dateString: string | null | undefined): strin
 
     if (diffSeconds < 60) {
         return 'just now';
-    } else if (diffMinutes < 60) {
-        return `${diffMinutes}m ago`;
-    } else if (diffHours < 24) {
-        return `${diffHours}h ago`;
-    } else if (diffDays < 7) {
-        return `${diffDays}d ago`;
-    } else if (diffWeeks < 4) {
-        return `${diffWeeks}w ago`;
-    } else if (diffMonths < 12) {
-        return `${diffMonths}mo ago`;
-    } else {
-        return `${diffYears}y ago`;
     }
+    if (diffMinutes < 60) {
+        return `${diffMinutes}m ago`;
+    }
+    if (diffHours < 24) {
+        return `${diffHours}h ago`;
+    }
+    if (diffDays < 7) {
+        return `${diffDays}d ago`;
+    }
+    if (diffWeeks < 4) {
+        return `${diffWeeks}w ago`;
+    }
+    if (diffMonths < 12) {
+        return `${diffMonths}mo ago`;
+    }
+    return `${diffYears}y ago`;
 }
 
 /**
@@ -93,9 +97,11 @@ export function formatDuration(seconds: number): string {
 export function formatNumber(num: number): string {
     if (num >= 1_000_000_000) {
         return `${(num / 1_000_000_000).toFixed(1)}B`;
-    } else if (num >= 1_000_000) {
+    }
+    if (num >= 1_000_000) {
         return `${(num / 1_000_000).toFixed(1)}M`;
-    } else if (num >= 1_000) {
+    }
+    if (num >= 1_000) {
         return `${(num / 1_000).toFixed(1)}K`;
     }
     return num.toString();
@@ -109,7 +115,7 @@ export function formatFileSize(bytes: number): string {
 
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const size = bytes / Math.pow(1024, i);
+    const size = bytes / 1024 ** i;
 
     return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
@@ -119,7 +125,7 @@ export function formatFileSize(bytes: number): string {
  */
 export function truncateText(text: string, maxLength: number): string {
     if (text.length <= maxLength) return text;
-    return text.slice(0, maxLength - 1) + '…';
+    return `${text.slice(0, maxLength - 1)}…`;
 }
 
 /**

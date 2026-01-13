@@ -1,7 +1,7 @@
 <script lang="ts">
 import '../app.css';
 import { loadArticles, loadFeeds, loadFolderTree } from '$lib/stores/feeds';
-import { setTheme } from '$lib/stores/ui';
+import { setTheme, currentTheme } from '$lib/stores/ui';
 import { onMount } from 'svelte';
 
 onMount(async () => {

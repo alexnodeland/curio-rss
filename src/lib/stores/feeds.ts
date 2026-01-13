@@ -40,7 +40,7 @@ export const isRefreshing = writable<boolean>(false);
 
 export const currentArticles = derived(
     [articles, selectedFeedId, selectedFolderId, articleFilter],
-    ([$articles, $feedId, $folderId, $filter]) => {
+    ([$articles, $feedId, _$folderId, $filter]) => {
         let list = Array.from($articles.values());
 
         if ($feedId) {

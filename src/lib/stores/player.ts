@@ -189,7 +189,6 @@ export function clearQueue(): void {
 }
 
 export function playNext(): void {
-    const state = get(playerState);
     const queue = get(playerQueue);
 
     if (queue.length === 0) {

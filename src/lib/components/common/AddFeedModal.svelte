@@ -1,12 +1,11 @@
 <script lang="ts">
-import { addFeed } from '$lib/stores/feeds';
+import { addFeed, folders } from '$lib/stores/feeds';
 import { createEventDispatcher } from 'svelte';
 
-const dispatch = createEventDispatcher<{ close: void }>();
+const dispatch = createEventDispatcher<{ close: undefined }>();
 
-const feedUrl = '';
-const title = '';
-const selectedFolderId: string | null = null;
+let feedUrl = '';
+let selectedFolderId: string | null = null;
 let isLoading = false;
 let error = '';
 
@@ -20,7 +19,7 @@ async function handleSubmit() {
     error = '';
 
     try {
-        await addFeed(feedUrl.trim(), title.trim() || undefined, selectedFolderId);
+        await addFeed(feedUrl.trim(), selectedFolderId ?? undefined);
         dispatch('close');
     } catch (e) {
         error = e instanceof Error ? e.message : 'Failed to add feed';
@@ -73,22 +72,11 @@ function handleBackdropClick(event: MouseEvent) {
             </div>
 
             <div class="form-group">
-                <label for="feed-title">Custom Title (optional)</label>
-                <input
-                    id="feed-title"
-                    type="text"
-                    bind:value={title}
-                    placeholder="Leave blank to use feed's title"
-                    disabled={isLoading}
-                />
-            </div>
-
-            <div class="form-group">
                 <label for="feed-folder">Folder (optional)</label>
                 <select id="feed-folder" bind:value={selectedFolderId} disabled={isLoading}>
                     <option value={null}>No folder</option>
-                    {#each $folders as folder}
-                        <option value={folder.id}>{folder.title}</option>
+                    {#each [...$folders.values()] as folder}
+                        <option value={folder.id}>{folder.name}</option>
                     {/each}
                 </select>
             </div>

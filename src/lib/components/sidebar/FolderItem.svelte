@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { FolderNode } from '$lib/types';
+import { unreadCounts, selectedFeedId, selectFeed } from '$lib/stores/feeds';
 
 export let node: FolderNode;
 

@@ -5,8 +5,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::commands::AppState;
-use crate::core::content::markdown::{article_to_markdown, generate_filename};
-use crate::core::models::ExportSettings;
+use crate::core::content::{article_to_markdown, generate_filename};
 use crate::error::CommandError;
 
 /// Export an article to Markdown format

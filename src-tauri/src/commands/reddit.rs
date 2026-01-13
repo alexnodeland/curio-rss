@@ -22,8 +22,8 @@ pub async fn fetch_reddit_thread(
 /// Extract Reddit post info from a URL
 #[tauri::command]
 pub fn parse_reddit_url(url: &str) -> Result<RedditUrlInfo, CommandError> {
-    let info = extract_reddit_info(url)
-        .ok_or_else(|| CommandError::Validation("Invalid Reddit URL".to_string()))?;
+    let info =
+        extract_reddit_info(url).ok_or_else(|| CommandError::validation("Invalid Reddit URL"))?;
     Ok(info)
 }
 

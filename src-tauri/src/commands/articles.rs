@@ -135,6 +135,7 @@ pub async fn reorder_read_later(
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     // Integration tests would use a mock state

@@ -1,7 +1,11 @@
 //! Markdown export for articles.
 
 use crate::core::models::{Article, ExportSettings, ImageExportMode, LinkStyle};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+
+// DateTime is used in tests
+#[cfg(test)]
+use chrono::DateTime;
 
 /// Export an article to Markdown format
 pub fn article_to_markdown(article: &Article, settings: &ExportSettings) -> String {

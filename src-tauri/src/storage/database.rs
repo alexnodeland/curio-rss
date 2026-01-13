@@ -7,10 +7,9 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::core::models::{
-    Article, ArticleFilter, ArticlePage, Feed, FeedUpdate, Folder, FolderUpdate, MediaAttachment,
-    Pagination, ViewMode,
+    Article, ArticleFilter, ArticlePage, Feed, FeedUpdate, Folder, MediaAttachment, Pagination,
 };
-use crate::error::{CoreError, InfraError};
+use crate::error::InfraError;
 use crate::storage::migrations;
 
 /// Database connection wrapper

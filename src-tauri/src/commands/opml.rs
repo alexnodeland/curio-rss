@@ -1,11 +1,10 @@
 //! OPML import/export commands.
 
-use std::path::PathBuf;
 use tauri::State;
 use uuid::Uuid;
 
 use crate::commands::AppState;
-use crate::core::feeds::opml::{export_opml, parse_opml, OpmlDocument, OpmlOutline};
+use crate::core::feeds::{export_opml, parse_opml, OpmlDocument, OpmlOutline};
 use crate::core::models::{Feed, Folder, ViewMode};
 use crate::error::CommandError;
 
@@ -65,7 +64,8 @@ async fn import_outline(
                 // Update folder with extended attributes
                 if outline.icon.is_some() || outline.color.is_some() || outline.view_mode.is_some()
                 {
-                    let mut updates = std::collections::HashMap::new();
+                    let mut updates: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
                     if let Some(ref icon) = outline.icon {
                         updates.insert("icon".to_string(), icon.clone());
                     }
@@ -149,9 +149,9 @@ pub async fn export_opml_file(
 
     let xml = export_opml(&doc, extended)?;
 
-    tokio::fs::write(&path, xml)
+    tokio::fs::write(&path, &xml)
         .await
-        .map_err(|e| CommandError::io(format!("Failed to write file: {}", e)))?;
+        .map_err(|e: std::io::Error| CommandError::io(format!("Failed to write file: {}", e)))?;
 
     Ok(())
 }

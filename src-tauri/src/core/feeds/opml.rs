@@ -4,7 +4,6 @@ use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use uuid::Uuid;
 
 use crate::core::models::ViewMode;
 use crate::error::InfraError;
@@ -69,7 +68,7 @@ pub fn parse_opml(xml: &str) -> Result<OpmlDocument, InfraError> {
     reader.config_mut().trim_text(true);
 
     let mut title = String::new();
-    let mut profile = None;
+    let profile = None;
     let mut outlines = Vec::new();
     let mut stack: Vec<OpmlOutline> = Vec::new();
     let mut in_head = false;

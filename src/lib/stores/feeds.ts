@@ -211,37 +211,47 @@ export async function refreshAllFeeds(): Promise<void> {
 export async function markArticlesRead(articleIds: string[]): Promise<void> {
     await api.markRead(articleIds);
 
+    // Create a NEW Map to ensure Svelte detects the change
     articles.update((map) => {
+        const newMap = new Map(map);
         for (const id of articleIds) {
-            const article = map.get(id);
+            const article = newMap.get(id);
             if (article) {
-                map.set(id, {
+                newMap.set(id, {
                     ...article,
                     is_read: true,
                     read_at: new Date().toISOString(),
                 });
             }
         }
-        return map;
+        return newMap;
     });
+
+    // Refresh folder tree to update sidebar unread counts
+    await loadFolderTree();
 }
 
 export async function markArticlesUnread(articleIds: string[]): Promise<void> {
     await api.markUnread(articleIds);
 
+    // Create a NEW Map to ensure Svelte detects the change
     articles.update((map) => {
+        const newMap = new Map(map);
         for (const id of articleIds) {
-            const article = map.get(id);
+            const article = newMap.get(id);
             if (article) {
-                map.set(id, {
+                newMap.set(id, {
                     ...article,
                     is_read: false,
                     read_at: null,
                 });
             }
         }
-        return map;
+        return newMap;
     });
+
+    // Refresh folder tree to update sidebar unread counts
+    await loadFolderTree();
 }
 
 export async function toggleArticleStarred(articleId: string): Promise<boolean> {
@@ -301,4 +311,87 @@ export function clearFilter(): void {
     });
     pagination.set({ page: 1, per_page: 50 });
     loadArticles();
+}
+
+// ============================================================================
+// Navigation Functions
+// ============================================================================
+
+export function selectNextArticle(): void {
+    const articleList = get(currentArticles);
+    const currentId = get(selectedArticleId);
+
+    if (articleList.length === 0) return;
+
+    const currentIndex = currentId ? articleList.findIndex((a) => a.id === currentId) : -1;
+    const nextIndex = Math.min(currentIndex + 1, articleList.length - 1);
+
+    if (nextIndex >= 0 && nextIndex < articleList.length) {
+        selectArticle(articleList[nextIndex].id);
+    }
+}
+
+export function selectPreviousArticle(): void {
+    const articleList = get(currentArticles);
+    const currentId = get(selectedArticleId);
+
+    if (articleList.length === 0) return;
+
+    const currentIndex = currentId
+        ? articleList.findIndex((a) => a.id === currentId)
+        : articleList.length;
+    const prevIndex = Math.max(currentIndex - 1, 0);
+
+    if (prevIndex >= 0 && prevIndex < articleList.length) {
+        selectArticle(articleList[prevIndex].id);
+    }
+}
+
+// Helper to flatten folder tree into a list of feed IDs
+function getFlattenedFeedIds(): string[] {
+    const tree = get(folderTree);
+    const feedIds: string[] = [];
+
+    function traverseNode(node: FolderNode): void {
+        for (const feed of node.feeds) {
+            feedIds.push(feed.id);
+        }
+        for (const child of node.children) {
+            traverseNode(child);
+        }
+    }
+
+    for (const node of tree) {
+        traverseNode(node);
+    }
+
+    return feedIds;
+}
+
+export function selectNextFeed(): void {
+    const feedIds = getFlattenedFeedIds();
+    const currentId = get(selectedFeedId);
+
+    if (feedIds.length === 0) return;
+
+    const currentIndex = currentId ? feedIds.indexOf(currentId) : -1;
+    const nextIndex = Math.min(currentIndex + 1, feedIds.length - 1);
+
+    if (nextIndex >= 0 && nextIndex < feedIds.length) {
+        selectFeed(feedIds[nextIndex]);
+    }
+}
+
+export function selectPreviousFeed(): void {
+    const feedIds = getFlattenedFeedIds();
+    const currentId = get(selectedFeedId);
+
+    if (feedIds.length === 0) return;
+
+    const currentIndex = currentId ? feedIds.indexOf(currentId) : feedIds.length;
+    const prevIndex = Math.max(currentIndex - 1, 0);
+
+    if (prevIndex >= 0 && prevIndex < feedIds.length) {
+        selectFeed(feedIds[prevIndex]);
+    }
 }

@@ -64,10 +64,12 @@
         "ignore": [
             "node_modules",
             "dist",
+            "build",
             "target",
             "coverage",
             "src/lib/types/generated",
-            ".svelte-kit"
+            ".svelte-kit",
+            "src-tauri/gen"
         ]
     }
 }

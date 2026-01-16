@@ -87,7 +87,7 @@ fn allowed_tags() -> HashSet<&'static str> {
 fn tag_attributes() -> std::collections::HashMap<&'static str, HashSet<&'static str>> {
     let mut map = std::collections::HashMap::new();
 
-    map.insert("a", ["href", "title", "rel"].into_iter().collect());
+    map.insert("a", ["href", "title"].into_iter().collect()); // Note: "rel" set via link_rel()
     map.insert(
         "img",
         ["src", "alt", "title", "width", "height", "loading"]

@@ -73,10 +73,12 @@ pub fn parse_opml(xml: &str) -> Result<OpmlDocument, InfraError> {
     let mut stack: Vec<OpmlOutline> = Vec::new();
     let mut in_head = false;
     let mut in_body = false;
+    let mut found_opml = false;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) => match e.name().as_ref() {
+                b"opml" => found_opml = true,
                 b"head" => in_head = true,
                 b"body" => in_body = true,
                 b"title" if in_head => {
@@ -116,6 +118,12 @@ pub fn parse_opml(xml: &str) -> Result<OpmlDocument, InfraError> {
             Err(e) => return Err(InfraError::FeedParse(format!("OPML parse error: {}", e))),
             _ => {}
         }
+    }
+
+    if !found_opml {
+        return Err(InfraError::FeedParse(
+            "Invalid OPML: missing <opml> root element".to_string(),
+        ));
     }
 
     Ok(OpmlDocument {

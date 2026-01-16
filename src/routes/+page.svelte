@@ -1,15 +1,85 @@
 <script lang="ts">
-import { refreshAllFeeds, selectedArticle, isRefreshing } from '$lib/stores/feeds';
-import { closeModal, openModal, sidebarCollapsed, activeModal } from '$lib/stores/ui';
+import {
+    refreshAllFeeds,
+    selectedArticle,
+    selectedArticleId,
+    isRefreshing,
+    selectNextArticle,
+    selectPreviousArticle,
+    selectNextFeed,
+    selectPreviousFeed,
+    toggleArticleStarred,
+    markArticlesRead,
+    markArticlesUnread,
+    articles,
+} from '$lib/stores/feeds';
+import {
+    closeModal,
+    openModal,
+    sidebarCollapsed,
+    activeModal,
+    focusedElement,
+    setFocus,
+} from '$lib/stores/ui';
+import { get } from 'svelte/store';
 import Sidebar from '$lib/components/sidebar/Sidebar.svelte';
 import ArticleList from '$lib/components/article/ArticleList.svelte';
 import ReaderPane from '$lib/components/article/ReaderPane.svelte';
 import AddFeedModal from '$lib/components/common/AddFeedModal.svelte';
 
 function handleKeydown(e: KeyboardEvent) {
-    // Global keyboard shortcuts
-    if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
-        // Show keyboard shortcuts
+    // Skip if in input/textarea
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+    }
+
+    // Navigation keys (j/k or arrows)
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (get(focusedElement) === 'sidebar') {
+            selectNextFeed();
+        } else {
+            selectNextArticle();
+        }
+    } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (get(focusedElement) === 'sidebar') {
+            selectPreviousFeed();
+        } else {
+            selectPreviousArticle();
+        }
+    } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setFocus('sidebar');
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const current = get(focusedElement);
+        if (current === 'sidebar') {
+            setFocus('list');
+        } else if (current === 'list') {
+            setFocus('reader');
+        }
+    } else if (e.key === 's' && !e.ctrlKey && !e.metaKey) {
+        // Star/unstar current article
+        const articleId = get(selectedArticleId);
+        if (articleId) {
+            e.preventDefault();
+            toggleArticleStarred(articleId);
+        }
+    } else if (e.key === 'm' && !e.ctrlKey && !e.metaKey) {
+        // Toggle read/unread
+        const articleId = get(selectedArticleId);
+        if (articleId) {
+            e.preventDefault();
+            const article = get(articles).get(articleId);
+            if (article?.is_read) {
+                markArticlesUnread([articleId]);
+            } else {
+                markArticlesRead([articleId]);
+            }
+        }
+    } else if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+        // Show keyboard shortcuts (placeholder)
     } else if (e.key === 't' && !e.ctrlKey && !e.metaKey) {
         sidebarCollapsed.update((v) => !v);
     } else if (e.key === 'r' && e.shiftKey) {

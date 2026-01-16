@@ -98,7 +98,7 @@ export const THEMES: ThemeInfo[] = [
 const THEME_STORAGE_KEY = 'curio-theme';
 
 function getStoredTheme(): ThemeId {
-    if (typeof localStorage === 'undefined') return 'dark';
+    if (typeof window === 'undefined') return 'dark';
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored && THEMES.some((t) => t.id === stored)) {
         return stored as ThemeId;

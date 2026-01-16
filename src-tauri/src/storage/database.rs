@@ -269,9 +269,10 @@ impl Database {
                     INSERT INTO articles (
                         id, feed_id, guid, title, url, content_html, content_text,
                         summary, author, thumbnail_url, published_at, updated_at, fetched_at,
+                        is_read, is_starred, is_read_later, is_archived,
                         reddit_score, reddit_num_comments, youtube_duration,
                         podcast_duration, podcast_progress
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                     params![
                         article.id.to_string(),
@@ -287,6 +288,10 @@ impl Database {
                         article.published_at.map(|dt| dt.to_rfc3339()),
                         article.updated_at.map(|dt| dt.to_rfc3339()),
                         article.fetched_at.to_rfc3339(),
+                        article.is_read,
+                        article.is_starred,
+                        article.is_read_later,
+                        article.is_archived,
                         article.reddit_score,
                         article.reddit_num_comments,
                         article.youtube_duration,
@@ -538,6 +543,28 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    /// Get unread article counts grouped by feed
+    pub fn get_unread_counts_by_feed(
+        &self,
+    ) -> Result<std::collections::HashMap<Uuid, i32>, InfraError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT feed_id, COUNT(*) as count FROM articles WHERE is_read = 0 GROUP BY feed_id",
+        )?;
+
+        let counts: std::collections::HashMap<Uuid, i32> = stmt
+            .query_map([], |row| {
+                let feed_id_str: String = row.get(0)?;
+                let count: i32 = row.get(1)?;
+                Ok((feed_id_str, count))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id_str, count)| Uuid::parse_str(&id_str).ok().map(|id| (id, count)))
+            .collect();
+
+        Ok(counts)
     }
 
     // =========================================================================

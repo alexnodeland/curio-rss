@@ -16,8 +16,13 @@ pub async fn add_feed(
     folder_id: Option<String>,
     tags: Option<Vec<String>>,
 ) -> Result<Feed, CommandError> {
+    tracing::debug!("add_feed called with url: {}", url);
+
     // Validate URL
-    let validated_url = validate_feed_url(&url)?;
+    let validated_url = validate_feed_url(&url).map_err(|e| {
+        tracing::error!("URL validation failed: {:?}", e);
+        e
+    })?;
 
     // Check for duplicate
     if state.db.get_feed_by_url(&validated_url)?.is_some() {
@@ -40,8 +45,13 @@ pub async fn add_feed(
     }
 
     // Insert into database
-    state.db.insert_feed(&feed)?;
+    tracing::debug!("Inserting feed into database: {:?}", feed.id);
+    state.db.insert_feed(&feed).map_err(|e| {
+        tracing::error!("Database insert failed: {:?}", e);
+        e
+    })?;
 
+    tracing::info!("Feed added successfully: {}", feed.url);
     Ok(feed)
 }
 

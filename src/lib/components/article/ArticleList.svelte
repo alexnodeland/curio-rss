@@ -8,6 +8,7 @@ import {
     refreshFeed,
     selectArticle,
 } from '$lib/stores/feeds';
+import { focusedElement, setFocus } from '$lib/stores/ui';
 import { formatRelativeTime } from '$lib/utils/format';
 import type { Article } from '$lib/types';
 
@@ -17,16 +18,26 @@ function handleMarkAllRead() {
         markArticlesRead(unreadIds);
     }
 }
+
+function handleListClick() {
+    setFocus('list');
+}
+
+function handleRefreshFeed() {
+    if ($selectedFeed) {
+        refreshFeed($selectedFeed.id);
+    }
+}
 </script>
 
-<div class="article-list">
+<div class="article-list" class:focused={$focusedElement === 'list'} on:click={handleListClick} on:keydown={handleListClick} role="region" aria-label="Article list">
     <header class="list-header">
         <h2 class="list-title">
             {$selectedFeed ? $selectedFeed.title : 'All Items'}
         </h2>
         <div class="list-actions">
             {#if $selectedFeed}
-                <button on:click={() => refreshFeed($selectedFeed.id)} title="Refresh feed">
+                <button on:click={handleRefreshFeed} title="Refresh feed">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 12a9 9 0 11-6.219-8.56"/>
                         <path d="M21 3v9h-9"/>
@@ -79,7 +90,7 @@ function handleMarkAllRead() {
                             </svg>
                         {/if}
                         {#if !article.is_read}
-                            <span class="unread-dot" />
+                            <span class="unread-dot"></span>
                         {/if}
                     </div>
                 </button>
@@ -97,6 +108,10 @@ function handleMarkAllRead() {
         display: flex;
         flex-direction: column;
         overflow: hidden;
+    }
+
+    .article-list.focused {
+        border-right-color: var(--accent);
     }
 
     .list-header {

@@ -20,8 +20,18 @@ import type {
 } from '$lib/types';
 import { invoke } from '@tauri-apps/api/core';
 
+// Check if running inside Tauri
+function isTauri(): boolean {
+    return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 // Generic invoke wrapper with error handling
 async function typedInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    if (!isTauri()) {
+        throw new Error(
+            'This app must be run in the Tauri desktop application, not in a web browser.',
+        );
+    }
     try {
         return await invoke<T>(cmd, args);
     } catch (error) {

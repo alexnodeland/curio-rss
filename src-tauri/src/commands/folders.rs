@@ -48,6 +48,7 @@ pub async fn get_folders(state: State<'_, AppState>) -> Result<Vec<Folder>, Comm
 pub async fn get_folder_tree(state: State<'_, AppState>) -> Result<Vec<FolderNode>, CommandError> {
     let folders = state.db.get_all_folders()?;
     let feeds = state.db.get_all_feeds()?;
+    let unread_counts = state.db.get_unread_counts_by_feed()?;
 
     // Build tree
     let mut root_nodes: Vec<FolderNode> = Vec::new();
@@ -65,7 +66,7 @@ pub async fn get_folder_tree(state: State<'_, AppState>) -> Result<Vec<FolderNod
             id: feed.id,
             title: feed.title.clone(),
             icon_url: feed.icon_url.clone(),
-            unread_count: 0, // TODO: Calculate unread count
+            unread_count: unread_counts.get(&feed.id).copied().unwrap_or(0),
             position: feed.position,
         };
 
@@ -98,18 +99,27 @@ pub async fn get_folder_tree(state: State<'_, AppState>) -> Result<Vec<FolderNod
         }
     }
 
-    // Add feeds without folders to a virtual root
-    let _orphan_feeds: Vec<FolderFeedItem> = feeds
+    // Add feeds without folders to a virtual "Uncategorized" node
+    let orphan_feeds: Vec<FolderFeedItem> = feeds
         .iter()
         .filter(|f| f.folder_id.is_none())
         .map(|f| FolderFeedItem {
             id: f.id,
             title: f.title.clone(),
             icon_url: f.icon_url.clone(),
-            unread_count: 0,
+            unread_count: unread_counts.get(&f.id).copied().unwrap_or(0),
             position: f.position,
         })
         .collect();
+
+    // If there are orphan feeds, create a virtual folder for them
+    if !orphan_feeds.is_empty() {
+        let mut uncategorized = FolderNode::new(Folder::new("Uncategorized"));
+        uncategorized.feeds = orphan_feeds;
+        // Put uncategorized at the end
+        uncategorized.folder.position = i32::MAX;
+        root_nodes.push(uncategorized);
+    }
 
     // Return nodes sorted by position
     root_nodes.sort_by(|a, b| a.folder.position.cmp(&b.folder.position));

@@ -1,6 +1,12 @@
 <script lang="ts">
 import { markArticlesUnread, toggleArticleStarred } from '$lib/stores/feeds';
-import { readerFontSize, readerLineHeight, readerMaxWidth } from '$lib/stores/ui';
+import {
+    focusedElement,
+    readerFontSize,
+    readerLineHeight,
+    readerMaxWidth,
+    setFocus,
+} from '$lib/stores/ui';
 import { formatDate } from '$lib/utils/format';
 import type { Article } from '$lib/types';
 
@@ -19,11 +25,19 @@ function openInBrowser() {
         window.open(article.url, '_blank');
     }
 }
+
+function handleReaderClick() {
+    setFocus('reader');
+}
 </script>
 
 <article
     class="reader-pane"
+    class:focused={$focusedElement === 'reader'}
     style="--reader-font-size: {$readerFontSize}px; --reader-line-height: {$readerLineHeight}; --reader-max-width: {$readerMaxWidth}px;"
+    on:click={handleReaderClick}
+    on:keydown={handleReaderClick}
+    role="main"
 >
     <header class="reader-header">
         <div class="reader-actions">
@@ -95,6 +109,11 @@ function openInBrowser() {
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        border-left: 1px solid var(--border);
+    }
+
+    .reader-pane.focused {
+        border-left-color: var(--accent);
     }
 
     .reader-header {

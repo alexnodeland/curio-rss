@@ -11,9 +11,10 @@ function toggleExpand() {
 }
 
 function getTotalUnread(node: FolderNode): number {
-    let count = node.unread_count;
+    let count = 0;
     for (const feed of node.feeds) {
-        count += $unreadCounts.get(feed.id) ?? 0;
+        // Prefer reactive derived store, fallback to backend-provided count
+        count += $unreadCounts.get(feed.id) ?? feed.unread_count ?? 0;
     }
     for (const child of node.children) {
         count += getTotalUnread(child);

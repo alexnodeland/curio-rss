@@ -114,14 +114,16 @@ pub fn detect_view_mode(url: &str) -> ViewMode {
 
 /// Check if a URL is likely a podcast feed
 fn is_likely_podcast_url(url: &str) -> bool {
+    // Check for podcast-specific keywords and hosting platforms
     url.contains("podcast")
-        || url.contains("feed.xml")
-        || url.contains("rss.xml")
         || url.contains("anchor.fm")
         || url.contains("libsyn.com")
         || url.contains("podbean.com")
         || url.contains("buzzsprout.com")
         || url.contains("transistor.fm")
+        || url.contains("simplecast.com")
+        || url.contains("spreaker.com")
+        || url.contains("megaphone.fm")
 }
 
 /// Validate and normalize a feed URL

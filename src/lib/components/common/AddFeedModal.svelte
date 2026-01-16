@@ -4,6 +4,33 @@ import { createEventDispatcher } from 'svelte';
 
 const dispatch = createEventDispatcher<{ close: undefined }>();
 
+// Extract error message from various error formats (Tauri, native Error, string)
+function extractErrorMessage(e: unknown): string {
+    if (e instanceof Error) {
+        return e.message;
+    }
+    if (typeof e === 'string') {
+        return e;
+    }
+    if (typeof e === 'object' && e !== null) {
+        // Tauri CommandError format: { User: { message, ... } } or { Internal: { message, ... } }
+        const obj = e as Record<string, unknown>;
+        if ('User' in obj && typeof obj.User === 'object' && obj.User !== null) {
+            const user = obj.User as Record<string, unknown>;
+            if (typeof user.message === 'string') return user.message;
+        }
+        if ('Internal' in obj && typeof obj.Internal === 'object' && obj.Internal !== null) {
+            const internal = obj.Internal as Record<string, unknown>;
+            if (typeof internal.message === 'string') return internal.message;
+        }
+        // Direct message property
+        if ('message' in obj && typeof obj.message === 'string') {
+            return obj.message;
+        }
+    }
+    return 'An unexpected error occurred';
+}
+
 let feedUrl = '';
 let selectedFolderId: string | null = null;
 let isLoading = false;
@@ -22,7 +49,9 @@ async function handleSubmit() {
         await addFeed(feedUrl.trim(), selectedFolderId ?? undefined);
         dispatch('close');
     } catch (e) {
-        error = e instanceof Error ? e.message : 'Failed to add feed';
+        console.error('Add feed error:', e);
+        // Tauri errors serialize as { User: { message, code, recoverable } } or { Internal: { message } }
+        error = extractErrorMessage(e);
     } finally {
         isLoading = false;
     }

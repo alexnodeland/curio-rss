@@ -308,6 +308,31 @@ fn marker_literals_in_the_body_cannot_break_the_managed_region() {
     assert!(rewritten.contains("revised"));
 }
 
+/// Lexical containment alone is fooled by a symlinked subdirectory
+/// planted inside the destination root: `<root>/curio -> /elsewhere`
+/// would redirect the atomic write outside the root. The write path
+/// canonicalizes and re-asserts containment — the guarantee documented
+/// on `Destination::root`.
+#[test]
+#[cfg(unix)]
+fn a_symlinked_subdirectory_cannot_redirect_writes_outside_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("curio")).unwrap();
+
+    let dest = destination(dir.path());
+    let err = export_note(&dest, &input(CurioId::new(), "Escape", "body")).unwrap_err();
+    assert!(
+        matches!(err, curio_core::export::ExportError::Containment { .. }),
+        "expected containment refusal, got: {err}"
+    );
+    assert_eq!(
+        std::fs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "nothing may land outside the destination root"
+    );
+}
+
 #[test]
 fn hostile_titles_cannot_escape_the_destination() {
     let dir = tempfile::tempdir().unwrap();

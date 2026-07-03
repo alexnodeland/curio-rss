@@ -45,7 +45,7 @@ pub fn load_manifest(root: &Path) -> Result<ManifestV1, ExportError> {
 /// [`ExportError::Io`] on write failures.
 pub fn write_manifest(root: &Path, manifest: &ManifestV1) -> Result<(), ExportError> {
     let path = manifest_path(root);
-    write_atomic(&path, manifest.to_canonical_json().as_bytes())
+    write_atomic(root, &path, manifest.to_canonical_json().as_bytes())
 }
 
 #[cfg(test)]

@@ -252,7 +252,7 @@ pub fn stage_export_note(
     };
 
     // Contract write ordering: note first…
-    write_atomic(&abs_path, content.as_bytes())?;
+    write_atomic(&destination.root, &abs_path, content.as_bytes())?;
     // …manifest second — held back so the caller can stage its event
     // intent between the two writes (see [`StagedExport`]).
     manifest.notes.insert(
@@ -351,7 +351,10 @@ fn slugify(title: &str, curio_id: &CurioId) -> String {
     }
 }
 
-/// Joins a relative note path under the root, refusing traversal.
+/// Joins a relative note path under the root, refusing traversal. This
+/// is the lexical half of containment; [`write_atomic`] adds the
+/// realpath half (symlinked intermediate directories cannot redirect a
+/// write outside the root).
 fn contained_path(root: &Path, rel: &str) -> Result<PathBuf, ExportError> {
     let rel_path = Path::new(rel);
     let safe = rel_path
@@ -372,8 +375,14 @@ fn read_file(path: &Path) -> Result<String, ExportError> {
     })
 }
 
-/// Temp-file + atomic-rename write in the target's own directory.
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
+/// Temp-file + atomic-rename write in the target's own directory,
+/// with realpath containment under `root`: after the parent directories
+/// exist, both they and the root are canonicalized and the write is
+/// refused unless the parent still resolves under the root — a symlinked
+/// intermediate directory planted inside the destination cannot redirect
+/// the write elsewhere. (The final component is not followed either:
+/// `rename` replaces a symlink itself rather than writing through it.)
+pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
     let io_err = |source| ExportError::Io {
         path: path.to_path_buf(),
         source,
@@ -382,6 +391,16 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ExportError>
         path: path.display().to_string(),
     })?;
     std::fs::create_dir_all(dir).map_err(io_err)?;
+    let canonical_root = root.canonicalize().map_err(|source| ExportError::Io {
+        path: root.to_path_buf(),
+        source,
+    })?;
+    let canonical_dir = dir.canonicalize().map_err(io_err)?;
+    if !canonical_dir.starts_with(&canonical_root) {
+        return Err(ExportError::Containment {
+            path: path.display().to_string(),
+        });
+    }
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy())

@@ -1,0 +1,26 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/code-heavy.html
+---
+# Multi-line code must survive
+
+The sketch's regex converter destroyed every element spanning lines. This fixture is the permanent regression test.
+
+```
+fn main() {
+    let xs: Vec<i32> = (0..10).collect();
+    // angle brackets <T> and ampersands && stay intact
+    let sum: i32 = xs.iter().sum();
+    println!("{sum}");
+}
+```
+
+Inline spans like `Vec<String>` too, plus a paragraph that itself spans several source lines.
+
+```
+SELECT id, title
+FROM articles
+WHERE content_text MATCH 'wal'
+ORDER BY rank;
+```

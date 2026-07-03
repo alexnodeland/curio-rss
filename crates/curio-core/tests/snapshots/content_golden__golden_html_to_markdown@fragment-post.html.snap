@@ -1,0 +1,16 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/fragment-post.html
+---
+Feed items usually arrive as **bare fragments** — no `<html>`, no `<body>`, just content.
+
+They still deserve a faithful conversion, including [links with query strings](https://example.com/details?a=1&b=2) and images:
+
+![a cat, obviously](https://example.com/cat.jpg)
+
+1.  First point
+2.  Second point with *emphasis*
+
+And a line  
+break.

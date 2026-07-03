@@ -14,6 +14,7 @@
 //! remaining engine modules (`fetch/`, `ingest/`, `export/`, `enrich/`)
 //! land per `docs/design/roadmap.md`.
 
+pub mod content;
 pub mod events;
 pub mod feeds;
 pub mod fetch;

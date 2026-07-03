@@ -1,0 +1,19 @@
+<article>
+<h1>Multi-line code must survive</h1>
+<p>The sketch's regex converter destroyed every element spanning lines.
+This fixture is the permanent regression test.</p>
+<pre><code>fn main() {
+    let xs: Vec&lt;i32&gt; = (0..10).collect();
+    // angle brackets &lt;T&gt; and ampersands &amp;&amp; stay intact
+    let sum: i32 = xs.iter().sum();
+    println!("{sum}");
+}</code></pre>
+<p>Inline spans like <code>Vec&lt;String&gt;</code> too, plus a paragraph
+that itself
+spans several
+source lines.</p>
+<pre><code>SELECT id, title
+FROM articles
+WHERE content_text MATCH 'wal'
+ORDER BY rank;</code></pre>
+</article>

@@ -1,0 +1,14 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/xss-corpus.html
+---
+# Hostile fixture
+
+Every vector below must be inert in the stored output.
+
+Event handler in attribute.
+
+![](https://example.com/posts/x) javascript: link data: link [handler on a good link](https://example.com/ok)
+
+Legitimate **content** around the attacks [survives](https://example.com/fine).

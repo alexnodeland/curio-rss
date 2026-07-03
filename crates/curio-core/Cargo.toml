@@ -12,6 +12,7 @@ authors.workspace = true
 ammonia = { workspace = true }
 chrono = { workspace = true }
 curio-types = { workspace = true }
+ego-tree = { workspace = true }
 feed-rs = { workspace = true }
 htmd = { workspace = true }
 quick-xml = { workspace = true }

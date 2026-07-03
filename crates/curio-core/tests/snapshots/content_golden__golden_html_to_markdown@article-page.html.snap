@@ -1,0 +1,40 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/article-page.html
+---
+# Understanding WAL mode
+
+SQLite's *write-ahead log* changes the concurrency story completely. Instead of writers blocking readers, the WAL lets readers keep a stable snapshot while a single writer appends.
+
+## The basics
+
+Enable it with a pragma:
+
+```
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+-- and always set a busy timeout
+PRAGMA busy_timeout = 5000;
+```
+
+Note that `<checkpoint>` behavior depends on the [documentation](https://sqlite.org/wal.html).
+
+> A single writer matches SQLite's actual concurrency model.
+
+![WAL architecture diagram](https://example.com/images/wal-diagram.png)
+
+Readers see the snapshot; the writer appends.
+
+## Checklist
+
+*   WAL mode on
+*   busy\_timeout set
+*   one writer thread
+    *   channel-fed
+    *   transactional
+
+| Mode   | Readers during write |
+| ------ | -------------------- |
+| DELETE | blocked              |
+| WAL    | concurrent           |

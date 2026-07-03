@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Understanding WAL mode — Example Blog</title>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <header>
+    <h1>Example Blog</h1>
+    <nav>
+      <ul>
+        <li><a href="/">Home</a></li>
+        <li><a href="/archive">Archive</a></li>
+        <li><a href="/about">About</a></li>
+      </ul>
+    </nav>
+  </header>
+  <aside>
+    <h2>Related posts</h2>
+    <ul>
+      <li><a href="/posts/vacuum">VACUUM considered harmful</a></li>
+      <li><a href="/posts/fts5">FTS5 from scratch</a></li>
+    </ul>
+  </aside>
+  <article>
+    <h1>Understanding WAL mode</h1>
+    <p>SQLite's <em>write-ahead log</em> changes the concurrency story completely.
+    Instead of writers blocking readers, the WAL lets readers keep a stable
+    snapshot while a single writer appends.</p>
+    <h2>The basics</h2>
+    <p>Enable it with a pragma:</p>
+    <pre><code>PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+-- and always set a busy timeout
+PRAGMA busy_timeout = 5000;</code></pre>
+    <p>Note that <code>&lt;checkpoint&gt;</code> behavior depends on the
+    <a href="https://sqlite.org/wal.html">documentation</a>.</p>
+    <blockquote>
+      <p>A single writer matches SQLite's actual concurrency model.</p>
+    </blockquote>
+    <figure>
+      <img src="https://example.com/images/wal-diagram.png" alt="WAL architecture diagram">
+      <figcaption>Readers see the snapshot; the writer appends.</figcaption>
+    </figure>
+    <h2>Checklist</h2>
+    <ul>
+      <li>WAL mode on</li>
+      <li>busy_timeout set</li>
+      <li>one writer thread
+        <ul><li>channel-fed</li><li>transactional</li></ul>
+      </li>
+    </ul>
+    <table>
+      <thead><tr><th>Mode</th><th>Readers during write</th></tr></thead>
+      <tbody>
+        <tr><td>DELETE</td><td>blocked</td></tr>
+        <tr><td>WAL</td><td>concurrent</td></tr>
+      </tbody>
+    </table>
+  </article>
+  <footer>
+    <p>© 2026 Example Blog · <a href="/feed.xml">RSS</a></p>
+  </footer>
+</body>
+</html>

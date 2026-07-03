@@ -28,15 +28,18 @@ curio-core = { path = "crates/curio-core", version = "0.1.0" }
 curio-types = { path = "crates/curio-types", version = "0.1.0" }
 
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tracing = "0.1"
 ulid = "1"
 uuid = { version = "1", features = ["v7"] }
 
 # dev-only
 jsonschema = { version = "0.33", default-features = false }
 proptest = "1"
+tempfile = "3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

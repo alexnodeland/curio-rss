@@ -8,9 +8,10 @@
 //! `cargo run -p xtask -- boundary`): this crate must never depend on tauri
 //! or any webview — it builds and tests headless, everywhere.
 //!
-//! This is the Phase 0 stub; the engine modules (`fetch/`, `ingest/`,
-//! `store/`, `events/`, `export/`, `enrich/`) land in Phases 2–3 per
-//! `docs/design/roadmap.md`.
+//! Shipped so far: [`model`] (domain types). The remaining engine
+//! modules land per `docs/design/roadmap.md`.
+
+pub mod model;
 
 pub use curio_types as types;
 

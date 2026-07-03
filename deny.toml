@@ -13,6 +13,16 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+# Both advisories are DoS-class bugs in quick-xml 0.37, which feed-rs pins
+# (`^0.37`; the fixes landed in 0.41 and no feed-rs release has moved yet).
+# Curio only ever hands quick-xml bytes that arrived through the policed
+# fetch client, whose streaming 10 MB body cap bounds the quadratic scan
+# and the namespace-allocation blowup to a fixed, small cost. Drop these
+# ignores when feed-rs releases against quick-xml >= 0.41.
+ignore = [
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37 via feed-rs; input is size-capped (10 MB) by the policed fetch client" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.37 via feed-rs; input is size-capped (10 MB) by the policed fetch client" },
+]
 
 [licenses]
 # Permissive-only allowlist. Anything outside this list fails the build —
@@ -29,6 +39,20 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.8
+
+# Deliberate, per-crate extensions of the allowlist — never blanket allows.
+#
+# MPL-2.0 (file-level copyleft) rides in through ammonia/scraper's shared
+# CSS machinery; we vendor nothing and modify nothing, so the obligation
+# never triggers. CDLA-Permissive-2.0 covers the Mozilla CA certificate
+# *data* bundled by rustls' webpki-roots (reqwest rustls-tls).
+exceptions = [
+    { crate = "cssparser", allow = ["MPL-2.0"] },
+    { crate = "cssparser-macros", allow = ["MPL-2.0"] },
+    { crate = "dtoa-short", allow = ["MPL-2.0"] },
+    { crate = "selectors", allow = ["MPL-2.0"] },
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+]
 
 [bans]
 multiple-versions = "warn"

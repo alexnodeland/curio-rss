@@ -1,0 +1,407 @@
+//! [`PolicedClient`] — the reqwest(rustls) client factory with the SSRF
+//! policy, manual redirect handling, size caps and politeness built in.
+
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use reqwest::header::{ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION};
+use url::{Host, Url};
+
+use super::{FetchError, FetchRequest, FetchResponse, policy};
+
+/// Default streaming response-body cap: 10 MB.
+pub const DEFAULT_MAX_BODY_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Contract W1 / D7: redirect hop cap.
+pub const DEFAULT_MAX_REDIRECTS: u32 = 5;
+
+/// Configuration of a [`PolicedClient`].
+#[derive(Debug, Clone)]
+pub struct FetchConfig {
+    /// The honest User-Agent every request carries.
+    pub user_agent: String,
+    /// TCP connect timeout.
+    pub connect_timeout: Duration,
+    /// Total per-request timeout (covers reading the body).
+    pub request_timeout: Duration,
+    /// Streaming response-body cap in bytes.
+    pub max_body_bytes: u64,
+    /// Redirect hop cap; every hop is re-validated.
+    pub max_redirects: u32,
+    /// Minimum spacing between requests to the same host. Zero disables.
+    pub politeness_delay: Duration,
+    /// Harness escape hatch: individual addresses exempted from the SSRF
+    /// guard so hermetic test fixtures on `127.0.0.1` can exercise the
+    /// deny-private policy against *other* private targets. Never set in
+    /// production configuration — the per-feed contract-W1 exemption is
+    /// [`FetchRequest::allow_private_network`].
+    pub trusted_addrs: HashSet<IpAddr>,
+}
+
+impl Default for FetchConfig {
+    fn default() -> Self {
+        Self {
+            user_agent: format!(
+                "curio/{} (+https://github.com/alexnodeland/curio-rss)",
+                env!("CARGO_PKG_VERSION")
+            ),
+            connect_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(30),
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            max_redirects: DEFAULT_MAX_REDIRECTS,
+            politeness_delay: Duration::from_millis(500),
+            trusted_addrs: HashSet::new(),
+        }
+    }
+}
+
+/// The policy-hardened client. One instance serves the whole engine;
+/// it is `Send + Sync` and cheap to share behind an `Arc`.
+#[derive(Debug)]
+pub struct PolicedClient {
+    config: FetchConfig,
+    /// Per-host next-allowed-request instants (politeness reservations).
+    next_allowed: Mutex<HashMap<String, Instant>>,
+}
+
+impl Default for PolicedClient {
+    fn default() -> Self {
+        Self::new(FetchConfig::default())
+    }
+}
+
+impl PolicedClient {
+    /// A client with the given policy configuration.
+    #[must_use]
+    pub fn new(config: FetchConfig) -> Self {
+        Self {
+            config,
+            next_allowed: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The active configuration.
+    #[must_use]
+    pub fn config(&self) -> &FetchConfig {
+        &self.config
+    }
+
+    /// Performs one policed GET: validate → resolve → check policy →
+    /// politeness → request → (re-validated) redirects → capped body read.
+    ///
+    /// Redirect statuses never surface: they are followed (cap
+    /// [`FetchConfig::max_redirects`], every hop re-validated) or turned
+    /// into an error. 304 and HTTP error statuses come back as a normal
+    /// [`FetchResponse`] with an empty body — the caller owns the mapping
+    /// to feed health / fetch-log semantics.
+    ///
+    /// # Errors
+    ///
+    /// Any [`FetchError`]: invalid/forbidden URL, DNS failure, the SSRF
+    /// guard, redirect-cap or missing-Location, body cap, timeouts, or
+    /// transport failures.
+    pub async fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
+        let mut url = parse_and_screen(&request.url)?;
+        let mut hops: u32 = 0;
+        let mut all_permanent = true;
+
+        loop {
+            let pinned = self
+                .resolve_and_check(&url, request.allow_private_network)
+                .await?;
+            self.be_polite(&url).await;
+
+            let client = self.build_hop_client(&url, pinned)?;
+            let mut req = client.get(url.clone());
+            if let Some(etag) = &request.etag {
+                req = req.header(IF_NONE_MATCH, etag);
+            }
+            if let Some(last_modified) = &request.last_modified {
+                req = req.header(IF_MODIFIED_SINCE, last_modified);
+            }
+            let response = req.send().await.map_err(|err| map_reqwest(&url, &err))?;
+
+            let status = response.status().as_u16();
+            if matches!(status, 301 | 302 | 303 | 307 | 308) {
+                hops += 1;
+                if hops > self.config.max_redirects {
+                    return Err(FetchError::TooManyRedirects {
+                        limit: self.config.max_redirects,
+                        url: request.url.clone(),
+                    });
+                }
+                all_permanent &= matches!(status, 301 | 308);
+                let location = response
+                    .headers()
+                    .get(LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .ok_or_else(|| FetchError::MissingRedirectLocation {
+                        url: url.to_string(),
+                    })?;
+                let next = url
+                    .join(location)
+                    .map_err(|err| FetchError::InvalidUrl {
+                        url: location.to_owned(),
+                        message: err.to_string(),
+                    })?
+                    .to_string();
+                // Re-validation: the next hop goes through the exact same
+                // scheme/userinfo screen — and, at the top of the loop,
+                // the same DNS + address policy — as the first hop.
+                url = parse_and_screen(&next)?;
+                continue;
+            }
+
+            let etag = header_string(&response, ETAG.as_str());
+            let last_modified = header_string(&response, LAST_MODIFIED.as_str());
+            let body = if response.status().is_success() {
+                self.read_capped(&url, response).await?
+            } else {
+                Vec::new()
+            };
+            return Ok(FetchResponse {
+                status,
+                final_url: url.to_string(),
+                permanent_redirect: hops > 0 && all_permanent,
+                etag,
+                last_modified,
+                body,
+            });
+        }
+    }
+
+    /// Resolves the URL's host (DNS first for domain names) and applies
+    /// the address policy to *every* resolved address — one private
+    /// record poisons the lot, so split-horizon/rebinding games with
+    /// mixed record sets cannot slip through. Returns the address to pin
+    /// the connection to for domain-name hosts.
+    async fn resolve_and_check(
+        &self,
+        url: &Url,
+        allow_private: bool,
+    ) -> Result<Option<SocketAddr>, FetchError> {
+        let host = url.host().ok_or_else(|| FetchError::NoHost {
+            url: url.to_string(),
+        })?;
+        let port = url.port_or_known_default().unwrap_or(80);
+        match host {
+            Host::Ipv4(v4) => {
+                self.check_addr(url, IpAddr::V4(v4), allow_private)?;
+                Ok(None)
+            }
+            Host::Ipv6(v6) => {
+                self.check_addr(url, IpAddr::V6(v6), allow_private)?;
+                Ok(None)
+            }
+            Host::Domain(domain) => {
+                let addrs: Vec<SocketAddr> = tokio::net::lookup_host((domain, port))
+                    .await
+                    .map_err(|err| FetchError::Dns {
+                        host: domain.to_owned(),
+                        message: err.to_string(),
+                    })?
+                    .collect();
+                if addrs.is_empty() {
+                    return Err(FetchError::DnsNoAddresses {
+                        host: domain.to_owned(),
+                    });
+                }
+                for addr in &addrs {
+                    self.check_addr(url, addr.ip(), allow_private)?;
+                }
+                Ok(addrs.first().copied())
+            }
+        }
+    }
+
+    fn check_addr(&self, url: &Url, addr: IpAddr, allow_private: bool) -> Result<(), FetchError> {
+        if allow_private || self.config.trusted_addrs.contains(&addr) {
+            return Ok(());
+        }
+        if policy::is_public_address(addr) {
+            return Ok(());
+        }
+        Err(FetchError::PrivateAddress {
+            host: url.host_str().unwrap_or_default().to_owned(),
+            addr,
+        })
+    }
+
+    /// One reqwest client per hop: redirects disabled (we follow them
+    /// ourselves), and for domain-name hosts the connection is pinned to
+    /// the address that was just validated — closing the DNS-rebinding
+    /// window between the check and the connect.
+    fn build_hop_client(
+        &self,
+        url: &Url,
+        pinned: Option<SocketAddr>,
+    ) -> Result<reqwest::Client, FetchError> {
+        let mut builder = reqwest::Client::builder()
+            .user_agent(&self.config.user_agent)
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(self.config.connect_timeout)
+            .timeout(self.config.request_timeout);
+        if let (Some(addr), Some(domain)) = (pinned, url.domain()) {
+            builder = builder.resolve(domain, addr);
+        }
+        builder.build().map_err(|err| map_reqwest(url, &err))
+    }
+
+    /// Streams the body, enforcing the size cap (a lying or absent
+    /// `Content-Length` cannot bypass it).
+    async fn read_capped(
+        &self,
+        url: &Url,
+        mut response: reqwest::Response,
+    ) -> Result<Vec<u8>, FetchError> {
+        let cap = self.config.max_body_bytes;
+        let too_large = || FetchError::BodyTooLarge {
+            limit: cap,
+            url: url.to_string(),
+        };
+        if response.content_length().is_some_and(|len| len > cap) {
+            return Err(too_large());
+        }
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|err| map_reqwest(url, &err))?
+        {
+            if (body.len() as u64).saturating_add(chunk.len() as u64) > cap {
+                return Err(too_large());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+
+    /// Per-host politeness: reserves the next allowed slot under the lock
+    /// (so concurrent fetches to one host queue up honestly), then sleeps
+    /// out its own wait without holding the lock.
+    async fn be_polite(&self, url: &Url) {
+        let delay = self.config.politeness_delay;
+        if delay.is_zero() {
+            return;
+        }
+        let Some(host) = url.host_str() else { return };
+        let wait = {
+            #[allow(clippy::unwrap_used, reason = "politeness lock is never poisoned")]
+            let mut slots = self.next_allowed.lock().unwrap();
+            let now = Instant::now();
+            let at = slots
+                .get(host)
+                .copied()
+                .map_or(now, |reserved| reserved.max(now));
+            slots.insert(host.to_owned(), at + delay);
+            at.saturating_duration_since(now)
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+    }
+}
+
+/// Parses a URL and screens its shape: http/https only, no userinfo.
+/// Runs on the first hop and on every redirect target.
+fn parse_and_screen(raw: &str) -> Result<Url, FetchError> {
+    let url = Url::parse(raw).map_err(|err| FetchError::InvalidUrl {
+        url: raw.to_owned(),
+        message: err.to_string(),
+    })?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(FetchError::UnsupportedScheme {
+            scheme: url.scheme().to_owned(),
+            url: raw.to_owned(),
+        });
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(FetchError::UserinfoForbidden {
+            url: raw.to_owned(),
+        });
+    }
+    if url.host().is_none() {
+        return Err(FetchError::NoHost {
+            url: raw.to_owned(),
+        });
+    }
+    Ok(url)
+}
+
+fn header_string(response: &reqwest::Response, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(ToOwned::to_owned)
+}
+
+fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
+    if err.is_timeout() {
+        FetchError::Timeout {
+            url: url.to_string(),
+        }
+    } else {
+        FetchError::Transport {
+            url: url.to_string(),
+            message: err.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screen_rejects_non_http_schemes() {
+        for bad in [
+            "ftp://example.com/feed",
+            "file:///etc/passwd",
+            "gopher://example.com/",
+            "javascript:alert(1)",
+        ] {
+            assert!(matches!(
+                parse_and_screen(bad),
+                Err(FetchError::UnsupportedScheme { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn screen_rejects_userinfo() {
+        assert!(matches!(
+            parse_and_screen("http://user:pass@example.com/"),
+            Err(FetchError::UserinfoForbidden { .. })
+        ));
+        assert!(matches!(
+            parse_and_screen("http://user@example.com/"),
+            Err(FetchError::UserinfoForbidden { .. })
+        ));
+    }
+
+    #[test]
+    fn screen_rejects_garbage() {
+        assert!(matches!(
+            parse_and_screen("not a url"),
+            Err(FetchError::InvalidUrl { .. })
+        ));
+    }
+
+    #[test]
+    fn screen_accepts_plain_http_and_https() {
+        assert!(parse_and_screen("http://example.com/feed.xml").is_ok());
+        assert!(parse_and_screen("https://example.com:8443/feed.xml").is_ok());
+    }
+
+    #[test]
+    fn default_config_matches_the_contract() {
+        let config = FetchConfig::default();
+        assert_eq!(config.max_redirects, 5);
+        assert_eq!(config.max_body_bytes, 10 * 1024 * 1024);
+        assert!(config.user_agent.starts_with("curio/"));
+        assert!(config.trusted_addrs.is_empty());
+    }
+}

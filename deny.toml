@@ -1,0 +1,55 @@
+# cargo-deny — the mechanical supply-chain boundary.
+# https://embarkstudios.github.io/cargo-deny/
+#
+# Two jobs:
+#   1. [bans] keeps the cargo workspace webview-free: tauri and friends are
+#      banned until Phase 4 deliberately moves the boundary by bringing
+#      apps/desktop into the workspace. `cargo run -p xtask -- boundary`
+#      is the defense-in-depth twin of this rule.
+#   2. Advisories + license allowlist for everything we ship.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# Permissive-only allowlist. Anything outside this list fails the build —
+# extend deliberately, never ad hoc.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The webview boundary: none of these may appear anywhere in the workspace
+# dependency graph. curio-core must build and test headless, everywhere.
+deny = [
+    { crate = "tauri", reason = "the cargo workspace is webview-free until Phase 4; the desktop head lives in apps/desktop outside the workspace" },
+    { crate = "tauri-build", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri-runtime", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri-runtime-wry", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri-codegen", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri-macros", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri-utils", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri-plugin", reason = "webview boundary (Phase 4)" },
+    { crate = "wry", reason = "webview boundary (Phase 4)" },
+    { crate = "tao", reason = "webview boundary (Phase 4)" },
+    { crate = "webkit2gtk", reason = "webview boundary (Phase 4)" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []

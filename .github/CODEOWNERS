@@ -1,20 +1,14 @@
 # Default owners for everything
-*       @alexnodeland
+*                   @alexnodeland
 
-# Rust backend
-/src-tauri/     @alexnodeland
+# The engine and its contracts — extra care
+/crates/            @alexnodeland
+/schemas/           @alexnodeland
+/docs/design/       @alexnodeland
+/deny.toml          @alexnodeland
 
-# Frontend
-/src/           @alexnodeland
-
-# Documentation
-/docs/          @alexnodeland
-*.md            @alexnodeland
+# Parked desktop sketch (outside the workspace until Phase 4)
+/apps/desktop/      @alexnodeland
 
 # CI/CD
-/.github/       @alexnodeland
-
-# Configuration
-*.toml          @alexnodeland
-*.json          @alexnodeland
-*.yml           @alexnodeland
+/.github/           @alexnodeland

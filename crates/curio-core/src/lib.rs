@@ -16,6 +16,7 @@
 
 pub mod content;
 pub mod events;
+pub mod export;
 pub mod feeds;
 pub mod fetch;
 pub mod model;

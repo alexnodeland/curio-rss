@@ -266,15 +266,56 @@ impl Storage {
     /// unchanged (`UPDATE OR IGNORE`) — better a stale URL than a
     /// UNIQUE explosion mid-refresh.
     ///
+    /// The feed URL is the identity key of `feed.added`/`feed.removed`,
+    /// so an actual rewrite stages the negation pair in the same
+    /// transaction — `feed.removed{old}` then `feed.added{new}` (with
+    /// the stored title/tags). Without it, a later removal would carry
+    /// the new URL and never negate the `feed.added` a consumer folded
+    /// under the original URL, leaving a phantom live subscription.
+    ///
     /// # Errors
     ///
     /// Database errors.
     pub fn update_feed_url(&self, id: FeedId, url: String) -> Result<(), StorageError> {
         self.write(move |conn| {
-            conn.prepare_cached(
-                "UPDATE OR IGNORE feeds SET url = ?2, modified_at = ?3 WHERE id = ?1",
-            )?
-            .execute((id.0, url, Timestamp::now().to_string()))?;
+            let tx = conn.transaction()?;
+            let row: Option<(String, Option<String>, String)> = tx
+                .prepare_cached("SELECT url, title, tags FROM feeds WHERE id = ?1")?
+                .query_row([id.0], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .optional()?;
+            let Some((old_url, title, tags_json)) = row else {
+                return Ok(()); // vanished mid-refresh: nothing to adopt
+            };
+            if old_url != url {
+                let n = tx
+                    .prepare_cached(
+                        "UPDATE OR IGNORE feeds SET url = ?2, modified_at = ?3 WHERE id = ?1",
+                    )?
+                    .execute((id.0, &url, Timestamp::now().to_string()))?;
+                // Events only when the rewrite actually happened (an
+                // OR-IGNORE conflict keeps the old URL — and the old
+                // membership stays correct).
+                if n > 0 {
+                    let tags: Vec<String> =
+                        serde_json::from_str(&tags_json).map_err(|err| StorageError::Corrupt {
+                            column: "feeds.tags",
+                            message: err.to_string(),
+                        })?;
+                    insert_intent(
+                        &tx,
+                        &EventEnvelope::new(EventPayload::FeedRemoved { feed: old_url }),
+                    )?;
+                    insert_intent(
+                        &tx,
+                        &EventEnvelope::new(EventPayload::FeedAdded {
+                            feed: url,
+                            feed_title: title,
+                            tags,
+                        }),
+                    )?;
+                }
+            }
+            tx.commit()?;
             Ok(())
         })
     }

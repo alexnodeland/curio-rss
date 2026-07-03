@@ -200,6 +200,80 @@ fn feed_lifecycle_round_trips_and_stages_events() {
     ));
 }
 
+/// The feed URL is the identity key of feed.added/feed.removed: adopting
+/// a permanent redirect must stage the negation pair, or a consumer's
+/// fold keeps a phantom subscription under the original URL forever
+/// (the eventual feed.removed would carry the new URL and negate
+/// nothing).
+#[test]
+fn adopting_a_redirect_stages_the_removed_added_pair() {
+    let (_dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://old.example/feed.xml".to_owned(),
+            title: Some("Example".to_owned()),
+            tags: vec!["rust".to_owned()],
+        })
+        .unwrap();
+    storage
+        .mark_intents_emitted(
+            storage
+                .pending_intents()
+                .unwrap()
+                .iter()
+                .map(|p| p.intent_id)
+                .collect(),
+        )
+        .unwrap();
+
+    // Same URL: no-op, no events.
+    storage
+        .update_feed_url(feed.id, "https://old.example/feed.xml".to_owned())
+        .unwrap();
+    assert!(storage.pending_intents().unwrap().is_empty());
+
+    // Real adoption: removed{old} then added{new} with title + tags.
+    storage
+        .update_feed_url(feed.id, "https://new.example/feed.xml".to_owned())
+        .unwrap();
+    let pending = storage.pending_intents().unwrap();
+    assert_eq!(pending.len(), 2);
+    assert!(matches!(
+        &pending[0].envelope.event,
+        EventPayload::FeedRemoved { feed } if feed == "https://old.example/feed.xml"
+    ));
+    assert!(matches!(
+        &pending[1].envelope.event,
+        EventPayload::FeedAdded { feed, feed_title, tags }
+            if feed == "https://new.example/feed.xml"
+                && feed_title.as_deref() == Some("Example")
+                && tags == &["rust".to_owned()]
+    ));
+    assert_eq!(
+        storage.get_feed(feed.id).unwrap().unwrap().url,
+        "https://new.example/feed.xml"
+    );
+
+    // Conflict with another subscription: OR IGNORE keeps the URL and
+    // stages nothing (the folded membership stays correct).
+    storage
+        .add_feed(NewFeed {
+            url: "https://taken.example/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let before = storage.pending_intents().unwrap().len();
+    storage
+        .update_feed_url(feed.id, "https://taken.example/feed.xml".to_owned())
+        .unwrap();
+    assert_eq!(storage.pending_intents().unwrap().len(), before);
+    assert_eq!(
+        storage.get_feed(feed.id).unwrap().unwrap().url,
+        "https://new.example/feed.xml"
+    );
+}
+
 #[test]
 fn removing_a_feed_orphans_articles_instead_of_deleting_them() {
     let (_dir, storage) = temp_storage();

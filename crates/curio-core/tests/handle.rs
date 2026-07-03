@@ -238,6 +238,53 @@ async fn ssrf_guard_holds_inside_the_facade_without_the_w1_flag() {
     );
 }
 
+/// A 301-adopted URL rewrite is a subscription identity change: the fold
+/// must end with exactly one live subscription, keyed by the new URL —
+/// not a phantom under the original one.
+#[tokio::test]
+async fn permanent_redirect_adoption_keeps_the_event_fold_consistent() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/old.xml"))
+        .respond_with(
+            ResponseTemplate::new(301)
+                .insert_header("location", format!("{}/new.xml", server.uri()).as_str()),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/new.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(RSS, "application/rss+xml"))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let old_url = format!("{}/old.xml", server.uri());
+    let new_url = format!("{}/new.xml", server.uri());
+    let feed = subscribe(&core, &old_url);
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(outcome.status, FetchStatus::Ok);
+    assert_eq!(core.get_feed(feed.id).unwrap().unwrap().url, new_url);
+
+    let events = read_all(&profile.path().join(".curio/events")).unwrap();
+    let types: Vec<&str> = events.iter().map(|e| e.event.event_type()).collect();
+    assert_eq!(types, vec!["feed.added", "feed.removed", "feed.added"]);
+    let folded = FoldedState::fold(events);
+    assert!(
+        !folded.feeds.contains_key(&old_url),
+        "no phantom subscription under the pre-redirect URL"
+    );
+    let live = folded.feeds.get(&new_url).unwrap();
+    assert_eq!(live.tags, vec!["fixtures".to_owned()], "tags carry over");
+
+    // Removing the feed now negates cleanly.
+    core.remove_feed(feed.id).unwrap();
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert!(folded.feeds.is_empty());
+}
+
 #[tokio::test]
 async fn opml_round_trips_through_the_facade() {
     let profile = tempfile::tempdir().unwrap();

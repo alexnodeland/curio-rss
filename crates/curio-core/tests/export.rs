@@ -70,6 +70,11 @@ fn first_export_creates_note_and_manifest() {
             .count(),
         1
     );
+
+    // Contract: the event log is gitignored in every destination too —
+    // a destination is often a git repo (Obsidian vault).
+    let gitignore = std::fs::read_to_string(dir.path().join(".curio/.gitignore")).unwrap();
+    assert!(gitignore.contains("events/"));
 }
 
 #[test]

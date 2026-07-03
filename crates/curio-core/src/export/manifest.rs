@@ -40,12 +40,26 @@ pub fn load_manifest(root: &Path) -> Result<ManifestV1, ExportError> {
 
 /// Writes the manifest in canonical form via temp-file + atomic rename.
 ///
+/// Also drops a `.curio/.gitignore` (once) ignoring `events/`: the
+/// contract says the event log is never committed to git *in any
+/// destination* either, and the intended destination is often a git
+/// repository (an Obsidian vault) — the manifest itself stays
+/// committable (canonical form exists for git-mergeable diffs).
+///
 /// # Errors
 ///
 /// [`ExportError::Io`] on write failures.
 pub fn write_manifest(root: &Path, manifest: &ManifestV1) -> Result<(), ExportError> {
     let path = manifest_path(root);
-    write_atomic(root, &path, manifest.to_canonical_json().as_bytes())
+    write_atomic(root, &path, manifest.to_canonical_json().as_bytes())?;
+    let gitignore = root.join(".curio").join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(&gitignore, "events/\n").map_err(|source| ExportError::Io {
+            path: gitignore.clone(),
+            source,
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -8,10 +8,13 @@
 //! `cargo run -p xtask -- boundary`): this crate must never depend on tauri
 //! or any webview — it builds and tests headless, everywhere.
 //!
-//! Shipped so far: [`model`] (domain types) and [`storage`] (WAL
-//! `SQLite` behind a single-writer/pooled-reader facade). The remaining
-//! engine modules land per `docs/design/roadmap.md`.
+//! Shipped so far: [`model`] (domain types), [`storage`] (WAL `SQLite`
+//! behind a single-writer/pooled-reader facade), and [`events`] (the
+//! `curio.events.v1` JSONL log with crash-recoverable emission). The
+//! remaining engine modules (`fetch/`, `ingest/`, `export/`, `enrich/`)
+//! land per `docs/design/roadmap.md`.
 
+pub mod events;
 pub mod model;
 pub mod storage;
 

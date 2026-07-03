@@ -1,7 +1,7 @@
 //! `curio` — the CLI head over [`curio_core`].
 //!
 //! Thin by charter: every command parses arguments, calls one or two
-//! [`curio_core::CoreHandle`](curio_core::CoreHandle) methods, and prints
+//! [`curio_core::CoreHandle`] methods, and prints
 //! either human lines or (with `--json`) exactly one JSON document on
 //! stdout. Diagnostics go to stderr, driven by `RUST_LOG`.
 

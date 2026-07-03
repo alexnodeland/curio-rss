@@ -11,6 +11,11 @@
 //! Contract rule: schema files are versioned-immutable — a breaking change
 //! mints `*.v2`, it never edits v1 semantics.
 
+// Crate-level (not workspace) on purpose: `[lints]` inheritance is
+// all-or-nothing per crate, and the CLI/xtask binaries don't carry this
+// bar. `clippy -D warnings` in the gate turns it into a hard error.
+#![warn(missing_docs)]
+
 mod checksum;
 mod destination;
 mod event;

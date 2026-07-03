@@ -15,7 +15,13 @@
 //! [`storage`] (WAL `SQLite` behind a single-writer/pooled-reader facade),
 //! [`events`] (the `curio.events.v1` JSONL log with crash-recoverable
 //! emission), [`export`] (the `curio.frontmatter.v1` note writer), and
-//! [`handle`] (the [`CoreHandle`] facade wiring them together).
+//! the private `handle` module (the [`CoreHandle`] facade wiring them
+//! together).
+
+// Crate-level (not workspace) on purpose: `[lints]` inheritance is
+// all-or-nothing per crate, and the CLI/xtask binaries don't carry this
+// bar. `clippy -D warnings` in the gate turns it into a hard error.
+#![warn(missing_docs)]
 
 pub mod content;
 pub mod events;

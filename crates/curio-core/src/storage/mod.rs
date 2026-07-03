@@ -8,8 +8,8 @@
 //! executors) is banned by design; nothing above this module ever sees a
 //! `rusqlite` type or a line of SQL.
 //!
-//! Schema lives in [`migrations`]; every query goes through the typed repo
-//! functions in [`repo`].
+//! Schema lives in the private `migrations` module; every query goes through
+//! the typed repo functions in the private `repo` module.
 
 mod migrations;
 mod pool;

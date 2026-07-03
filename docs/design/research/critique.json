@@ -1,0 +1,181 @@
+{
+ "keep": [
+  "Stack: Tauri 2 + Rust backend + Svelte 5/SvelteKit + SQLite (rusqlite) \u2014 correct for a local-first desktop reader at 500+ feed scale; keep verbatim.",
+  "Core differentiator framing: 'RSS as backbone, rich experiences on top' with per-feed view modes (article/reddit/youtube/podcast) stored as feed metadata \u2014 keep the concept and the ViewMode enum.",
+  "Markdown export pipeline stages verbatim: raw HTML \u2192 ammonia sanitize \u2192 Readability extraction \u2192 CommonMark via htmd \u2192 clean/format, with YAML frontmatter (title, author, source, feed, published, saved, tags). This is the Knowledge-Plane ingestion contract (RFC-0018 \u00a7Ingestion) and the single most strategically load-bearing design in the PRD.",
+  "Read Later as a first-class queue distinct from stars, with explicit semantics ('keep this' vs 'need to read this'), ordering, and auto-remove option \u2014 these are exactly the behavioral signals the KP interest model consumes.",
+  "Fetch architecture: parallel fetching with bounded concurrency, conditional GET (ETag/If-Modified-Since), delta upserts keyed on (feed_id, guid), staggered/smart refresh scheduling, per-feed interval override \u2014 validated as already ~implemented on the branch; keep.",
+  "Local image cache design: content-hash dedup, lazy fetch-on-view, LRU eviction with size caps, privacy rationale (tracking pixels fetched once) \u2014 keep, but relocate out of ~/.config (see grain-of-salt).",
+  "SQLite FTS5 external-content table + sync triggers for full-text search, and the stated keyset-pagination requirement (no OFFSET) \u2014 keep the intent; fix the rowid-stability hazard (see grain-of-salt).",
+  "Clean-architecture layering in the brief: thin Tauri commands / pure I/O-free core / infrastructure implementing core-defined traits (FeedRepository, FeedFetcher, YouTubeEnricher, RedditEnricher as ports) \u2014 keep verbatim; it is what makes the enrichers swappable/optional later.",
+  "Unified three-tier error taxonomy (CoreError / InfraError / serializable CommandError with ErrorCode + recoverable flag) \u2014 keep verbatim.",
+  "ts-rs Rust\u2192TypeScript type generation as the single source of type truth across the IPC boundary \u2014 keep.",
+  "Reddit client hygiene as specified: descriptive User-Agent, raw_json=1, request queue with minimum spacing, exponential backoff on 429, aggressive caching, stale-while-revalidate \u2014 keep the mechanics even though the quoted rate-limit numbers are stale.",
+  "yt-dlp-over-official-API as the *direction* (no API-key onboarding, richer data, multi-platform) and the graceful-degradation-to-RSS-only requirement \u2014 keep the decision, replace the bundling/auto-update mechanics (see grain-of-salt).",
+  "Keyboard-first navigation map (j/k, o, s, l, m, g-prefix chords, ? help modal) and the full shortcut table \u2014 keep verbatim.",
+  "Extended-OPML custom attributes riding standard OPML with lossless round-trip and 'export standard (strips attrs) or extended' \u2014 keep as the interchange format (not as the profile storage model).",
+  "Startup sequence contract (shell UI < 500ms, paginated first view < 1s, background load rest) and virtualized lists \u2014 keep as requirements.",
+  "Engineering hygiene skeleton: Conventional Commits + lefthook hooks, CI matrix (fmt/clippy -D warnings/test; biome/tsc/vitest), cross-platform build verification job, cargo-llvm-cov + codecov split flags, ADRs in docs/architecture/decisions \u2014 keep, minus the unimplementable e2e job.",
+  "Non-goals list (no web version, no server-side components, no full Reddit/YouTube account auth, no feed hosting) \u2014 keep verbatim; the KP mobile/couch-reach tension is correctly resolved by the vault-export/event-log contract plus KP-side ingestion, not by adding a server to Curio.",
+  "Documented Design Decisions table (\u00a78) and Open Questions (\u00a79) as a living decision log \u2014 keep the practice; PRD open question #1 (Obsidian integration depth) is where the generic vault-export design plugs in."
+ ],
+ "grain_of_salt": [
+  {
+   "item": "Bundling yt-dlp inside the app with runtime auto-update from GitHub releases",
+   "why": "Supply-chain and distribution poison for OSS: the app downloads and executes an unpinned third-party binary at runtime \u2014 that binary is unsigned/un-notarized, so it breaks macOS notarization/Gatekeeper, is grounds for Flathub/homebrew-cask rejection, and violates Linux distro no-vendored-autoupdating-binaries norms. Also operationally stale: YouTube's 2025+ bot detection (PO tokens, IP blocks) makes yt-dlp comment extraction slow (minutes per video with --write-comments) and flaky; 'full comment extraction, no pagination limits' is fantasy. The PRD even contradicts itself \u2014 Phase 2 deliverables say 'YouTube Data API v3' + 'API key configuration UI' while \u00a73.2.3/\u00a78 say yt-dlp/no-key.",
+   "recommendation": "Make yt-dlp an optional external provider behind the YouTubeEnricher trait: detect on PATH, offer guided install, or manage it with pinned version + SHA256 verification into the app data dir (never inside the .app bundle). Never auto-execute an unverified download. Cap comments (--max-comments), fetch lazily on demand, degrade to RSS-only silently with an inline notice. Resolve the Data-API-v3 contradiction in the PRD (delete it). Ship v1 without yt-dlp at all (see scope cuts)."
+  },
+  {
+   "item": "Reddit public JSON endpoint at '~60 req/min no auth'",
+   "why": "Stale since the 2023 API lockdown: unauthenticated .json is now throttled far harder (~10 req/min in practice), blocks datacenter/VPN IPs outright, and is a ToS gray area. A reader with 50 subreddit feeds doing thread enrichment will hit 403/429 walls quickly; 'Load more comments' (morechildren) isn't designed at all.",
+   "recommendation": "Treat Reddit enrichment as best-effort with a circuit breaker and honest degraded-mode UI (RSS content only). Correct the rate-limit table. Offer optional user-supplied OAuth client credentials (installed-app flow, 100 QPM authenticated) as the reliable path. Document the ToS posture in the repo. Keep read-only vote display but render it visually inert, not button-like."
+  },
+  {
+   "item": "OPML-files-as-profiles as the profile storage model",
+   "why": "Conflates interchange format with database and creates two sources of truth: the PRD's own SQLite schema has no profile_id on any table \u2014 the schema cannot represent profiles at all (validation report: profiles 0% implemented, unsurprisingly). Article state (read/starred/read-later) is keyed to feeds; what happens to it when the profile OPML file is switched/edited externally is undefined. Round-tripping live state through XML files guarantees sync bugs.",
+   "recommendation": "Profiles become first-class SQLite rows (profiles table; profile_id FK on feeds/folders), with OPML strictly as import/export interchange per profile \u2014 the extended curio:* attributes survive as the serialization. Also: the sample extended OPML never declares the curio XML namespace (invalid as written) \u2014 fix the schema example. Defer multi-profile entirely to post-v1 (see scope cuts)."
+  },
+  {
+   "item": "Theming system scope (7+ theme families, JSON editor with live preview, transparency/blur/vibrancy/Mica, custom titlebar) in v1",
+   "why": "Largest cosmetic surface in the PRD against 0% implementation; transparency/blur/vibrancy is a per-platform compositing minefield (macOS vibrancy vs Windows Mica vs Linux compositor roulette) and custom titlebars break native window behaviors. It crowds out the strategic features and none of it is required by either persona's core job.",
+   "recommendation": "v1: CSS custom-property token system + Light/Dark/system-follow + accent color, with themes-as-JSON-token-files kept as the architecture so the editor can come later. Defer theme editor, community themes, transparency/blur/vibrancy, custom titlebar to post-v1. Add WCAG AA contrast validation to the theme loader so community themes can't ship inaccessible palettes."
+  },
+  {
+   "item": "The 5-phase 17\u201323 week plan",
+   "why": "Not honest. Evidence: the validation report claims Phase 1 '~70%' while showing 0% profiles, 0% image cache, 0% themes, 0% OPML commands, 0% podcast commands, no integration/e2e tests, 1 frontend test file \u2014 i.e., the plan's own first phase was ~40% real. The plan front-loads breadth (5 view modes, 3 platform enrichments) and back-loads table stakes (OPML *export* is Phase 5; cache management Phase 5), and budgets zero weeks for release engineering, packaging, updater, a11y, i18n, docs, or a beta cycle \u2014 the majority of production cost.",
+   "recommendation": "Re-plan around a vertical slice: Phase 1 = articles-only reader excellent end-to-end INCLUDING the signed/notarized release pipeline, updater, OPML import+export, search, read-later, and the vault-export/event-log contract. Platform view modes ship as separately-flagged increments after. Budget honestly: 6\u201312 months to a production v1 for a small team, or cut scope to match the calendar."
+  },
+  {
+   "item": "Success metrics table without any verification methodology",
+   "why": "'<50ms interaction latency', '80%+ cache hit rate', '<3s cold start', '<500MB at 5000 articles' are unfalsifiable as written \u2014 no target hardware, no dataset spec, no measurement harness; the validation report marks cold start 'Unknown \u2014 no benchmarks'.",
+   "recommendation": "Keep the targets; add the methodology: a seeded synthetic dataset generator (1000 feeds/50k articles fixture DB), criterion benchmarks for parser/DB hot paths, startup-time tracing in CI on a fixed runner, and a perf regression smoke gate. Define target hardware (e.g., 2019 4-core laptop)."
+  },
+  {
+   "item": "Brief's quality mandates: 80/90% coverage gates, cyclomatic complexity <10, 'no unwrap() in production'",
+   "why": "Aspirational theater the actual branch already violates everywhere; hard numeric coverage gates on a GUI app breed low-value tests; clippy's cognitive-complexity lint is nursery/unstable, so the clippy.toml as given doesn't enforce what it claims.",
+   "recommendation": "Gate coverage on the pure core crate only (where 90% is cheap and meaningful); report-only elsewhere. Enforce no-unwrap via clippy::unwrap_used allow-listed in tests. Drop the numeric complexity threshold from gates."
+  },
+  {
+   "item": "E2E testing strategy (Playwright driving the Tauri app, window.__TAURI_TEST_RESET__ magic)",
+   "why": "Not implementable as specified: Playwright cannot drive a Tauri webview; tauri-driver (WebDriver) has no macOS support; the CI e2e job downloads a Linux bundle artifact then runs Playwright chromium against nothing \u2014 incoherent as written. The test hooks (__TAURI_TEST_RESET__/__TAURI_TEST_SEED_FEEDS__) don't exist and would be a shipping backdoor if they did.",
+   "recommendation": "Rewrite the strategy honestly: (1) Vitest component tests, (2) browser-mode E2E against the SvelteKit frontend with a mocked IPC layer (Tauri's mockIPC), (3) tauri-driver smoke suite on Linux+Windows CI only, (4) a documented manual smoke matrix per OS per release. Gate test-mode hooks behind a compile-time feature never present in release builds."
+  },
+  {
+   "item": "Embedded YouTube iframe player + Google Favicon service fallback in a 'privacy-first' app",
+   "why": "Direct contradiction with the secondary persona ('YouTube without platform tracking'): the iframe embed loads Google trackers, and the favicon fallback ships the user's entire subscription list to Google domain-by-domain. Some videos also disable embedding entirely.",
+   "recommendation": "Use youtube-nocookie.com embeds, load player only on explicit click (thumbnail fa\u00e7ade pattern), offer 'open in browser / external player (mpv)' as first-class alternative, handle embed-disabled videos. Favicon chain: /favicon.ico \u2192 HTML link-rel parse \u2192 DuckDuckGo icons or give up; Google service opt-in only. Add a PRIVACY.md enumerating every network call the app can make."
+  },
+  {
+   "item": "Storage layout: everything (2GB image cache, podcast audio, DB, themes) under ~/.config/curio-reader/",
+   "why": "Violates XDG (cache belongs in XDG_CACHE_HOME, data in XDG_DATA_HOME) and macOS/Windows platform conventions; backup tools and roaming profiles will choke on gigabytes of cache in a config dir; PRD hardcodes a unix path in a cross-platform product.",
+   "recommendation": "Use Tauri's path resolver: config (settings/themes) vs data (DB, downloads) vs cache (images, thumbnails) split per-platform. Document locations in user docs; make podcast download dir user-configurable."
+  },
+  {
+   "item": "SQLite schema details: FTS5 external-content keyed to rowid of a TEXT-PK table; TEXT UUID PKs; overloaded updated_at; guid assumed present",
+   "why": "External-content FTS uses content_rowid='rowid' against a table whose PK is TEXT \u2014 implicit rowids on non-INTEGER-PK tables are not stable across VACUUM, which silently corrupts the FTS mapping. Random UUIDv4 TEXT keys also wreck insert locality at 100k+ articles. Many real feeds lack guid entirely (dedupe key undefined). articles.updated_at conflates feed-provided update time with row modification time.",
+   "recommendation": "Give articles an INTEGER PRIMARY KEY rowid alias (keep UUID as a unique column, or move to UUIDv7/ULID). Define the dedupe fallback chain: guid \u2192 link \u2192 hash(title+published). Split updated_at into source_updated_at and row modified_at. Move user state (read/starred/read_later + timestamps) into a separate article_state table or append-only events table \u2014 this also becomes the substrate for the KP event-log export for free."
+  },
+  {
+   "item": "Brief's code examples treated as normative",
+   "why": "Multiple stale/wrong specifics: Svelte 4 store API and component.$on (removed in Svelte 5) despite the PRD saying 'Runes'; both .husky/ and lefthook.yml in the tree; 'routes (if using)' SvelteKit ambivalence; dtolnay/rust-action doesn't exist (it's dtolnay/rust-toolchain); r2d2 pooling with rusqlite alongside tokio-rusqlite ambiguity; the release workflow passes signing secrets into fork-visible contexts.",
+   "recommendation": "Mark the brief's code as illustrative. Rebuild frontend patterns on Svelte 5 runes ($state/$derived) with a documented state architecture. Pick lefthook, delete husky. Decide SvelteKit-static-adapter vs plain Vite+Svelte explicitly. Make CI signing conditional on secret availability so fork PRs pass."
+  },
+  {
+   "item": "Tauri identifier com.curio-reader.app and product naming ('Curio' / stray 'Flowfeed')",
+   "why": "Tauri explicitly warns identifiers ending in .app break macOS bundles; the identifier is baked into updater artifacts and signing, so it's near-immutable after first release. 'Curio' collides with existing shipped software (Zengobi Curio on macOS, among others) \u2014 trademark risk for an OSS launch. PRD \u00a75.1 mock still says 'Flowfeed'.",
+   "recommendation": "Fix the identifier before any public artifact (e.g., app.curioreader.desktop or reverse-DNS of an owned domain). Run a name-clearance pass before launch; scrub 'Flowfeed'."
+  },
+  {
+   "item": "Notifications, global shortcuts, protocol handler, smart folders, feed statistics, gallery view all specced in detail",
+   "why": "Long-tail features specced to the same fidelity as core reading \u2014 signals the PRD optimizes for completeness over sequencing; each carries per-platform quirks (feed:// handlers are attacker-controlled input; global shortcuts conflict management) that don't pay for themselves at launch.",
+   "recommendation": "Keep in the backlog with their specs, explicitly tagged post-v1; when protocol handlers do land, treat incoming URLs as untrusted input with validation before any fetch."
+  }
+ ],
+ "missing_for_production": [
+  {
+   "area": "Release engineering / code signing",
+   "details": "Nothing on macOS Developer ID signing + notarization + stapling (and the sidecar problem: an embedded yt-dlp binary would need its own signing for notarization to pass), Windows Authenticode (Azure Trusted Signing or EV cert; SmartScreen reputation cold-start), Linux packaging matrix (AppImage vs deb/rpm vs Flatpak \u2014 WebKitGTK 4.1 runtime dependency pinning is the classic Tauri-on-Linux trap), universal-macOS builds requiring per-arch sidecars, SBOM generation, cargo-deny/cargo-audit + npm audit gates (security.yml exists as a filename only), reproducible builds stance, artifact checksums + minisign on releases."
+  },
+  {
+   "area": "Auto-update strategy",
+   "details": "The PRD specs yt-dlp's auto-update in detail but never the app's own. Needed: tauri-plugin-updater with signed manifests, update-channel design (stable/beta), the TAURI_SIGNING private-key custody/rotation/compromise-recovery plan, Linux policy (updater conflicts with package managers \u2014 disable for deb/rpm/Flatpak builds), rollback story for a bad release, and 'update available' UX."
+  },
+  {
+   "area": "Crash reporting & telemetry stance",
+   "details": "Zero mention. A privacy-first app needs an explicit published stance: default zero telemetry, no phone-home; opt-in crash reporting (local crash/panic capture with user-initiated submission, or sentry-rust behind a compile feature); a PRIVACY.md enumerating every network request class the app can ever make (feeds, favicons, reddit, youtube, yt-dlp GitHub checks, app updater) \u2014 this doubles as a marketing asset for the target persona."
+  },
+  {
+   "area": "Data migration, backup, and corruption recovery",
+   "details": "migrations.rs exists but no policy: forward-only versioned migrations tested against fixture DBs from every released version; automatic pre-migration backup; WAL mode + integrity_check on startup with a recovery path; documented downgrade behavior; full data portability export (OPML + article states + settings + read-later in one archive) so users are never locked in; documented file locations per platform."
+  },
+  {
+   "area": "Accessibility (a11y)",
+   "details": "Not one mention in ~3800 lines. Keyboard-shortcut-first is not accessibility: needs focus management and visible focus rings, ARIA roles/announcements for virtualized lists (hard \u2014 plan it, don't retrofit), screen-reader status for refresh progress, prefers-reduced-motion, user font scaling beyond the reader pane, WCAG AA contrast enforcement in the theme system, and platform caveats (WebKitGTK accessibility tree quirks under Tauri)."
+  },
+  {
+   "area": "Internationalization",
+   "details": "Zero mention, and English strings are already hardcoded (relative-time formatting, UI copy). Retrofitting i18n is the classic expensive miss: v1 must at least route all strings through an i18n layer (paraglide/fluent), use Intl for dates/numbers, and leave RTL layout feasible; community translation workflow (weblate/crowdin) can come later."
+  },
+  {
+   "area": "Security threat model & disclosure policy",
+   "details": "Brief \u00a79 covers input validation and ammonia only. Missing: SECURITY.md with disclosure contact + supported versions; strict Tauri CSP (the branch ships \"csp\": null \u2014 rendering hostile feed HTML in a webview with no CSP is the app's single biggest vulnerability); Tauri capability/permission scoping and asset-protocol scope; SSRF defense on all app-initiated fetches (feeds/favicons/images following redirects to localhost/RFC1918/link-local); XML entity-expansion and oversized-body limits on feed fetch; image decompression-bomb limits; path traversal in export filename templates ({title} sanitization) and symlink safety in cache/export dirs; iframe sandbox attributes on embeds."
+  },
+  {
+   "area": "Feed-parsing robustness against the real world",
+   "details": "The brief's four happy-path fixtures are nowhere near production. Needed: a nasty-corpus fixture suite (undeclared/wrong encodings, invalid UTF-8, HTML soup, RSS 1.0/RDF, missing GUIDs, duplicate GUIDs, timezone-less and garbage dates, relative URLs needing xml:base resolution, itunes/podcast-2.0 namespaces); JSON Feed support (absent from the docs entirely); permanent-redirect handling that updates the stored URL; 410/404 dead-feed auto-pause with feed-health surfacing; Cloudflare-challenge detection; max-size truncation; cargo-fuzz on the parser path; opt-in anonymized 'this feed failed' reporting is out (privacy), so ship a local feed-debug view instead."
+  },
+  {
+   "area": "Database growth & retention policy",
+   "details": "article_retention_days exists as a lone setting. Undefined: retention interaction with starred/read-later/archived/exported items (must never reap them); FTS index size management and rebuild; incremental auto-vacuum strategy; cache-index consistency (orphaned files after crash); expected DB size at 1M articles; a 'storage' settings pane backed by real numbers."
+  },
+  {
+   "area": "Performance verification methodology",
+   "details": "See grain-of-salt on metrics: seeded synthetic dataset generator, criterion benches on parse/upsert/query hot paths, startup-time measurement in CI, memory profiling plan (5000-article target), and a documented target-hardware baseline. None exists."
+  },
+  {
+   "area": "Generic markdown-vault export + reading-event log (the strategic integration, underdesigned)",
+   "details": "PRD has only export_to_obsidian(vault_path) + ExportSettings. For the OSS-generic design the KP constraint requires: (1) a 'Markdown Vault' destination abstraction \u2014 any directory, not Obsidian-branded; (2) idempotent re-export: stable per-article IDs and a content checksum in frontmatter (mirrors RFC-0018's checksum-for-dedupe/incremental-reindex key) so re-promotion updates rather than duplicates; (3) frontmatter schema versioning + user-configurable field mapping/template; (4) filename template with collision policy and strict path sanitization; (5) atomic writes (tmp+rename) because the vault may be git-watched mid-write; (6) attachment/image policy relative to the vault; (7) a separate append-only event log export \u2014 JSONL of {event: read|starred|read_later|promoted, article_id, url, feed, ts, schema_version} to a configurable sink (file or webhook) \u2014 generic 'reading signals' any downstream can consume, which is exactly what the KP interest model ingests; (8) the derived/disposable contract: promotion-to-vault carries everything downstream needs, and Curio must tolerate its own DB being wiped (KP canonical/derived rule). Record now (per raw/curio-rss.md) that future annotations land in the vault, not the app DB."
+  },
+  {
+   "area": "Tauri/platform runtime realities",
+   "details": "Undiscussed: the webview is WebKit on macOS/Linux but Chromium/WebView2 on Windows \u2014 YouTube iframe, CSS effects, and audio behave differently per platform; HTML5 audio codecs in WebKitGTK depend on user-installed GStreamer plugins (the podcast player will be silent on stock distros \u2014 needs detection + guidance); single-instance enforcement; window-state restore across monitor changes; OS media-key/MPRIS/SMTC integration for the podcast player; system proxy support and custom CA handling for corporate/self-hosted-feed users."
+  },
+  {
+   "area": "Podcast download integrity",
+   "details": "is_downloaded flag exists but no design for partial-download resume, content-length/hash verification, disk-full handling, or concurrent download limits."
+  },
+  {
+   "area": "Beta / QA process",
+   "details": "No pre-release channel, no per-OS manual test matrix, no dogfooding period, no issue-triage SLA definition before 1.0."
+  }
+ ],
+ "scope_cuts": [
+  "Cut Reddit thread viewer + YouTube yt-dlp enrichment from v1 entirely: ship the reddit/youtube view-mode LAYOUTS (card/grid rendering of RSS-native data, open-in-browser) but no unofficial-endpoint enrichment. This removes the two highest-breakage/ToS-risk dependencies from the launch; enrichment returns in v1.x behind provider feature flags using the already-designed enricher traits.",
+  "Cut yt-dlp bundling entirely (even post-v1 use external/managed binary per grain-of-salt).",
+  "Cut multi-profile system from v1; ship single profile + rock-solid OPML import AND export. Re-introduce profiles later as SQLite-first (profiles table), never as OPML-files-as-state.",
+  "Cut podcasts to v1.1 (they're already Phase 4): if kept, streaming playback + progress only \u2014 cut downloads/offline, auto-download, sleep timer.",
+  "Cut Gallery view (post-v1).",
+  "Cut theme editor, community themes, transparency/blur/vibrancy, custom titlebar; keep token-based Light/Dark/system + accent color.",
+  "Cut smart folders, feed statistics dashboards, notification grouping, global shortcuts to post-v1; protocol handler (feed://) may stay as a small high-adoption item but only with untrusted-input validation.",
+  "Cut batch-export 'combined file with separators' and Base64Embed image mode; keep per-article files + LocalCopy images (the vault-export path).",
+  "Cut picture-in-picture, mini-player, theater mode from the (deferred) YouTube view.",
+  "MOVE (not cut) OPML export from Phase 5 to Phase 1 \u2014 data-portability-out is an OSS credibility requirement at launch.",
+  "MOVE release pipeline (signing, notarization, packaging, updater) into Phase 1 \u2014 release from the first alpha so the pipeline hardens with the product.",
+  "PROMOTE the generic vault-export + event-log contract from Phase 5 ('Obsidian vault integration') into the v1 core: it is the strategic feature and it is cheap once the export pipeline (already ~working on the branch) exists.",
+  "Resulting credible v1: articles-only reader that is genuinely excellent \u2014 500-feed fetch engine, OPML in/out, search, read-later/stars, keyboard nav, light/dark, image cache, markdown vault export + event log, signed installers + updater on all three OSes."
+ ],
+ "open_source_gaps": [
+  "License decision + audit: brief's README says 'MIT' but no LICENSE file exists on any branch. Decide MIT vs dual MIT/Apache-2.0 (Rust convention, adds patent grant \u2014 recommended). Run cargo-deny license audit over the tree (readability ports are Apache-2.0/MPL; yt-dlp is Unlicense but any FFmpeg adjacency drags LGPL/GPL questions); ship NOTICE/third-party-licenses in the app's About.",
+  "Name/trademark clearance: 'Curio' collides with shipped software (e.g., Zengobi Curio on macOS); clear the name and the domain before public launch; scrub the stray 'Flowfeed' branding in PRD \u00a75.1.",
+  "Governance & sustainability statement: single-maintainer project whose roadmap is partly driven by a private Knowledge-Plane use case \u2014 say so honestly in README/GOVERNANCE ('personal-first, community-welcome'), define what contributions are wanted vs out-of-scope (protects against feature-demand burnout), bus-factor mitigation (documented release process so anyone can cut a release), DCO vs CLA decision (DCO recommended).",
+  "Contributor experience: CONTRIBUTING.md with the actual dev-env story \u2014 Tauri's Linux system-dependency setup is notoriously painful; provide a devcontainer and/or nix flake; issue/PR templates with content (currently named in the tree but unspecified); CODE_OF_CONDUCT.md; good-first-issue curation; architecture docs that match reality (the brief's docs/ tree is a good skeleton).",
+  "CI must pass on fork PRs: the brief's workflows inject TAURI_SIGNING secrets into every build \u2014 fork PRs have no secrets, so builds fail or create a secret-exfiltration temptation; make signing conditional, run untrusted PRs with least-privilege permissions, pin all third-party actions by SHA.",
+  "SECURITY.md + coordinated disclosure channel + supported-versions table (also listed under production gaps; for OSS it's additionally a trust signal and a GitHub badge).",
+  "User-facing docs site: both docs are developer-facing only. Need install docs per platform (including Gatekeeper/SmartScreen guidance until signing reputation exists), a keyboard-reference page, feed-management how-tos, the vault-export/event-log integration guide (this is the doc that recruits the PKM community \u2014 Obsidian/Logseq users are the natural early adopters), screenshots/GIF pipeline, and a CHANGELOG discipline (keep-a-changelog).",
+  "Distribution relationships: README already promises 'brew install --cask curio-reader' \u2014 homebrew/cask has acceptance criteria (notarization, popularity thresholds) so plan a self-hosted tap first; Flathub submission (requires dropping runtime binary downloads); AUR package; winget manifest; these each constrain the yt-dlp and auto-update decisions and should be decided before v1, not after.",
+  "Community infrastructure decisions: GitHub Discussions vs issues policy, release-announcement channel, whether to run a chat (Matrix/Discord) at all pre-1.0 (recommend not), and a public roadmap via GitHub milestones so the phase plan lives where contributors can see it.",
+  "Versioning & release policy: semver commitment, what the DB-schema/vault-frontmatter/event-log schemas' compat guarantees are across minor versions (the export/event schemas become public API the moment one external consumer \u2014 the Knowledge Plane \u2014 exists; version them explicitly and document breaking-change policy).",
+  "Brand assets: icon/logo licensing separate from code license (common OSS omission), and a policy on forks using the name/marks.",
+  "Fixture/test-data licensing: the nasty-feed corpus will contain third-party content \u2014 scrub or synthesize fixtures so the repo stays cleanly licensed."
+ ]
+}

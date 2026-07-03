@@ -1,0 +1,184 @@
+{
+ "overall_verdict": "salvage-parts. The DX/tooling layer is ~70% production-shape (real CI gates, lefthook + conventional-commit hook, curated .vscode, solid Makefile) and should be kept with targeted fixes: signing/notarization, coverage gating, audit enforcement, repo hygiene. The frontend is a Svelte-4-idiom prototype on a Svelte 5 runtime whose IPC boundary is broken at runtime (snake_case args vs Tauri 2 camelCase convention \u2014 mark-read/star/delete/refresh/export all fail with \"invalid args\"; invisible to the test suite which never crosses IPC), and whose flagship differentiators \u2014 native Reddit/YouTube views, podcast player, Markdown/Obsidian export (the Knowledge-Plane-critical path) \u2014 exist as orphaned components/stores with zero wiring into routes. Security posture (CSP null + no capabilities file + unused-but-registered shell plugin) is unacceptable for an OSS desktop app rendering remote HTML. Keep the CSS token/theme system, the viewer components as visual reference, and the tooling; rewrite the state layer with runes + genuinely generated IPC bindings (tauri-specta or wired ts-rs) and rebuild the shell/dispatch/keyboard layer.",
+ "modules": [
+  {
+   "path": "src/app.css",
+   "verdict": "keep",
+   "notes": "Best asset in the frontend: disciplined CSS custom-property token system (spacing/radius/shadow/layout vars) with 9 complete themes (light/dark/nord/catppuccin/dracula/gruvbox/tokyo-night/solarized x2) keyed off [data-theme]. Utility classes mostly unused. Carry forward as the theming foundation; add reduced-motion + theme-preload to kill FOUC (app.html hardcodes data-theme=dark, real theme applied only onMount)."
+  },
+  {
+   "path": "src/app.html",
+   "verdict": "keep",
+   "notes": "Trivial. Add an inline pre-hydration script reading localStorage curio-theme to prevent dark-flash for light-theme users."
+  },
+  {
+   "path": "src/lib/api/index.ts",
+   "verdict": "refactor",
+   "notes": "Structure is right (one typed wrapper per command, isTauri guard) but: (1) passes snake_case arg keys (feed_id, article_id, article_ids, video_url, destination_dir...) to #[tauri::command] fns lacking rename_all=\"snake_case\" \u2014 Tauri 2 expects camelCase, so every multi-word REQUIRED arg fails at runtime and Option args (add_feed folder_id/tags) silently become None; (2) `throw error as CommandError` is a no-op cast against a wrong type; (3) ~20 registered backend commands have no wrapper (OPML import/export, settings, themes CRUD, cache, podcast download/progress); (4) the 5 export wrappers (export_to_markdown/export_to_obsidian/batch) exist but NOTHING in the UI calls them \u2014 Knowledge-Plane export path has zero frontend surface. Replace with generated bindings (tauri-specta) and keep the module layout."
+  },
+  {
+   "path": "src/lib/types/index.ts",
+   "verdict": "rewrite",
+   "notes": "Hand-maintained mirror of Rust models; already drifted: TS CommandError is flat {message,code,recoverable} but the Rust enum serializes externally-tagged as {User:{...}}|{Internal:{...}} (src-tauri/src/error.rs:84, no serde tag attr). Only AddFeedModal hand-unwraps the real shape. Replace entirely with codegen output; keep field coverage as the reference spec \u2014 it does match the Rust structs otherwise."
+  },
+  {
+   "path": "src/lib/stores/feeds.ts",
+   "verdict": "rewrite",
+   "notes": "Svelte 4 writable/derived singletons with action functions. Real bugs: unreadCounts derived only from the currently loaded 50-article page so sidebar badges are wrong (and FolderItem's `?? feed.unread_count` fallback is unreachable because the derived map always yields 0, never undefined); double filtering (server-side via get_articles filter AND client-side re-filter in currentArticles, where folder_id is deliberately ignored `_$folderId`); client re-sort duplicating backend ORDER BY; selectArticle \u2192 markArticlesRead \u2192 loadFolderTree() refetches the whole tree on every article click; pagination frozen at page 1/per_page 50, totalArticles never consumed. Rewrite as runes-based state (or a query-cache layer) with backend-owned counts."
+  },
+  {
+   "path": "src/lib/stores/ui.ts",
+   "verdict": "refactor",
+   "notes": "Theme store + THEMES registry is sound and matches app.css. But half the file is dead: viewState never consumed, searchQuery/searchResults/isSearching have no search UI, sidebarWidth unused (no resizable panes), toasts store has no Toast component so showToast renders nothing, modal enum lists settings/keyboard_shortcuts/theme_editor but +page.svelte only renders add_feed."
+  },
+  {
+   "path": "src/lib/stores/player.ts",
+   "verdict": "drop",
+   "notes": "310 lines of podcast player state, queue management, shuffle, persistence helpers \u2014 zero components consume any of it; savePlayerState/saveQueue never called; no <audio> element exists anywhere. Well-written but pure dead weight on this branch. Rewrite alongside an actual player component when podcasts land; formatPlayerTime duplicates utils/format.formatDuration."
+  },
+  {
+   "path": "src/lib/components/sidebar/Sidebar.svelte + FolderItem.svelte",
+   "verdict": "refactor",
+   "notes": "Functional three-pane leftmost column: quick-access views, recursive folder tree, unread badges, add-feed CTA. Legacy idiom (export let, svelte:self \u2014 deprecated in v5, on: directives); badge counts wrong via unreadCounts bug; no feed context menu, no edit/delete/drag-reorder UI (deleteFeed store action has no caller); active-state highlighting for Unread/Starred/ReadLater views missing (only All Items gets .active)."
+  },
+  {
+   "path": "src/lib/components/article/ArticleList.svelte",
+   "verdict": "refactor",
+   "notes": "Reasonable middle column: header actions, thumbnail/title/meta/summary rows, star + unread indicators, selected state. But no virtualization or infinite scroll (hard 50-item cap), no scroll-into-view on j/k navigation, mark-all-read only sees the loaded page, and clicking an article triggers the broken snake_case mark_read call. click/keydown-on-div focus tracking is a11y theater."
+  },
+  {
+   "path": "src/lib/components/article/ReaderPane.svelte",
+   "verdict": "refactor",
+   "notes": "Decent reader typography (font-size/line-height/max-width CSS vars from ui store, styled :global() article body). Critical gaps: renders article.content_html via {@html} with CSP null \u2014 backend ammonia is the sole XSS defense; window.open(url,'_blank') for open-in-browser does not reach the system browser in Tauri (needs opener plugin + capability); NO view-mode dispatch \u2014 feed.view_mode ('reddit'|'youtube'|'podcast'|'gallery') is never consulted so RedditViewer/YouTubeViewer are unreachable; no export/copy-markdown/read-later buttons despite backend commands existing (Knowledge-Plane promotion flow absent)."
+  },
+  {
+   "path": "src/lib/components/common/AddFeedModal.svelte",
+   "verdict": "keep",
+   "notes": "Best component: proper dialog a11y (aria-modal, labelledby, esc/backdrop close), loading/error states, and the ONLY code that correctly unwraps the real {User:{message}}/{Internal:{message}} error wire format. Its folder selection silently no-ops though (folder_id snake_case arg dropped to None by Tauri). Port to runes ($props/callback props instead of createEventDispatcher \u2014 deprecated in v5)."
+  },
+  {
+   "path": "src/lib/components/common/ThemePicker.svelte",
+   "verdict": "keep",
+   "notes": "Clever mini-preview swatches reusing global [data-theme] vars per-tile; aria-pressed. Never imported anywhere \u2014 theme_editor modal is never rendered. Wire it into a settings surface."
+  },
+  {
+   "path": "src/lib/components/reddit/RedditViewer.svelte + RedditComment.svelte",
+   "verdict": "refactor",
+   "notes": "Substantial, visually complete thread view (score/ratio/flair, sort selector, recursive comments) \u2014 but fully orphaned (no importer), duplicates URL parsing client-side that backend parse_reddit_url already provides, renders selftext_html via {@html} (backend-sanitized only), window.open for permalinks. `$: if (article) loadThread()` legacy reactive fetch has no cancellation/race guard on rapid article switches."
+  },
+  {
+   "path": "src/lib/components/youtube/YouTubeViewer.svelte + YouTubeComment.svelte",
+   "verdict": "refactor",
+   "notes": "Complete video page (embed, stats, chapters, description, tags, lazy comments) \u2014 orphaned like Reddit. Uses youtube.com/embed rather than youtube-nocookie.com; loads remote iframe under null CSP; duplicates video-ID regexes vs backend parse_youtube_url; same uncancelled `$: loadMetadata()` race pattern; thumbnail-priority logic belongs server-side."
+  },
+  {
+   "path": "src/lib/utils/format.ts + format.test.ts",
+   "verdict": "keep",
+   "notes": "Correct, pure, and the only tested frontend code (36 cases with fake timers). stripHtml via DOMParser is fine for display-layer use."
+  },
+  {
+   "path": "src/routes/+page.svelte + +layout.svelte + +layout.ts",
+   "verdict": "rewrite",
+   "notes": "Three-column skeleton exists (Sidebar | ArticleList | ReaderPane) matching the PRD shape, ssr=false correct for Tauri. But keyboard handling is one giant if-chain with a literal empty '?' placeholder branch, no shortcut registry/customization, no view-mode dispatch, only add_feed modal rendered, no Toast outlet, no resizable panes, no error boundary beyond a single init message. This is the file a production shell replaces wholesale."
+  },
+  {
+   "path": "package.json",
+   "verdict": "refactor",
+   "notes": "Sane scripts + lefthook prepare. Stray/unused: @playwright/test with no playwright.config or e2e dir (test:e2e errors), @testing-library/svelte never used, @typescript-eslint/types orphan (biome project), @tauri-apps/plugin-shell JS package never imported. Version 0.1.0, MIT in Cargo.toml but no LICENSE file at root \u2014 OSS blocker to fix."
+  },
+  {
+   "path": "biome.json",
+   "verdict": "keep",
+   "notes": "Strict where it can be (noExplicitAny error, cognitive complexity warn, useImportType). Caveat: biome 1.x cannot lint Svelte templates, and the .svelte override disables unused-import/var rules \u2014 svelte-check is the only real component gate. Consider biome 2.x or eslint-plugin-svelte for template linting in the rewrite."
+  },
+  {
+   "path": "Makefile",
+   "verdict": "keep",
+   "notes": "Accurate, well-organized task surface (setup/dev/test/cov/lint/fmt/release/gen-types/ytdlp-update). db-reset guesses two config paths. Release targets duplicate what tauri-action does; harmless."
+  },
+  {
+   "path": "lefthook.yml",
+   "verdict": "keep",
+   "notes": "pre-commit: cargo fmt --check, clippy -D warnings (slow on every .rs commit but real), biome --staged, svelte-check; pre-push: rust lib tests + npm test; commit-msg conventional-commit regex gate. Genuinely good hook layer."
+  },
+  {
+   "path": "scripts/gen-types.sh",
+   "verdict": "rewrite",
+   "notes": "A self-admitted stub: greps for ts-rs in Cargo.toml (present as optional dep + feature) then runs `cargo test export_bindings --features ts-rs` which finds zero tests because NO Rust type derives TS \u2014 it prints 'not configured' and exits 0. src/lib/types/generated never exists (yet biome/tsconfig/vitest all carefully exclude it \u2014 scaffolding for a capability that was never built). Replace with tauri-specta (commands + types + events) or actually derive TS/#[ts(export)] across models and make CI diff the generated output against committed bindings."
+  },
+  {
+   "path": "scripts/bundle-ytdlp.sh",
+   "verdict": "refactor",
+   "notes": "Works (platform detection, force flag, version check) but: pinned YTDLP_VERSION=2024.12.23 (18 months stale \u2014 yt-dlp breaks against YouTube constantly, needs an update story), downloads with zero checksum/signature verification (supply-chain hole for a shipped binary), and tauri.conf.json declares NO externalBin/resources so the downloaded binary is never actually bundled \u2014 release builds silently fall back to exe-dir/bin or bare PATH lookup (src-tauri/src/platform/youtube/mod.rs:62-82)."
+  },
+  {
+   "path": "scripts/setup.sh",
+   "verdict": "keep",
+   "notes": "Solid first-run script: prerequisite checks with actionable messages, node version floor, hooks install, ytdlp bundle."
+  },
+  {
+   "path": ".github/workflows/ci.yml",
+   "verdict": "refactor",
+   "notes": "Real gates, good bones: rust matrix (fmt/clippy -D warnings/test with webkit deps + frontend prebuild for generate_context!), frontend matrix (biome lint / svelte-check / vitest), 3-OS build verification with artifacts. Gaps: coverage never enforced (plain `vitest run`, no cargo-llvm-cov), no E2E stage, build job runs `cargo build --release` not `tauri build` so bundling/sidecar/icon regressions aren't caught, no concurrency-cancel groups, actions unpinned (tags not SHAs). The sibling fix branch (ee90ef1) additionally prebuilds frontend before clippy \u2014 fold that in."
+  },
+  {
+   "path": ".github/workflows/release.yml",
+   "verdict": "refactor",
+   "notes": "Skeleton right (draft release \u2192 tauri-action matrix builds for mac arm64/x64, linux AppImage, windows msi \u2192 publish), but not release-ready: TAURI_SIGNING_PRIVATE_KEY env vars are vestigial \u2014 no updater plugin/createUpdaterArtifacts in tauri.conf so nothing consumes them and there is NO auto-update story; zero macOS codesign/notarization (APPLE_CERTIFICATE/APPLE_ID absent \u2192 Gatekeeper-blocked DMGs) and zero Windows signing; publish-release auto-flips draft\u2192published with no human gate; workflow_dispatch version input never syncs tauri.conf/package.json/Cargo.toml versions."
+  },
+  {
+   "path": ".github/workflows/security.yml",
+   "verdict": "refactor",
+   "notes": "Looks thorough, gates little: cargo-audit and npm-audit are continue-on-error artifact-uploads (report-only); CodeQL is javascript-typescript only; the one real gate is dependency-review (fail-on-severity high, deny GPL-3.0/AGPL-3.0) on PRs. Add cargo-deny (licenses+advisories, enforced), make audits fail the build, consider osv-scanner."
+  },
+  {
+   "path": ".vscode/ (settings/extensions/launch/tasks)",
+   "verdict": "keep",
+   "notes": "Curated and correct: biome default formatter with per-language overrides, rust-analyzer clippy-on-save with all-features, svelte ts-plugin, recommended + unwanted extension lists (blocks prettier/eslint conflicts)."
+  },
+  {
+   "path": "src-tauri/tauri.conf.json + capabilities + gen/schemas",
+   "verdict": "rewrite",
+   "notes": "Security section is effectively absent: csp:null while the app renders remote/{@html} content and embeds YouTube iframes \u2014 needs a strict CSP (default-src 'self'; img/media https:; frame-src youtube-nocookie.com; connect-src ipc:). NO src-tauri/capabilities/ directory exists and gen/schemas/capabilities.json is literally {} \u2014 no core:default, no window ACL; tauri-plugin-shell is registered in main.rs but ungated, unused from JS (backend uses std::process::Command directly), and should be removed in favor of tauri-plugin-opener with URL scope for open-in-browser. No externalBin for yt-dlp, no updater config, identifier com.curio-reader.app contains a hyphen (Tauri warns). gen/ (machine output) is committed to git \u2014 gitignore it. The Cfqby fix branch already trims gen/schemas and adds real icons; reconcile."
+  },
+  {
+   "path": "src-tauri/bin/yt-dlp-aarch64-apple-darwin (repo hygiene)",
+   "verdict": "drop",
+   "notes": "34 MB platform-specific binary committed to git on the checked-out branch (.gitignore has no bin/ entry) \u2014 bloats every clone forever once merged. The Cfqby branch removes it; gitignore src-tauri/bin/ and rely on bundle-ytdlp.sh + CI."
+  },
+  {
+   "path": "vitest.config.ts / tsconfig.json / svelte.config.js / vite.config.ts",
+   "verdict": "keep",
+   "notes": "tsconfig is maximally strict (all strict flags + noUnusedLocals/Parameters + useUnknownInCatchVariables). vitest coverage thresholds (80/75/80/80) are aspirational fiction \u2014 see test_reality. adapter-static with SPA fallback + port 1420 strictPort is the correct Tauri/SvelteKit setup. vitest includes tests/unit/** which doesn't exist."
+  }
+ ],
+ "strengths": [
+  "CSS theming foundation is genuinely production-grade: complete token system + 9 fully specified themes on [data-theme] attributes, disciplined scoped component styles, focus-visible/scrollbar/reset polish \u2014 directly reusable.",
+  "DX scaffolding is the strongest layer: Makefile task surface, lefthook hooks (fmt/clippy/biome/svelte-check pre-commit, tests pre-push, conventional-commit gate), curated .vscode with formatter-conflict prevention, prerequisite-checking setup.sh.",
+  "CI has real teeth where it runs: clippy -D warnings, cargo fmt --check, svelte-check, biome, vitest, and 3-OS build verification with the webkit dependency handling and frontend-prebuild-for-generate_context gotcha already solved.",
+  "TypeScript strictness maxed (every strict flag + noUnusedLocals/noImplicitReturns); the api/index.ts wrapper module cleanly enumerates 40+ commands in a shape that maps 1:1 onto generated bindings later.",
+  "Reddit and YouTube viewer components are substantial and visually complete (thread scores/flair/sort/recursive comments; embed/chapters/tags/lazy comments) \u2014 wire-ready once view-mode dispatch exists.",
+  "Three-column PRD skeleton (Sidebar | ArticleList | ReaderPane) with keyboard-first j/k/star/mark interactions already sketched; AddFeedModal shows correct dialog a11y and the only correct error-shape handling.",
+  "Security workflow includes an actually-gating dependency-review step (fail on high severity, license denylist) and a scheduled audit cadence to build on."
+ ],
+ "defects": [
+  "FATAL IPC ARG-CASE BUG: frontend invokes with snake_case keys (feed_id, article_id, article_ids, video_url, destination_dir, post_id...) but every #[tauri::command] lacks rename_all=\"snake_case\", and Tauri 2 matches camelCase \u2014 all multi-word REQUIRED args fail at runtime ('invalid args: missing required key articleId'): get_article, mark_read/mark_unread (fired on every article click), toggle_starred, delete/refresh_feed, all export commands. Option args (add_feed folder_id/tags) silently become None. Invisible to the entire test suite, which never crosses the IPC boundary.",
+  "IPC error contract drift: Rust CommandError serializes externally-tagged {User:{message,code,recoverable}}|{Internal:{message}} (error.rs:84, no serde tag attr) but TS declares it flat; api/index.ts 'throw error as CommandError' is a lie; only AddFeedModal hand-unwraps the real shape.",
+  "ts-rs codegen is scaffolding theater: optional dep + feature flag in Cargo.toml, zero #[derive(TS)] in src-tauri/src, gen-types.sh exits 'not configured', src/lib/types/generated never exists (yet three configs exclude it). Types are hand-maintained and already drifted.",
+  "Tauri security posture near-zero: csp:null while {@html} renders remote HTML in 3 components (ammonia backend sanitization is the single defense); NO capabilities file (src-tauri/capabilities/ absent, gen/schemas/capabilities.json == {}); tauri-plugin-shell registered but ungated and never used from JS; YouTube embed via youtube.com not youtube-nocookie.com.",
+  "window.open(url,'_blank') used for every open-in-browser action \u2014 does not open the system browser in Tauri; needs tauri-plugin-opener with scoped allow-list.",
+  "Massive orphaned surface: RedditViewer/RedditComment/YouTubeViewer/YouTubeComment (no importer \u2014 ReaderPane never dispatches on feed.view_mode), ThemePicker (theme_editor modal never rendered), entire player.ts store (no audio element/UI), toasts (no outlet), searchQuery/viewState/sidebarWidth stores. PRD's headline features are dead code.",
+  "Sidebar unread badges wrong: unreadCounts derived from the \u226450 currently loaded articles; FolderItem's '?? feed.unread_count' backend fallback is unreachable (derived always yields 0, never undefined).",
+  "Incoherent data flow: filtering applied server-side (get_articles filter) then re-applied client-side in currentArticles (which ignores folder_id), client re-sort duplicates backend ORDER BY; selectArticle \u2192 markArticlesRead \u2192 full loadFolderTree() refetch per article click; pagination frozen at page 1 with totalArticles never consumed; no list virtualization.",
+  "Knowledge-Plane-critical gap: export_to_markdown/export_to_obsidian/copy_as_markdown/batch_export wrappers exist in api/index.ts but no component calls them; no read-later add/remove UI either \u2014 the promote-to-vault flow has zero frontend surface. ~20 more backend commands (OPML, settings, themes CRUD, podcast download/progress, cache) have no frontend wrapper at all.",
+  "Svelte 5 in name only: zero runes ($state/$derived/$props), export let + createEventDispatcher (deprecated) + svelte:self (deprecated) + on: directives throughout \u2014 the whole frontend runs in legacy compatibility mode.",
+  "Test tooling fiction: vitest coverage thresholds 80% never run in CI (plain vitest run); make cov would fail immediately; test:e2e script exists but no playwright.config or tests directory (command errors); @testing-library/svelte installed, zero component/store tests.",
+  "Release workflow not shippable: TAURI_SIGNING_PRIVATE_KEY env vars are vestigial (no updater plugin configured \u2014 no auto-update story at all); no macOS codesign/notarization \u2192 Gatekeeper-blocked DMGs; no Windows signing; publish job auto-flips draft\u2192published; version input doesn't sync the three version files.",
+  "security.yml mostly report-only: cargo-audit and npm-audit continue-on-error, CodeQL JS-only; only dependency-review gates.",
+  "Repo hygiene: 34 MB yt-dlp macOS binary committed at src-tauri/bin/ (not gitignored); machine-generated src-tauri/gen/schemas committed with an empty capabilities projection; placeholder icons. The origin/claude/fix-tauri-frontend-dist-Cfqby branch fixes exactly these but is a SIBLING of HEAD's last two commits (forked at 58e6834), so its cleanups partially conflict with HEAD's bfedb35/87189ce \u2014 needs deliberate reconciliation, not a fast-forward.",
+  "bundle-ytdlp.sh downloads without checksum/signature verification, pins stale 2024.12.23, and tauri.conf declares no externalBin/resources \u2014 packaged releases won't contain yt-dlp and fall back to PATH.",
+  "Theme FOUC: app.html hardcodes data-theme=dark, stored theme applied in onMount; light-theme users flash dark on every launch.",
+  "Biome cannot lint Svelte templates (1.x) and the .svelte override disables unused-import/vars \u2014 svelte-check is the only real component gate; a11y approach is click/keydown-on-div focus theater with a literal empty '?' shortcut-help branch."
+ ],
+ "test_reality": "Frontend testing claims (80/75/80/80 vitest coverage thresholds, test:e2e Playwright script, @testing-library/svelte dependency, lefthook pre-push test gate, CI test matrix) versus reality: exactly ONE test file exists \u2014 src/lib/utils/format.test.ts, 36 cases over pure date/number/string formatters with fake timers. Zero store tests, zero component tests, zero IPC-contract tests, no tests/ directory (vitest's tests/unit/** include matches nothing), no playwright.config or e2e specs (npm run test:e2e errors out). Coverage is never invoked in CI (plain `vitest run`), so the 80% thresholds have never been evaluated and would fail instantly if they were. The consequence is concrete: because nothing exercises the frontend\u2192Rust boundary, the snake_case-vs-camelCase argument bug that breaks mark-read, star, delete, refresh, and every export command in the running app is invisible to the entire green test suite \u2014 Rust-side tests (which CI genuinely runs, with clippy -D warnings) call command internals directly and never validate the invoke contract, and the branch's own HEAD commit message ('resolve all failing Rust tests') reflects exactly that gap between passing tests and a non-functioning app."
+}

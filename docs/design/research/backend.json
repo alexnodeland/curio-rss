@@ -1,0 +1,175 @@
+{
+ "overall_verdict": "salvage-parts \u2014 The layering skeleton (commands \u2192 core/platform/services \u2192 storage), error model, SQLite schema, serde models, and parsers are genuinely good and worth keeping as the base of a production rewrite of the load-bearing paths. But every path that matters at scale or for safety is broken: raw feed HTML is stored unsanitized and rendered via Svelte {@html} (stored XSS inside a Tauri webview with file-writing IPC commands), the storage layer is a single sync Mutex<Connection> without WAL or transactions called directly from async commands, the concurrent refresh service and favicon service are complete dead code (the shipped refresh path is sequential with a per-call untimed reqwest client), full-text search silently indexes nothing because content_text is never populated, and the HTML\u2192Markdown exporter \u2014 the exact seam the Knowledge-Plane vault export depends on \u2014 is a regex converter that destroys any multi-line element while the declared htmd dependency sits unused. Keep ~40% (models, error.rs, schema, feed/OPML/URL parsers, sanitizer config, themes, thin command shells); rewrite storage access, the fetch/refresh pipeline, the content pipeline (sanitize-at-ingest + text extraction + DOM-based Markdown), and the export layer; do not treat the \"Phase-1 ~70%\" claim as load-bearing.",
+ "modules": [
+  {
+   "path": "src-tauri/src/storage/database.rs",
+   "verdict": "rewrite",
+   "notes": "1104 lines, single Arc<Mutex<Connection>>, no WAL/busy_timeout, all sync rusqlite I/O invoked directly from async Tauri commands (blocks tokio workers; UI stalls during refresh). upsert_articles (L226-325): per-article SELECT-then-INSERT/UPDATE with NO transaction (2N statements, N implicit fsyncs \u2014 brutal at 500 feeds/50k articles; should be one tx + INSERT..ON CONFLICT), and the UPDATE branch never refreshes media_attachments. mark_read/mark_unread/reorder_read_later loop per-id without a transaction. Silent corruption handling everywhere: Uuid::parse_str(..).unwrap_or_default() (L745, L782-783, L836) turns bad rows into nil UUIDs; .filter_map(|r| r.ok()) swallows row-mapping errors in every list query. get_articles (L347-411) implements only 5 of ArticleFilter's 10 fields \u2014 folder_id, tags, search_query, published_after/before silently ignored \u2014 and uses COUNT(*)+OFFSET pagination (O(n) deep pages). view_mode stored as serde_json string (quoted \"article\") while schema DEFAULT is unquoted 'article' \u2014 latent parse mismatch. search_articles passes raw user input to FTS5 MATCH (syntax error on unbalanced quotes \u2192 user-facing DB error). No article retention/pruning despite settings.article_retention_days. Schema-facing API shape is fine; the implementation needs a pooled/spawn_blocking repository rewrite."
+  },
+  {
+   "path": "src-tauri/src/storage/migrations.rs",
+   "verdict": "refactor",
+   "notes": "Schema itself is solid: FKs with sensible ON DELETE, FTS5 external-content table with the correct delete-trigger protocol, good indexes incl. (is_read_later, read_later_position). Defects: get_schema_version (L32) does SELECT on schema_version and errors with QueryReturnedNoRows if the table exists but is empty; migration not wrapped in a transaction; articles_au trigger (L148-153) rewrites the FTS entry on EVERY update including is_read flips (index churn on the hottest write); datetime('now') column defaults produce 'YYYY-MM-DD HH:MM:SS' while Rust writes RFC3339 'T\u2026+00:00' \u2014 mixed string formats break lexicographic ORDER BY and the Rust-side parse (falls back silently to Utc::now). Only v1 exists; the versioning scaffold (DELETE+INSERT version row) is adequate but should become a migration list with per-migration transactions."
+  },
+  {
+   "path": "src-tauri/src/error.rs",
+   "verdict": "keep",
+   "notes": "Best module in the codebase. Clean three-tier design (CoreError business / InfraError I-O / CommandError serializable with SCREAMING_SNAKE code + recoverable flag), thiserror throughout, exhaustive From impls, genuinely tested serialization. Nits: InfraError::Database \u2192 user-facing message leaks rusqlite internals; CommandError::Internal.source is dead weight; RateLimited is defined but only Reddit ever produces it."
+  },
+  {
+   "path": "src-tauri/src/commands/mod.rs",
+   "verdict": "refactor",
+   "notes": "AppState::new (L42-56) initializes settings to Default and relies on the frontend calling load_settings later \u2014 until then export_to_obsidian etc. see defaults; settings should load at startup. Database held by value (not Arc) which is why RefreshService (wants Arc<Database>) could never be wired. No shared reqwest::Client managed in state \u2014 every command builds its own. Glob re-exports (pub use *) across 9 modules make the IPC surface hard to audit."
+  },
+  {
+   "path": "src-tauri/src/commands/feeds.rs",
+   "verdict": "rewrite",
+   "notes": "refresh_feed (L109-214): new reqwest::Client per call with NO timeout \u2014 one hanging feed wedges the command forever; no response-size cap; no redirect limit; on HTTP error it calls update_feed_fetch(id, None, None, err) clobbering stored etag/last_modified (L160). refresh_all_feeds (L217-241) is fully sequential with a literal 'TODO: Parallel refresh' \u2014 500 feeds \u2248 minutes \u2014 while a correct concurrent implementation already exists unwired in services/refresh.rs (~150 lines of duplicated logic between the two). add_feed never fetches the feed, so title=URL until first refresh and a non-feed URL is accepted silently. No sanitization or text extraction at ingest. This entire path should collapse into the (fixed) RefreshService."
+  },
+  {
+   "path": "src-tauri/src/commands/articles.rs",
+   "verdict": "keep",
+   "notes": "Thin, correct wrappers with proper UUID validation \u2014 the right shape for command handlers. Inherits storage defects (blocking calls, raw FTS query pass-through). Empty test module stub ('Integration tests would use a mock state')."
+  },
+  {
+   "path": "src-tauri/src/commands/folders.rs",
+   "verdict": "refactor",
+   "notes": "get_folder_tree (L82-91) hierarchy build is order-dependent and silently drops folders: it iterates folders in arbitrary order, removes each child node from folder_map and inserts it into its parent \u2014 but if the parent was already moved into the grandparent, get_mut(&parent_id) misses and the entire subtree vanishes from the returned tree. Untested, will bite any user with \u22653-level nesting (and 2-level depending on order). 'Uncategorized' virtual folder with position=i32::MAX is a hack the frontend must special-case. create_folder/delete_folder are fine."
+  },
+  {
+   "path": "src-tauri/src/commands/export.rs",
+   "verdict": "rewrite",
+   "notes": "This is the Knowledge-Plane seam and it is the weakest strategic module. Present: single-article MD export, export_to_obsidian (bare vault_path join), batch export. Missing everything the generic vault/event-log integration needs: no dedup/idempotency (generate_filename has no collision handling \u2014 same-title-same-day articles silently overwrite vault notes), batch_export_markdown (L154-164) swallows per-article failures with if-let-Ok, no atomic write (partial files on crash), no read/star/read-later event export at all, frontmatter fields are a hardcoded match on 5 strings, 'feed' field is a skipped TODO. Security: export_to_markdown accepts an arbitrary destination_path from IPC \u2014 combined with the XSS below this is an arbitrary-file-write primitive. Rebuild as a proper exporter (template-driven frontmatter, stable IDs, collision policy, JSONL/NDJSON event log)."
+  },
+  {
+   "path": "src-tauri/src/commands/opml.rs",
+   "verdict": "refactor",
+   "notes": "import_opml duplicate check (L91-96) calls state.db.get_feeds() \u2014 a full table scan \u2014 once per outline: O(n\u00b2) on large OPML files. _merge parameter accepted and ignored. Folder extended attrs routed through the stringly HashMap update_folder API (color/icon only; view_mode dropped, L65-75). build_opml_document tree assembly is correct (unlike folders.rs it nests bottom-up via .rev() on position-sorted list \u2014 still order-fragile for same-position folders but works). Export side is fine."
+  },
+  {
+   "path": "src-tauri/src/commands/settings.rs",
+   "verdict": "refactor",
+   "notes": "Path traversal: delete_custom_theme (L108-111) and save_custom_theme (L86) join unvalidated theme_id/theme.id into a path \u2014 theme_id='../../foo' escapes the themes dir (delete guarded only against builtin names). update_settings performs zero validation: fetch_concurrency=0 makes buffer_unordered(0) hang, refresh_interval=0 makes the (would-be) background loop spin hot, obsidian_vault_path unchecked. Sync std::fs::create_dir_all in async fn (L83). File written before the in-memory lock is taken \u2014 concurrent updates can leave disk/memory divergent."
+  },
+  {
+   "path": "src-tauri/src/commands/podcast.rs",
+   "verdict": "refactor",
+   "notes": "download_episode (L69-76) buffers the ENTIRE episode via response.bytes() \u2014 a 200MB file costs 200MB RAM; no streaming to disk, no progress events, no cancellation, new untimed client per download. Extension guessing by substring on mime (L56-64) defaults to mp3. delete_download trusts local_path from DB and removes it (OK since machine-written, but no canonicalization). progress commands are fine thin wrappers."
+  },
+  {
+   "path": "src-tauri/src/commands/reddit.rs",
+   "verdict": "keep",
+   "notes": "URL parsing helpers are decent and tested (r/sub shorthand, old.reddit, post extraction). fetch_reddit_thread passes unvalidated subreddit/post_id straight through to platform::reddit (see below). Regexes recompiled per call \u2014 trivial. Keep with input validation added."
+  },
+  {
+   "path": "src-tauri/src/commands/youtube.rs",
+   "verdict": "keep",
+   "notes": "extract_youtube_info covers watch/short/embed/channel/@handle/playlist formats and is the best-tested command module. Defects: check_ytdlp_version is a sync command running a blocking subprocess (blocks the invoking thread); fetch_youtube_metadata/comments forward arbitrary URLs to yt-dlp with no validation that it is a YouTube URL. Keep the parser, harden the fetch entry points."
+  },
+  {
+   "path": "src-tauri/src/core/feeds/parser.rs",
+   "verdict": "refactor",
+   "notes": "Correct feed-rs usage, solid tests for RSS+Atom. Critical gap: content_text is NEVER populated (parser sets only content_html), and nothing else fills it \u2014 so the FTS index's main column is always NULL and 'full-text search' actually searches title+author only. Also: no sanitize/extract at ingest; site_url = links.first() picks the Atom rel=self link on many feeds; published_at has no fallback to updated; detect_view_mode is substring matching (any URL containing 'podcast' anywhere flips the view). validate_feed_url is correct (scheme+host check)."
+  },
+  {
+   "path": "src-tauri/src/core/feeds/opml.rs",
+   "verdict": "keep",
+   "notes": "Hand-rolled quick-xml state machine that round-trips standard OPML plus curio:* extension attributes; both directions tested with realistic fixtures; nested Start/Empty/End handling is correct. Minor: namespace matched by literal 'curio:' prefix string (breaks if a producer binds another prefix); head/title extraction assumes immediate text event. One of the keepable modules."
+  },
+  {
+   "path": "src-tauri/src/core/content/sanitizer.rs",
+   "verdict": "keep",
+   "notes": "The ammonia configuration itself is good \u2014 sensible tag/attr allowlist, http/https/mailto schemes only, forced rel=noopener-noreferrer, well-tested against script/style/onclick/javascript: vectors. BUT it is dead code: grep confirms sanitize_html/strip_html/extract_text are called from NOWHERE in the ingest, storage, or command paths \u2014 see the XSS defect. Also truncate_text (L159) byte-slices &text[..max_len] \u2192 panics on any multibyte UTF-8 boundary (any non-English feed). Keep the module, wire it into ingest, fix truncation to char_indices."
+  },
+  {
+   "path": "src-tauri/src/core/content/markdown.rs",
+   "verdict": "rewrite",
+   "notes": "The vault-export cornerstone, built on regex. html_to_markdown (L73-178) uses (.*?) patterns WITHOUT (?s): dot doesn't match newlines, so any element whose content spans lines \u2014 most real <p>, every real <pre><code> block \u2014 fails to match, survives to the final r'<[^>]+>' strip-all pass (L160), and its structure is destroyed (code blocks flattened into prose). Nested inline tags break; entities hand-decoded from a 13-entry table; regexes recompiled per call per pattern. ImageExportMode::LocalCopy/Base64Embed silently behave as Inline; LinkStyle::Reference silently falls back to inline (L109-117). The htmd crate is declared in Cargo.toml and referenced only in a comment ('For now, implement a simple converter'). escape_yaml is minimal but OK; generate_filename has no collision handling; sanitize_filename mixes byte-len check with char truncation. Rebuild on htmd or a DOM walk with real-world fixture tests."
+  },
+  {
+   "path": "src-tauri/src/core/models/ (article.rs, feed.rs, folder.rs, settings.rs)",
+   "verdict": "keep",
+   "notes": "Clean, well-tested serde models with sensible helpers \u2014 the strongest layer. Issues to fix in place: Theme/ThemeColors/ThemeTypography/ThemeSpacing/ThemeEffects defined TWICE (settings.rs L163-225 duplicates core/themes.rs \u2014 commands use the themes.rs one); ~10 Settings fields are aspirational no-ops with zero backend implementation (article_retention_days, image_cache_days/max_gb, podcast_auto_download/auto_cleanup, notifications_enabled/sound, ytdlp_auto_update, mark_read_on_scroll is frontend-only); ArticleFilter promises filters storage ignores; ts-rs feature exists but no #[ts(export)] anywhere \u2014 frontend TS types are hand-duplicated and can drift."
+  },
+  {
+   "path": "src-tauri/src/core/themes.rs",
+   "verdict": "keep",
+   "notes": "464 lines of static theme data (10 themes: light/dark/nord/4-catppuccin/2-solarized/dracula) with shared default typography/spacing helpers. Fine as-is, but consider moving to JSON assets so themes don't require recompilation, and delete the duplicate struct set in models/settings.rs."
+  },
+  {
+   "path": "src-tauri/src/platform/reddit/mod.rs",
+   "verdict": "refactor",
+   "notes": "fetch_thread: new untimed reqwest::Client per call; subreddit/post_id interpolated into the URL unvalidated (subreddit='../..' style path injection into reddit.com requests); handles 429 Retry-After (good). Parsing via direct serde_json::Value indexing with unwrap_or_default (silently produces empty posts on schema drift) instead of typed structs; 'more comments' continuation nodes silently dropped, hard 500-comment cap; body_html returned raw (raw_json=1 \u2192 real HTML) and rendered by the frontend via {@html} \u2014 part of the XSS surface."
+  },
+  {
+   "path": "src-tauri/src/platform/youtube/mod.rs",
+   "verdict": "refactor",
+   "notes": "fetch_metadata/fetch_comments correctly use spawn_blocking around the yt-dlp subprocess \u2014 the one place async hygiene is right. Defects: video_url passed positionally to yt-dlp with no '--' separator and no URL validation \u2014 a 'url' starting with '-' is argument injection into yt-dlp (flags like --exec exist: potential RCE from a crafted feed link); ytdlp_path falls back to bare PATH lookup (hijackable); get_version() is sync Command::output. fetch_comments re-downloads full metadata JSON just to read comments. Typed extraction is verbose but sound."
+  },
+  {
+   "path": "src-tauri/src/platform/podcast/mod.rs",
+   "verdict": "drop",
+   "notes": "PodcastEpisode/PlaybackState/PlaybackQueue are pure in-memory structs used by NOTHING \u2014 no command references them, no persistence, playback lives in the frontend <audio> element. Tests test the dead code. Delete, or replace with a persisted queue table if the PRD's queue feature is real."
+  },
+  {
+   "path": "src-tauri/src/services/refresh.rs",
+   "verdict": "refactor",
+   "notes": "Ironically the best-engineered pipeline in the repo \u2014 Client with 30s timeout + UA, buffer_unordered(concurrency) from settings, conditional GET, per-feed error isolation, broadcast shutdown \u2014 and it is COMPLETELY UNWIRED: grep confirms RefreshService is constructed nowhere; main.rs never starts it, so the app has NO background refresh at all and users get the sequential command instead. It also duplicates refresh_feed's logic (~150 lines) and still calls sync db methods from async (inherits the storage problem), and its error paths clobber etag/last_modified like the command does. Fix, dedupe, and make it the single refresh path."
+  },
+  {
+   "path": "src-tauri/src/services/favicon.rs",
+   "verdict": "rewrite",
+   "notes": "Also fully unwired dead code (no caller). Line 40: futures::executor::block_on(self.try_html_link(...)) INSIDE an async fn on the tokio runtime \u2014 blocks a worker thread mid-poll on a reqwest future whose wakeups depend on the tokio driver; deadlock-prone and defeats the async chain (written to force .or_else() to typecheck). Google favicon fallback silently leaks every subscribed domain to google.com \u2014 needs to be opt-in for a privacy-positioned OSS reader. Fetch-strategy order (ico \u2192 HTML link \u2192 Google) is sensible; keep the strategy, rewrite the code."
+  },
+  {
+   "path": "src-tauri/src/services/cache.rs",
+   "verdict": "refactor",
+   "notes": "Workable LRU-by-mtime disk cache. get_stats iterates icons/thumbnails/images but NOT avatars, while clear() and enforce_size_limit() include avatars \u2014 stats undercount and the size limit is enforced against a wrong total. All sync std::fs called from async commands. cleanup_older_than/enforce_size_limit are never invoked by anything (settings fields image_cache_days/max_gb are no-ops). Zero tests. store() writes key+ext without atomicity."
+  },
+  {
+   "path": "src-tauri/src/main.rs + lib.rs",
+   "verdict": "keep",
+   "notes": "Standard Tauri 2 wiring, tracing init, 46 commands registered. Fixes needed: AppState::new(...).expect() \u2192 panic-on-first-launch failure with no user-visible error; data (curio.db, downloads, cache) lives in config_dir (~/.config/curio-reader) instead of data_dir; no RefreshService start; duplicate dirs_config_dir definition under cfg(not(any(...))) is unreachable on all supported targets. lib.rs is a clean 18-line facade."
+  },
+  {
+   "path": "src-tauri/Cargo.toml",
+   "verdict": "refactor",
+   "notes": "Good library choices (feed-rs, ammonia, rusqlite bundled, quick-xml, thiserror). Dead weight: htmd (comment-only), mockall, tokio-test, pretty_assertions barely, image (grep shows no use), ts-rs feature never exercised. tokio features='full' overkill. Release profile is well-tuned (lto, strip, panic=abort). Separately: the branch commits a 33MB yt-dlp aarch64-apple-darwin binary at src-tauri/bin/ into git \u2014 unacceptable for an OSS repo (repo bloat, single-platform, yt-dlp is Unlicense but binary vendoring needs a download-at-build/first-run story instead)."
+  }
+ ],
+ "strengths": [
+  "Layering is genuinely clean: commands are thin IPC wrappers delegating to core (pure logic) / platform (integrations) / services / storage \u2014 the module skeleton is the right shape for the production rewrite",
+  "error.rs three-tier design (CoreError/InfraError/CommandError) with serializable error codes + recoverable flags is a production-quality IPC error contract, fully tested",
+  "SQLite schema is well-designed: proper FKs with ON DELETE CASCADE/SET NULL, FTS5 external-content table with the correct delete-trigger protocol, sensible composite indexes \u2014 the schema survives; only the access layer doesn't",
+  "services/refresh.rs demonstrates the correct fetch architecture (bounded buffer_unordered concurrency, 30s timeouts, conditional GET, per-feed error isolation, graceful shutdown) \u2014 it just was never wired in",
+  "Conditional GET (ETag/If-Modified-Since) handled in both refresh paths including 304 short-circuit \u2014 rare to see done at all in first implementations",
+  "sanitizer.rs ammonia allowlist is thoughtfully chosen (scheme restriction, forced noopener, per-tag attribute allowlists) and well-tested \u2014 it needs wiring, not redesign",
+  "OPML import/export round-trips a curio: extension namespace (viewMode, tags, refreshInterval, notify) \u2014 a real differentiator feature, correctly implemented and tested both directions",
+  "Model layer (Article/Feed/Folder/Settings + filter/pagination types) is clean serde structs mapping 1:1 onto a future ts-rs-generated TS contract",
+  "139 fast deterministic unit tests passing in 0.06s form a real regression floor for the parts they cover (models, parsers, error conversions, DB CRUD happy paths)",
+  "Dependency selection is correct across the board (feed-rs, ammonia, rusqlite+bundled, quick-xml, scraper, thiserror) \u2014 no exotic or abandoned foundations",
+  "yt-dlp subprocess calls correctly use spawn_blocking with typed JSON extraction \u2014 the one async-hygiene bright spot"
+ ],
+ "defects": [
+  "CRITICAL stored-XSS chain: parser stores feed HTML raw (parser.rs L54-56), sanitize_html is called nowhere in the codebase, and the frontend renders {@html article.content_html} (ReaderPane.svelte L93), {@html comment.body_html} and {@html thread.post.selftext_html} (Reddit views, with raw_json=1 so it IS live HTML) \u2014 any subscribed feed executes JS inside the Tauri webview, which can invoke IPC commands including export_to_markdown(destination_path=anywhere) for arbitrary file write",
+  "Full-text search is a silent no-op over content: content_text is never populated by any code path (only ever None from Article::new), so the FTS5 index's content column is always NULL \u2014 search matches only title/author; no test exists that would catch this",
+  "Background refresh does not exist: RefreshService (the only concurrent, timeout-guarded fetch path) is never constructed; the shipped refresh_all_feeds command is sequential (TODO in code) using a per-call reqwest::Client with NO timeout, no size cap, no redirect limit \u2014 one dead feed hangs the command indefinitely; at 500 feeds a manual refresh takes minutes",
+  "Storage concurrency model fails at scale: single Arc<Mutex<Connection>>, no WAL, no busy_timeout, sync SQLite executed on async runtime threads \u2014 every DB call blocks a tokio worker and serializes globally; a refresh writing articles blocks all UI reads (50k-article workload will visibly freeze the app)",
+  "upsert_articles has no transaction and no ON CONFLICT: per-article SELECT-then-INSERT/UPDATE = 2N statements and N autocommit fsyncs per feed refresh; media attachments are never updated for existing articles; FTS articles_au trigger additionally rewrites the search index on every is_read flip",
+  "html_to_markdown (the vault-export engine) is regex-based with (.*?) lacking (?s): any multi-line paragraph/pre/code block fails to convert and is destroyed by the final strip-all-tags pass \u2014 real-world article exports to the Knowledge-Plane vault will be mangled; htmd is declared in Cargo.toml and used only in a comment; ImageExportMode::LocalCopy/Base64Embed and LinkStyle::Reference are silent no-ops",
+  "get_folder_tree silently drops folder subtrees: the re-parenting loop (folders.rs L82-91) is not topologically ordered, so a child whose parent was already moved into a grandparent disappears from the returned tree \u2014 order-dependent, untested, guaranteed at \u22653 nesting levels",
+  "truncate_text panics on non-ASCII: &text[..max_len] byte-slice (sanitizer.rs L159) hits a UTF-8 char boundary on any non-English text",
+  "Path traversal in theme commands: save_custom_theme/delete_custom_theme join unvalidated theme.id/theme_id into config paths ('../../x' escapes); export commands accept arbitrary absolute destination paths from IPC",
+  "yt-dlp argument injection: video_url passed positionally with no '--' separator and no YouTube-URL validation \u2014 a crafted link starting with '-' injects yt-dlp flags (e.g. --exec \u2192 command execution); ytdlp_path also falls back to bare PATH lookup",
+  "futures::executor::block_on inside async fn (favicon.rs L40) blocks a tokio worker mid-poll on a reqwest future \u2014 deadlock-prone; the whole FaviconService plus ImageCache.cleanup_older_than/enforce_size_limit and platform/podcast queue are unwired dead code (three of five 'services' never run)",
+  "Error-path data loss: refresh failure calls update_feed_fetch(id, None, None, err) clobbering stored etag/last_modified, so the next fetch after any transient error is unconditional; row mappers use filter_map(r.ok()) and Uuid::parse_str().unwrap_or_default() \u2014 corrupt rows silently become nil-UUID records instead of surfacing",
+  "Settings are unenforced promises: article_retention_days, image_cache_days/max_gb, podcast_auto_download/auto_cleanup_days, notifications_enabled, ytdlp_auto_update have zero backend implementation; update_settings validates nothing (fetch_concurrency=0 hangs buffer_unordered, refresh_interval=0 spins); settings load only when the frontend remembers to call load_settings",
+  "ArticleFilter contract violation: folder_id, tags, search_query, published_after/published_before accepted over IPC and silently ignored by get_articles",
+  "Date format schizophrenia: SQL DEFAULT datetime('now') writes 'YYYY-MM-DD HH:MM:SS' while Rust writes RFC3339 with 'T' \u2014 string ORDER BY and parse both break across formats; get_schema_version errors on an existing-but-empty schema_version table; migration v1 not transactional",
+  "import_opml is O(n\u00b2) (full get_feeds() scan per outline) and ignores its _merge parameter; podcast download_episode buffers entire episodes in RAM with no streaming/progress/cancellation",
+  "Repo hygiene for OSS: 33MB single-platform yt-dlp binary committed to git; four unused dependencies (htmd, mockall, tokio-test, image); ts-rs feature present but no type export \u2014 frontend TS types are hand-duplicated and already drifting; duplicate Theme struct definitions in core/themes.rs and models/settings.rs",
+  "No SSRF/resource guardrails on outbound fetches (feed URLs, favicons, podcast enclosures): no private-IP/localhost policy, no response size limits, no redirect caps \u2014 worth an explicit policy layer for an OSS product whose core function is fetching arbitrary URLs",
+  "Origin/claude/fix-tauri-frontend-dist-Cfqby branch: adds exactly one commit (ee90ef1) on an older base (58e6834, i.e. it predates the checked-out branch's final test-fix commit 87189ce): CI-only fix reordering the clippy job to build the frontend first + 5 tiny placeholder icon files, because tauri::generate_context! validates frontendDist and icons at compile time \u2014 the idea is worth folding into any new CI, the branch itself is otherwise superseded"
+ ],
+ "test_reality": "139 unit tests, all passing in 0.06s \u2014 real but shallow. What they actually cover: pure model logic (constructors, toggles, pagination math), error-type conversions/serialization, DB CRUD happy paths against in-memory SQLite (insert/get/update/delete feed, upsert count semantics, mark read/unread, one filter case), migration idempotency, RSS/Atom/OPML parsing with small clean fixtures, URL parsing helpers (YouTube/Reddit \u2014 genuinely thorough), ammonia sanitizer behavior (of a function production never calls), and regex markdown conversion on single-line snippets only. What they do NOT cover, despite the branch's TDD branding: not one of the 46 Tauri commands (every commands/* test module is an empty stub reading 'Integration tests would go here'); the entire refresh pipeline \u2014 zero HTTP mocking even though mockall and tokio-test are declared dev-dependencies and never imported; FTS search (no test exists \u2014 one would have exposed that content_text is never populated and search is title/author-only); get_folder_tree (would have exposed the vanishing-subtree bug); multi-line HTML\u2192Markdown (would have exposed the missing (?s) regex flag); non-ASCII truncation (panics); RefreshService/FaviconService/ImageCache (zero tests, mostly dead code); export file-writing, collisions, and path handling; concurrency, transactions, or any behavior under load. Net: the tests validate the code that was easy to write, not the code that carries risk \u2014 the validation report's 'Phase-1 ~70%' reads as feature-file-exists coverage, not working-behavior coverage."
+}

@@ -1,0 +1,150 @@
+{
+ "competitors": [
+  {
+   "name": "NetNewsWire",
+   "model": "Native desktop (macOS) + iOS; MIT open source; free, donation/volunteer-driven",
+   "strengths": "Gold standard for free native Apple RSS; fast, polished, mature (v7 in 2026); syncs as a CLIENT to Feedbin/Feedly/Inoreader/iCloud/GReader-API servers \u2014 the proof that 'desktop app + pluggable sync backends' is a viable OSS architecture; huge trust/brand in the RSS community",
+   "weaknesses": "Apple-only (no Windows/Linux); iCloud sync is notoriously slow/broken (multi-hour initial syncs, state-sync failures tracked in issues #3901/#4024); plain reading experience \u2014 no rich per-platform views, no read-later pipeline, no export-to-notes story, minimal filtering/rules"
+  },
+  {
+   "name": "Miniflux",
+   "model": "Self-hosted web server (Go); Apache-2.0; free OSS, paid hosted option ($15/yr)",
+   "strengths": "Minimalist, extremely fast, low-memory, rock-solid; exposes Fever + Google Reader APIs so native mobile clients (Reeder Classic, Capy Reader, FeedMe, NewsFlash) attach cleanly; excellent docs; the default answer for 'self-hosted RSS' among engineers",
+   "weaknesses": "Requires PostgreSQL (no SQLite), so not zero-ops; single maintainer; deliberately feature-sparse UI \u2014 no rich media views, weak read-later, no notes/export pipeline; server ops burden is exactly what local-first users don't want"
+  },
+  {
+   "name": "FreshRSS",
+   "model": "Self-hosted web server (PHP); AGPL-3.0; free OSS",
+   "strengths": "Large community, extensions/themes, multi-user, SQLite-or-Postgres, scales to many feeds; best-in-class GReader-API server implementation \u2014 the de facto sync hub the OSS mobile-client ecosystem builds against; web scraping/XPath for full-content",
+   "weaknesses": "Dated PHP web UI; power features live in extensions of varying quality; still a server to run; reading experience (typography, media, read-later) far behind Readwise/Reeder; no markdown/notes export"
+  },
+  {
+   "name": "Feedbin",
+   "model": "Hosted web service + source on GitHub (MIT, Rails) but hostile to self-hosting in practice; $5/mo single tier",
+   "strengths": "Beloved simple pricing, clean UI; best-known newsletter-to-feed email address feature; strong API that many native clients (NetNewsWire, Unread, Reeder Classic) sync against; podcast/YouTube feed support",
+   "weaknesses": "Cloud dependency \u2014 your archive lives on their servers; self-hosting is documented-but-painful (multi-service Rails stack); no offline desktop app; no vault/notes export beyond basic integrations"
+  },
+  {
+   "name": "Inoreader",
+   "model": "Hosted web + mobile apps; proprietary; freemium, Pro ~$90/yr, ad-supported free tier",
+   "strengths": "The power-user feature ceiling: rules/filters/pipelines, dedup, search operators, newsletter ingestion, annotations, offline mobile, 150-feed free tier; widely recommended 'best for power users' in 2026 roundups",
+   "weaknesses": "Feature-gating creep \u2014 'most worthwhile features gated behind the most expensive plan'; ads on free; proprietary silo with data on their servers; heavy/cluttered UI; privacy posture unattractive to the self-host crowd"
+  },
+  {
+   "name": "Readwise Reader",
+   "model": "Hosted web + mobile + desktop wrappers; proprietary; $9.99/mo annual ($120/yr)",
+   "strengths": "The benchmark for read-it-later + PKM: RSS + newsletters + PDFs + EPUBs + YouTube-with-transcript in one inbox, highlights, Ghostreader AI, spaced-repetition resurfacing, and the category-best OFFICIAL Obsidian export plugin (Jinja2-templated markdown, auto-sync) \u2014 it proved 'reading \u2192 markdown vault' is a killer workflow",
+   "weaknesses": "Expensive for casual users, and price is the #1 complaint; entirely cloud-hosted (your library dies with the company \u2014 the exact fear Omnivore/Pocket validated); AI credits exhaust; closed source; no local-first mode"
+  },
+  {
+   "name": "Folo (follow.is, RSSNext)",
+   "model": "Desktop (Electron) + mobile + web; client AGPL-3.0 (with icon-license exception) but backend is a proprietary hosted service requiring an account; VC/crypto-funded (RSS3 ecosystem, $POWER token economy)",
+   "strengths": "36k+ GitHub stars \u2014 proof of massive demand for a modern 'everything-is-a-feed' reader; beautiful UI; per-media view modes (articles/social/pictures/video/audio) \u2014 the closest existing product to Curio's rich-views concept; AI timeline summaries/digests; MCP server for agents",
+   "weaknesses": "'Open source' client, closed backend \u2014 unusable without their cloud; crypto token incentives and tracker reports poison trust with exactly the privacy/self-host audience; Electron heft; data not locally owned; longevity tied to token economics"
+  },
+  {
+   "name": "Omnivore (dead) + forks",
+   "model": "Was: hosted + AGPL-3.0 OSS read-later; acquihired by ElevenLabs Nov 2024, service killed with ~2 weeks notice, user data deleted",
+   "strengths": "Had the best free OSS read-later UX, labels, highlights, newsletters, and a popular Obsidian sync plugin; its death is the market-shaping event \u2014 thousands of displaced users migrated to Karakeep/Readeck/Wallabag/Readwise and now select for 'can't be taken away from me'",
+   "weaknesses": "Self-hosting the corpse is miserable (PostgreSQL + Elasticsearch + microservices); community fork (omnivore.work) exists but momentum scattered; lesson for Curio: VC-free governance, boring deps, data-on-disk, and an exit-friendly export are FEATURES to advertise"
+  },
+  {
+   "name": "Karakeep (ex-Hoarder)",
+   "model": "Self-hosted web server (Docker, Next.js) + mobile apps + browser extension; AGPL-3.0; free OSS + new paid cloud beta",
+   "strengths": "Fastest-growing Omnivore/Pocket successor (~25k stars); bookmark-everything (links/notes/images/PDFs); AI auto-tagging via OpenAI OR local Ollama \u2014 the template for optional-BYO-AI done right; full-text search; one-click capture",
+   "weaknesses": "It's a bookmark pile, not a reader \u2014 no feed triage workflow, weak RSS; archives open live URL by default; logged-in pages archive poorly; Docker setup intimidates non-technical users; no markdown-vault export contract"
+  },
+  {
+   "name": "Readeck",
+   "model": "Self-hosted web server (single Go binary + SQLite); AGPL-3.0; free OSS",
+   "strengths": "Simplicity darling of 2025-26 migrations: one binary, SQLite, fast on a Pi; highlights, e-book (EPUB/Kobo) export, in-app archival incl. video transcripts; KOReader plugin emerging \u2014 the e-ink angle",
+   "weaknesses": "Small community (~1k stars vs Wallabag's 12.6k); thin third-party ecosystem and API surface; no RSS aggregation (read-later only); no notes/vault pipeline"
+  },
+  {
+   "name": "Wallabag",
+   "model": "Self-hosted web (PHP/Symfony) + mobile apps; MIT; free OSS + wallabag.it hosted (~\u20ac11/yr)",
+   "strengths": "13 years old, most-integrated self-hosted read-later: browser extensions, mobile apps, KOReader/e-ink plugins, RSS-reader hooks; annotation support; the safe default Omnivore replacement",
+   "weaknesses": "Aging UX; parser quality trails Readability-class extractors; heavier PHP stack; users increasingly defect to Readeck/Karakeep for speed and polish; no markdown-vault export, no feed reading"
+  },
+  {
+   "name": "Reeder (new) / Reeder Classic",
+   "model": "Native Apple-only (macOS/iOS); proprietary; new Reeder is subscription, Classic is one-time",
+   "strengths": "New Reeder is the mainstream 'unified timeline' experiment: RSS + YouTube + Reddit + Mastodon + Bluesky + podcasts + comics in one app with iCloud position sync \u2014 validates Curio's multi-platform-views bet; gorgeous design; Classic remains the best GReader/Fever/Miniflux client on Apple",
+   "weaknesses": "New version removed unread counts and third-party sync (iCloud only), alienating power users ('feels like a social app, not a tool'); no feed folders; Apple-only; closed source; the backlash is a published map of what power users refuse to give up: unread counts, folders, sync-service choice"
+  },
+  {
+   "name": "Unread",
+   "model": "Native Apple-only (iOS/macOS); proprietary; freemium + $29.99/yr premium",
+   "strengths": "Best gesture-driven reading aesthetic on iOS; syncs with Feedbin/Feedly/Fever/Inoreader/NewsBlur + own Unread Cloud; webpage-text pre-caching; special Reddit link-post handling (2026)",
+   "weaknesses": "Reading-only client, not an aggregation brain; Apple-only; subscription for basics like caching; small feature surface for 300+ feed triage"
+  },
+  {
+   "name": "Feedly",
+   "model": "Hosted web + mobile; proprietary; freemium, Pro+ $99/yr, pivoted to enterprise threat-intel",
+   "strengths": "Smoothest onboarding, biggest brand, 100-source free tier, AI 'Leo' filtering; enterprise revenue keeps it alive",
+   "weaknesses": "2026 consensus: optimizing for enterprise intelligence, not readers; search paywalled; power features expensive; notorious for tracking/ads posture; individual power users are actively migrating off \u2014 a harvestable user base"
+  },
+  {
+   "name": "NewsBlur",
+   "model": "Hosted + fully self-hostable (Docker, whole stack incl. mobile sync); MIT; $36/yr hosted, free tier",
+   "strengths": "Only major service that is MIT-licensed end-to-end incl. iOS/Android apps; 'intelligence training' (per-feed like/dislike classifiers) is the original local ranking model; original-site view; 15 years of survival without VC",
+   "weaknesses": "Dated UI; heavy multi-service self-host stack (MongoDB, Postgres, Redis, Elasticsearch); training model feels ancient next to LLM-era expectations; niche mindshare"
+  },
+  {
+   "name": "OSS desktop field: Fluent Reader / Lettura / NewsFlash / papr",
+   "model": "Fluent Reader: Electron, BSD-3, effectively stale; Lettura: Tauri, free OSS, low-activity solo project; NewsFlash: GTK/Rust for Linux, GPL, active GReader/Miniflux/FreshRSS client; papr (2026): native + agent-facing CLI for AI-agent feed triage, OSS",
+   "strengths": "Collectively prove the demand for a cross-platform desktop OSS reader and that Tauri works for it; NewsFlash shows client-to-self-hosted-server is the winning sync pattern on Linux; papr shows the emerging 'agent-readable feeds' niche (CLI/MCP)",
+   "weaknesses": "This is the graveyard Curio must not join: solo-maintainer stalls, shallow feature sets, no read-later pipeline, no export story, no mobile answer \u2014 there is NO healthy, actively-maintained, power-user, cross-platform OSS desktop reader in 2026. The seat is empty"
+  },
+  {
+   "name": "OSS mobile field: Capy Reader / ReadYou (Android), + Slax Reader (web)",
+   "model": "Capy Reader: Android, OSS, free, syncs to Feedbin/FreshRSS/Miniflux via GReader API (active, June 2026 releases); ReadYou: Android Material You, OSS, local-focused; Slax Reader: Apache-2.0 web read-later, 'Omnivore but alive', AI outlines",
+   "strengths": "A healthy OSS mobile-client ecosystem already exists AGAINST the GReader API \u2014 Curio doesn't have to build mobile to have a mobile story, it has to speak the protocol",
+   "weaknesses": "None of them are Curio competitors head-on; they are complements. Slax is the closest new read-later competitor but is web/cloud-first"
+  }
+ ],
+ "table_stakes": [
+  "OPML import/export with folder structure preserved, round-trip safe; feed autodiscovery from a bare URL; favicon fetch \u2014 first-run must ingest a 500-feed OPML from Feedly/Inoreader/FreshRSS without loss",
+  "Full-text extraction for truncated feeds (Readability-class) with HTML sanitization, plus 'original site' fallback view \u2014 users assume one keystroke gets the whole article",
+  "Fast keyboard-first triage: j/k navigation, mark-read semantics (item/feed/folder/all-older-than), unread counts (the new-Reeder backlash proves removing them is disqualifying), saved filters/smart views",
+  "Full-text search over the entire local archive (SQLite FTS5 tier), instant at 100k+ items; performance at 300\u20131000 feeds is assumed, not a feature",
+  "Read-later queue distinct from stars, plus tags/labels; read/unread/star state that never gets lost",
+  "Filters and rules: keyword mute, auto-mark-read, auto-tag, per-feed refresh intervals \u2014 high-volume users cannot function without noise controls (Inoreader set the bar)",
+  "Sync/mobile answer \u2014 the #1 churn driver for desktop-only readers: in 2026 users assume read-state follows them to phone and couch; minimum credible answer is first-class GReader-API + Fever + Miniflux-API CLIENT mode so an existing FreshRSS/Miniflux/Feedbin account is the sync brain and Capy Reader/Reeder Classic/Unread cover mobile; standalone-local mode remains for no-server users",
+  "Offline-complete reading: all article text and images cached locally; the app must be fully usable on a plane",
+  "Polite fetching: conditional GET (ETag/Last-Modified), per-host rate limits, gzip, good User-Agent, dead-feed and permanent-redirect handling with a feed-health surface",
+  "Newsletter ingestion path (email-to-feed) \u2014 Feedbin/Inoreader/Readwise made this assumed for the read-later audience; even a v2 IMAP-pull answer must be on the roadmap",
+  "Podcast enclosures handled at least as playable/downloadable items; YouTube channel feeds render watchably",
+  "Total data portability advertised loudly: one-command export of everything (OPML + articles + state), documented schema \u2014 post-Omnivore/post-Pocket, 'you can leave anytime' is emotionally table stakes for this audience",
+  "Dark mode, typography/measure controls, and a settings surface that respects power users; system-native feel on macOS/Windows/Linux",
+  "Browser extension or share/protocol handler to subscribe-to-this-page and save-this-URL from the browser",
+  "Import from the dead and dying: Pocket export files, Omnivore archives, Instapaper, Readwise CSV \u2014 switching-cost killers that every successful successor (Karakeep, Readeck) shipped"
+ ],
+ "differentiation": [
+  "The empty seat: there is no healthy, actively maintained, cross-platform, power-user OSS desktop reader in 2026 \u2014 NetNewsWire is Apple-only, Fluent Reader is stale Electron, Lettura is a low-activity solo Tauri project, NewsFlash is Linux/GTK-niche. A polished Tauri app on macOS+Windows+Linux with a 1000-feed triage workflow wins this category by showing up and staying maintained",
+  "Markdown-vault export as a first-class product contract, not a plugin: deterministic CommonMark + YAML frontmatter, user-templated, incremental, to any folder (Obsidian/Logseq/plain git repo). The proprietary benchmark is Readwise's $120/yr Obsidian pipeline; the OSS field has only toy Obsidian plugins. 'Your reading becomes your notes, on your disk, in a format that outlives this app' is simultaneously the Knowledge-Plane contract and the strongest post-Omnivore marketing line in the space",
+  "Reading-behavior event log as an open data product: append-only JSONL of read/star/read-later/dwell events with a documented schema. No competitor exposes reading behavior as user-owned data; it powers PKM pipelines, interest models, and agent workflows, and it's near-free to build on top of the existing SQLite layer",
+  "Per-platform rich views without accounts or API keys: Reddit thread view (public JSON), YouTube grid + player + yt-dlp metadata, podcast player/queue/downloads. Only new-Reeder (proprietary, Apple-only, dumbed-down sync) and Folo (closed backend, crypto-tainted) attempt this; an OSS, local, no-account version of 'everything is a feed' is an open niche with proven demand (Folo's 36k stars)",
+  "Trust positioning the incumbents can't copy: local-first, no account, no server required, no telemetry, SQLite file you can open yourself, MIT/Apache-class licensing, boring dependencies. Post-Omnivore/Pocket/Feedly-enterprise, 'can't be enshittified, can't be acquihired away' is a rational purchasing criterion \u2014 make longevity architecture (data on disk, exportable everything) the headline",
+  "Sync pragmatism instead of sync denial: ship GReader/Fever/Miniflux CLIENT mode so Curio is the desktop cockpit over the user's existing FreshRSS/Miniflux/Feedbin, inheriting their mobile apps \u2014 honest framing: Curio doesn't solve mobile in v1, it federates into the ecosystem that already did. Optionally later: file-based state sync (CRDT journal over Syncthing/iCloud Drive/NFS) for the serverless crowd, and vault-promotion-as-sync for the KP pattern",
+  "Rust core as a reusable library + headless CLI: the fetch/normalize/extract/export pipeline as a crate powering the GUI, a CLI (cron-able fetch/export), and an MCP server \u2014 riding the 2026 'agent-readable feeds' wave (papr, Folo MCP) that no established reader serves in an open, local way",
+  "Performance as a feature: Tauri + Rust + SQLite FTS5 can make 100k-item search and cold-start instant where Electron (Folo, Fluent Reader) and web UIs (FreshRSS) visibly lag \u2014 benchmark it publicly at 1000 feeds"
+ ],
+ "above_beyond_ideas": [
+  "Vault export engine (the flagship): per-feed/per-tag routing rules, Jinja-style templates for frontmatter+body, stable dedup keys/slugs, incremental sync with a manifest, archived images copied as vault-relative assets, one-keystroke 'promote to vault' in the reader, optional auto-git-commit \u2014 generic 'markdown vault' integration that any Obsidian/Logseq/git user configures, and the Knowledge Plane consumes unmodified",
+  "Open events stream: JSONL event log (subscribed/read/starred/read-later/promoted/highlighted/dwell-seconds, article URL+ids+ts) with a versioned published schema, plus `curio events tail` \u2014 the raw material for interest models, quantified-self dashboards, and spaced-resurfacing tools",
+  "curio-core crate + `curio` CLI + MCP server: headless fetch/query/export against the same SQLite; agents can triage feeds, search the archive, and pull markdown \u2014 the first power reader designed to be driven by both a human and their agent",
+  "Sync-service client mode at launch: log into FreshRSS/Miniflux/Feedbin/Inoreader via GReader/Fever/native APIs, two-way read/star state \u2014 instantly gives Curio users mobile (Capy Reader, Reeder Classic, Unread) and kills the #1 switching objection",
+  "Local rules + trainable ranking: keyword/regex/author filters, auto-tag, and a NewsBlur-style like/dislike per-feed scorer running locally (simple classifier, no cloud) that sorts the triage view by predicted interest; expose the model's features so it's inspectable",
+  "Strictly-optional BYO-AI (Karakeep pattern): point at Ollama or any OpenAI-compatible endpoint for summaries, auto-tagging, daily digest note exported into the vault; zero AI calls unless configured, works fully without it",
+  "Rich views v1: Reddit card feed + full comment threads (public JSON, no auth), YouTube channel grid + embedded player + metadata/transcripts via bundled yt-dlp (no API key), podcast player with queue/downloads/position-tracking (positions land in the event log); v2: Mastodon/Bluesky public feeds, comics mode",
+  "Link-rot-proof archive: content-addressed local snapshot (sanitized readable HTML + images) for starred/read-later items, so saved articles survive site death; 'archive view' is the default for saved items (fixing Karakeep's top complaint)",
+  "Local-first newsletter ingestion: poll an IMAP folder / plus-address in the user's own mailbox and convert emails to feed items \u2014 nobody offers newsletter-to-feed without a cloud middleman",
+  "E-reader lane: batch the read-later queue to EPUB / send-to-Kobo (Readeck precedent) \u2014 cheap feature, disproportionate loyalty from the e-ink crowd",
+  "Switcher's toolkit: importers for Pocket exports, Omnivore archives, Instapaper CSV, Readwise CSV, Feedly/Inoreader OPML+starred, plus a migration doc per source \u2014 with 'export everything back out' as the first documented command (`curio export --all`)",
+  "Highlights that live in the vault: select-to-highlight in the reader; highlights are stored as vault markdown (appended under the promoted note) rather than app-private state \u2014 the anti-Readwise: your annotations are files",
+  "Feed intelligence dashboard: dead/redirected feed detection, posting-frequency and read-ratio stats from the event log, 'you never read these 40 feeds' pruning suggestions \u2014 turns the event log into a visible product win",
+  "OPML profiles/contexts (work/research/leisure) with fast switching and per-profile vault-export targets \u2014 the 300\u20131000-feed power-user organizational layer no competitor has",
+  "Governance as a feature: permissive license (MIT/Apache-2.0, avoiding Folo's AGPL+proprietary-backend trust problem), public roadmap, reproducible builds, no-CLA-drama, no token, no telemetry \u2014 state in the README why this project structurally cannot repeat the Omnivore ending"
+ ]
+}

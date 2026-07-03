@@ -60,8 +60,7 @@ core-cov-floor := "85"
 # it is added here — the gate fails loud, never silently narrows.
 cov-non-core-regex := "(crates/curio-cli|crates/curio-types|xtask)/"
 
-# Coverage: run the workspace suite once under llvm-cov, report everything,
-# then enforce the region floor on crates/curio-core (report-only elsewhere)
+# Coverage: workspace report + enforced region floor on crates/curio-core
 cov:
     cargo llvm-cov --workspace --no-report
     @echo "── workspace coverage (report-only) ──"

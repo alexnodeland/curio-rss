@@ -586,6 +586,12 @@ impl CoreHandle {
     /// Registers (or re-roots) a named destination and persists the
     /// registry. The only place a destination path ever enters.
     ///
+    /// The registry is persisted *inside* the write-lock critical
+    /// section, and the in-memory map only adopts the entry after the
+    /// persist succeeds — so concurrent registrations cannot clobber
+    /// each other's settings value, and a failed persist never leaves a
+    /// destination that works now but vanishes on the next open.
+    ///
     /// # Errors
     ///
     /// Filesystem or settings errors.
@@ -595,14 +601,16 @@ impl CoreHandle {
             source,
         })?;
         let mut map = self.lock_destinations_mut();
-        map.insert(name, root);
+        let mut next = map.clone();
+        next.insert(name, root);
         let serialized = serde_json::to_string(
-            &map.iter()
+            &next
+                .iter()
                 .map(|(n, p)| (n.to_string(), p.display().to_string()))
                 .collect::<BTreeMap<_, _>>(),
         )?;
-        drop(map);
         self.storage.set_setting(DESTINATIONS_KEY, &serialized)?;
+        *map = next;
         Ok(())
     }
 

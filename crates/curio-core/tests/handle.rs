@@ -483,6 +483,33 @@ fn a_crash_before_the_manifest_write_never_loses_article_saved() {
     assert_eq!(folded.articles[&curio_id].path, saved.path);
 }
 
+/// Concurrent registrations must all survive a reopen: the registry is
+/// serialized and persisted inside the write-lock critical section, so a
+/// slower thread can no longer persist a map missing a faster thread's
+/// entry.
+#[test]
+fn concurrent_destination_registrations_all_persist() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    {
+        let core = std::sync::Arc::new(open_core(profile.path()));
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let core = std::sync::Arc::clone(&core);
+                let root = vault.path().join(format!("dest-{i}"));
+                std::thread::spawn(move || {
+                    core.add_destination(format!("dest-{i}").parse().unwrap(), root)
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+    }
+    let core = open_core(profile.path());
+    assert_eq!(core.destinations().len(), 8, "every registration persisted");
+}
+
 #[tokio::test]
 async fn reopening_a_profile_restores_destinations_and_state() {
     let profile = tempfile::tempdir().unwrap();

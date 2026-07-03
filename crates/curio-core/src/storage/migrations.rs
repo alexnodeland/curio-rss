@@ -29,6 +29,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("migrations/0002_feed_scoped_dedupe.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("migrations/0003_feed_tags.sql"),
+    },
 ];
 
 /// The schema version this build writes and expects.

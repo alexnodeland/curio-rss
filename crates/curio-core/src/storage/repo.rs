@@ -58,7 +58,7 @@ pub struct PendingIntent {
 }
 
 const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modified, status, \
-                         allow_private_network, added_at, last_fetched_at";
+                         allow_private_network, added_at, last_fetched_at, tags";
 
 const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url, author, \
                             published_at, content_html, content_text, lang, word_count, \
@@ -83,9 +83,16 @@ impl Storage {
             let now = Timestamp::now();
             let tags = normalize_tags(new.tags);
             tx.prepare_cached(
-                "INSERT INTO feeds (url, title, added_at, modified_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO feeds (url, title, tags, added_at, modified_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )?
-            .execute((&new.url, &new.title, now.to_string(), now.to_string()))?;
+            .execute((
+                &new.url,
+                &new.title,
+                serde_json::to_string(&tags)?,
+                now.to_string(),
+                now.to_string(),
+            ))?;
             let id = tx.last_insert_rowid();
             let envelope = EventEnvelope::new(EventPayload::FeedAdded {
                 feed: new.url.clone(),
@@ -1121,6 +1128,7 @@ struct RawFeed {
     allow_private_network: bool,
     added_at: String,
     last_fetched_at: Option<String>,
+    tags: String,
 }
 
 fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
@@ -1136,6 +1144,7 @@ fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         allow_private_network: row.get(8)?,
         added_at: row.get(9)?,
         last_fetched_at: row.get(10)?,
+        tags: row.get(11)?,
     })
 }
 
@@ -1156,6 +1165,10 @@ impl RawFeed {
             allow_private_network: self.allow_private_network,
             added_at: parse_ts("feeds.added_at", &self.added_at)?,
             last_fetched_at: parse_opt_ts("feeds.last_fetched_at", self.last_fetched_at)?,
+            tags: serde_json::from_str(&self.tags).map_err(|err| StorageError::Corrupt {
+                column: "feeds.tags",
+                message: err.to_string(),
+            })?,
         })
     }
 }

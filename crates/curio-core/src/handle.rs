@@ -740,7 +740,7 @@ impl CoreHandle {
                 xml_url: feed.url,
                 title: feed.title,
                 html_url: feed.site_url,
-                tags: Vec::new(),
+                tags: feed.tags,
             })
             .collect::<Vec<_>>();
         Ok(crate::feeds::export_opml("Curio subscriptions", &feeds)?)

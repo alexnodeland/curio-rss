@@ -90,6 +90,10 @@ pub struct Feed {
     pub added_at: Timestamp,
     /// When the feed was last fetched, if ever.
     pub last_fetched_at: Option<Timestamp>,
+    /// Tags assigned to the feed (normalized: non-empty, unique). Carried
+    /// on `feed.added` and exported as the OPML `category` attribute, so
+    /// an import/export cycle keeps folder/category structure.
+    pub tags: Vec<String>,
 }
 
 /// Input for subscribing to a feed.

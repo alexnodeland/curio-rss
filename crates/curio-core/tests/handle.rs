@@ -19,6 +19,11 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const RSS: &str = include_str!("../../../fixtures/feeds/rss2.xml");
 
+/// Re-imports an exported OPML document (round-trip helper).
+fn crate_reimport(xml: &str) -> Vec<curio_core::feeds::OpmlFeed> {
+    curio_core::feeds::import_opml(xml).unwrap()
+}
+
 fn open_core(profile: &std::path::Path) -> CoreHandle {
     CoreHandle::open_with(
         profile,
@@ -261,6 +266,22 @@ async fn opml_round_trips_through_the_facade() {
     ] {
         assert!(exported.contains(url), "{url} missing from export");
     }
+    // Folder/category structure survives the full facade cycle: tags are
+    // persisted on the feed row, not only in the one-time feed.added
+    // event, so export writes them back as OPML categories.
+    assert!(
+        exported.contains(r#"category="Tech,Databases""#),
+        "feed tags must ride the OPML export:\n{exported}"
+    );
+    let reimported = crate_reimport(&exported);
+    assert_eq!(
+        reimported
+            .iter()
+            .find(|f| f.xml_url == "https://sqlite.example/news.xml")
+            .unwrap()
+            .tags,
+        vec!["Tech".to_owned(), "Databases".to_owned()]
+    );
 
     // Every import emitted feed.added with its folder tags.
     let events = read_all(&profile.path().join(".curio/events")).unwrap();

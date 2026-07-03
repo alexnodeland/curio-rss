@@ -139,6 +139,11 @@ fn feed_lifecycle_round_trips_and_stages_events() {
         .unwrap();
     assert_eq!(feed.url, "https://example.com/feed.xml");
     assert_eq!(feed.status, FeedStatus::Active);
+    assert_eq!(
+        feed.tags,
+        vec!["rust".to_owned()],
+        "tags persist on the row, not only in the one-time event"
+    );
     assert!(matches!(
         &added.event,
         EventPayload::FeedAdded { feed, feed_title, tags }

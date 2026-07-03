@@ -48,6 +48,43 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
+  doc:
+    name: rustdoc (-D warnings)
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps
+
+  coverage:
+    # Region floor on crates/curio-core; report-only for the other crates.
+    # The floor and the non-core regex mirror `just cov` — ratchet rule in
+    # CONTRIBUTING.md: the number only moves up, and it moves in both files
+    # together.
+    name: coverage (curio-core regions >= 85%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the workspace suite under llvm-cov
+        run: cargo llvm-cov --workspace --no-report
+      - name: Workspace coverage (report-only)
+        run: cargo llvm-cov report --summary-only
+      - name: Enforce the curio-core region floor
+        run: |
+          cargo llvm-cov report --summary-only \
+            --ignore-filename-regex '(crates/curio-cli|crates/curio-types|xtask)/' \
+            --fail-under-regions 85
+
   deny:
     name: cargo-deny (advisories, licenses, webview ban)
     runs-on: ubuntu-latest

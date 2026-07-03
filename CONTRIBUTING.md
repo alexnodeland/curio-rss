@@ -13,12 +13,14 @@ with no arguments to list the recipes.
 git clone https://github.com/alexnodeland/curio-rss
 cd curio-rss
 just setup     # installs git hooks (lefthook) and checks required tools
-just ci        # everything CI runs: fmt, clippy, tests, cargo-deny, boundary
+just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, cov, doc
 ```
 
 Required: stable Rust (see `rust-version` in `Cargo.toml`),
 [lefthook](https://github.com/evilmartians/lefthook),
-[cargo-deny](https://github.com/EmbarkStudios/cargo-deny).
+[cargo-deny](https://github.com/EmbarkStudios/cargo-deny),
+[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) (`just cov`,
+part of `just ci`).
 Not required: Node, npm, or a webview — the cargo workspace builds and tests
 fully headless. `apps/desktop/` is the parked desktop sketch and is outside
 the workspace until Phase 4.
@@ -37,6 +39,25 @@ the workspace until Phase 4.
   --all-targets -- -D warnings` clean, `cargo test --workspace` green.
   `unwrap`/`expect` are denied outside tests.
 - **No blobs.** CI fails the push if any git object exceeds 1 MB.
+
+## Coverage ratchet
+
+`just cov` runs the workspace test suite under
+[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) and enforces a
+**region-coverage floor on `crates/curio-core`** (currently **85%**); the
+other crates are report-only. CI runs the same check.
+
+The floor is a **ratchet**:
+
+- It only moves **up** — when sustained coverage sits comfortably above the
+  floor (a few points of headroom), raise `core-cov-floor` in the `justfile`
+  and the matching number in `.github/workflows/ci.yml` in the same commit.
+- It is never lowered, and coverage is never "recovered" by excluding
+  modules, cfg-gating code out of the instrumented build, or narrowing the
+  measured file set. If the gate goes red, write the missing tests.
+- New workspace crates count against the core floor until deliberately
+  listed in the `cov-non-core-regex` filter (justfile + ci.yml) — misconfig
+  fails loud rather than silently shrinking what is measured.
 
 ## Commits and PRs
 

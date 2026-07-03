@@ -12,7 +12,7 @@ default:
 setup:
     lefthook install
     @command -v cargo-deny >/dev/null || echo "warning: cargo-deny not found — install with: cargo install cargo-deny"
-    @command -v cargo-llvm-cov >/dev/null || echo "note: cargo-llvm-cov not found (only needed for `just cov`) — install with: cargo install cargo-llvm-cov"
+    @command -v cargo-llvm-cov >/dev/null || echo "warning: cargo-llvm-cov not found (needed by `just cov`, part of `just ci`) — install with: cargo install cargo-llvm-cov"
     @echo "setup complete — run 'just ci' to verify the workspace"
 
 # Build the workspace
@@ -38,6 +38,10 @@ clippy:
 # fmt-check + clippy
 lint: fmt-check clippy
 
+# Rustdoc with warnings denied — docs are part of the contract surface
+doc:
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
 # Supply-chain gate: advisories, license allowlist, webview ban
 deny:
     cargo deny check
@@ -46,8 +50,29 @@ deny:
 boundary:
     cargo run -p xtask -- boundary
 
-# Coverage report (HTML in target/llvm-cov/html)
+# Region-coverage floor on crates/curio-core — the enforced number. Ratchet
+# rule in CONTRIBUTING.md: it only moves up, and it moves here and in
+# .github/workflows/ci.yml together.
+core-cov-floor := "85"
+
+# Everything in the workspace that is NOT crates/curio-core, for the
+# enforced report below. A new crate counts against the core floor until
+# it is added here — the gate fails loud, never silently narrows.
+cov-non-core-regex := "(crates/curio-cli|crates/curio-types|xtask)/"
+
+# Coverage: run the workspace suite once under llvm-cov, report everything,
+# then enforce the region floor on crates/curio-core (report-only elsewhere)
 cov:
+    cargo llvm-cov --workspace --no-report
+    @echo "── workspace coverage (report-only) ──"
+    cargo llvm-cov report --summary-only
+    @echo "── curio-core region floor: {{core-cov-floor}}% (enforced) ──"
+    cargo llvm-cov report --summary-only \
+        --ignore-filename-regex '{{cov-non-core-regex}}' \
+        --fail-under-regions {{core-cov-floor}}
+
+# Coverage with a browsable HTML report (target/llvm-cov/html)
+cov-html:
     cargo llvm-cov --workspace --html
     @echo "open target/llvm-cov/html/index.html"
 
@@ -56,5 +81,5 @@ fixtures:
     @echo "the seeded fixture generator lands in Phase 1 (docs/design/roadmap.md) — nothing to generate yet"
 
 # Everything CI runs, in CI order — green here means green there
-ci: fmt-check clippy test deny boundary
+ci: fmt-check clippy test deny boundary cov doc
     @echo "ci suite green"

@@ -20,10 +20,16 @@ struct Migration {
 }
 
 /// Every migration, in order. Version `N` lives at index `N - 1`.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: include_str!("migrations/0001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("migrations/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("migrations/0002_feed_scoped_dedupe.sql"),
+    },
+];
 
 /// The schema version this build writes and expects.
 pub(crate) const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;

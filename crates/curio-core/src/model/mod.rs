@@ -121,7 +121,9 @@ pub struct NewArticle {
     /// The feed the article came from; `None` for manual saves.
     pub feed_id: Option<FeedId>,
     /// Total dedupe key: `guid → link → hash(title+published)` — computed
-    /// by ingest, unique per feed item.
+    /// by ingest, unique per feed item. Storage namespaces it by
+    /// provenance (`f<feed_id>:`/`m:`) so it only ever matches within the
+    /// same feed (or within manual saves).
     pub dedupe_key: String,
     /// Article title.
     pub title: String,
@@ -151,7 +153,9 @@ pub struct Article {
     pub curio_id: CurioId,
     /// The feed the article came from; `None` for manual saves.
     pub feed_id: Option<FeedId>,
-    /// Total dedupe key (`guid → link → hash(title+published)`).
+    /// Total dedupe key (`guid → link → hash(title+published)`), in its
+    /// stored provenance-scoped form: `f<feed_id>:…` for feed articles,
+    /// `m:…` for manual saves — colliding guids across feeds never match.
     pub dedupe_key: String,
     /// Article title.
     pub title: String,

@@ -46,7 +46,7 @@ fn insert_one(storage: &Storage, key: &str, title: &str, text: &str) -> ArticleI
         .list_articles(ListArticles::default())
         .unwrap()
         .into_iter()
-        .find(|a| a.dedupe_key == key)
+        .find(|a| a.dedupe_key == format!("m:{key}"))
         .unwrap()
         .id
 }
@@ -244,6 +244,114 @@ fn upsert_inserts_then_updates_by_dedupe_key() {
             .id,
         original.id
     );
+}
+
+/// Two subscriptions carrying the same guid (sequential-integer guids are
+/// common in broken feeds, and guids are attacker-choosable) must stay two
+/// distinct articles: a refresh of one feed can never overwrite the
+/// other's content, identity, or FTS entry.
+#[test]
+fn identical_guids_from_different_feeds_stay_distinct_articles() {
+    let (_dir, storage) = temp_storage();
+    let (feed_a, _) = storage
+        .add_feed(NewFeed {
+            url: "https://a.example/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let (feed_b, _) = storage
+        .add_feed(NewFeed {
+            url: "https://b.example/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+
+    let mut from_a = new_article("guid:1", "A's story", "alpha content");
+    from_a.feed_id = Some(feed_a.id);
+    let mut from_b = new_article("guid:1", "B's story", "beta content");
+    from_b.feed_id = Some(feed_b.id);
+
+    let first = storage.upsert_articles(vec![from_a.clone()]).unwrap();
+    let second = storage.upsert_articles(vec![from_b.clone()]).unwrap();
+    assert_eq!((first.inserted, second.inserted), (1, 1));
+    assert_eq!(storage.count_articles().unwrap(), 2);
+
+    // Refreshing B updates only B's row; A is untouched.
+    from_b.content.text = "beta content revised".to_owned();
+    let refresh = storage.upsert_articles(vec![from_b]).unwrap();
+    assert_eq!((refresh.inserted, refresh.updated), (0, 1));
+    let articles = storage.list_articles(ListArticles::default()).unwrap();
+    let a_row = articles
+        .iter()
+        .find(|a| a.feed_id == Some(feed_a.id))
+        .unwrap();
+    let b_row = articles
+        .iter()
+        .find(|a| a.feed_id == Some(feed_b.id))
+        .unwrap();
+    assert_eq!(a_row.title, "A's story");
+    assert_eq!(a_row.content.text, "alpha content");
+    assert_eq!(b_row.content.text, "beta content revised");
+    assert_ne!(a_row.curio_id, b_row.curio_id);
+
+    // The same collision on the manual-save namespace: a manual save never
+    // matches a feed article's key either.
+    let manual = new_article("guid:1", "Manual", "gamma");
+    storage.upsert_articles(vec![manual]).unwrap();
+    assert_eq!(storage.count_articles().unwrap(), 3);
+}
+
+/// Migration 0002 rewrites pre-existing rows with the same provenance
+/// scoping the repo now applies on insert, so a v1 database refreshes
+/// without duplicating its whole article set.
+#[test]
+fn migration_0002_scopes_legacy_dedupe_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        // Build a v1-shaped database by hand: schema 0001, legacy rows,
+        // user_version = 1.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(include_str!("../src/storage/migrations/0001_init.sql"))
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO feeds (id, url, added_at, modified_at)
+             VALUES (7, 'https://a.example/feed.xml', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z');
+             INSERT INTO articles (curio_id, feed_id, dedupe_key, title, source_url,
+                                   saved_at, modified_at)
+             VALUES ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d', 7, 'guid:1', 'From feed',
+                     'https://a.example/1', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z'),
+                    ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6e', NULL, 'guid:2', 'Manual',
+                     'https://m.example/2', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(
+        storage.db_schema_version().unwrap(),
+        Storage::schema_version()
+    );
+    let mut keys: Vec<String> = storage
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|a| a.dedupe_key)
+        .collect();
+    keys.sort();
+    assert_eq!(keys, vec!["f7:guid:1".to_owned(), "m:guid:2".to_owned()]);
+
+    // And the migrated feed article still matches its own refresh.
+    let mut refresh = new_article("guid:1", "From feed (updated)", "text");
+    refresh.feed_id = Some(FeedId(7));
+    let outcome = storage.upsert_articles(vec![refresh]).unwrap();
+    assert_eq!((outcome.inserted, outcome.updated), (0, 1));
 }
 
 #[test]

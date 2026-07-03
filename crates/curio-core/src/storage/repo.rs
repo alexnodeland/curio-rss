@@ -287,8 +287,10 @@ impl Storage {
     // --------------------------------------------------------- articles
 
     /// Batch-upserts articles in a single transaction (one fsync per
-    /// batch, not per row). Identity: existing rows are matched by
-    /// `dedupe_key`; an update refreshes content columns but never touches
+    /// batch, not per row). Identity: existing rows are matched by the
+    /// **feed-scoped** dedupe key (see [`scoped_dedupe_key`]) — colliding
+    /// guids from different feeds are different articles, never
+    /// overwrites. An update refreshes content columns but never touches
     /// `curio_id` or `saved_at`.
     ///
     /// # Errors
@@ -303,9 +305,10 @@ impl Storage {
             let mut outcome = UpsertOutcome::default();
             let now = Timestamp::now().to_string();
             for article in articles {
+                let dedupe_key = scoped_dedupe_key(article.feed_id, &article.dedupe_key);
                 let existing: Option<i64> = tx
                     .prepare_cached("SELECT id FROM articles WHERE dedupe_key = ?1")?
-                    .query_row([&article.dedupe_key], |row| row.get(0))
+                    .query_row([&dedupe_key], |row| row.get(0))
                     .optional()?;
                 if let Some(id) = existing {
                     tx.prepare_cached(
@@ -338,7 +341,7 @@ impl Storage {
                     .execute((
                         CurioId::new().to_string(),
                         article.feed_id.map(|f| f.0),
-                        &article.dedupe_key,
+                        &dedupe_key,
                         &article.title,
                         &article.source_url,
                         &article.author,
@@ -929,6 +932,24 @@ impl Storage {
 }
 
 // ---------------------------------------------------------------- helpers
+
+/// Namespaces an ingest-computed dedupe key by its provenance:
+/// `f<feed_id>:` for feed articles, `m:` for manual saves — so two feeds
+/// carrying the same guid (or the same hash-tier key) can never match
+/// each other's rows, while the global UNIQUE constraint stays as
+/// defense in depth. Migration 0002 applied the same transform to
+/// pre-existing rows.
+///
+/// Provenance is the feed's row id, not its URL, so permanent-redirect
+/// URL adoption never churns keys. Rows orphaned by a feed removal keep
+/// their historical prefix (feed row ids are effectively never reused at
+/// personal scale, and a re-subscription is a new subscription).
+fn scoped_dedupe_key(feed_id: Option<FeedId>, key: &str) -> String {
+    match feed_id {
+        Some(feed) => format!("f{}:{key}", feed.0),
+        None => format!("m:{key}"),
+    }
+}
 
 /// Compiles user input into a safe FTS5 query: every whitespace-separated
 /// token becomes a quoted phrase (embedded quotes doubled), joined by the

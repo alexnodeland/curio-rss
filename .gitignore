@@ -1,32 +1,34 @@
-# Dependencies
+# Rust / Cargo (workspace root)
+/target/
+
+# Desktop head (apps/desktop — outside the cargo workspace until Phase 4)
 node_modules/
+apps/desktop/.svelte-kit/
+apps/desktop/build/
+apps/desktop/dist/
+apps/desktop/coverage/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/bin/
+apps/desktop/src-tauri/gen/
 
-# Build outputs
-.svelte-kit/
-build/
-dist/
+# Curio runtime state — the events log is never committed (curio.events.v1)
+.curio/events/
 
-# Rust/Cargo
-src-tauri/target/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# Coverage
+coverage/
+lcov.info
 
 # Environment
 .env
 .env.*
 !.env.example
 
-# Test coverage
-coverage/
+# IDE
+.idea/
+*.swp
+*.swo
+*~
 
 # System files
 .DS_Store
 Thumbs.db
-
-# Lock files (optional - some prefer to commit package-lock.json)
-# package-lock.json

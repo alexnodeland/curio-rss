@@ -1,0 +1,47 @@
+# Curio — cargo workspace (core-plus-heads).
+#
+# The webview lives in apps/desktop, which is deliberately OUTSIDE this
+# workspace until Phase 4 moves the boundary. `deny.toml` bans tauri from the
+# workspace graph and `cargo run -p xtask -- boundary` double-checks
+# curio-core's tree — the core must always build headless.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/curio-cli",
+    "crates/curio-core",
+    "crates/curio-types",
+    "xtask",
+]
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alexnodeland/curio-rss"
+authors = ["Alex Nodeland <nodeland.alex@gmail.com>"]
+
+[workspace.dependencies]
+curio-core = { path = "crates/curio-core", version = "0.1.0" }
+curio-types = { path = "crates/curio-types", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

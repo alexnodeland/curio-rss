@@ -1,0 +1,15 @@
+[package]
+name = "curio-core"
+description = "The Curio reading engine: fetch, ingest, store, state, export, events — Tauri-free by construction"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+curio-types = { workspace = true }
+
+[lints]
+workspace = true

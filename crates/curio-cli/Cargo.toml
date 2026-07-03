@@ -1,0 +1,19 @@
+[package]
+name = "curio-cli"
+description = "curio — the CLI head over curio-core: the agent/cron/scripting surface and the daily proof the core is headless"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "curio"
+path = "src/main.rs"
+
+[dependencies]
+curio-core = { workspace = true }
+
+[lints]
+workspace = true

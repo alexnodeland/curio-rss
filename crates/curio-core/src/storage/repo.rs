@@ -190,6 +190,83 @@ impl Storage {
         })
     }
 
+    /// Flips a feed's contract-W1 private-network exemption. Reachable
+    /// only from explicit configuration surfaces — never feed content.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist.
+    pub fn set_feed_allow_private_network(
+        &self,
+        id: FeedId,
+        allow: bool,
+    ) -> Result<(), StorageError> {
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached(
+                    "UPDATE feeds SET allow_private_network = ?2, modified_at = ?3 WHERE id = ?1",
+                )?
+                .execute((id.0, allow, Timestamp::now().to_string()))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
+    /// Fills in feed metadata learned from a fetch, without clobbering
+    /// anything already set (human edits win over parsed values).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist.
+    pub fn update_feed_metadata(
+        &self,
+        id: FeedId,
+        title: Option<String>,
+        site_url: Option<String>,
+        description: Option<String>,
+    ) -> Result<(), StorageError> {
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached(
+                    "UPDATE feeds SET title = COALESCE(title, ?2), \
+                     site_url = COALESCE(site_url, ?3), \
+                     description = COALESCE(description, ?4), \
+                     modified_at = ?5 WHERE id = ?1",
+                )?
+                .execute((
+                    id.0,
+                    title,
+                    site_url,
+                    description,
+                    Timestamp::now().to_string(),
+                ))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
+    /// Adopts a permanent-redirect target as the feed's stored URL.
+    /// A conflict with another subscription's URL leaves the row
+    /// unchanged (`UPDATE OR IGNORE`) — better a stale URL than a
+    /// UNIQUE explosion mid-refresh.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn update_feed_url(&self, id: FeedId, url: String) -> Result<(), StorageError> {
+        self.write(move |conn| {
+            conn.prepare_cached(
+                "UPDATE OR IGNORE feeds SET url = ?2, modified_at = ?3 WHERE id = ?1",
+            )?
+            .execute((id.0, url, Timestamp::now().to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Sets a feed's lifecycle status (pause, dead-on-410, reactivate).
     ///
     /// # Errors

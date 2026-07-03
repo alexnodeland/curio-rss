@@ -7,10 +7,7 @@
 
 use std::process::{Command, ExitCode};
 
-/// Crate names that must never appear in curio-core's dependency tree.
-/// The webview boundary lives in `apps/desktop`, outside the workspace,
-/// until Phase 4 deliberately moves it.
-const BANNED: &[&str] = &["tauri", "wry", "tao"];
+use xtask::banned_crates_in_tree;
 
 fn main() -> ExitCode {
     let task = std::env::args().nth(1);
@@ -60,15 +57,7 @@ fn boundary() -> ExitCode {
     }
 
     let tree = String::from_utf8_lossy(&output.stdout);
-    let violations: Vec<&str> = tree
-        .lines()
-        .filter_map(|line| line.split_whitespace().next())
-        .filter(|name| {
-            BANNED
-                .iter()
-                .any(|banned| name == banned || name.starts_with(&format!("{banned}-")))
-        })
-        .collect();
+    let violations = banned_crates_in_tree(&tree);
 
     if violations.is_empty() {
         println!("xtask boundary: OK — curio-core's dependency tree is webview-free");

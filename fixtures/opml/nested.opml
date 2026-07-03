@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Nested folders</title>
+  </head>
+  <body>
+    <outline text="Tech">
+      <outline type="rss" text="Rust Blog" xmlUrl="https://blog.rust-lang.org/feed.xml" htmlUrl="https://blog.rust-lang.org/"/>
+      <outline text="Databases">
+        <outline type="rss" text="SQLite News" xmlUrl="https://sqlite.example/news.xml"/>
+      </outline>
+    </outline>
+    <outline text="Cooking">
+      <outline type="rss" text="Bread Weekly" xmlUrl="https://bread.example/feed"/>
+    </outline>
+    <outline type="rss" text="Top Level" xmlUrl="https://top.example/feed.xml"/>
+  </body>
+</opml>

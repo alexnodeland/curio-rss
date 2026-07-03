@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head/>
+  <body>
+    <outline xmlurl="https://lowercase-attr.example/feed.xml"/>
+    <outline type="rss" title="Title Only" xmlUrl="https://title-only.example/feed"/>
+    <outline text="Not a feed, no children"/>
+  </body>
+</opml>

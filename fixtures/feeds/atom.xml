@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Example</title>
+  <link href="https://atom.example.org/"/>
+  <link rel="self" href="https://atom.example.org/feed.atom"/>
+  <subtitle>An atom feed.</subtitle>
+  <updated>2026-07-02T10:00:00Z</updated>
+  <id>urn:example:atom-feed</id>
+  <entry>
+    <title>Atom entry one</title>
+    <link href="https://atom.example.org/entries/one"/>
+    <id>urn:example:atom-1</id>
+    <updated>2026-07-02T10:00:00Z</updated>
+    <published>2026-07-01T09:00:00Z</published>
+    <author><name>Ada Lovelace</name></author>
+    <content type="html">&lt;p&gt;Atom &lt;em&gt;content&lt;/em&gt;.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Atom entry two</title>
+    <link href="https://atom.example.org/entries/two"/>
+    <id>urn:example:atom-2</id>
+    <updated>2026-07-02T11:00:00Z</updated>
+    <summary>Only a summary here.</summary>
+  </entry>
+</feed>

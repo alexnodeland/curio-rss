@@ -15,6 +15,7 @@
 //! land per `docs/design/roadmap.md`.
 
 pub mod events;
+pub mod feeds;
 pub mod fetch;
 pub mod model;
 pub mod storage;

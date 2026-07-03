@@ -1,0 +1,21 @@
+{
+  "schema": "curio.events.v1",
+  "event_id": "01J1PZ2M3N4P5Q6R7S8T9V0W1X",
+  "ts": "2026-07-03T09:15:00Z",
+  "type": "article.saved",
+  "payload": {
+    "curio_id": "0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d",
+    "title": "Article title",
+    "source": "https://example.com/article",
+    "feed": "https://example.com/feed.xml",
+    "feed_title": "Example Blog",
+    "tags": [
+      "rust",
+      "databases"
+    ],
+    "published": "2026-07-01T12:00:00.000Z",
+    "destination": "vault",
+    "path": "curio/article-title.md",
+    "checksum": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  }
+}

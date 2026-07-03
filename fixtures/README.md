@@ -4,6 +4,14 @@ Test fixtures for the Curio workspace. Everything here is local and static —
 tests are hermetic and never touch the network (feed servers are simulated
 with wiremock / in-process `127.0.0.1` servers fed from these files).
 
+Current layout:
+
+- `contracts/` — valid + invalid example instances per published contract
+  (frontmatter, manifest, one per event type); the curio-types test suite
+  validates them against `../schemas/*.json` and round-trips the valid ones
+  through the Rust types (`*.noncanonical.json` = schema-valid but not
+  byte-canonical, exempt from the equality assertion)
+
 Planned layout (populated from Phase 1 onward, per `docs/design/roadmap.md`):
 
 - `feeds/` — real-world RSS/Atom/JSON Feed samples for the ingest pipeline

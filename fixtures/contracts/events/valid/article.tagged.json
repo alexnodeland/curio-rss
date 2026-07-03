@@ -1,0 +1,10 @@
+{
+  "schema": "curio.events.v1",
+  "event_id": "01J1PZ2M3N4P5Q6R7S8T9V0W1X",
+  "ts": "2026-07-03T09:15:00.123Z",
+  "type": "article.tagged",
+  "payload": {
+    "curio_id": "0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d",
+    "tag": "rust"
+  }
+}

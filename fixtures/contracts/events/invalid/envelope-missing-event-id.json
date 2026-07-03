@@ -1,0 +1,8 @@
+{
+  "schema": "curio.events.v1",
+  "ts": "2026-07-03T09:15:00.123Z",
+  "type": "article.archived",
+  "payload": {
+    "curio_id": "0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d"
+  }
+}

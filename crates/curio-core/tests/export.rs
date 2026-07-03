@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use curio_core::export::{
-    ExportDisposition, ExportInput, export_note, load_manifest, region_checksum,
+    ExportDisposition, ExportInput, export_note, load_manifest, region_checksum, stage_export_note,
 };
 use curio_types::{CurioId, Destination, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
 
@@ -198,6 +198,39 @@ fn manifest_keys_are_sorted_and_git_mergeable() {
     let manifest = load_manifest(dir.path()).unwrap();
     assert_eq!(raw, manifest.to_canonical_json());
     assert_eq!(entry_keys, sorted);
+}
+
+/// The staged flow exists so the facade can put the event intent between
+/// the note write and the manifest write: after staging, the note bytes
+/// are durable but the manifest is untouched; `commit()` lands it.
+#[test]
+fn staged_export_holds_the_manifest_back_until_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+
+    let staged = stage_export_note(&dest, &input(id, "Staged", "body")).unwrap();
+    assert_eq!(staged.outcome().disposition, ExportDisposition::Created);
+    let note_path = dir.path().join(&staged.outcome().path);
+    assert!(note_path.is_file(), "note is written at stage time");
+    assert!(
+        load_manifest(dir.path()).unwrap().notes.is_empty(),
+        "manifest write must wait for commit"
+    );
+
+    let outcome = staged.commit().unwrap();
+    let manifest = load_manifest(dir.path()).unwrap();
+    assert_eq!(manifest.notes.get(&id).unwrap().checksum, outcome.checksum);
+
+    // A staged-but-never-committed export (crash before the manifest
+    // write) re-converges: the next export re-runs as Created and heals
+    // the manifest.
+    let id2 = CurioId::new();
+    drop(stage_export_note(&dest, &input(id2, "Crashy", "body")).unwrap());
+    assert!(!load_manifest(dir.path()).unwrap().notes.contains_key(&id2));
+    let retried = export_note(&dest, &input(id2, "Crashy", "body")).unwrap();
+    assert_eq!(retried.disposition, ExportDisposition::Created);
+    assert!(load_manifest(dir.path()).unwrap().notes.contains_key(&id2));
 }
 
 #[test]

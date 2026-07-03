@@ -126,6 +126,53 @@ pub enum ExportError {
     },
 }
 
+/// A note whose bytes are already durably on disk but whose manifest
+/// update is deliberately held back, so the facade can stage the
+/// matching event intent *between* the two writes.
+///
+/// Ordering: note → event intent → manifest. Staging the intent before
+/// the manifest write means no crash window can lose the contract
+/// event: with no intent and no manifest entry, the next export re-runs
+/// as Created/Updated and stages then; with an intent but no manifest
+/// entry, startup replay emits it (at worst a consumer later sees a
+/// duplicate snapshot for the same `curio_id`, which folds
+/// idempotently). Were the manifest written first, its
+/// `(curio_id, checksum)` idempotency hit would suppress the event on
+/// every retry — losing it forever.
+#[derive(Debug)]
+#[must_use = "call commit() — the manifest write is still pending"]
+pub struct StagedExport {
+    outcome: ExportOutcome,
+    pending: Option<PendingManifest>,
+}
+
+#[derive(Debug)]
+struct PendingManifest {
+    root: PathBuf,
+    manifest: curio_types::ManifestV1,
+}
+
+impl StagedExport {
+    /// What this export did (path, checksum, disposition).
+    #[must_use]
+    pub fn outcome(&self) -> &ExportOutcome {
+        &self.outcome
+    }
+
+    /// Commits the held-back manifest write (the contract's second
+    /// write; a no-op for the pure idempotency hit).
+    ///
+    /// # Errors
+    ///
+    /// [`ExportError::Io`] on manifest write failures.
+    pub fn commit(self) -> Result<ExportOutcome, ExportError> {
+        if let Some(pending) = self.pending {
+            write_manifest(&pending.root, &pending.manifest)?;
+        }
+        Ok(self.outcome)
+    }
+}
+
 /// Exports one article into a destination, per the contract flow:
 /// checksum → manifest lookup → (maybe) note write → manifest write.
 ///
@@ -138,6 +185,20 @@ pub fn export_note(
     destination: &Destination,
     input: &ExportInput,
 ) -> Result<ExportOutcome, ExportError> {
+    stage_export_note(destination, input)?.commit()
+}
+
+/// The staged form of [`export_note`]: performs everything up to and
+/// including the note write, returning the manifest write for the
+/// caller to [`StagedExport::commit`] after staging its event intent.
+///
+/// # Errors
+///
+/// See [`export_note`].
+pub fn stage_export_note(
+    destination: &Destination,
+    input: &ExportInput,
+) -> Result<StagedExport, ExportError> {
     // Neutralize managed-region marker literals smuggled in via feed
     // content (e.g. inside a code fence): the bytes between the markers
     // must never parse as a marker, or the next re-export's region
@@ -171,10 +232,13 @@ pub fn export_note(
     let note_exists = abs_path.is_file();
 
     if disposition == ExportDisposition::Unchanged && note_exists {
-        return Ok(ExportOutcome {
-            path: rel_path,
-            checksum,
-            disposition,
+        return Ok(StagedExport {
+            outcome: ExportOutcome {
+                path: rel_path,
+                checksum,
+                disposition,
+            },
+            pending: None,
         });
     }
 
@@ -189,7 +253,8 @@ pub fn export_note(
 
     // Contract write ordering: note first…
     write_atomic(&abs_path, content.as_bytes())?;
-    // …manifest second.
+    // …manifest second — held back so the caller can stage its event
+    // intent between the two writes (see [`StagedExport`]).
     manifest.notes.insert(
         input.curio_id,
         ManifestEntry {
@@ -198,12 +263,16 @@ pub fn export_note(
             exported_at: Timestamp::now(),
         },
     );
-    write_manifest(&destination.root, &manifest)?;
-
-    Ok(ExportOutcome {
-        path: rel_path,
-        checksum,
-        disposition,
+    Ok(StagedExport {
+        outcome: ExportOutcome {
+            path: rel_path,
+            checksum,
+            disposition,
+        },
+        pending: Some(PendingManifest {
+            root: destination.root.clone(),
+            manifest,
+        }),
     })
 }
 

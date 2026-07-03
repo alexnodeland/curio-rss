@@ -665,26 +665,32 @@ impl CoreHandle {
             name: destination.clone(),
             root,
         };
-        let outcome = export::export_note(&dest, &input)?;
-
+        // Ordering: note write → event intent → manifest write. The
+        // intent is staged BEFORE the manifest commit — were it the
+        // other way around, a crash between the two would make the
+        // manifest's (curio_id, checksum) idempotency hit suppress the
+        // event on every retry, losing article.saved/updated forever.
+        let staged = export::stage_export_note(&dest, &input)?;
         let snapshot = article.snapshot(
             input.feed.clone(),
             input.feed_title.clone(),
             tags,
             destination.clone(),
-            outcome.path.clone(),
-            outcome.checksum,
+            staged.outcome().path.clone(),
+            staged.outcome().checksum,
         );
-        match outcome.disposition {
+        match staged.outcome().disposition {
             ExportDisposition::Created => {
                 self.storage.record_article_saved(snapshot)?;
-                self.emit()?;
             }
             ExportDisposition::Updated => {
                 self.storage.record_article_updated(snapshot)?;
-                self.emit()?;
             }
             ExportDisposition::Unchanged => {}
+        }
+        let outcome = staged.commit()?;
+        if outcome.disposition != ExportDisposition::Unchanged {
+            self.emit()?;
         }
         Ok(SaveOutcome {
             destination: destination.clone(),

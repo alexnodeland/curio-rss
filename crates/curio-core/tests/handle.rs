@@ -8,12 +8,12 @@
 use std::time::Duration;
 
 use curio_core::events::{FoldedState, read_all};
-use curio_core::export::ExportDisposition;
+use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
-use curio_core::model::{FeedStatus, FetchStatus, NewFeed};
+use curio_core::model::{ArticleContent, FeedStatus, FetchStatus, NewArticle, NewFeed};
 use curio_core::storage::ListArticles;
 use curio_core::{CoreHandle, CoreOptions};
-use curio_types::{DestinationName, EventPayload};
+use curio_types::{Destination, DestinationName, EventPayload};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -324,6 +324,95 @@ async fn updated_content_re_export_emits_article_updated() {
     assert_eq!(saves, vec!["article.saved", "article.updated"]);
     let folded = FoldedState::fold(events);
     assert_eq!(folded.articles[&article.curio_id].checksum, second.checksum);
+}
+
+/// Crash between staging the article.saved intent and the manifest write:
+/// the event must survive (startup replay), and the next save re-converges
+/// the manifest. Regression for the ordering bug where the manifest was
+/// made durable before any intent existed — the retry's
+/// `(curio_id, checksum)` idempotency hit then suppressed the event forever.
+#[test]
+fn a_crash_before_the_manifest_write_never_loses_article_saved() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let dest_name: DestinationName = "vault".parse().unwrap();
+
+    let (article_id, curio_id) = {
+        let core = open_core(profile.path());
+        core.add_destination(dest_name.clone(), vault.path().to_path_buf())
+            .unwrap();
+        core.storage()
+            .upsert_articles(vec![NewArticle {
+                feed_id: None,
+                dedupe_key: "k1".to_owned(),
+                title: "Title".to_owned(),
+                source_url: "https://example.com/a".to_owned(),
+                author: None,
+                published_at: None,
+                content: ArticleContent {
+                    html: "<p>body</p>".to_owned(),
+                    text: "body".to_owned(),
+                },
+                lang: None,
+                word_count: None,
+                source_updated_at: None,
+            }])
+            .unwrap();
+        let article = core
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .remove(0);
+
+        // Simulate the crashing save: note written, intent staged — and
+        // the process dies before the manifest commit and the emit.
+        let input = ExportInput {
+            curio_id: article.curio_id,
+            title: article.title.clone(),
+            source: article.source_url.clone(),
+            feed: None,
+            feed_title: None,
+            author: None,
+            published: None,
+            saved: article.saved_at,
+            tags: vec![],
+            lang: None,
+            word_count: None,
+            markdown: "body".to_owned(),
+        };
+        let dest = Destination {
+            name: dest_name.clone(),
+            root: vault.path().to_path_buf(),
+        };
+        let staged = stage_export_note(&dest, &input).unwrap();
+        let snapshot = article.snapshot(
+            None,
+            None,
+            vec![],
+            dest_name.clone(),
+            staged.outcome().path.clone(),
+            staged.outcome().checksum,
+        );
+        core.storage().record_article_saved(snapshot).unwrap();
+        drop(staged); // the manifest write never happens
+        (article.id, article.curio_id)
+    }; // dropping the handle = the crash
+
+    // Restart: the startup replay emits the staged article.saved.
+    let core = open_core(profile.path());
+    let events = read_all(&profile.path().join(".curio/events")).unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            &e.event,
+            EventPayload::ArticleSaved(s) if s.curio_id == curio_id
+        )),
+        "the saved event must survive the crash window"
+    );
+
+    // And the next save re-converges the manifest without losing anything.
+    let saved = core.save_to_destination(article_id, &dest_name).unwrap();
+    assert_eq!(saved.disposition, ExportDisposition::Created);
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert_eq!(folded.articles[&curio_id].path, saved.path);
 }
 
 #[tokio::test]

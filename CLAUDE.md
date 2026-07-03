@@ -10,7 +10,7 @@ surface of a personal knowledge plane. Pre-1.0, mid-reset; the build plan is
 | Path | What it is |
 |------|------------|
 | `crates/curio-core` | The engine: fetch, ingest, store, state, export, events. **Never depends on tauri.** |
-| `crates/curio-types` | Shared DTOs + published contract identifiers; schemars → `schemas/` artifacts (Phase 3) |
+| `crates/curio-types` | Shared DTOs + published contract types; round-trip tests pin them to the `schemas/` artifacts |
 | `crates/curio-cli` | The v1 head (`curio`): agent/cron/scripting surface, CI proof the core is headless |
 | `xtask` | Workspace automation (`cargo run -p xtask -- boundary`) |
 | `apps/desktop/` | The parked Tauri/Svelte sketch — **outside the cargo workspace until Phase 4**; does not build, do not fix it |

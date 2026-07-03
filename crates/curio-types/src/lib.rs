@@ -3,11 +3,31 @@
 //! This crate is the home of the two published, versioned contract surfaces
 //! (`curio.frontmatter.v1` and `curio.events.v1`) plus the DTOs shared by
 //! every head. The authoritative human-readable spec is
-//! `docs/design/contracts-draft.md`; machine-readable JSON Schema artifacts
-//! are published under `schemas/` (generated here via schemars in Phase 3).
+//! `docs/design/contracts-draft.md`; the machine-readable JSON Schema
+//! artifacts are published under `schemas/`, and this crate's round-trip
+//! test suite validates every serialized type against those files — the
+//! types are pinned to the published schemas mechanically.
 //!
 //! Contract rule: schema files are versioned-immutable — a breaking change
 //! mints `*.v2`, it never edits v1 semantics.
+
+mod checksum;
+mod destination;
+mod event;
+mod frontmatter;
+mod id;
+mod manifest;
+mod marker;
+mod timestamp;
+
+pub use checksum::{Checksum, ParseChecksumError};
+pub use destination::{Destination, DestinationName, ParseDestinationNameError};
+pub use event::{ArticleSnapshot, EventEnvelope, EventPayload};
+pub use frontmatter::ArticleFrontmatter;
+pub use id::{CurioId, EventId, ParseCurioIdError, ParseEventIdError};
+pub use manifest::{ManifestEntry, ManifestV1};
+pub use marker::{EventsSchemaV1Marker, FrontmatterSchemaV1Marker, ManifestSchemaV1Marker};
+pub use timestamp::{ParseTimestampError, Timestamp};
 
 /// Schema identifier carried in the YAML frontmatter of every exported note.
 pub const FRONTMATTER_SCHEMA_V1: &str = "curio.frontmatter.v1";
@@ -44,6 +64,13 @@ mod tests {
         assert_eq!(FRONTMATTER_SCHEMA_V1, "curio.frontmatter.v1");
         assert_eq!(EVENTS_SCHEMA_V1, "curio.events.v1");
         assert_eq!(MANIFEST_SCHEMA_V1, "curio.manifest.v1");
+    }
+
+    #[test]
+    fn marker_literals_match_the_constants() {
+        assert_eq!(FrontmatterSchemaV1Marker::LITERAL, FRONTMATTER_SCHEMA_V1);
+        assert_eq!(EventsSchemaV1Marker::LITERAL, EVENTS_SCHEMA_V1);
+        assert_eq!(ManifestSchemaV1Marker::LITERAL, MANIFEST_SCHEMA_V1);
     }
 
     #[test]

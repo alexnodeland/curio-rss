@@ -132,6 +132,59 @@ fn append_resumes_the_newest_file_across_reopen() {
     assert_eq!(read_all(dir.path()).unwrap(), vec![first, second]);
 }
 
+/// Crash window C: the process died (or the disk filled) mid-append,
+/// leaving a torn partial line at EOF. The line's fsync never ran, so its
+/// intent survives and is replayed — but without healing, the replay
+/// would be glued onto the torn bytes and the file would be unreadable
+/// forever. Opening the log truncates the torn tail back to the last
+/// complete line.
+#[test]
+fn a_torn_final_line_is_healed_at_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = CurioId::new();
+    let whole = opened("2026-07-03T10:00:00.000Z", id);
+    {
+        let mut log = EventLog::open(dir.path()).unwrap();
+        log.append(&whole).unwrap();
+        log.flush().unwrap();
+    }
+    // Simulate the crash: a partial line, no trailing newline.
+    let path = dir.path().join("events-20260703.jsonl");
+    {
+        use std::io::Write as _;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(b"{\"schema\":\"curio.events.v1\",\"event_id\":\"tor")
+            .unwrap();
+    }
+
+    // Reopen and append (the replayed envelope in real life).
+    let replayed = opened("2026-07-03T10:00:01.000Z", id);
+    let mut log = EventLog::open(dir.path()).unwrap();
+    log.append(&replayed).unwrap();
+    log.flush().unwrap();
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(raw.lines().count(), 2, "torn bytes must be gone:\n{raw}");
+    assert_eq!(read_all(dir.path()).unwrap(), vec![whole, replayed]);
+}
+
+/// A file that is nothing but one torn line heals to empty — and stays
+/// readable without any append happening first (`curio events` right
+/// after a crash).
+#[test]
+fn a_wholly_torn_file_heals_to_empty_at_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events-20260703.jsonl");
+    std::fs::write(&path, b"{\"schema\":\"curio.eve").unwrap();
+
+    let _log = EventLog::open(dir.path()).unwrap();
+    assert_eq!(read_all(dir.path()).unwrap(), vec![]);
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+}
+
 // --------------------------------------------------------------- retention
 
 #[test]

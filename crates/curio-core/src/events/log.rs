@@ -1,7 +1,8 @@
-//! The append-only JSONL writer: rotation, retention, fsync-on-flush.
+//! The append-only JSONL writer: rotation, retention, fsync-on-flush,
+//! and torn-tail crash recovery (see [`heal_torn_tail`]).
 
 use std::fs::{File, OpenOptions};
-use std::io::Write as _;
+use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
@@ -43,7 +44,9 @@ struct OpenFile {
 impl EventLog {
     /// Opens (creating if absent) the events directory. Appending resumes
     /// on the newest existing log file, so restarts continue the day's
-    /// file instead of abandoning it.
+    /// file instead of abandoning it. A torn final line left by a crash
+    /// mid-append is healed here (see [`heal_torn_tail`]), so readers and
+    /// subsequent appends only ever see whole lines.
     ///
     /// # Errors
     ///
@@ -51,6 +54,9 @@ impl EventLog {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, EventLogError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
+        if let Some((date, suffix)) = scan_latest(&dir)? {
+            heal_torn_tail(&dir.join(file_name(date, suffix)))?;
+        }
         Ok(Self {
             dir,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
@@ -183,6 +189,8 @@ impl EventLog {
 
     fn open_file(&mut self, date: NaiveDate, suffix: u32) -> Result<(), EventLogError> {
         let path = self.dir.join(file_name(date, suffix));
+        // Belt and suspenders: never glue an append onto a torn tail.
+        heal_torn_tail(&path)?;
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         let bytes = file.metadata()?.len();
         tracing::debug!(path = %path.display(), bytes, "event log file opened");
@@ -195,6 +203,63 @@ impl EventLog {
         });
         Ok(())
     }
+}
+
+/// Backwards-scan chunk size used by [`heal_torn_tail`].
+const HEAL_SCAN_CHUNK: u64 = 8192;
+
+/// Repairs a torn final line — the artifact of a crash (or a partial
+/// write on a full disk) mid-append — by truncating the file back to its
+/// last complete line.
+///
+/// Safe by the emitter's ordering contract: a line can only be torn if
+/// its fsync never ran, and the fsync always happens *before* the staged
+/// write-ahead intent is deleted — so the envelope on the torn line
+/// still exists as an intent and is replayed in full at the next
+/// startup. Without this heal, the replayed line would be glued onto the
+/// torn bytes, permanently corrupting the file for every line-oriented
+/// consumer (including `read_all`, which refuses invalid lines).
+fn heal_torn_tail(path: &Path) -> Result<(), EventLogError> {
+    let mut file = match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    let len = file.metadata()?.len();
+    if len == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    if last[0] == b'\n' {
+        return Ok(());
+    }
+    // Scan backwards for the last newline; everything after it is the
+    // torn line. Chunked so a large file never loads whole.
+    let mut buf = vec![0u8; usize::try_from(HEAL_SCAN_CHUNK).unwrap_or(8192)];
+    let mut end = len;
+    let keep = loop {
+        if end == 0 {
+            break 0;
+        }
+        let start = end.saturating_sub(HEAL_SCAN_CHUNK);
+        let n = usize::try_from(end - start).unwrap_or(buf.len());
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(&mut buf[..n])?;
+        if let Some(idx) = buf[..n].iter().rposition(|&b| b == b'\n') {
+            break start + idx as u64 + 1;
+        }
+        end = start;
+    };
+    file.set_len(keep)?;
+    file.sync_all()?;
+    tracing::warn!(
+        path = %path.display(),
+        torn_bytes = len - keep,
+        "healed torn event-log tail left by a previous crash"
+    );
+    Ok(())
 }
 
 /// The newest `(date, suffix)` among existing log files, if any.

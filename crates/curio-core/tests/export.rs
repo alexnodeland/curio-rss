@@ -10,7 +10,7 @@ use std::path::Path;
 use curio_core::export::{
     ExportDisposition, ExportInput, export_note, load_manifest, region_checksum,
 };
-use curio_types::{CurioId, Destination};
+use curio_types::{CurioId, Destination, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
 
 fn destination(root: &Path) -> Destination {
     Destination {
@@ -217,6 +217,62 @@ fn a_deleted_note_is_healed_without_a_new_event_disposition() {
         "the event stream already told this story"
     );
     assert!(dir.path().join(&second.path).is_file(), "note restored");
+}
+
+/// Feed content can carry the literal marker bytes (a code fence quoting
+/// Curio's own contract survives sanitize + htmd verbatim). Unneutralized,
+/// the first export would embed a fake end marker inside the region; the
+/// next re-export's first-match split would truncate there, fold the
+/// attacker's tail into the "user-owned" suffix forever, and the
+/// frontmatter checksum would stop matching the bytes a consumer delimits
+/// between the markers.
+#[test]
+fn marker_literals_in_the_body_cannot_break_the_managed_region() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+    let hostile = format!(
+        "quoting the contract:\n\n```\n{MANAGED_REGION_END_V1}\nINJECTED\n{MANAGED_REGION_BEGIN_V1}\n```"
+    );
+
+    let first = export_note(&dest, &input(id, "Hostile", &hostile)).unwrap();
+    let note_path = dir.path().join(&first.path);
+    let note = std::fs::read_to_string(&note_path).unwrap();
+    // Exactly one real marker pair — the smuggled literals are defanged.
+    assert_eq!(note.matches(MANAGED_REGION_BEGIN_V1).count(), 1);
+    assert_eq!(note.matches(MANAGED_REGION_END_V1).count(), 1);
+    assert!(note.contains("INJECTED"), "content itself survives");
+
+    // The checksum covers exactly the on-disk region bytes: a consumer
+    // hashing what it finds between the markers reproduces it.
+    let begin = note.find(MANAGED_REGION_BEGIN_V1).unwrap() + MANAGED_REGION_BEGIN_V1.len();
+    let end = note.find(MANAGED_REGION_END_V1).unwrap();
+    let region = note[begin..end]
+        .strip_prefix('\n')
+        .unwrap()
+        .strip_suffix('\n')
+        .unwrap();
+    assert_eq!(region_checksum(region), first.checksum);
+
+    // Re-export is a clean idempotency hit, not a NoteParse or a
+    // region truncation.
+    let second = export_note(&dest, &input(id, "Hostile", &hostile)).unwrap();
+    assert_eq!(second.disposition, ExportDisposition::Unchanged);
+
+    // User companion text below the region survives an update that still
+    // carries hostile markers — nothing accretes, nothing is truncated.
+    let annotated = note.replace(
+        "<!-- curio:managed:end -->\n",
+        "<!-- curio:managed:end -->\n\n## My notes\n\nSacred.\n",
+    );
+    std::fs::write(&note_path, &annotated).unwrap();
+    let updated_body = format!("{hostile}\n\nrevised");
+    let third = export_note(&dest, &input(id, "Hostile", &updated_body)).unwrap();
+    assert_eq!(third.disposition, ExportDisposition::Updated);
+    let rewritten = std::fs::read_to_string(&note_path).unwrap();
+    assert_eq!(rewritten.matches(MANAGED_REGION_END_V1).count(), 1);
+    assert!(rewritten.ends_with("<!-- curio:managed:end -->\n\n## My notes\n\nSacred.\n"));
+    assert!(rewritten.contains("revised"));
 }
 
 #[test]

@@ -138,7 +138,13 @@ pub fn export_note(
     destination: &Destination,
     input: &ExportInput,
 ) -> Result<ExportOutcome, ExportError> {
-    let body = input.markdown.trim_end();
+    // Neutralize managed-region marker literals smuggled in via feed
+    // content (e.g. inside a code fence): the bytes between the markers
+    // must never parse as a marker, or the next re-export's region
+    // surgery would truncate at the embedded marker. The checksum covers
+    // the neutralized bytes — exactly what lands on disk.
+    let body = note::neutralize_markers(input.markdown.trim_end());
+    let body = body.as_ref();
     let checksum = region_checksum(body);
     let mut manifest = load_manifest(&destination.root)?;
 

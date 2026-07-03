@@ -20,11 +20,42 @@
 //! The checksum covers the bytes strictly between the begin-marker line
 //! and the end-marker line (excluding the delimiting newlines).
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use curio_types::{ArticleFrontmatter, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
 
 use super::ExportError;
+
+/// The byte stem shared by both managed-region markers — the substring a
+/// hostile (or merely self-quoting) article body must not carry, or
+/// [`split_note`]'s first-match parsing would truncate the region at the
+/// embedded marker on the next re-export, folding attacker bytes into
+/// the user-owned tail forever.
+const MARKER_STEM: &str = "<!-- curio:managed:";
+
+/// The defanged stem: a zero-width space (U+200B) after `curio` breaks
+/// the byte-level marker match while staying invisible in rendered
+/// markdown. Contains no occurrence of [`MARKER_STEM`], so the rewrite
+/// is idempotent.
+const NEUTRALIZED_STEM: &str = "<!-- curio\u{200B}:managed:";
+
+/// Rewrites any occurrence of the managed-region marker stem inside a
+/// body, so the bytes written between the real markers can never parse
+/// as a marker themselves. Feed content reaches the body verbatim
+/// through code fences (sanitize strips comment *nodes*, not text), so
+/// this is the export-side guarantee that the region Curio writes is
+/// exactly the region it will find again.
+///
+/// The checksum is computed over the neutralized bytes — what is hashed
+/// is what is on disk.
+pub(crate) fn neutralize_markers(body: &str) -> Cow<'_, str> {
+    if body.contains(MARKER_STEM) {
+        Cow::Owned(body.replace(MARKER_STEM, NEUTRALIZED_STEM))
+    } else {
+        Cow::Borrowed(body)
+    }
+}
 
 /// The three preserved spans of an existing note around Curio's two
 /// owned surfaces.
@@ -221,6 +252,22 @@ mod tests {
             ),
             "companion text must survive byte-for-byte:\n{rewritten}"
         );
+    }
+
+    #[test]
+    fn neutralize_defangs_both_markers_and_is_idempotent() {
+        let body = format!("a\n{MANAGED_REGION_BEGIN_V1}\nb\n{MANAGED_REGION_END_V1}\nc");
+        let once = neutralize_markers(&body);
+        assert!(!once.contains(MANAGED_REGION_BEGIN_V1));
+        assert!(!once.contains(MANAGED_REGION_END_V1));
+        assert!(!once.contains(MARKER_STEM));
+        let twice = neutralize_markers(&once);
+        assert_eq!(once, twice, "neutralization must be idempotent");
+        // Clean bodies borrow — no rewrite, no allocation.
+        assert!(matches!(
+            neutralize_markers("plain body"),
+            Cow::Borrowed("plain body")
+        ));
     }
 
     #[test]

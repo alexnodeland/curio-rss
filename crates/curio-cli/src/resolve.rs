@@ -9,11 +9,14 @@ use crate::output::short_id;
 
 const PAGE: u32 = 500;
 
-/// Resolves a `curio_id` prefix (case-insensitive) to exactly one
-/// article. Zero or multiple matches are errors that tell the user what
-/// to do next.
-pub(crate) fn article_by_prefix(core: &CoreHandle, prefix: &str) -> anyhow::Result<Article> {
-    let needle = prefix.to_ascii_lowercase();
+/// Resolves a `curio_id` fragment (case-insensitive) to exactly one
+/// article. A prefix, the short tail shown by listings, or any other
+/// unique substring all work — `UUIDv7` prefixes are timestamp bits and
+/// collide within an ingest batch, so pure-prefix matching would leave
+/// same-batch articles unaddressable. Zero or multiple matches are
+/// errors that tell the user what to do next.
+pub(crate) fn article_by_prefix(core: &CoreHandle, fragment: &str) -> anyhow::Result<Article> {
+    let needle = fragment.to_ascii_lowercase();
     if needle.is_empty() {
         bail!("empty article id — run `curio list` to find one");
     }
@@ -28,7 +31,7 @@ pub(crate) fn article_by_prefix(core: &CoreHandle, prefix: &str) -> anyhow::Resu
         let page_len = page.len();
         for article in page {
             before = Some(article.id);
-            if article.curio_id.to_string().starts_with(&needle) {
+            if article.curio_id.to_string().contains(&needle) {
                 matches.push(article);
             }
         }
@@ -37,7 +40,7 @@ pub(crate) fn article_by_prefix(core: &CoreHandle, prefix: &str) -> anyhow::Resu
         }
     }
     match matches.len() {
-        0 => bail!("no article matches id {prefix:?} — run `curio list` to find one"),
+        0 => bail!("no article matches id {fragment:?} — run `curio list` to find one"),
         1 => matches.pop().context("unreachable: len checked"),
         n => {
             let ids: Vec<String> = matches
@@ -46,7 +49,7 @@ pub(crate) fn article_by_prefix(core: &CoreHandle, prefix: &str) -> anyhow::Resu
                 .map(|a| short_id(&a.curio_id.to_string()))
                 .collect();
             bail!(
-                "{n} articles match id {prefix:?} ({}, …) — give more characters",
+                "{n} articles match id {fragment:?} ({}, …) — give more characters",
                 ids.join(", ")
             )
         }

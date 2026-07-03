@@ -44,13 +44,15 @@ pub(crate) enum Command {
     List(ListArgs),
     /// Print one article as markdown (marks it read).
     Show {
-        /// A unique prefix of the article's id.
+        /// A unique fragment of the article's id (listings show the
+        /// typable 8-character tail).
         id: String,
     },
     /// Record an open (emits article.opened) and launch $BROWSER on the
     /// article's source URL.
     Open {
-        /// A unique prefix of the article's id.
+        /// A unique fragment of the article's id (listings show the
+        /// typable 8-character tail).
         id: String,
     },
     /// Star an article (emits article.starred).
@@ -72,7 +74,8 @@ pub(crate) enum Command {
     /// Export an article to a named destination as a curio.frontmatter.v1
     /// markdown note (emits article.saved / article.updated).
     Save {
-        /// A unique prefix of the article's id.
+        /// A unique fragment of the article's id (listings show the
+        /// typable 8-character tail).
         id: String,
         /// Destination name; defaults to the default destination
         /// configured in curio.toml.

@@ -20,9 +20,12 @@ pub(crate) fn emit_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
 /// unique in any personal-scale profile, short enough to type.
 pub(crate) const SHORT_ID_LEN: usize = 8;
 
-/// The head of a `curio_id` string, as shown in listings.
+/// The *tail* of a `curio_id` string, as shown in listings. `UUIDv7`
+/// ids share their leading timestamp bits within an ingest batch, so
+/// the random tail is the part a human can use as a unique handle.
 pub(crate) fn short_id(curio_id: &str) -> String {
-    curio_id.chars().take(SHORT_ID_LEN).collect()
+    let start = curio_id.len().saturating_sub(SHORT_ID_LEN);
+    curio_id[start..].to_owned()
 }
 
 /// A feed, as printed.

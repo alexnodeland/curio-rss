@@ -1,3 +1,7 @@
+# curio-cli — the v1 head. Thin by charter: every command is a clap
+# adapter over curio_core::CoreHandle; the only logic that lives here is
+# argument resolution, config-file plumbing, and output shaping.
+
 [package]
 name = "curio-cli"
 description = "curio — the CLI head over curio-core: the agent/cron/scripting surface and the daily proof the core is headless"
@@ -13,7 +17,26 @@ name = "curio"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
 curio-core = { workspace = true }
+curio-types = { workspace = true }
+directories = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+axum = { workspace = true }
+jsonschema = { workspace = true }
+predicates = { workspace = true }
+serde_yaml = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

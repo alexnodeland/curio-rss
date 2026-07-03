@@ -1,12 +1,39 @@
 //! `curio` — the CLI head over [`curio_core`].
 //!
-//! Phase 0 stub. The v1 surface (`add / fetch / query / search / export /
-//! events tail / opml`, plus `curio export --all`) lands in Phase 3 per
-//! `docs/design/roadmap.md`, as thin calls into [`curio_core::CoreHandle`].
+//! Thin by charter: every command parses arguments, calls one or two
+//! [`curio_core::CoreHandle`](curio_core::CoreHandle) methods, and prints
+//! either human lines or (with `--json`) exactly one JSON document on
+//! stdout. Diagnostics go to stderr, driven by `RUST_LOG`.
 
-use curio_core::CoreHandle;
+mod app;
+mod cli;
+mod commands;
+mod config;
+mod output;
+mod resolve;
 
-fn main() {
-    let version = CoreHandle::version();
-    println!("curio {version} — pre-1.0 workspace reset; see docs/design/roadmap.md");
+use std::process::ExitCode;
+
+use clap::Parser as _;
+
+fn main() -> ExitCode {
+    init_tracing();
+    let cli = cli::Cli::parse();
+    match commands::run(cli) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("error: {err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// stderr diagnostics, `RUST_LOG`-driven (`warn` when unset).
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }

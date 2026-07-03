@@ -6,14 +6,20 @@ coordinate before starting anything large.
 
 ## Dev setup
 
+> **Publication status:** this repository is not yet published — the
+> GitHub URL below goes live with the first public release, and the CI
+> workflows in `.github/workflows/` run from that moment on. Until then,
+> `just ci` **is** the gate: it runs the same suite locally (including
+> the blob guard), and nothing lands without it being green.
+
 Everything goes through [`just`](https://github.com/casey/just) — run `just`
 with no arguments to list the recipes.
 
 ```sh
-git clone https://github.com/alexnodeland/curio-rss
+git clone https://github.com/alexnodeland/curio-rss   # post-publication
 cd curio-rss
 just setup     # installs git hooks (lefthook) and checks required tools
-just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, cov, doc
+just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, cov, doc, blob-guard
 ```
 
 Required: stable Rust (see `rust-version` in `Cargo.toml`),
@@ -38,7 +44,9 @@ the workspace until Phase 4.
 - **Lints are the floor.** `cargo fmt` clean, `cargo clippy --workspace
   --all-targets -- -D warnings` clean, `cargo test --workspace` green.
   `unwrap`/`expect` are denied outside tests.
-- **No blobs.** CI fails the push if any git object exceeds 1 MB.
+- **No blobs.** No git object may exceed 1 MB. `just blob-guard` (part of
+  `just ci`) checks the full local history before you push; CI runs the
+  same guard server-side.
 
 ## Coverage ratchet
 

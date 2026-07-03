@@ -75,10 +75,28 @@ cov-html:
     cargo llvm-cov --workspace --html
     @echo "open target/llvm-cov/html/index.html"
 
-# Regenerate generated test fixtures (fixtures/generated — never committed)
+# Regenerate generated test fixtures (fixtures/generated — gitignored, never committed)
 fixtures:
     @echo "the seeded fixture generator lands in Phase 1 (docs/design/roadmap.md) — nothing to generate yet"
 
+# Blob-size guard: fail if any git object in history exceeds 1MB
+# (mirrors CI's blob-guard job — catches the blob BEFORE it is pushed
+# and immortalized in history)
+blob-guard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    limit=1048576
+    oversized=$(git rev-list --objects --all \
+      | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+      | awk -v limit="$limit" '$1 == "blob" && $3 > limit { print $3 " " $2 " " substr($0, index($0, $4)) }' \
+      | sort -rn || true)
+    if [ -n "$oversized" ]; then
+      echo "git objects larger than 1MB found in history:"
+      echo "$oversized"
+      exit 1
+    fi
+    echo "blob guard: OK — no object in history exceeds 1MB"
+
 # Everything CI runs, in CI order — green here means green there
-ci: fmt-check clippy test deny boundary cov doc
+ci: fmt-check clippy test deny boundary cov doc blob-guard
     @echo "ci suite green"

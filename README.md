@@ -49,8 +49,9 @@ Full command walkthrough + `curio.toml` format: [docs/cli.md](docs/cli.md).
 Developing? From a clone:
 
 ```sh
-just setup   # git hooks + tool checks (needs Rust stable, just, lefthook, cargo-deny)
-just ci      # fmt, clippy -D warnings, hermetic tests, cargo-deny, boundary check
+just setup   # git hooks + tool checks (needs Rust stable, just, lefthook, cargo-deny, cargo-llvm-cov)
+just ci      # fmt, clippy -D warnings, hermetic tests, cargo-deny, boundary check,
+             # coverage floor (85% regions on curio-core), rustdoc -D warnings, blob guard
 just         # list all recipes
 ```
 

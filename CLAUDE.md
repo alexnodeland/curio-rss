@@ -31,8 +31,11 @@ contract.
 
 All dev operations go through `just` (run bare to list recipes). `just ci`
 runs exactly what CI runs — fmt-check, clippy `-D warnings`, tests,
-cargo-deny, boundary check — and must be green before any commit lands.
-Hooks are lefthook (`just setup` installs them).
+cargo-deny, boundary check, the **85% region-coverage floor on
+curio-core** (a ratchet — see CONTRIBUTING.md), rustdoc `-D warnings`,
+and the 1MB blob guard — and must be green before any commit lands.
+Hooks are lefthook (`just setup` installs them; they cover fmt/clippy on
+commit and tests on push — the full gate is `just ci`).
 
 ## Commit conventions
 

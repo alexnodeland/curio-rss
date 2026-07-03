@@ -7,10 +7,12 @@ description: Add a new content-source module to curio-core (a feed format, a sit
 
 Three distinct kinds — pick the right one before writing code:
 
-1. **Feed format** (e.g. a new syndication flavor): extend `ingest/`
-   normalization. It must flow through the existing pipeline —
-   parse → normalize → ammonia sanitize → readability → content_text → htmd.
-   Never store raw source HTML; never bypass sanitize-at-ingest.
+1. **Feed format** (e.g. a new syndication flavor): extend the parse
+   layer in `crates/curio-core/src/feeds/` (normalization + the total
+   dedupe key). It must flow through the existing pipeline — `feeds/`
+   parse → `content/` (ammonia sanitize → readability extract →
+   content_text → htmd markdown). Never store raw source HTML; never
+   bypass sanitize-at-ingest.
 2. **View layout** (reddit/youtube-style rendering over RSS-native data):
    v1-legal. Core exposes data; heads own presentation. No new fetching.
 3. **Enrichment provider** (extra API calls, external tools): post-v1 only,

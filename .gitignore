@@ -14,6 +14,9 @@ apps/desktop/src-tauri/gen/
 # Curio runtime state — the events log is never committed (curio.events.v1)
 .curio/events/
 
+# Generated test fixtures — rebuilt via `just fixtures`, never committed
+/fixtures/generated/
+
 # Coverage
 coverage/
 lcov.info

@@ -94,12 +94,27 @@ pub fn split_note(content: &str, path: &Path) -> Result<NoteParts, ExportError> 
         path: path.to_path_buf(),
         message: message.to_owned(),
     };
-    let rest = content
-        .strip_prefix("---\n")
-        .ok_or_else(|| parse_err("missing opening frontmatter fence"))?;
-    let fence_end = rest
-        .find("\n---\n")
-        .ok_or_else(|| parse_err("missing closing frontmatter fence"))?;
+    // Curio writes LF-only notes; an external editor that rewrote the
+    // file with CRLF gets a diagnosis, not a shrug (the generic message
+    // sent people hunting for missing markers that are right there).
+    let crlf_hint = " — the note uses CRLF line endings; Curio writes and re-exports \
+                     LF-only notes, convert the file back to LF (\\n)";
+    let rest = content.strip_prefix("---\n").ok_or_else(|| {
+        if content.starts_with("---\r\n") {
+            parse_err(&format!("frontmatter fence not recognized{crlf_hint}"))
+        } else {
+            parse_err("missing opening frontmatter fence")
+        }
+    })?;
+    let fence_end = rest.find("\n---\n").ok_or_else(|| {
+        if rest.contains("\r\n---\r\n") {
+            parse_err(&format!(
+                "closing frontmatter fence not recognized{crlf_hint}"
+            ))
+        } else {
+            parse_err("missing closing frontmatter fence")
+        }
+    })?;
     let yaml = &rest[..=fence_end];
     let after_fm = &rest[fence_end + "\n---\n".len()..];
 
@@ -276,5 +291,23 @@ mod tests {
         assert!(matches!(err, Err(ExportError::NoteParse { .. })));
         let err = split_note("no frontmatter at all", Path::new("t.md"));
         assert!(matches!(err, Err(ExportError::NoteParse { .. })));
+    }
+
+    /// A CRLF-rewritten note (Notepad, CRLF-configured editors) wedges
+    /// re-export by design (refusing to guess) — but the error must name
+    /// line endings, not claim the fences are missing.
+    #[test]
+    fn split_names_crlf_line_endings_in_its_refusal() {
+        let note = render_note(&sample_frontmatter("T"), "body").unwrap();
+        let crlf = note.replace('\n', "\r\n");
+        let err = split_note(&crlf, Path::new("t.md")).unwrap_err();
+        assert!(
+            err.to_string().contains("CRLF"),
+            "diagnosis must name line endings: {err}"
+        );
+        // Mixed case: LF opening fence, CRLF body.
+        let mixed = "---\ntitle: x\r\n---\r\nbody\r\n";
+        let err = split_note(mixed, Path::new("t.md")).unwrap_err();
+        assert!(err.to_string().contains("CRLF"), "{err}");
     }
 }

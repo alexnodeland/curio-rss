@@ -27,7 +27,26 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 
 ## Quickstart
 
-Once released: `cargo install curio-cli`. Until then, from a clone:
+Once released: `cargo install curio-cli`. Until then, from a clone,
+`cargo install --path crates/curio-cli` (or run via `cargo run -p
+curio-cli --`). Then:
+
+```sh
+curio init                                  # scaffold the profile: curio.toml, curio.db, events log
+curio feed add https://example.com/feed.xml --tags rust
+curio fetch                                 # refresh, report new-article counts
+curio list --unread                         # what's waiting (--json on any read command)
+curio show 3e9f10aa                         # rendered markdown in the terminal
+curio star 3e9f10aa                         # …later/archive/tag/untag; every flip is an event
+curio dest add vault ~/notes/reading        # name a destination directory once
+curio save 3e9f10aa --dest vault            # export the note per curio.frontmatter.v1
+curio events tail -n 5                      # watch the curio.events.v1 stream
+curio doctor                                # db integrity, FTS sync, events-log health
+```
+
+Full command walkthrough + `curio.toml` format: [docs/cli.md](docs/cli.md).
+
+Developing? From a clone:
 
 ```sh
 just setup   # git hooks + tool checks (needs Rust stable, just, lefthook, cargo-deny)

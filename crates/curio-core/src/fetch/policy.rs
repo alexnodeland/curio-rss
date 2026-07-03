@@ -5,9 +5,13 @@
 //! the per-feed `allow_private_network` flag exempts the feed. "Not
 //! public" covers loopback, RFC 1918 private ranges, link-local,
 //! carrier-grade NAT, ULA, multicast, documentation/benchmark ranges and
-//! other never-routable space — for both IPv4 and IPv6, including
-//! IPv4-mapped/compatible IPv6 forms (checked against the embedded IPv4
-//! address, so `::ffff:10.0.0.1` is as private as `10.0.0.1`).
+//! other never-routable space — for both IPv4 and IPv6, including every
+//! IPv4-embedding IPv6 form (checked against the embedded IPv4 address,
+//! so `::ffff:10.0.0.1` is as private as `10.0.0.1`): IPv4-mapped
+//! (`::ffff:0:0/96`), IPv4-compatible (`::/96`), NAT64 (`64:ff9b::/96`,
+//! RFC 6052 — on a NAT64 network `64:ff9b::192.168.0.1` reaches
+//! `192.168.0.1`), 6to4 (`2002::/16`) and Teredo (`2001::/32`, both the
+//! server and the obfuscated client address).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -52,6 +56,29 @@ fn ipv6_is_public(addr: Ipv6Addr) -> bool {
         return ipv4_is_public(v4);
     }
     let segments = addr.segments();
+    // NAT64 (RFC 6052): on a NAT64-enabled network the kernel translates
+    // 64:ff9b::<v4> straight to <v4>, so an AAAA record pointing at
+    // 64:ff9b::192.168.0.1 reaches 192.168.0.1 — judge the embedded
+    // address for the well-known prefix 64:ff9b::/96, and reject the
+    // rest of 64:ff9b::/32 outright (64:ff9b:1::/48 is local-use NAT64
+    // space, never publicly routable).
+    if segments[0] == 0x0064 && segments[1] == 0xff9b {
+        if segments[2..6] == [0, 0, 0, 0] {
+            return ipv4_is_public(embedded_ipv4(segments[6], segments[7]));
+        }
+        return false;
+    }
+    // 6to4 (2002::/16): the tunnel endpoint is the embedded IPv4.
+    if segments[0] == 0x2002 {
+        return ipv4_is_public(embedded_ipv4(segments[1], segments[2]));
+    }
+    // Teredo (2001::/32): carries the server's IPv4 in the clear and the
+    // client's IPv4 ones-complement-obfuscated — judge both.
+    if segments[0] == 0x2001 && segments[1] == 0 {
+        let server = embedded_ipv4(segments[2], segments[3]);
+        let client = embedded_ipv4(!segments[6], !segments[7]);
+        return ipv4_is_public(server) && ipv4_is_public(client);
+    }
     let unique_local = (segments[0] & 0xfe00) == 0xfc00; // fc00::/7 (ULA)
     let link_local = (segments[0] & 0xffc0) == 0xfe80; // fe80::/10
     let multicast = (segments[0] & 0xff00) == 0xff00; // ff00::/8
@@ -59,6 +86,13 @@ fn ipv6_is_public(addr: Ipv6Addr) -> bool {
     let benchmarking = segments[0] == 0x2001 && segments[1] == 0x0002 && segments[2] == 0; // 2001:2::/48
 
     !(unique_local || link_local || multicast || documentation || benchmarking)
+}
+
+/// The IPv4 address packed into two IPv6 segments.
+fn embedded_ipv4(hi: u16, lo: u16) -> Ipv4Addr {
+    let [a, b] = hi.to_be_bytes();
+    let [c, d] = lo.to_be_bytes();
+    Ipv4Addr::new(a, b, c, d)
 }
 
 #[cfg(test)]
@@ -142,6 +176,26 @@ mod tests {
             ("::ffff:169.254.169.254", false),
             ("::ffff:1.1.1.1", true),
             ("::10.0.0.1", false),
+            // NAT64 well-known prefix (RFC 6052): the embedded IPv4 is
+            // what the NAT64 gateway actually reaches.
+            ("64:ff9b::192.168.0.1", false),
+            ("64:ff9b::10.0.0.1", false),
+            ("64:ff9b::169.254.169.254", false),
+            ("64:ff9b::127.0.0.1", false),
+            ("64:ff9b::8.8.8.8", true),
+            // NAT64 local-use space 64:ff9b:1::/48 (and the rest of
+            // 64:ff9b::/32) is never publicly routable.
+            ("64:ff9b:1::192.168.0.1", false),
+            ("64:ff9b:1::8.8.8.8", false),
+            // 6to4: the tunnel endpoint is the embedded IPv4.
+            ("2002:c0a8:1::", false),      // 192.168.0.1
+            ("2002:a00:1::", false),       // 10.0.0.1
+            ("2002:a9fe:a9fe::", false),   // 169.254.169.254
+            ("2002:808:808::1", true),     // 8.8.8.8
+            // Teredo: server IPv4 in the clear, client IPv4 inverted.
+            ("2001:0:c0a8:1::f7f7:f7f7", false), // server 192.168.0.1
+            ("2001:0:505:505::3f57:fffe", false), // client 192.168.0.1
+            ("2001:0:505:505::f7f7:f7f7", true), // server+client 8.8.8.8/5.5.5.5
             // IPv6 public
             ("2606:4700:4700::1111", true),
             ("2001:4860:4860::8888", true),

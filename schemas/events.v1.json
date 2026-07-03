@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curio.dev/schemas/events.v1.json",
+  "title": "curio.events.v1",
+  "description": "Envelope for one line of Curio's append-only behavioral event log: per profile, `.curio/events/` holds JSONL files (`events-YYYYMMDD.jsonl`, UTC date of first event, rotated at UTC midnight or 50 MB with `-2`/`-3` suffixes; retained at least 90 days; never rewritten; never committed to git). One JSON object per line. Consumers dedupe and gain replay-idempotency by `event_id`; within a single file `ts` is non-decreasing, and across files the file naming gives ordering. Negation rule: state reconstruction folds events in order, and a negation event removes membership — histories are NOT monotone, so consumers implementing a \"starred set\" (etc.) MUST honor negations. Tags-in-payload rule: state-carrying events carry the full article snapshot including `tags`, so consumers never need a DB join.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "curio.events.v1",
+      "description": "Contract identifier. Always the literal `curio.events.v1`."
+    },
+    "event_id": {
+      "$ref": "#/$defs/eventId",
+      "description": "ULID, unique per event. Consumers dedupe / gain replay-idempotency by event_id."
+    },
+    "ts": {
+      "$ref": "#/$defs/timestampMillis",
+      "description": "Event time, RFC 3339 UTC with exactly millisecond precision. Non-decreasing within a single file."
+    },
+    "type": {
+      "enum": [
+        "article.saved",
+        "article.updated",
+        "article.starred",
+        "article.unstarred",
+        "article.read_later.added",
+        "article.read_later.removed",
+        "article.archived",
+        "article.unarchived",
+        "article.opened",
+        "article.tagged",
+        "article.untagged",
+        "feed.added",
+        "feed.removed"
+      ],
+      "description": "Namespaced event type (`article.*` / `feed.*`). The 13 types of v1."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Per-type payload. Every `article.*` event carries at minimum `curio_id`; state-carrying events carry the full article snapshot including `tags`."
+    }
+  },
+  "required": ["schema", "event_id", "ts", "type", "payload"],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "description": "article.saved — an article was saved. Payload is the full article snapshot including tags (tags-in-payload rule).",
+      "properties": {
+        "type": { "const": "article.saved" },
+        "payload": { "$ref": "#/$defs/articleSnapshotPayload" }
+      }
+    },
+    {
+      "description": "article.updated — a saved article was re-exported with a changed checksum. Payload is the same full snapshot shape as article.saved.",
+      "properties": {
+        "type": { "const": "article.updated" },
+        "payload": { "$ref": "#/$defs/articleSnapshotPayload" }
+      }
+    },
+    {
+      "description": "article.starred — the article joined the starred set. State-carrying: payload includes tags. Negated by a later article.unstarred for the same curio_id.",
+      "properties": {
+        "type": { "const": "article.starred" },
+        "payload": { "$ref": "#/$defs/curioIdWithTagsPayload" }
+      }
+    },
+    {
+      "description": "article.unstarred — NEGATION of article.starred: folding events in order, this removes the article from the starred set. Histories are not monotone; consumers MUST honor this negation.",
+      "properties": {
+        "type": { "const": "article.unstarred" },
+        "payload": { "$ref": "#/$defs/curioIdOnlyPayload" }
+      }
+    },
+    {
+      "description": "article.read_later.added — the article joined the read-later set. State-carrying: payload includes tags. Negated by a later article.read_later.removed for the same curio_id.",
+      "properties": {
+        "type": { "const": "article.read_later.added" },
+        "payload": { "$ref": "#/$defs/curioIdWithTagsPayload" }
+      }
+    },
+    {
+      "description": "article.read_later.removed — NEGATION of article.read_later.added: folding events in order, this removes the article from the read-later set. Consumers MUST honor this negation.",
+      "properties": {
+        "type": { "const": "article.read_later.removed" },
+        "payload": { "$ref": "#/$defs/curioIdOnlyPayload" }
+      }
+    },
+    {
+      "description": "article.archived — the article was archived. Negated by a later article.unarchived for the same curio_id.",
+      "properties": {
+        "type": { "const": "article.archived" },
+        "payload": { "$ref": "#/$defs/curioIdOnlyPayload" }
+      }
+    },
+    {
+      "description": "article.unarchived — NEGATION of article.archived: folding events in order, this removes the article from the archived set. Consumers MUST honor this negation.",
+      "properties": {
+        "type": { "const": "article.unarchived" },
+        "payload": { "$ref": "#/$defs/curioIdOnlyPayload" }
+      }
+    },
+    {
+      "description": "article.opened — the article was opened for reading; dwell_ms optionally records reading dwell time in milliseconds.",
+      "properties": {
+        "type": { "const": "article.opened" },
+        "payload": { "$ref": "#/$defs/openedPayload" }
+      }
+    },
+    {
+      "description": "article.tagged — a single tag was added to the article. Negated, per tag, by a later article.untagged with the same curio_id and tag.",
+      "properties": {
+        "type": { "const": "article.tagged" },
+        "payload": { "$ref": "#/$defs/tagChangePayload" }
+      }
+    },
+    {
+      "description": "article.untagged — NEGATION of article.tagged for the same tag: folding events in order, this removes the tag from the article. Consumers MUST honor this negation.",
+      "properties": {
+        "type": { "const": "article.untagged" },
+        "payload": { "$ref": "#/$defs/tagChangePayload" }
+      }
+    },
+    {
+      "description": "feed.added — a feed subscription was added. Negated by a later feed.removed for the same feed URL.",
+      "properties": {
+        "type": { "const": "feed.added" },
+        "payload": { "$ref": "#/$defs/feedAddedPayload" }
+      }
+    },
+    {
+      "description": "feed.removed — NEGATION of feed.added: folding events in order, this removes the feed subscription. Consumers MUST honor this negation.",
+      "properties": {
+        "type": { "const": "feed.removed" },
+        "payload": { "$ref": "#/$defs/feedRemovedPayload" }
+      }
+    }
+  ],
+  "$defs": {
+    "curioId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUIDv7 in canonical lowercase hyphenated form. Article identity — assigned at save, never changes."
+    },
+    "eventId": {
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+      "description": "ULID: 26 characters of Crockford base32 (uppercase, no I/L/O/U), first character 0-7."
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 digest in lowercase hex with the literal `sha256:` prefix. Change token ONLY — never identity."
+    },
+    "timestampMillis": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "description": "RFC 3339 UTC timestamp with exactly millisecond precision, `Z`-suffixed."
+    },
+    "timestampUtc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$",
+      "description": "RFC 3339 UTC timestamp, `Z`-suffixed, fractional seconds optional."
+    },
+    "articleSnapshotPayload": {
+      "type": "object",
+      "description": "Full article snapshot carried by state-carrying events (article.saved / article.updated), including tags — the tags-in-payload rule means consumers never need a DB join.",
+      "properties": {
+        "curio_id": { "$ref": "#/$defs/curioId" },
+        "title": { "type": "string", "minLength": 1 },
+        "source": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1,
+          "description": "Canonical article URL."
+        },
+        "feed": {
+          "type": ["string", "null"],
+          "format": "uri",
+          "description": "Feed URL the article came from; null if saved manually."
+        },
+        "feed_title": {
+          "type": ["string", "null"],
+          "description": "Human-readable feed name; null if unknown or manual save."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Curio-assigned tags at event time (tags-in-payload rule)."
+        },
+        "published": {
+          "oneOf": [{ "$ref": "#/$defs/timestampUtc" }, { "type": "null" }],
+          "description": "Publication time, RFC 3339 UTC; null if unknown."
+        },
+        "destination": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Named destination the note was exported to. Destination names, never raw filesystem paths."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Note path relative to the destination root."
+        },
+        "checksum": { "$ref": "#/$defs/checksum" }
+      },
+      "required": [
+        "curio_id",
+        "title",
+        "source",
+        "feed",
+        "feed_title",
+        "tags",
+        "published",
+        "destination",
+        "path",
+        "checksum"
+      ],
+      "additionalProperties": false
+    },
+    "curioIdWithTagsPayload": {
+      "type": "object",
+      "description": "State-carrying membership payload: the article's identity plus its tags at event time (tags-in-payload rule).",
+      "properties": {
+        "curio_id": { "$ref": "#/$defs/curioId" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "required": ["curio_id", "tags"],
+      "additionalProperties": false
+    },
+    "curioIdOnlyPayload": {
+      "type": "object",
+      "description": "Minimal article payload: identity only. Used by negation events (which carry no tags) and simple state flips.",
+      "properties": {
+        "curio_id": { "$ref": "#/$defs/curioId" }
+      },
+      "required": ["curio_id"],
+      "additionalProperties": false
+    },
+    "openedPayload": {
+      "type": "object",
+      "description": "article.opened payload: identity plus optional dwell time.",
+      "properties": {
+        "curio_id": { "$ref": "#/$defs/curioId" },
+        "dwell_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Reading dwell time in milliseconds. Optional."
+        }
+      },
+      "required": ["curio_id"],
+      "additionalProperties": false
+    },
+    "tagChangePayload": {
+      "type": "object",
+      "description": "Single-tag change payload for article.tagged / article.untagged. article.untagged negates article.tagged for the same (curio_id, tag).",
+      "properties": {
+        "curio_id": { "$ref": "#/$defs/curioId" },
+        "tag": { "type": "string", "minLength": 1 }
+      },
+      "required": ["curio_id", "tag"],
+      "additionalProperties": false
+    },
+    "feedAddedPayload": {
+      "type": "object",
+      "description": "feed.added payload: the subscribed feed plus its tags at event time.",
+      "properties": {
+        "feed": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1,
+          "description": "Feed URL."
+        },
+        "feed_title": {
+          "type": ["string", "null"],
+          "description": "Human-readable feed name; null if unknown."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "required": ["feed", "feed_title", "tags"],
+      "additionalProperties": false
+    },
+    "feedRemovedPayload": {
+      "type": "object",
+      "description": "feed.removed payload: the unsubscribed feed URL. Negates feed.added for the same feed.",
+      "properties": {
+        "feed": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1
+        }
+      },
+      "required": ["feed"],
+      "additionalProperties": false
+    }
+  }
+}

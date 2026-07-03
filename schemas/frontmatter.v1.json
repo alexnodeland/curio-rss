@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curio.dev/schemas/frontmatter.v1.json",
+  "title": "curio.frontmatter.v1",
+  "description": "YAML frontmatter carried by every markdown note Curio exports into a named destination, expressed over the YAML data model as JSON. `curio_id` is identity (UUIDv7, assigned at save, never changes); `checksum` is a change token ONLY and covers exactly the bytes of the managed content region (between `<!-- curio:managed:begin v1 -->` and `<!-- curio:managed:end -->`), never the whole file. Consumers MUST NOT use checksum as identity. User-added frontmatter keys unknown to Curio are preserved on re-export, so additional properties are permitted. The per-destination export-idempotency manifest (`.curio/manifest.json`, `curio.manifest.v1`) is published under `$defs/manifest` in this file.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "curio.frontmatter.v1",
+      "description": "Contract identifier. Always the literal `curio.frontmatter.v1`."
+    },
+    "curio_id": {
+      "$ref": "#/$defs/curioId",
+      "description": "Article identity: UUIDv7, assigned at save, never changes. An edited article keeps its id."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Article title."
+    },
+    "source": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1,
+      "description": "Canonical article URL."
+    },
+    "feed": {
+      "type": ["string", "null"],
+      "format": "uri",
+      "description": "Feed URL the article came from; null if the article was saved manually. The key is always present."
+    },
+    "feed_title": {
+      "type": ["string", "null"],
+      "description": "Human-readable feed name. Optional."
+    },
+    "author": {
+      "type": ["string", "null"],
+      "description": "Article author. Optional."
+    },
+    "published": {
+      "oneOf": [{ "$ref": "#/$defs/timestampUtc" }, { "type": "null" }],
+      "description": "Publication time, RFC 3339 UTC (`Z`-suffixed, fractional seconds optional); null if unknown. The key is always present."
+    },
+    "saved": {
+      "$ref": "#/$defs/timestampMillis",
+      "description": "Time the article was saved in Curio. RFC 3339 UTC with exactly millisecond precision."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Curio-assigned tags at export time. May be empty."
+    },
+    "checksum": {
+      "$ref": "#/$defs/checksum",
+      "description": "sha256 of the managed content region bytes. Change token ONLY — never identity: two articles can have identical content, and an edited article keeps its curio_id while the checksum changes."
+    },
+    "lang": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "BCP-47 language tag. Optional."
+    },
+    "word_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Word count of the extracted article. Optional."
+    }
+  },
+  "required": [
+    "schema",
+    "curio_id",
+    "title",
+    "source",
+    "feed",
+    "published",
+    "saved",
+    "tags",
+    "checksum"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "curioId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUIDv7 in canonical lowercase hyphenated form (version nibble 7, RFC 4122 variant)."
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 digest in lowercase hex with the literal `sha256:` prefix."
+    },
+    "timestampMillis": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "description": "RFC 3339 UTC timestamp with exactly millisecond precision, `Z`-suffixed (e.g. 2026-07-03T09:15:00.123Z)."
+    },
+    "timestampUtc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$",
+      "description": "RFC 3339 UTC timestamp, `Z`-suffixed, fractional seconds optional (e.g. 2026-07-01T12:00:00Z)."
+    },
+    "manifest": {
+      "type": "object",
+      "title": "curio.manifest.v1",
+      "description": "Per-destination export-idempotency oracle at `.curio/manifest.json`, mapping curio_id to export record. On disk the writer keeps keys sorted, 2-space indent, one entry per line (git-mergeable diffs), and writes the note file first, the manifest second, via temp-file + atomic rename — a crash leaves an orphan note, never a dangling manifest entry. Export is idempotent on (curio_id, checksum): unchanged means no write. Consumers read the manifest to learn write-ownership: paths present here are Curio-owned at the managed-region level.",
+      "properties": {
+        "schema": {
+          "const": "curio.manifest.v1",
+          "description": "Contract identifier. Always the literal `curio.manifest.v1`."
+        },
+        "notes": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/curioId" },
+          "additionalProperties": { "$ref": "#/$defs/manifestEntry" },
+          "description": "Map from curio_id to export record. Keys are sorted on disk."
+        }
+      },
+      "required": ["schema", "notes"],
+      "additionalProperties": false
+    },
+    "manifestEntry": {
+      "type": "object",
+      "description": "Export record for one note in this destination.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Note path relative to the destination root."
+        },
+        "checksum": {
+          "$ref": "#/$defs/checksum",
+          "description": "Checksum of the managed region as last exported. Change token ONLY, never identity."
+        },
+        "exported_at": {
+          "$ref": "#/$defs/timestampMillis",
+          "description": "Time of the last export of this note. RFC 3339 UTC with exactly millisecond precision."
+        }
+      },
+      "required": ["path", "checksum", "exported_at"],
+      "additionalProperties": false
+    }
+  }
+}

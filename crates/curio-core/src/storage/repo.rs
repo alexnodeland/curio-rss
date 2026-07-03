@@ -341,7 +341,7 @@ impl Storage {
 
     /// Batch-upserts articles in a single transaction (one fsync per
     /// batch, not per row). Identity: existing rows are matched by the
-    /// **feed-scoped** dedupe key (see [`scoped_dedupe_key`]) — colliding
+    /// **feed-scoped** dedupe key (`f<feed_id>:`/`m:` prefix) — colliding
     /// guids from different feeds are different articles, never
     /// overwrites. An update refreshes content columns but never touches
     /// `curio_id` or `saved_at`.

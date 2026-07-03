@@ -45,8 +45,9 @@ impl EventLog {
     /// Opens (creating if absent) the events directory. Appending resumes
     /// on the newest existing log file, so restarts continue the day's
     /// file instead of abandoning it. A torn final line left by a crash
-    /// mid-append is healed here (see [`heal_torn_tail`]), so readers and
-    /// subsequent appends only ever see whole lines.
+    /// mid-append is healed here (truncated back to the last complete
+    /// line — see `heal_torn_tail`), so readers and subsequent appends
+    /// only ever see whole lines.
     ///
     /// # Errors
     ///

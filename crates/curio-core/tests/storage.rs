@@ -63,6 +63,13 @@ fn fresh_database_reaches_the_current_schema_version() {
 }
 
 #[test]
+fn integrity_check_passes_on_a_healthy_database() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "guid:1", "Title", "body text");
+    storage.integrity_check().unwrap();
+}
+
+#[test]
 fn migrations_are_idempotent_across_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("curio.db");

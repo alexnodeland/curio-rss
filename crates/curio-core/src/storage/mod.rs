@@ -67,6 +67,12 @@ pub enum StorageError {
         /// Parse-failure detail.
         message: String,
     },
+    /// `PRAGMA integrity_check` reported problems.
+    #[error("database integrity check failed: {detail}")]
+    IntegrityFailed {
+        /// The first problem `SQLite` reported.
+        detail: String,
+    },
     /// Event-envelope (de)serialization failed.
     #[error("event envelope serialization: {0}")]
     Envelope(#[from] serde_json::Error),
@@ -194,6 +200,25 @@ impl Storage {
         self.write(|conn| {
             conn.execute("VACUUM", [])?;
             Ok(())
+        })
+    }
+
+    /// Runs `PRAGMA integrity_check` over the whole database — the
+    /// doctor-surface health probe.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::IntegrityFailed`] with `SQLite`'s first finding if
+    /// the database is damaged; [`StorageError::Sqlite`] if the pragma
+    /// itself cannot run.
+    pub fn integrity_check(&self) -> Result<(), StorageError> {
+        self.read(|conn| {
+            let verdict: String = conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+            if verdict.eq_ignore_ascii_case("ok") {
+                Ok(())
+            } else {
+                Err(StorageError::IntegrityFailed { detail: verdict })
+            }
         })
     }
 

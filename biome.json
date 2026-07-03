@@ -69,7 +69,8 @@
             "coverage",
             "src/lib/types/generated",
             ".svelte-kit",
-            "src-tauri/gen"
+            "src-tauri/gen",
+            "docs/design/research"
         ]
     }
 }

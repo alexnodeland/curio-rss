@@ -67,7 +67,11 @@ const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url
 impl Storage {
     // ------------------------------------------------------------ feeds
 
-    /// Subscribes to a feed and stages the `feed.added` event.
+    /// Subscribes to a feed and stages the `feed.added` event. Tags are
+    /// normalized first (trimmed, empties dropped, deduplicated in
+    /// first-seen order) so the staged event satisfies the published
+    /// schema's `minLength: 1` / `uniqueItems` constraints no matter how
+    /// sloppy the input (CLI flags, OPML categories).
     ///
     /// # Errors
     ///
@@ -77,6 +81,7 @@ impl Storage {
         self.write(move |conn| {
             let tx = conn.transaction()?;
             let now = Timestamp::now();
+            let tags = normalize_tags(new.tags);
             tx.prepare_cached(
                 "INSERT INTO feeds (url, title, added_at, modified_at) VALUES (?1, ?2, ?3, ?4)",
             )?
@@ -85,7 +90,7 @@ impl Storage {
             let envelope = EventEnvelope::new(EventPayload::FeedAdded {
                 feed: new.url.clone(),
                 feed_title: new.title.clone(),
-                tags: new.tags,
+                tags,
             });
             insert_intent(&tx, &envelope)?;
             let feed = feed_by_id(&tx, id)?.ok_or(StorageError::NotFound { entity: "feed" })?;
@@ -672,17 +677,20 @@ impl Storage {
     // ------------------------------------------------------------- tags
 
     /// Adds a tag to an article; stages `article.tagged`. Idempotent:
-    /// `None` when the article already carries the tag.
+    /// `None` when the article already carries the tag. The tag is
+    /// trimmed before storage.
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`] if the article does not exist.
+    /// [`StorageError::NotFound`] if the article does not exist;
+    /// [`StorageError::InvalidTag`] for an empty/whitespace-only tag
+    /// (the published schemas require `minLength: 1`).
     pub fn tag_article(
         &self,
         id: ArticleId,
         tag: &str,
     ) -> Result<Option<EventEnvelope>, StorageError> {
-        let tag = tag.to_owned();
+        let tag = validated_tag(tag)?;
         self.write(move |conn| {
             let tx = conn.transaction()?;
             let curio_id = require_article(&tx, id.0)?;
@@ -709,17 +717,19 @@ impl Storage {
     }
 
     /// Removes a tag from an article; stages the `article.untagged`
-    /// negation. `None` when the article did not carry the tag.
+    /// negation. `None` when the article did not carry the tag. The tag
+    /// is trimmed before matching, mirroring [`Storage::tag_article`].
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`] if the article does not exist.
+    /// [`StorageError::NotFound`] if the article does not exist;
+    /// [`StorageError::InvalidTag`] for an empty/whitespace-only tag.
     pub fn untag_article(
         &self,
         id: ArticleId,
         tag: &str,
     ) -> Result<Option<EventEnvelope>, StorageError> {
-        let tag = tag.to_owned();
+        let tag = validated_tag(tag)?;
         self.write(move |conn| {
             let tx = conn.transaction()?;
             let curio_id = require_article(&tx, id.0)?;
@@ -949,6 +959,29 @@ fn scoped_dedupe_key(feed_id: Option<FeedId>, key: &str) -> String {
         Some(feed) => format!("f{}:{key}", feed.0),
         None => format!("m:{key}"),
     }
+}
+
+/// Trims a tag and refuses the empty result — the producer-side
+/// enforcement of the published schemas' `minLength: 1` on tags.
+fn validated_tag(tag: &str) -> Result<String, StorageError> {
+    let tag = tag.trim();
+    if tag.is_empty() {
+        return Err(StorageError::InvalidTag);
+    }
+    Ok(tag.to_owned())
+}
+
+/// Normalizes a tag list: trim, drop empties, dedupe in first-seen order
+/// (`uniqueItems` in the published schemas).
+fn normalize_tags(tags: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let tag = tag.trim();
+        if !tag.is_empty() && !out.iter().any(|t| t == tag) {
+            out.push(tag.to_owned());
+        }
+    }
+    out
 }
 
 /// Compiles user input into a safe FTS5 query: every whitespace-separated

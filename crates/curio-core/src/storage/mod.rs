@@ -76,6 +76,13 @@ pub enum StorageError {
     /// Event-envelope (de)serialization failed.
     #[error("event envelope serialization: {0}")]
     Envelope(#[from] serde_json::Error),
+    /// A tag failed validation. The published contracts require tags to
+    /// be non-empty (`minLength: 1` in both `curio.events.v1` and
+    /// `curio.frontmatter.v1`), so empty or whitespace-only tags are
+    /// refused at the producer boundary — an accepted one would emit
+    /// events and frontmatter that fail the schemas Curio publishes.
+    #[error("invalid tag: tags must contain non-whitespace characters")]
+    InvalidTag,
 }
 
 /// The storage handle: one writer thread + a read-only pool over a single

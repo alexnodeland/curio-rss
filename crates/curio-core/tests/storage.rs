@@ -481,6 +481,56 @@ fn state_events_carry_tags_in_payload() {
     );
 }
 
+/// The published schemas require tags to be non-empty (`minLength: 1`);
+/// the producer must refuse what its own consumers would reject.
+#[test]
+fn empty_and_whitespace_tags_are_refused_and_inputs_are_trimmed() {
+    let (_dir, storage) = temp_storage();
+    let id = insert_one(&storage, "k1", "Title", "body");
+
+    for bad in ["", " ", "\t", "\n  "] {
+        assert!(matches!(
+            storage.tag_article(id, bad),
+            Err(StorageError::InvalidTag)
+        ));
+        assert!(matches!(
+            storage.untag_article(id, bad),
+            Err(StorageError::InvalidTag)
+        ));
+    }
+    assert!(
+        storage.pending_intents().unwrap().is_empty(),
+        "no event staged"
+    );
+
+    // Accidental surrounding whitespace normalizes to the same tag.
+    assert!(storage.tag_article(id, " rust ").unwrap().is_some());
+    assert!(storage.tag_article(id, "rust").unwrap().is_none());
+    assert_eq!(storage.article_tags(id).unwrap(), vec!["rust".to_owned()]);
+    assert!(storage.untag_article(id, " rust").unwrap().is_some());
+
+    // Feed tags normalize (trim, drop empties, dedupe) instead of erroring:
+    // OPML categories are third-party input.
+    let (_feed, added) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![
+                String::new(),
+                "  ".to_owned(),
+                " rust ".to_owned(),
+                "rust".to_owned(),
+                "db".to_owned(),
+            ],
+        })
+        .unwrap();
+    assert!(matches!(
+        &added.event,
+        EventPayload::FeedAdded { tags, .. }
+            if tags == &["rust".to_owned(), "db".to_owned()]
+    ));
+}
+
 #[test]
 fn state_ops_on_a_missing_article_report_not_found() {
     let (_dir, storage) = temp_storage();

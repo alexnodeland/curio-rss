@@ -8,10 +8,12 @@
 //! `cargo run -p xtask -- boundary`): this crate must never depend on tauri
 //! or any webview — it builds and tests headless, everywhere.
 //!
-//! Shipped so far: [`model`] (domain types). The remaining engine
-//! modules land per `docs/design/roadmap.md`.
+//! Shipped so far: [`model`] (domain types) and [`storage`] (WAL
+//! `SQLite` behind a single-writer/pooled-reader facade). The remaining
+//! engine modules land per `docs/design/roadmap.md`.
 
 pub mod model;
+pub mod storage;
 
 pub use curio_types as types;
 

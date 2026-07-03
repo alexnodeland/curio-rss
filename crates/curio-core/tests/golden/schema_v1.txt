@@ -1,0 +1,149 @@
+-- index idx_articles_feed_id
+CREATE INDEX idx_articles_feed_id ON articles(feed_id)
+
+-- index idx_articles_published_at
+CREATE INDEX idx_articles_published_at ON articles(published_at)
+
+-- index idx_fetch_log_feed_id
+CREATE INDEX idx_fetch_log_feed_id ON fetch_log(feed_id, id)
+
+-- index sqlite_autoindex_articles_1
+<internal>
+
+-- index sqlite_autoindex_articles_2
+<internal>
+
+-- index sqlite_autoindex_event_intents_1
+<internal>
+
+-- index sqlite_autoindex_feeds_1
+<internal>
+
+-- index sqlite_autoindex_tags_1
+<internal>
+
+-- table article_state
+CREATE TABLE article_state (
+    article_id    INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+    is_read       INTEGER NOT NULL DEFAULT 0,
+    is_starred    INTEGER NOT NULL DEFAULT 0,
+    is_read_later INTEGER NOT NULL DEFAULT 0,
+    is_archived   INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT    NOT NULL
+)
+
+-- table article_tags
+CREATE TABLE article_tags (
+    article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    tag_id     INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (article_id, tag_id)
+) WITHOUT ROWID
+
+-- table articles
+CREATE TABLE articles (
+    id                INTEGER PRIMARY KEY,
+    curio_id          TEXT    NOT NULL UNIQUE,
+    feed_id           INTEGER REFERENCES feeds(id) ON DELETE SET NULL,
+    dedupe_key        TEXT    NOT NULL UNIQUE,
+    title             TEXT    NOT NULL DEFAULT '',
+    source_url        TEXT    NOT NULL,
+    author            TEXT,
+    published_at      TEXT,
+    content_html      TEXT    NOT NULL DEFAULT '',
+    content_text      TEXT    NOT NULL DEFAULT '',
+    lang              TEXT,
+    word_count        INTEGER,
+    saved_at          TEXT    NOT NULL,
+    source_updated_at TEXT,
+    modified_at       TEXT    NOT NULL
+)
+
+-- table articles_fts
+CREATE VIRTUAL TABLE articles_fts USING fts5(
+    title,
+    content_text,
+    content='articles',
+    content_rowid='id'
+)
+
+-- table articles_fts_config
+CREATE TABLE 'articles_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID
+
+-- table articles_fts_data
+CREATE TABLE 'articles_fts_data'(id INTEGER PRIMARY KEY, block BLOB)
+
+-- table articles_fts_docsize
+CREATE TABLE 'articles_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)
+
+-- table articles_fts_idx
+CREATE TABLE 'articles_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID
+
+-- table event_intents
+CREATE TABLE event_intents (
+    id            INTEGER PRIMARY KEY,
+    event_id      TEXT NOT NULL UNIQUE,
+    ts            TEXT NOT NULL,
+    envelope_json TEXT NOT NULL
+)
+
+-- table feeds
+CREATE TABLE feeds (
+    id                    INTEGER PRIMARY KEY,
+    url                   TEXT    NOT NULL UNIQUE,
+    title                 TEXT,
+    site_url              TEXT,
+    description           TEXT,
+    etag                  TEXT,
+    last_modified         TEXT,
+    status                TEXT    NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'paused', 'dead')),
+    allow_private_network INTEGER NOT NULL DEFAULT 0,
+    added_at              TEXT    NOT NULL,
+    last_fetched_at       TEXT,
+    modified_at           TEXT    NOT NULL
+)
+
+-- table fetch_log
+CREATE TABLE fetch_log (
+    id           INTEGER PRIMARY KEY,
+    feed_id      INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+    fetched_at   TEXT    NOT NULL,
+    status       TEXT    NOT NULL
+                 CHECK (status IN ('ok', 'not_modified', 'error')),
+    http_status  INTEGER,
+    error        TEXT,
+    articles_new INTEGER NOT NULL DEFAULT 0,
+    duration_ms  INTEGER
+)
+
+-- table settings
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+) WITHOUT ROWID
+
+-- table tags
+CREATE TABLE tags (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+)
+
+-- trigger articles_fts_ad
+CREATE TRIGGER articles_fts_ad AFTER DELETE ON articles BEGIN
+    INSERT INTO articles_fts(articles_fts, rowid, title, content_text)
+    VALUES ('delete', old.id, old.title, old.content_text);
+END
+
+-- trigger articles_fts_ai
+CREATE TRIGGER articles_fts_ai AFTER INSERT ON articles BEGIN
+    INSERT INTO articles_fts(rowid, title, content_text)
+    VALUES (new.id, new.title, new.content_text);
+END
+
+-- trigger articles_fts_au
+CREATE TRIGGER articles_fts_au AFTER UPDATE OF title, content_text ON articles BEGIN
+    INSERT INTO articles_fts(articles_fts, rowid, title, content_text)
+    VALUES ('delete', old.id, old.title, old.content_text);
+    INSERT INTO articles_fts(rowid, title, content_text)
+    VALUES (new.id, new.title, new.content_text);
+END

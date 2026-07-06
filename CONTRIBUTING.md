@@ -19,7 +19,7 @@ with no arguments to list the recipes.
 git clone https://github.com/alexnodeland/curio-rss   # post-publication
 cd curio-rss
 just setup     # installs git hooks (lefthook) and checks required tools
-just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, cov, doc, blob-guard
+just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, cov, doc, blob-guard, frontend gates
 ```
 
 Required: stable Rust (see `rust-version` in `Cargo.toml`),
@@ -33,7 +33,10 @@ head builds and tests fully headless. Phase 4 brought `apps/desktop/src-tauri`
 tauri: on Linux install the webview system packages first
 (`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
 librsvg2-dev` — see ci.yml); macOS and Windows need nothing extra. The
-Svelte frontend under `apps/desktop/` has its own npm toolchain.
+Svelte frontend under `apps/desktop/` has its own npm toolchain: run
+`npm install` there once, and the frontend gates (`just desktop-lint`,
+`just desktop-npm-test`, `just frontend-bans`) run as part of `just ci`
+and as lefthook hooks scoped to `apps/desktop/` changes.
 
 ## Ground rules
 

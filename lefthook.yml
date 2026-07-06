@@ -2,11 +2,12 @@
 # https://github.com/evilmartians/lefthook
 #
 # Phase 4: the desktop head's Rust crate (apps/desktop/src-tauri) is a
-# workspace member, so the Rust hooks below cover it too. The npm hooks
-# (biome/svelte-check pre-commit, vitest pre-push) land with the frontend
-# rewrite (WP2) — the parked sketch frontend would fail them by design.
-# Rust hooks run on the whole workspace (staged-only games are not worth
-# the drift).
+# workspace member, so the Rust hooks cover it too. The frontend rewrite
+# (WP2) brought the promised npm hooks: biome + eslint (svelte templates) +
+# svelte-check + the frontend-bans greps on commit, vitest on push — all
+# glob-scoped to apps/desktop so Rust-only commits stay fast. They need
+# `npm install` under apps/desktop once. Rust hooks run on the whole
+# workspace (staged-only games are not worth the drift).
 
 pre-commit:
   parallel: true
@@ -25,10 +26,45 @@ pre-commit:
         - merge
         - rebase
 
+    frontend-bans:
+      glob: "apps/desktop/src/**"
+      run: bash scripts/check-frontend-bans.sh
+      skip:
+        - merge
+        - rebase
+
+    desktop-biome:
+      glob: "apps/desktop/**"
+      run: cd apps/desktop && npm run lint
+      skip:
+        - merge
+        - rebase
+
+    desktop-eslint:
+      glob: "apps/desktop/src/**"
+      run: cd apps/desktop && npm run lint:eslint
+      skip:
+        - merge
+        - rebase
+
+    desktop-svelte-check:
+      glob: "apps/desktop/src/**"
+      run: cd apps/desktop && npm run check
+      skip:
+        - merge
+        - rebase
+
 pre-push:
   commands:
     rust-tests:
       run: cargo test --workspace
+      skip:
+        - merge
+        - rebase
+
+    desktop-vitest:
+      glob: "apps/desktop/**"
+      run: cd apps/desktop && npm run test
       skip:
         - merge
         - rebase

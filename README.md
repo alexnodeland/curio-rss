@@ -51,13 +51,16 @@ Developing? From a clone:
 ```sh
 just setup   # git hooks + tool checks (needs Rust stable, just, lefthook, cargo-deny, cargo-llvm-cov)
 just ci      # fmt, clippy -D warnings, hermetic tests, cargo-deny, boundary check,
-             # coverage floor (85% regions on curio-core), rustdoc -D warnings, blob guard
+             # coverage floor (85% regions on curio-core), rustdoc -D warnings, blob guard,
+             # frontend gates (biome/eslint/svelte-check, vitest, {@html}+invoke bans)
 just         # list all recipes
 ```
 
 No Node or npm required for engine work; the desktop head's Rust crate is
 in the workspace (on Linux, `--workspace` builds need the webkit2gtk/gtk
 system packages — see CONTRIBUTING.md), and the core itself stays headless.
+Frontend work needs Node + `npm install` under `apps/desktop/` — the
+frontend gates then ride `just ci`.
 
 ## Architecture
 

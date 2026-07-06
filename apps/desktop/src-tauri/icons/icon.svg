@@ -1,0 +1,35 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Curio">
+  <title>Curio</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4A38C8"/>
+      <stop offset="0.55" stop-color="#3A2AA0"/>
+      <stop offset="1" stop-color="#271B6E"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.32" cy="0.26" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- app tile: a rounded squircle-ish rect on a transparent canvas so the
+       corners read as a native macOS icon -->
+  <rect x="72" y="72" width="880" height="880" rx="212" ry="212" fill="url(#tile)"/>
+  <rect x="72" y="72" width="880" height="880" rx="212" ry="212" fill="url(#sheen)"/>
+
+  <!-- the Curio "C": a bold aperture ring opening to the right, drawn as a
+       stroked circle with a dashed gap centred on 3 o'clock -->
+  <circle cx="512" cy="512" r="292" fill="none" stroke="#F6F1E7" stroke-width="116"
+          stroke-linecap="round" stroke-dasharray="1265 570" stroke-dashoffset="285"/>
+
+  <!-- the RSS mark tucked inside the C's mouth: dot + two broadcast arcs
+       opening to the upper-right (this is a feed reader). Arcs are quarter
+       circles centred on the dot at (452,646): East endpoint -> North
+       endpoint, bulging toward the upper-right. -->
+  <g fill="none" stroke="#F4B23E" stroke-width="52" stroke-linecap="round">
+    <path d="M 556 646 A 104 104 0 0 0 452 542"/>
+    <path d="M 644 646 A 192 192 0 0 0 452 454"/>
+  </g>
+  <circle cx="452" cy="646" r="42" fill="#F4B23E"/>
+</svg>

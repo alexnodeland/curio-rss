@@ -1,61 +1,46 @@
 <script lang="ts">
 import '../app.css';
-import { loadArticles, loadFeeds, loadFolderTree } from '$lib/stores/feeds';
-import { setTheme, currentTheme } from '$lib/stores/ui';
 import { onMount } from 'svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
+import { wireInvalidation } from '$lib/state/query-cache.svelte';
+import { settingsStore } from '$lib/state/settings.svelte';
+import { uiStore } from '$lib/state/ui.svelte';
+import type { Snippet } from 'svelte';
 
-let initError = '';
+let { children }: { children: Snippet } = $props();
 
-onMount(async () => {
-    // Apply saved theme
-    setTheme($currentTheme);
+onMount(() => {
+    const teardowns: Array<() => void> = [];
+    let unmounted = false;
 
-    // Load initial data
-    try {
-        await Promise.all([loadFeeds(), loadFolderTree()]);
-        await loadArticles();
-    } catch (e) {
-        initError = e instanceof Error ? e.message : 'Failed to initialize';
-        console.error('Initialization error:', e);
-    }
+    void (async () => {
+        // Settings first: the persisted theme wins over the preload's
+        // localStorage mirror once the backend answers.
+        await settingsStore.load();
+        uiStore.initTheme();
+
+        // Event-driven invalidation: the query cache and the refresh
+        // progress fields subscribe to the Rust-emitted specta events.
+        const unsubscribers = await Promise.all([
+            wireInvalidation(),
+            feedsStore.wireRefreshEvents(),
+        ]);
+        if (unmounted) {
+            for (const unsubscribe of unsubscribers) {
+                unsubscribe();
+            }
+            return;
+        }
+        teardowns.push(...unsubscribers);
+    })();
+
+    return () => {
+        unmounted = true;
+        for (const teardown of teardowns) {
+            teardown();
+        }
+    };
 });
 </script>
 
-{#if initError}
-    <div class="init-error">
-        <h1>Curio Reader</h1>
-        <p>{initError}</p>
-        <p class="hint">Make sure you're running the app via <code>make dev</code> or the built application.</p>
-    </div>
-{:else}
-    <slot />
-{/if}
-
-<style>
-    .init-error {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        text-align: center;
-        padding: 2rem;
-        font-family: system-ui, sans-serif;
-    }
-    .init-error h1 {
-        font-size: 1.5rem;
-        margin-bottom: 1rem;
-    }
-    .init-error p {
-        color: #666;
-        margin: 0.5rem 0;
-    }
-    .init-error .hint {
-        font-size: 0.875rem;
-    }
-    .init-error code {
-        background: #f0f0f0;
-        padding: 0.2em 0.4em;
-        border-radius: 3px;
-    }
-</style>
+{@render children()}

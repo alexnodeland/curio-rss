@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Curio mark: a reader's dot-and-waves — an RSS glyph reduced to tokens. -->
+  <rect width="32" height="32" rx="7" fill="#1a1b1e"/>
+  <circle cx="10" cy="22" r="3.4" fill="#228be6"/>
+  <path d="M7 13.5a11.5 11.5 0 0 1 11.5 11.5" fill="none" stroke="#228be6" stroke-width="3.4" stroke-linecap="round"/>
+  <path d="M7 6a19 19 0 0 1 19 19" fill="none" stroke="#74c0fc" stroke-width="3.4" stroke-linecap="round"/>
+</svg>

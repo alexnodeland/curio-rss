@@ -1,10 +1,11 @@
 /**
- * Format utilities for Curio Reader
+ * Formatting utilities — pure functions over wire values (RFC 3339 strings,
+ * counts, byte sizes). Locale-sensitive date output routes through the i18n
+ * layer's `Intl` helpers so the locale lives in exactly one place.
  */
+import { formatIntlDate, formatIntlDateTime } from '$lib/i18n';
 
-/**
- * Format a date string as a relative time (e.g., "2 hours ago")
- */
+/** Formats a date string as a relative time (e.g. `4h ago`). */
 export function formatRelativeTime(dateString: string | null | undefined): string {
     if (!dateString) return '';
 
@@ -40,44 +41,19 @@ export function formatRelativeTime(dateString: string | null | undefined): strin
     return `${diffYears}y ago`;
 }
 
-/**
- * Format a date string as a human-readable date
- */
+/** Formats a date string as a human-readable date (year only when not this year). */
 export function formatDate(dateString: string | null | undefined): string {
     if (!dateString) return '';
-
-    const date = new Date(dateString);
-    const now = new Date();
-    const isThisYear = date.getFullYear() === now.getFullYear();
-
-    const options: Intl.DateTimeFormatOptions = {
-        month: 'long',
-        day: 'numeric',
-        ...(isThisYear ? {} : { year: 'numeric' }),
-    };
-
-    return date.toLocaleDateString('en-US', options);
+    return formatIntlDate(new Date(dateString));
 }
 
-/**
- * Format a date string as a full datetime
- */
+/** Formats a date string as a full datetime. */
 export function formatDateTime(dateString: string | null | undefined): string {
     if (!dateString) return '';
-
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-    });
+    return formatIntlDateTime(new Date(dateString));
 }
 
-/**
- * Format a duration in seconds as HH:MM:SS or MM:SS
- */
+/** Formats a duration in seconds as `H:MM:SS` or `M:SS`. */
 export function formatDuration(seconds: number): string {
     if (!seconds || seconds < 0) return '0:00';
 
@@ -91,9 +67,7 @@ export function formatDuration(seconds: number): string {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
-/**
- * Format a number with K/M/B suffixes
- */
+/** Formats a count with `K`/`M`/`B` suffixes. */
 export function formatNumber(num: number): string {
     if (num >= 1_000_000_000) {
         return `${(num / 1_000_000_000).toFixed(1)}B`;
@@ -107,9 +81,7 @@ export function formatNumber(num: number): string {
     return num.toString();
 }
 
-/**
- * Format file size in bytes to human readable
- */
+/** Formats a byte count as a human-readable size. */
 export function formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 B';
 
@@ -120,17 +92,13 @@ export function formatFileSize(bytes: number): string {
     return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-/**
- * Truncate text to a maximum length with ellipsis
- */
+/** Truncates text to `maxLength` with a trailing ellipsis. */
 export function truncateText(text: string, maxLength: number): string {
     if (text.length <= maxLength) return text;
     return `${text.slice(0, maxLength - 1)}…`;
 }
 
-/**
- * Strip HTML tags from a string
- */
+/** Strips HTML tags from a string (for plain-text previews, never rendering). */
 export function stripHtml(html: string): string {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     return doc.body.textContent || '';

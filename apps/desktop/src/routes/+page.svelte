@@ -5,9 +5,10 @@
  * outlet. Shortcuts are inert in typing contexts and while a modal owns
  * the keyboard (Escape / `?` dismiss the help overlay).
  */
-import ArticleList from '$components/articles/ArticleList.svelte';
 import Toasts from '$components/common/Toasts.svelte';
+import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
+import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
@@ -49,7 +50,7 @@ function onKeydown(event: KeyboardEvent): void {
         <Sidebar />
     {/snippet}
     {#snippet list()}
-        <ArticleList />
+        <ListPane />
     {/snippet}
     {#snippet reader()}
         <ReaderPane />
@@ -58,6 +59,10 @@ function onKeydown(event: KeyboardEvent): void {
 
 {#if uiStore.activeModal === 'help'}
     <HelpOverlay onclose={() => uiStore.closeModal()} />
+{/if}
+
+{#if uiStore.activeModal === 'destinations'}
+    <DestinationsPanel onclose={() => uiStore.closeModal()} />
 {/if}
 
 <Toasts />

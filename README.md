@@ -55,8 +55,9 @@ just ci      # fmt, clippy -D warnings, hermetic tests, cargo-deny, boundary che
 just         # list all recipes
 ```
 
-No Node, npm, or webview required — the cargo workspace builds and tests
-fully headless.
+No Node or npm required for engine work; the desktop head's Rust crate is
+in the workspace (on Linux, `--workspace` builds need the webkit2gtk/gtk
+system packages — see CONTRIBUTING.md), and the core itself stays headless.
 
 ## Architecture
 
@@ -67,11 +68,11 @@ One Tauri-free engine crate, many thin heads:
 | `crates/curio-core` | fetch, ingest, store, state, export, events — the whole engine |
 | `crates/curio-types` | shared DTOs + the published contract schemas |
 | `crates/curio-cli` | `curio`, the v1 head: agent/cron/scripting surface |
-| `apps/desktop` | Tauri 2 + Svelte 5 reader — rejoins the workspace in Phase 4 |
+| `apps/desktop` | Tauri 2 + Svelte 5 reader — `curio-desktop`, the Phase 4 head (in the workspace) |
 
-The boundary is mechanically enforced: `deny.toml` bans tauri from the
-workspace graph and CI proves the core builds headless on a bare Linux
-runner. Full design: [docs/design/architecture.md](docs/design/architecture.md).
+The boundary is mechanically enforced: `deny.toml` scopes the tauri bans so
+only the desktop head may pull the webview, and CI proves curio-core's own
+tree builds headless on a bare Linux runner. Full design: [docs/design/architecture.md](docs/design/architecture.md).
 
 ## Contributing
 

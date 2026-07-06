@@ -5,8 +5,10 @@
 //! `tests/boundary_canary.rs` (the tripwire that keeps `deny.toml` honest).
 
 /// Crate names that must never appear in curio-core's dependency tree.
-/// The webview boundary lives in `apps/desktop`, outside the workspace,
-/// until Phase 4 deliberately moves it.
+/// Phase 4 moved the webview boundary: the desktop head
+/// (`apps/desktop/src-tauri`) is a workspace member and the only crate
+/// allowed to pull these (deny.toml `wrappers`); curio-core's own tree
+/// stays webview-free forever — that is the invariant this scan holds.
 ///
 /// Matching rule: a dependency violates the boundary if its name equals a
 /// banned name or starts with `<banned>-` (the `tauri-*` family).

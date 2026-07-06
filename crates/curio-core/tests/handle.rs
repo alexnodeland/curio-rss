@@ -202,6 +202,73 @@ async fn conditional_refresh_hits_304_and_preserves_validators() {
     );
 }
 
+/// The conditional-GET validator race (docs/design/known-issues.md): an
+/// error-path preserve used to write back its pre-fetch etag snapshot,
+/// clobbering fresher validators a parallel successful refresh had just
+/// stored. Per-feed serialization closes it: the queued refresh re-reads
+/// the feed inside the lock, so its preserve carries the fresh pair.
+#[tokio::test]
+async fn concurrent_refreshes_of_one_feed_cannot_clobber_validators() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Request 1 (setup): 200 + etag v1. Request 2: 200 + etag v2.
+    /// Request 3: a slow 500 — the error path whose validator preserve
+    /// used to clobber.
+    struct Script(AtomicUsize);
+    impl wiremock::Respond for Script {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 => ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v1\"")
+                    .set_body_raw(RSS, "application/rss+xml"),
+                1 => ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v2\"")
+                    .set_body_raw(RSS, "application/rss+xml"),
+                _ => ResponseTemplate::new(500).set_delay(Duration::from_millis(150)),
+            }
+        }
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(Script(AtomicUsize::new(0)))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    let setup = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(setup.status, FetchStatus::Ok);
+
+    // Two concurrent refreshes: one lands fresh validators (200, v2),
+    // the other errors (500, deliberately slower). Unserialized, the
+    // error path would preserve its stale pre-fetch snapshot (v1) AFTER
+    // the success stored v2.
+    let (a, b) = tokio::join!(core.refresh_feed(feed.id), core.refresh_feed(feed.id));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert!(
+        (a.status == FetchStatus::Ok) ^ (b.status == FetchStatus::Ok),
+        "exactly one refresh succeeds: {a:?} / {b:?}"
+    );
+    assert!(a.status == FetchStatus::Error || b.status == FetchStatus::Error);
+
+    // The fresher validators won.
+    let stored = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.etag.as_deref(), Some("\"v2\""));
+
+    // Serialization proof: the queued refresh re-read the feed inside
+    // the lock, so its conditional GET already carried the new etag.
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 3);
+    let last_inm = requests[2]
+        .headers
+        .get("if-none-match")
+        .map(|v| v.to_str().unwrap().to_owned());
+    assert_eq!(last_inm.as_deref(), Some("\"v2\""));
+}
+
 #[tokio::test]
 async fn http_410_auto_pauses_the_feed_for_good() {
     let server = MockServer::start().await;

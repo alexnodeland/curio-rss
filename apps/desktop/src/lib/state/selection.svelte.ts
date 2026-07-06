@@ -6,6 +6,7 @@
  */
 import type { ArticleSummaryDto } from '$lib/bindings';
 import { articlesStore } from './articles.svelte';
+import { searchStore } from './search.svelte';
 
 export type FocusZone = 'sidebar' | 'list' | 'reader';
 
@@ -28,7 +29,7 @@ export class SelectionStore {
             return null;
         }
         const id = this.selectedArticleId;
-        return articlesStore.current.items.find((item) => item.id === id) ?? null;
+        return articlesStore.activeItems.find((item) => item.id === id) ?? null;
     }
 
     /** Index of the selection in the current window; -1 when absent. */
@@ -37,7 +38,7 @@ export class SelectionStore {
             return -1;
         }
         const id = this.selectedArticleId;
-        return articlesStore.current.items.findIndex((item) => item.id === id);
+        return articlesStore.activeItems.findIndex((item) => item.id === id);
     }
 
     /**
@@ -45,7 +46,7 @@ export class SelectionStore {
      * page more rows in (selection entered the load-more margin).
      */
     selectNextArticle(): boolean {
-        const items = articlesStore.current.items;
+        const items = articlesStore.activeItems;
         if (items.length === 0) {
             return false;
         }
@@ -57,7 +58,7 @@ export class SelectionStore {
 
     /** Moves selection up one row (k). */
     selectPreviousArticle(): void {
-        const items = articlesStore.current.items;
+        const items = articlesStore.activeItems;
         if (items.length === 0) {
             return;
         }
@@ -68,6 +69,7 @@ export class SelectionStore {
 
     /** Selects a feed (or all feeds) and re-scopes the article list to it. */
     selectFeed(feedId: number | null): void {
+        searchStore.clear(); // leaving search: the feed's own list takes over
         this.selectedFeedId = feedId;
         this.selectedArticleId = null;
         articlesStore.filters = { ...articlesStore.filters, feedId };

@@ -52,7 +52,47 @@ export function isThemePreference(value: string): value is ThemePreference {
     return value === 'system' || isThemeId(value);
 }
 
-export type ModalKind = 'add-feed' | 'settings' | 'help';
+export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations';
+
+/** Reader body font — an id mapped to a concrete CSS font stack. */
+export type ReaderFontId = 'sans' | 'serif' | 'mono';
+
+export interface ReaderFontInfo {
+    readonly id: ReaderFontId;
+    readonly name: string;
+    /** The CSS `font-family` value applied to the reader body. */
+    readonly stack: string;
+}
+
+/**
+ * The three reader fonts. `sans`/`mono` reuse the app's own token stacks;
+ * `serif` is a self-contained system-serif stack (no bundled webfont — the
+ * CSP blocks remote fonts and we ship none).
+ */
+export const READER_FONTS: readonly ReaderFontInfo[] = [
+    { id: 'sans', name: 'Sans', stack: 'var(--font-family)' },
+    {
+        id: 'serif',
+        name: 'Serif',
+        stack: 'Iowan Old Style, "Palatino Linotype", Palatino, Georgia, Cambria, "Times New Roman", serif',
+    },
+    { id: 'mono', name: 'Mono', stack: 'var(--font-mono)' },
+] as const;
+
+export function isReaderFontId(value: string): value is ReaderFontId {
+    return READER_FONTS.some((font) => font.id === value);
+}
+
+/** Typography clamp bounds — the controls and `initTypography` share them. */
+export const TYPOGRAPHY_LIMITS = {
+    fontSize: { min: 13, max: 24, default: 16 },
+    lineHeight: { min: 1.3, max: 2, default: 1.6 },
+    measure: { min: 520, max: 960, default: 720 },
+} as const;
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
 
 /** Resize bounds per pane — ThreePane and `initLayout` share them. */
 export const PANE_LIMITS = {
@@ -86,9 +126,10 @@ export class UiStore {
 
     activeModal: ModalKind | null = $state(null);
 
-    fontSize: number = $state(16);
-    lineHeight: number = $state(1.6);
-    measure: number = $state(720);
+    fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
+    lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
+    measure: number = $state(TYPOGRAPHY_LIMITS.measure.default);
+    fontFamily: ReaderFontId = $state('sans');
 
     toasts: Toast[] = $state([]);
 
@@ -98,6 +139,12 @@ export class UiStore {
     /** The concrete theme the preference resolves to. */
     get resolvedTheme(): ThemeId {
         return this.themePreference === 'system' ? systemTheme() : this.themePreference;
+    }
+
+    /** The CSS `font-family` value for the current reader font. */
+    get readerFontStack(): string {
+        const font = READER_FONTS.find((candidate) => candidate.id === this.fontFamily);
+        return (font ?? READER_FONTS[0]).stack;
     }
 
     /**
@@ -129,6 +176,60 @@ export class UiStore {
         }
         this.sidebarWidth = readWidth(SETTING_KEYS.sidebarWidth, PANE_LIMITS.sidebar, 280);
         this.listWidth = readWidth(SETTING_KEYS.listWidth, PANE_LIMITS.list, 360);
+    }
+
+    /**
+     * Adopts persisted reader typography at startup (after
+     * `settingsStore.load()`). Each value is clamped into range; anything
+     * unparseable or unknown falls back to the default.
+     */
+    initTypography(): void {
+        this.fontSize = readNumber(
+            SETTING_KEYS.fontSize,
+            TYPOGRAPHY_LIMITS.fontSize,
+            TYPOGRAPHY_LIMITS.fontSize.default,
+        );
+        this.lineHeight = readNumber(
+            SETTING_KEYS.lineHeight,
+            TYPOGRAPHY_LIMITS.lineHeight,
+            TYPOGRAPHY_LIMITS.lineHeight.default,
+        );
+        this.measure = readNumber(
+            SETTING_KEYS.measure,
+            TYPOGRAPHY_LIMITS.measure,
+            TYPOGRAPHY_LIMITS.measure.default,
+        );
+        const persistedFont = settingsStore.get(SETTING_KEYS.fontFamily);
+        if (persistedFont !== undefined && isReaderFontId(persistedFont)) {
+            this.fontFamily = persistedFont;
+        }
+    }
+
+    /** Sets the reader font size (px), clamped, and persists it. */
+    async setFontSize(px: number): Promise<void> {
+        const { min, max } = TYPOGRAPHY_LIMITS.fontSize;
+        this.fontSize = clamp(px, min, max);
+        await settingsStore.set(SETTING_KEYS.fontSize, String(this.fontSize));
+    }
+
+    /** Sets the reader line height, clamped, and persists it. */
+    async setLineHeight(value: number): Promise<void> {
+        const { min, max } = TYPOGRAPHY_LIMITS.lineHeight;
+        this.lineHeight = clamp(value, min, max);
+        await settingsStore.set(SETTING_KEYS.lineHeight, String(this.lineHeight));
+    }
+
+    /** Sets the reader measure (max line length, px), clamped, and persists it. */
+    async setMeasure(px: number): Promise<void> {
+        const { min, max } = TYPOGRAPHY_LIMITS.measure;
+        this.measure = clamp(px, min, max);
+        await settingsStore.set(SETTING_KEYS.measure, String(this.measure));
+    }
+
+    /** Sets the reader font family and persists it. */
+    async setFontFamily(id: ReaderFontId): Promise<void> {
+        this.fontFamily = id;
+        await settingsStore.set(SETTING_KEYS.fontFamily, id);
     }
 
     /** Picks a theme: applies it, mirrors it, persists it. */
@@ -192,7 +293,27 @@ export class UiStore {
         this.activeModal = null;
         this.themePreference = 'system';
         this.sidebarCollapsed = false;
+        this.fontSize = TYPOGRAPHY_LIMITS.fontSize.default;
+        this.lineHeight = TYPOGRAPHY_LIMITS.lineHeight.default;
+        this.measure = TYPOGRAPHY_LIMITS.measure.default;
+        this.fontFamily = 'sans';
     }
+}
+
+function readNumber(
+    key: (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS],
+    limits: { min: number; max: number },
+    fallback: number,
+): number {
+    const raw = settingsStore.get(key);
+    if (raw === undefined) {
+        return fallback;
+    }
+    const parsed = Number.parseFloat(raw);
+    if (Number.isNaN(parsed)) {
+        return fallback;
+    }
+    return clamp(parsed, limits.min, limits.max);
 }
 
 function readWidth(

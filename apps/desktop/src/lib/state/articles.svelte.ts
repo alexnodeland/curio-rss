@@ -15,6 +15,7 @@ import {
 import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
+import { searchStore } from './search.svelte';
 
 /** The UI-facing filter set — `ListArticlesDto` minus the cursor fields. */
 export interface ArticleFilters {
@@ -187,6 +188,16 @@ export class ArticlesStore {
     /** The list state for the current filters. */
     get current(): ArticleListState {
         return this.list(this.filters);
+    }
+
+    /**
+     * The rows the middle pane and selection navigation act on: search
+     * results while a search is active, otherwise the current filter
+     * window. Short-circuits before touching `current` during search so a
+     * search-only context never kicks off a `list_articles` fetch.
+     */
+    get activeItems(): ArticleSummaryDto[] {
+        return searchStore.active ? searchStore.results : this.current.items;
     }
 
     /** Test isolation — drops the list-state registry. */

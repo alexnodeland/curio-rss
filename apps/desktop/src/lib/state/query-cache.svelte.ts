@@ -138,6 +138,7 @@ export const queryKeys = {
     feeds: 'feeds',
     unreadCounts: 'unread-counts',
     tags: 'tags',
+    destinations: 'destinations',
     articleList: (filterKey: string) => `articles:${filterKey}`,
     article: (id: number) => `article:${id}`,
     articleState: (id: number) => `article-state:${id}`,

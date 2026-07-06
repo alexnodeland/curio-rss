@@ -1,10 +1,14 @@
-# CI for the cargo workspace. Phase 4 brought the desktop head
-# (apps/desktop/src-tauri, curio-desktop) into the workspace, so the
-# --workspace jobs compile tauri and need the webkit2gtk/gtk system
-# packages — still npm-free: the crate builds against a placeholder
-# frontendDist, and the CLI head remains the proof that curio-core
-# itself is headless (the boundary job checks its tree stays
-# webview-free). Local mirror: `just ci`.
+# CI for the cargo workspace + the desktop frontend. Phase 4 brought the
+# desktop head (apps/desktop/src-tauri, curio-desktop) into the workspace,
+# so the --workspace jobs compile tauri and need the webkit2gtk/gtk system
+# packages; the Rust jobs stay npm-free (the crate builds against a
+# placeholder frontendDist), and the CLI head remains the proof that
+# curio-core itself is headless (the boundary job checks its tree stays
+# webview-free). The frontend rewrite (WP2) added its own npm jobs:
+# desktop-lint (biome + eslint + svelte-check, zero warnings),
+# desktop-test (vitest + mockIPC with the 70% state/utils coverage
+# floor), and frontend-bans (the {@html} + raw-invoke greps).
+# Local mirror: `just ci`.
 
 name: CI
 
@@ -141,6 +145,55 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo run -p xtask -- boundary
+
+  desktop-lint:
+    # Zero warnings is a Phase 4 acceptance criterion: biome (TS), eslint
+    # (svelte templates — biome cannot lint them), svelte-check.
+    name: desktop lint (biome + eslint + svelte-check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run lint:eslint
+      - run: npm run check
+
+  desktop-test:
+    # vitest + mockIPC (tier 1 — real & cheap), including the contract test
+    # that invokes every generated wrapper. Coverage floor: 70% on the
+    # src/lib state/utils layer; components report-only.
+    name: desktop test (vitest + coverage floor)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run test:coverage
+
+  frontend-bans:
+    # {@html} may appear only in the sanitized-render component; raw
+    # @tauri-apps/api/core imports only in the generated bindings.
+    # Local mirror: `just frontend-bans` (also a lefthook pre-commit step).
+    name: frontend bans ({@html} + raw invoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-frontend-bans.sh
 
   blob-guard:
     name: blob-size guard (no object > 1MB)

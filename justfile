@@ -5,7 +5,8 @@
 # that needs the webkit2gtk/gtk system packages — see ci.yml), but only
 # the desktop head may depend on the webview (deny.toml wrappers + the
 # boundary check). The Svelte frontend keeps its own npm toolchain under
-# apps/desktop/.
+# apps/desktop/; its gates (frontend-bans, desktop-lint, desktop-npm-test)
+# ride `just ci` too and need a one-time `npm install` there.
 
 # List available recipes
 default:
@@ -72,6 +73,20 @@ desktop-dev:
 desktop-test:
     cargo test -p curio-desktop
 
+# Frontend bans: {@html} only in SanitizedHtml.svelte, raw invoke imports only in bindings.ts
+frontend-bans:
+    bash scripts/check-frontend-bans.sh
+
+# Needs `npm install` under apps/desktop first:
+# Desktop frontend lint at zero warnings: biome + eslint (svelte templates) + svelte-check
+desktop-lint:
+    cd apps/desktop && npm run lint && npm run lint:eslint && npm run check
+
+# Needs `npm install` under apps/desktop first:
+# Desktop frontend tests: vitest + mockIPC, 70% coverage floor on state/utils
+desktop-npm-test:
+    cd apps/desktop && npm run test:coverage
+
 # Region-coverage floor on crates/curio-core — the enforced number. Ratchet
 # rule in CONTRIBUTING.md: it only moves up, and it moves here and in
 # .github/workflows/ci.yml together.
@@ -120,5 +135,5 @@ blob-guard:
     echo "blob guard: OK — no object in history exceeds 1MB"
 
 # Everything CI runs, in CI order — green here means green there
-ci: fmt-check clippy test deny boundary bindings-check cov doc blob-guard
+ci: fmt-check clippy test deny boundary bindings-check cov doc blob-guard frontend-bans desktop-lint desktop-npm-test
     @echo "ci suite green"

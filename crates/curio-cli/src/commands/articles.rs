@@ -27,6 +27,7 @@ pub(crate) fn list(app: &App, args: &ListArgs) -> anyhow::Result<ExitCode> {
             feed_id: feed.as_ref().map(|f| f.id),
             before,
             limit: PAGE,
+            ..ListArticles::default()
         })?;
         let page_len = page.len();
         for article in page {

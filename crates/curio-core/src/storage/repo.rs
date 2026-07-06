@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 
 use curio_types::{ArticleSnapshot, CurioId, EventEnvelope, EventPayload, Timestamp};
+use rusqlite::types::ToSql;
 use rusqlite::{Connection, OptionalExtension as _, Row};
 
 use super::{Storage, StorageError};
@@ -29,7 +30,13 @@ pub struct UpsertOutcome {
 }
 
 /// Keyset-paginated article listing parameters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Filters are backend-owned so heads never re-filter client-side: every
+/// `Some` filter is `AND`ed into the query. An article with no
+/// `article_state` row counts as unread/unstarred/not-read-later/
+/// unarchived. The keyset order is fixed — `id DESC` (newest row first),
+/// paginated by `before` — and filters never change it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListArticles {
     /// Restrict to one feed; `None` lists across feeds.
     pub feed_id: Option<FeedId>,
@@ -37,6 +44,17 @@ pub struct ListArticles {
     pub before: Option<ArticleId>,
     /// Page size.
     pub limit: u32,
+    /// Keep only (un)read articles.
+    pub read: Option<bool>,
+    /// Keep only (un)starred articles.
+    pub starred: Option<bool>,
+    /// Keep only articles (not) in the read-later queue.
+    pub read_later: Option<bool>,
+    /// Keep only (un)archived articles.
+    pub archived: Option<bool>,
+    /// Keep only articles carrying this tag (trimmed before matching,
+    /// mirroring how tags are stored).
+    pub tag: Option<String>,
 }
 
 impl Default for ListArticles {
@@ -45,6 +63,11 @@ impl Default for ListArticles {
             feed_id: None,
             before: None,
             limit: 50,
+            read: None,
+            starred: None,
+            read_later: None,
+            archived: None,
+            tag: None,
         }
     }
 }
@@ -443,28 +466,22 @@ impl Storage {
         })
     }
 
-    /// Keyset-paginated listing, newest row id first.
+    /// Keyset-paginated listing, newest row id first. See [`ListArticles`]
+    /// for the filter semantics; filters never change the order.
     ///
     /// # Errors
     ///
     /// Database or stored-value corruption errors.
     pub fn list_articles(&self, params: ListArticles) -> Result<Vec<Article>, StorageError> {
         self.read(move |conn| {
-            let before = params.before.map_or(i64::MAX, |id| id.0);
-            let raws = if let Some(feed) = params.feed_id {
-                let mut stmt = conn.prepare_cached(&format!(
-                    "SELECT {ARTICLE_COLS} FROM articles WHERE id < ?1 AND feed_id = ?2 \
-                     ORDER BY id DESC LIMIT ?3"
-                ))?;
-                let rows = stmt.query_map((before, feed.0, params.limit), raw_article)?;
-                rows.collect::<Result<Vec<_>, _>>()?
-            } else {
-                let mut stmt = conn.prepare_cached(&format!(
-                    "SELECT {ARTICLE_COLS} FROM articles WHERE id < ?1 ORDER BY id DESC LIMIT ?2"
-                ))?;
-                let rows = stmt.query_map((before, params.limit), raw_article)?;
-                rows.collect::<Result<Vec<_>, _>>()?
-            };
+            let (sql, binds) = list_articles_query(&params);
+            let mut stmt = conn.prepare_cached(&sql)?;
+            let raws = stmt
+                .query_map(
+                    rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                    raw_article,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
             raws.into_iter().map(RawArticle::into_article).collect()
         })
     }
@@ -1079,6 +1096,50 @@ fn fts_match_expr(input: &str) -> Option<String> {
     }
 }
 
+/// Compiles [`ListArticles`] into SQL + positional binds. Static clause
+/// fragments only — no user input ever lands in the SQL string (the tag
+/// value is a bind). The `article_state` join appears only when a state
+/// filter asks for it, so the unfiltered hot path stays join-free; a
+/// missing state row defaults every flag to 0 via `COALESCE`.
+fn list_articles_query(params: &ListArticles) -> (String, Vec<Box<dyn ToSql>>) {
+    let cols = article_cols_prefixed("a");
+    let mut sql = format!("SELECT {cols} FROM articles a");
+    let state_filters = [
+        ("is_read", params.read),
+        ("is_starred", params.starred),
+        ("is_read_later", params.read_later),
+        ("is_archived", params.archived),
+    ];
+    if state_filters.iter().any(|(_, want)| want.is_some()) {
+        sql.push_str(" LEFT JOIN article_state s ON s.article_id = a.id");
+    }
+    let mut clauses = vec!["a.id < ?".to_owned()];
+    let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(params.before.map_or(i64::MAX, |id| id.0))];
+    if let Some(feed) = params.feed_id {
+        clauses.push("a.feed_id = ?".to_owned());
+        binds.push(Box::new(feed.0));
+    }
+    for (column, want) in state_filters {
+        if let Some(want) = want {
+            clauses.push(format!("COALESCE(s.{column}, 0) = ?"));
+            binds.push(Box::new(want));
+        }
+    }
+    if let Some(tag) = &params.tag {
+        clauses.push(
+            "EXISTS (SELECT 1 FROM article_tags at JOIN tags t ON t.id = at.tag_id \
+             WHERE at.article_id = a.id AND t.name = ?)"
+                .to_owned(),
+        );
+        binds.push(Box::new(tag.trim().to_owned()));
+    }
+    sql.push_str(" WHERE ");
+    sql.push_str(&clauses.join(" AND "));
+    sql.push_str(" ORDER BY a.id DESC LIMIT ?");
+    binds.push(Box::new(params.limit));
+    (sql, binds)
+}
+
 fn article_cols_prefixed(alias: &str) -> String {
     ARTICLE_COLS
         .split(',')
@@ -1338,5 +1399,45 @@ mod tests {
         assert!(cols.starts_with("a.id, a.curio_id"));
         assert!(cols.ends_with("a.source_updated_at"));
         assert!(!cols.contains(" ,"));
+    }
+
+    #[test]
+    fn unfiltered_list_query_stays_join_free_with_keyset_order() {
+        let (sql, binds) = list_articles_query(&ListArticles::default());
+        assert!(!sql.contains("JOIN"), "no filters → no joins: {sql}");
+        assert!(sql.ends_with("ORDER BY a.id DESC LIMIT ?"));
+        assert_eq!(binds.len(), 2, "before + limit");
+    }
+
+    #[test]
+    fn state_filters_join_and_coalesce_missing_rows() {
+        let (sql, binds) = list_articles_query(&ListArticles {
+            feed_id: Some(FeedId(7)),
+            read: Some(false),
+            archived: Some(true),
+            ..ListArticles::default()
+        });
+        assert!(sql.contains("LEFT JOIN article_state s ON s.article_id = a.id"));
+        assert!(sql.contains("COALESCE(s.is_read, 0) = ?"));
+        assert!(sql.contains("COALESCE(s.is_archived, 0) = ?"));
+        assert!(sql.contains("a.feed_id = ?"));
+        assert!(!sql.contains("is_starred"), "unset filters stay out");
+        assert!(sql.ends_with("ORDER BY a.id DESC LIMIT ?"), "order fixed");
+        assert_eq!(binds.len(), 5, "before + feed + 2 flags + limit");
+    }
+
+    #[test]
+    fn tag_filter_binds_the_tag_instead_of_splicing_it() {
+        let (sql, binds) = list_articles_query(&ListArticles {
+            tag: Some("rust'; DROP TABLE articles; --".to_owned()),
+            ..ListArticles::default()
+        });
+        assert!(sql.contains("t.name = ?"));
+        assert!(!sql.contains("DROP TABLE"), "tag value never enters SQL");
+        assert!(
+            !sql.contains("article_state"),
+            "tag alone needs no state join"
+        );
+        assert_eq!(binds.len(), 3, "before + tag + limit");
     }
 }

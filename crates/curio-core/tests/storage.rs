@@ -484,6 +484,155 @@ fn id_by_key(storage: &Storage, scoped_key: &str) -> ArticleId {
 }
 
 #[test]
+fn list_articles_filters_by_read_state_flags() {
+    let (_dir, storage) = temp_storage();
+    let batch: Vec<NewArticle> = (0..4)
+        .map(|i| new_article(&format!("k{i}"), &format!("T{i}"), "text"))
+        .collect();
+    storage.upsert_articles(batch).unwrap();
+    let k0 = id_by_key(&storage, "m:k0");
+    let k1 = id_by_key(&storage, "m:k1");
+    storage.mark_read(k0, true).unwrap();
+    storage.star_article(k0).unwrap();
+    storage.add_read_later(k1).unwrap();
+    storage.archive_article(k1).unwrap();
+
+    let list = |params: ListArticles| -> Vec<String> {
+        storage
+            .list_articles(params)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.dedupe_key)
+            .collect()
+    };
+
+    // Articles with no article_state row count as unread/unstarred/….
+    let unread = list(ListArticles {
+        read: Some(false),
+        ..ListArticles::default()
+    });
+    assert_eq!(unread.len(), 3);
+    assert!(!unread.contains(&"m:k0".to_owned()));
+    assert_eq!(
+        list(ListArticles {
+            read: Some(true),
+            ..ListArticles::default()
+        }),
+        vec!["m:k0".to_owned()]
+    );
+    assert_eq!(
+        list(ListArticles {
+            starred: Some(true),
+            ..ListArticles::default()
+        }),
+        vec!["m:k0".to_owned()]
+    );
+    assert_eq!(
+        list(ListArticles {
+            read_later: Some(true),
+            ..ListArticles::default()
+        }),
+        vec!["m:k1".to_owned()]
+    );
+    assert_eq!(
+        list(ListArticles {
+            archived: Some(false),
+            ..ListArticles::default()
+        })
+        .len(),
+        3
+    );
+
+    // Filters compose (AND): starred AND read.
+    assert_eq!(
+        list(ListArticles {
+            read: Some(true),
+            starred: Some(true),
+            ..ListArticles::default()
+        }),
+        vec!["m:k0".to_owned()]
+    );
+    assert!(
+        list(ListArticles {
+            read: Some(false),
+            starred: Some(true),
+            ..ListArticles::default()
+        })
+        .is_empty()
+    );
+}
+
+#[test]
+fn list_articles_filters_by_tag_without_reordering_the_keyset() {
+    let (_dir, storage) = temp_storage();
+    let feed = add_feed(&storage, "https://a.example/feed.xml");
+    let batch: Vec<NewArticle> = (0..6)
+        .map(|i| {
+            let mut article = new_article(&format!("k{i}"), &format!("T{i}"), "text");
+            article.feed_id = Some(feed.id);
+            article
+        })
+        .collect();
+    storage.upsert_articles(batch).unwrap();
+    for i in [0, 2, 4] {
+        let id = id_by_key(&storage, &format!("f{}:k{i}", feed.id.0));
+        storage.tag_article(id, "rust").unwrap();
+    }
+
+    // Tag filter (trimmed like the producer side), keyset order intact.
+    let tagged = storage
+        .list_articles(ListArticles {
+            tag: Some("  rust  ".to_owned()),
+            ..ListArticles::default()
+        })
+        .unwrap();
+    let keys: Vec<&str> = tagged.iter().map(|a| a.dedupe_key.as_str()).collect();
+    let feed_id = feed.id.0;
+    assert_eq!(
+        keys,
+        vec![
+            format!("f{feed_id}:k4"),
+            format!("f{feed_id}:k2"),
+            format!("f{feed_id}:k0")
+        ],
+        "id DESC, filter does not reorder"
+    );
+
+    // Keyset pagination composes with the filter.
+    let page1 = storage
+        .list_articles(ListArticles {
+            tag: Some("rust".to_owned()),
+            feed_id: Some(feed.id),
+            limit: 2,
+            ..ListArticles::default()
+        })
+        .unwrap();
+    assert_eq!(page1.len(), 2);
+    let page2 = storage
+        .list_articles(ListArticles {
+            tag: Some("rust".to_owned()),
+            feed_id: Some(feed.id),
+            limit: 2,
+            before: Some(page1.last().unwrap().id),
+            ..ListArticles::default()
+        })
+        .unwrap();
+    assert_eq!(page2.len(), 1);
+    assert!(page1.last().unwrap().id > page2[0].id);
+
+    // Unknown tag → empty, not an error.
+    assert!(
+        storage
+            .list_articles(ListArticles {
+                tag: Some("nope".to_owned()),
+                ..ListArticles::default()
+            })
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn unread_counts_group_by_feed_and_follow_read_flips() {
     let (_dir, storage) = temp_storage();
     assert!(

@@ -85,59 +85,151 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
 <div class="sanitized-content" use:interceptLinks>{@html clean}</div>
 
 <style>
+    /* Editorial reading rhythm. The article sets the font-family / size /
+       line-height on .reader-article (from the typography controls); this
+       governs vertical rhythm, emphasis, and the block elements. */
     .sanitized-content {
-        color: var(--fg);
+        color: var(--ink);
         overflow-wrap: break-word;
+        font-kerning: normal;
+        font-variant-numeric: oldstyle-nums proportional-nums;
     }
 
     .sanitized-content :global(p) {
-        margin-bottom: var(--space-4);
+        margin: 0 0 1.1em;
+        hanging-punctuation: first;
+    }
+
+    /* Lede: the first paragraph carries the eye in. */
+    .sanitized-content :global(> p:first-of-type) {
+        font-size: 1.08em;
+        line-height: 1.55;
+        color: var(--fg);
     }
 
     .sanitized-content :global(h1),
     .sanitized-content :global(h2),
     .sanitized-content :global(h3),
     .sanitized-content :global(h4) {
-        margin: var(--space-5) 0 var(--space-3);
-        line-height: 1.3;
+        font-family: var(--font-family);
+        color: var(--fg);
+        line-height: 1.25;
+        letter-spacing: var(--tracking-snug);
+        font-weight: 640;
+        margin: 1.9em 0 0.6em;
+    }
+
+    .sanitized-content :global(h2) {
+        font-size: 1.32em;
+    }
+    .sanitized-content :global(h3) {
+        font-size: 1.12em;
+    }
+    .sanitized-content :global(h4) {
+        font-size: 1em;
+        color: var(--fg-muted);
+        text-transform: uppercase;
+        letter-spacing: var(--tracking-caps);
+    }
+
+    .sanitized-content :global(figure) {
+        margin: 1.8em 0;
     }
 
     .sanitized-content :global(img) {
         max-width: 100%;
         height: auto;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-md);
+    }
+
+    .sanitized-content :global(figcaption) {
+        margin-top: 0.7em;
+        font-family: var(--font-family);
+        font-size: 0.8em;
+        line-height: 1.45;
+        color: var(--fg-muted);
+        text-align: center;
     }
 
     .sanitized-content :global(pre) {
-        padding: var(--space-3);
-        margin-bottom: var(--space-4);
+        padding: var(--space-4);
+        margin: 1.6em 0;
         overflow-x: auto;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-md);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-lg);
         font-family: var(--font-mono);
-        font-size: 0.875em;
+        font-size: 0.82em;
+        line-height: 1.6;
+        -webkit-font-smoothing: auto;
     }
 
     .sanitized-content :global(code) {
         font-family: var(--font-mono);
-        font-size: 0.875em;
+        font-size: 0.86em;
+    }
+
+    /* Inline code gets a subtle chip; code inside <pre> does not. */
+    .sanitized-content :global(:not(pre) > code) {
+        padding: 0.12em 0.38em;
+        border-radius: var(--radius-sm);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        font-size: 0.82em;
+        white-space: nowrap;
     }
 
     .sanitized-content :global(blockquote) {
-        margin: 0 0 var(--space-4);
-        padding-left: var(--space-4);
-        border-left: 3px solid var(--border);
-        color: var(--fg-muted);
+        margin: 1.6em 0;
+        padding: 0.1em 0 0.1em 1.15em;
+        border-left: 3px solid var(--accent);
+        color: var(--fg);
+        font-style: italic;
+        font-size: 1.06em;
+        line-height: 1.5;
+    }
+
+    .sanitized-content :global(blockquote p:last-child) {
+        margin-bottom: 0;
     }
 
     .sanitized-content :global(ul),
     .sanitized-content :global(ol) {
-        margin-bottom: var(--space-4);
-        padding-left: var(--space-5);
+        margin: 0 0 1.1em;
+        padding-left: 1.4em;
+    }
+
+    .sanitized-content :global(li) {
+        margin-bottom: 0.4em;
+    }
+
+    .sanitized-content :global(li::marker) {
+        color: var(--accent);
+    }
+
+    .sanitized-content :global(hr) {
+        margin: 2.2em auto;
+        width: 40%;
+        border: none;
+        border-top: 1px solid var(--hairline-strong);
     }
 
     .sanitized-content :global(a) {
         color: var(--link);
         text-decoration: underline;
+        text-decoration-color: color-mix(in srgb, var(--link), transparent 55%);
+        text-underline-offset: 0.15em;
+        text-decoration-thickness: 1px;
+        transition: text-decoration-color var(--dur-fast) var(--ease);
+    }
+
+    .sanitized-content :global(a:hover) {
+        text-decoration-color: var(--link);
+    }
+
+    .sanitized-content :global(strong) {
+        font-weight: 680;
+        color: var(--fg);
     }
 </style>

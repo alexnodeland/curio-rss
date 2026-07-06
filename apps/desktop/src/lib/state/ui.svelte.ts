@@ -139,7 +139,7 @@ export class UiStore {
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
     measure: number = $state(TYPOGRAPHY_LIMITS.measure.default);
-    fontFamily: ReaderFontId = $state('sans');
+    fontFamily: ReaderFontId = $state('serif');
 
     toasts: Toast[] = $state([]);
 

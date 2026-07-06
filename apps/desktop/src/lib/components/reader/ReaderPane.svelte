@@ -27,9 +27,19 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import Icon from '$components/common/Icon.svelte';
 import ArticleTags from './ArticleTags.svelte';
 import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
+
+/** A stable per-feed hue for the monogram chip, derived from the title. */
+function feedHue(label: string): number {
+    let hash = 0;
+    for (let i = 0; i < label.length; i += 1) {
+        hash = (hash * 31 + label.charCodeAt(i)) % 360;
+    }
+    return hash;
+}
 
 let showTypography = $state(false);
 
@@ -109,8 +119,14 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 
 <div class="reader">
     {#if selectionStore.selectedArticleId === null}
-        <div class="reader-status">
-            <p>{t('reader.empty')}</p>
+        <div class="reader-empty">
+            <div class="empty-mark" aria-hidden="true">
+                <Icon name="sparkle" size={30} strokeWidth={1.5} />
+            </div>
+            <p class="empty-title">{t('reader.empty')}</p>
+            <p class="empty-hint">
+                <kbd>j</kbd><kbd>k</kbd> to move · <kbd>Enter</kbd> to open · <kbd>?</kbd> for shortcuts
+            </p>
         </div>
     {:else if failure() !== null}
         <div class="reader-status">
@@ -126,54 +142,56 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <div class="reader-toolbar" role="toolbar" aria-label={t('reader.toolbar')}>
                 <button
                     class="tool"
+                    class:on={flags()?.read === true}
                     aria-pressed={flags()?.read === true}
+                    title={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
                     onclick={() => void toggleRead(current.id)}
                 >
-                    {flags()?.read === true
-                        ? t('reader.action.markUnread')
-                        : t('reader.action.markRead')}
+                    <Icon name="check" />
                 </button>
                 <button
                     class="tool"
+                    class:on={flags()?.starred === true}
                     aria-pressed={flags()?.starred === true}
+                    title={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
                     onclick={() => void toggleStar(current.id)}
                 >
-                    {flags()?.starred === true
-                        ? t('reader.action.unstar')
-                        : t('reader.action.star')}
+                    <Icon name={flags()?.starred === true ? 'star-filled' : 'star'} />
                 </button>
                 <button
                     class="tool"
+                    class:on={flags()?.read_later === true}
                     aria-pressed={flags()?.read_later === true}
+                    title={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
                     onclick={() => void toggleReadLater(current.id)}
                 >
-                    {flags()?.read_later === true
-                        ? t('reader.action.readLaterRemove')
-                        : t('reader.action.readLater')}
+                    <Icon name="bookmark" />
                 </button>
                 <button
                     class="tool"
+                    class:on={flags()?.archived === true}
                     aria-pressed={flags()?.archived === true}
+                    title={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
                     onclick={() => void toggleArchived(current.id)}
                 >
-                    {flags()?.archived === true
-                        ? t('reader.action.unarchive')
-                        : t('reader.action.archive')}
+                    <Icon name="archive" />
                 </button>
                 <span class="toolbar-spring"></span>
-                <button class="tool" onclick={() => void promoteSelected()}>
-                    {t('reader.action.promote')}
+                <button class="tool" title={t('reader.action.promote')} onclick={() => void promoteSelected()}>
+                    <Icon name="save" />
                 </button>
                 <div class="typography-anchor">
                     <button
                         class="tool"
+                        class:on={showTypography}
                         aria-haspopup="dialog"
                         aria-expanded={showTypography}
+                        title={t('reader.action.typography')}
                         onclick={() => {
                             showTypography = !showTypography;
                         }}
                     >
-                        {t('reader.action.typography')}
+                        <Icon name="type" />
                     </button>
                     {#if showTypography}
                         <div class="typography-popover">
@@ -183,9 +201,10 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 </div>
                 <button
                     class="tool"
+                    title={t('reader.action.openInBrowser')}
                     onclick={() => void openInBrowser(current.id, current.source_url)}
                 >
-                    {t('reader.action.openInBrowser')}
+                    <Icon name="external" />
                 </button>
             </div>
             <div class="reader-scroll">
@@ -197,17 +216,25 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     style:font-family={uiStore.readerFontStack}
                 >
                     <header class="reader-header">
-                        <h2 class="reader-title">
+                        {#if feedTitle(current) !== null}
+                            {@const label = feedTitle(current) ?? ''}
+                            <div class="reader-kicker">
+                                <span
+                                    class="feed-mono"
+                                    style:--mono-hue={feedHue(label)}
+                                    aria-hidden="true">{label.slice(0, 1).toUpperCase()}</span
+                                >
+                                <span class="feed-name">{label}</span>
+                            </div>
+                        {/if}
+                        <h1 class="reader-title">
                             <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
                             <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
                             <a href={current.source_url} onclick={(event) => openSource(event, current)}>
                                 {current.title}
                             </a>
-                        </h2>
+                        </h1>
                         <p class="reader-meta">
-                            {#if feedTitle(current) !== null}
-                                <span>{feedTitle(current)}</span>
-                            {/if}
                             {#if current.author !== null}
                                 <span>{current.author}</span>
                             {/if}
@@ -233,7 +260,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         display: flex;
         flex-direction: column;
         min-height: 0;
-        background: var(--bg);
+        background: var(--surface-app);
     }
 
     .reader-status {
@@ -249,13 +276,65 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         color: var(--error);
     }
 
+    /* Empty state */
+    .reader-empty {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-4);
+        padding: var(--space-8);
+        text-align: center;
+    }
+
+    .empty-mark {
+        display: grid;
+        place-items: center;
+        width: 68px;
+        height: 68px;
+        border-radius: var(--radius-xl);
+        color: var(--accent);
+        background: var(--selected);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 70%);
+    }
+
+    .empty-title {
+        font-size: var(--text-lg);
+        font-weight: 560;
+        color: var(--fg);
+        letter-spacing: var(--tracking-snug);
+    }
+
+    .empty-hint {
+        font-size: var(--text-sm);
+        color: var(--fg-subtle);
+    }
+
+    .empty-hint kbd {
+        display: inline-block;
+        min-width: 1.5em;
+        padding: 0.1em 0.4em;
+        margin: 0 0.1em;
+        border-radius: var(--radius-sm);
+        background: var(--surface-raised);
+        border: 1px solid var(--hairline);
+        box-shadow: 0 1px 0 var(--hairline-strong);
+        font-family: var(--font-mono);
+        font-size: 0.82em;
+        color: var(--fg-muted);
+        text-align: center;
+    }
+
     .reader-toolbar {
+        flex: 0 0 auto;
         display: flex;
         align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-2) var(--space-4);
-        border-bottom: 1px solid var(--border-subtle);
-        background: var(--bg-secondary);
+        gap: var(--space-1);
+        height: var(--header-height);
+        padding: 0 var(--space-4);
+        border-bottom: 1px solid var(--hairline);
+        background: color-mix(in srgb, var(--surface-app), var(--surface-chrome) 45%);
     }
 
     .toolbar-spring {
@@ -263,23 +342,27 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     }
 
     .tool {
-        padding: var(--space-1) var(--space-3);
+        display: inline-grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
         border-radius: var(--radius-md);
         background: transparent;
         color: var(--fg-muted);
-        font-size: 0.8125rem;
         border: 1px solid transparent;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .tool:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
         color: var(--fg);
     }
 
-    .tool[aria-pressed='true'] {
+    .tool.on {
         color: var(--accent);
-        border-color: var(--accent-muted);
-        background: var(--accent-muted);
+        background: var(--selected);
     }
 
     .typography-anchor {
@@ -293,8 +376,8 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         right: 0;
         z-index: 50;
         border-radius: var(--radius-lg);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
+        background: var(--surface-overlay);
+        border: 1px solid var(--hairline);
         box-shadow: var(--shadow-lg);
     }
 
@@ -306,17 +389,52 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 
     .reader-article {
         margin: 0 auto;
-        padding: var(--space-6) var(--space-5) var(--space-8);
+        padding: var(--space-10) var(--space-8) var(--space-12);
     }
 
     .reader-header {
-        margin-bottom: var(--space-5);
+        margin-bottom: var(--space-8);
+        padding-bottom: var(--space-5);
+        border-bottom: 1px solid var(--hairline);
+    }
+
+    .reader-kicker {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
+    }
+
+    .feed-mono {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        flex: 0 0 auto;
+        border-radius: var(--radius-sm);
+        font-family: var(--font-family);
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: hsl(var(--mono-hue) 65% 82%);
+        background: hsl(var(--mono-hue) 45% 32% / 0.5);
+        box-shadow: inset 0 0 0 1px hsl(var(--mono-hue) 55% 60% / 0.35);
+    }
+
+    .feed-name {
+        font-family: var(--font-family);
+        font-size: var(--text-sm);
+        font-weight: 560;
+        letter-spacing: var(--tracking-wide);
+        color: var(--fg-muted);
     }
 
     .reader-title {
-        font-size: 1.375rem;
-        line-height: 1.3;
-        letter-spacing: -0.01em;
+        font-family: var(--font-family);
+        font-size: var(--text-2xl);
+        font-weight: 680;
+        line-height: 1.16;
+        letter-spacing: var(--tracking-tight);
+        text-wrap: balance;
     }
 
     .reader-title a {
@@ -325,16 +443,26 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     }
 
     .reader-title a:hover {
-        color: var(--link);
         text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 0.12em;
+        text-decoration-color: var(--fg-subtle);
     }
 
     .reader-meta {
         display: flex;
         flex-wrap: wrap;
+        align-items: center;
         gap: var(--space-3);
-        margin-top: var(--space-2);
-        font-size: 0.8125rem;
-        color: var(--fg-muted);
+        margin-top: var(--space-3);
+        font-family: var(--font-family);
+        font-size: var(--text-sm);
+        color: var(--fg-subtle);
+    }
+
+    .reader-meta span + span::before {
+        content: '·';
+        margin-right: var(--space-3);
+        color: var(--fg-subtle);
     }
 </style>

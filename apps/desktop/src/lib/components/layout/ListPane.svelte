@@ -6,6 +6,7 @@
  */
 import ArticleList from '$components/articles/ArticleList.svelte';
 import SearchResults from '$components/articles/SearchResults.svelte';
+import Icon from '$components/common/Icon.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
 import { t } from '$lib/i18n';
 import { searchStore } from '$lib/state/search.svelte';
@@ -20,9 +21,11 @@ import { uiStore } from '$lib/state/ui.svelte';
         <button
             class="destinations-button"
             type="button"
+            title={t('destinations.open')}
+            aria-label={t('destinations.open')}
             onclick={() => uiStore.openModal('destinations')}
         >
-            {t('destinations.open')}
+            <Icon name="folder" />
         </button>
     </div>
     {#if searchStore.active}
@@ -38,16 +41,18 @@ import { uiStore } from '$lib/state/ui.svelte';
         display: flex;
         flex-direction: column;
         min-height: 0;
-        background: var(--bg);
+        background: var(--surface-list);
+        border-right: 1px solid var(--hairline);
     }
 
     .list-header {
+        flex: 0 0 auto;
         display: flex;
         align-items: center;
         gap: var(--space-2);
-        padding: var(--space-2) var(--space-3);
-        border-bottom: 1px solid var(--border-subtle);
-        background: var(--bg-secondary);
+        height: var(--header-height);
+        padding: 0 var(--space-3);
+        border-bottom: 1px solid var(--hairline);
     }
 
     .search-slot {
@@ -57,17 +62,21 @@ import { uiStore } from '$lib/state/ui.svelte';
 
     .destinations-button {
         flex: 0 0 auto;
-        padding: var(--space-1) var(--space-2);
+        display: inline-grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
         border-radius: var(--radius-md);
         background: transparent;
         color: var(--fg-muted);
-        border: 1px solid var(--border-subtle);
-        font-size: 0.75rem;
-        white-space: nowrap;
+        border: 1px solid transparent;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .destinations-button:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
         color: var(--fg);
     }
 </style>

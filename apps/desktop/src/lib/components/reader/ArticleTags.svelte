@@ -101,45 +101,59 @@ function onKeydown(event: KeyboardEvent): void {
     .tag {
         display: inline-flex;
         align-items: center;
-        gap: var(--space-1);
-        padding: 2px var(--space-1) 2px var(--space-2);
-        border-radius: var(--radius-xl);
-        background: var(--bg-tertiary);
+        gap: 3px;
+        padding: 3px 3px 3px var(--space-2);
+        border-radius: var(--radius-pill);
+        background: var(--surface-raised);
+        border: 1px solid var(--hairline);
         color: var(--fg-muted);
-        font-size: 0.75rem;
+        font-family: var(--font-family);
+        font-size: var(--text-xs);
+        font-weight: 500;
+    }
+
+    .tag::before {
+        content: '#';
+        color: var(--fg-subtle);
     }
 
     .tag-remove {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 1rem;
-        height: 1rem;
+        width: 1.05rem;
+        height: 1.05rem;
         border-radius: 50%;
         background: transparent;
         color: var(--fg-subtle);
         font-size: 0.875rem;
         line-height: 1;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .tag-remove:hover {
         color: var(--fg);
-        background: var(--bg-hover);
+        background: var(--active);
     }
 
     .tag-input {
         flex: 0 0 auto;
         width: 8rem;
-        padding: var(--space-1) var(--space-2);
-        border-radius: var(--radius-md);
-        background: var(--bg-secondary);
+        padding: 3px var(--space-3);
+        border-radius: var(--radius-pill);
+        background: transparent;
         color: var(--fg);
-        border: 1px solid var(--border-subtle);
-        font-size: 0.75rem;
+        border: 1px dashed var(--hairline-strong);
+        font-family: var(--font-family);
+        font-size: var(--text-xs);
     }
 
     .tag-input:focus-visible {
         outline: none;
-        border-color: var(--accent);
+        border-style: solid;
+        border-color: color-mix(in srgb, var(--accent), transparent 40%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 </style>

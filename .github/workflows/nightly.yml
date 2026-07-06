@@ -1,0 +1,160 @@
+# Merge + nightly workflow — deliberately NOT per-PR (see ci.yml for the
+# fast PR gate). This is the heavy tier: the 3-OS `tauri build` matrix that
+# produces the shippable (unsigned) bundles, the WebdriverIO + tauri-driver
+# smoke on the two platforms a driver exists for (Linux + Windows — there is
+# no macOS tauri-driver, so macOS is covered by the manual release checklist),
+# and the criterion cold-start benchmark that hosts the Phase-4 <1.5s gate.
+#
+# Signing is intentionally OFF: distribution is an unsigned Homebrew cask
+# (Apple enrollment skipped, Windows deferred — docs/design/decisions.md).
+# The signing env below reads from secrets so that when/if a key lands it is
+# picked up, and forks with no secrets still build green (empty => unsigned).
+name: nightly
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundle:
+    name: tauri build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-22.04 }
+          - { name: macos-arm64, os: macos-14 }
+          - { name: macos-x64, os: macos-13 }
+          - { name: windows-x64, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install Linux webview + bundling deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Build the unsigned bundle
+        working-directory: apps/desktop
+        # Unsigned by decision. These env vars stay empty on forks / when no
+        # key is configured, so `tauri build` produces an unsigned artifact
+        # instead of failing — the "conditional on secrets" contract.
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: curio-${{ matrix.name }}
+          # src-tauri is a workspace member, so cargo/tauri emit to the
+          # workspace-root target/, not a crate-local one.
+          path: |
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.app
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.rpm
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+          if-no-files-found: warn
+
+  smoke:
+    name: e2e smoke (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-22.04 }
+          - { name: windows, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install Linux webview deps + WebKitWebDriver
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev webkit2gtk-driver xvfb
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+      - name: Build the app under test (debug)
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+          cargo build --manifest-path src-tauri/Cargo.toml
+      - name: Install e2e harness deps
+        working-directory: apps/desktop/e2e
+        run: npm install
+      - name: Run the WebdriverIO smoke suite
+        working-directory: apps/desktop/e2e
+        # Skeleton: the 5 scenarios are wired but several are `.skip` pending
+        # test-harness selectors, so this stays informational until the suite
+        # is filled in. Flip to a hard gate once the scenarios are live.
+        continue-on-error: true
+        run: xvfb-run --auto-servernum npm test
+
+  bench:
+    name: cold-start bench (@50k fixture)
+    # curio-fixtures depends on curio-core only (no webview), so this job
+    # needs no gtk/webkit system packages.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the criterion cold-start benchmark
+        # bencher output format is what github-action-benchmark's `cargo`
+        # parser consumes; the fixture is generated inside the bench harness.
+        run: |
+          cargo bench -p curio-fixtures --bench cold_start -- --output-format bencher \
+            | tee bench-output.txt
+      - name: Track against the stored baseline (alert at 130%)
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: cold-start (open + first page @50k)
+          tool: cargo
+          output-file-path: bench-output.txt
+          alert-threshold: "130%"
+          comment-on-alert: true
+          fail-on-alert: true
+          auto-push: false

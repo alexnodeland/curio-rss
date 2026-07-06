@@ -30,6 +30,7 @@ export default [
             'coverage/',
             '.svelte-kit/',
             'src-tauri/',
+            'e2e/',
             'src/lib/bindings.ts',
         ],
     },

@@ -70,6 +70,7 @@
             "src/lib/bindings.ts",
             ".svelte-kit",
             "src-tauri",
+            "e2e",
             "docs/design/research"
         ]
     }

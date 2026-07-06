@@ -13,10 +13,12 @@
 //! envelope inside the storage transaction and is flushed to JSONL
 //! before the operation returns — heads never think about emission.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Instant;
+
+use tokio::sync::Mutex as AsyncMutex;
 
 use curio_types::{Destination, DestinationName, Timestamp};
 
@@ -139,6 +141,9 @@ pub struct CoreHandle {
     emitter: Mutex<EventEmitter>,
     client: PolicedClient,
     destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
+    /// Per-feed refresh serialization (see [`CoreHandle::refresh_feed`]).
+    /// Bounded by the subscription count; `remove_feed` drops entries.
+    refresh_locks: Mutex<HashMap<FeedId, Arc<AsyncMutex<()>>>>,
 }
 
 impl CoreHandle {
@@ -186,6 +191,7 @@ impl CoreHandle {
             emitter: Mutex::new(emitter),
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
+            refresh_locks: Mutex::new(HashMap::new()),
         })
     }
 
@@ -228,6 +234,10 @@ impl CoreHandle {
     /// [`CoreError::NotFound`] for an unknown feed.
     pub fn remove_feed(&self, id: FeedId) -> Result<(), CoreError> {
         self.storage.remove_feed(id)?;
+        self.refresh_locks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id);
         self.emit()?;
         Ok(())
     }
@@ -266,10 +276,20 @@ impl CoreHandle {
     /// (recorded, validators preserved), not errors; only storage-level
     /// failures surface as `Err`.
     ///
+    /// Refreshes of the **same feed are serialized**: concurrent callers
+    /// queue on a per-feed lock, and the feed snapshot below is read
+    /// inside the critical section — so an error-path validator preserve
+    /// can never write back a stale etag/last-modified over the fresher
+    /// pair a parallel successful refresh just stored (the
+    /// conditional-GET validator race, closed for the first concurrent
+    /// head). Different feeds still refresh in parallel.
+    ///
     /// # Errors
     ///
     /// [`CoreError::NotFound`] for an unknown feed; storage errors.
     pub async fn refresh_feed(&self, id: FeedId) -> Result<RefreshOutcome, CoreError> {
+        let lock = self.refresh_lock(id);
+        let _serialized = lock.lock().await;
         let feed = self
             .storage
             .get_feed(id)?
@@ -811,6 +831,17 @@ impl CoreHandle {
     }
 
     // ---------------------------------------------------------- private
+
+    /// The feed's refresh lock, minted on first use. The registry mutex
+    /// guards only the map lookup — the async lock itself is awaited
+    /// outside it, so a slow refresh never blocks other feeds.
+    fn refresh_lock(&self, id: FeedId) -> Arc<AsyncMutex<()>> {
+        let mut locks = self
+            .refresh_locks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(locks.entry(id).or_default())
+    }
 
     /// Serializes the registry into the reserved settings key. Callers
     /// adopt the new map only after this succeeds — a failed persist must

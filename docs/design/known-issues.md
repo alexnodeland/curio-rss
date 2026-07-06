@@ -58,16 +58,21 @@ consumer implementation.
 
 ## Behavior
 
-- **Concurrent refreshes of one feed race on conditional-GET
-  validators** (`handle.rs::preserve_validators`): an error-path
-  preserve writes back the pre-fetch etag/last-modified snapshot and can
-  clobber fresher validators a parallel successful refresh just stored.
-  Consequence is bounded: one wasted full-body 200 (or a missed 304) on
-  a later refresh — no data corruption, and the CLI head is effectively
-  single-flight today. Proper fix is per-feed refresh serialization (or
-  compare-and-swap on `last_fetched_at`) and belongs with the
-  first concurrent head (desktop, Phase 4). Trigger: any head that can
-  refresh the same feed from two tasks.
+- **FIXED (Phase 4 / desktop WP1a): concurrent refreshes of one feed
+  raced on conditional-GET validators**
+  (`handle.rs::preserve_validators`): an error-path preserve wrote back
+  the pre-fetch etag/last-modified snapshot and could clobber fresher
+  validators a parallel successful refresh had just stored (bounded
+  consequence: one wasted full-body 200 or a missed 304). The named
+  trigger arrived — the desktop head refreshes the same feed from two
+  tasks (`refresh_feed` while `refresh_all` runs) — so `refresh_feed`
+  now **serializes per feed**: concurrent callers queue on a per-feed
+  `tokio::sync::Mutex` (`CoreHandle::refresh_locks`) and the feed
+  snapshot is read inside the critical section, so a preserve always
+  carries the freshest stored pair. Different feeds still refresh in
+  parallel. Regression test:
+  `concurrent_refreshes_of_one_feed_cannot_clobber_validators`
+  (tests/handle.rs — deterministically fails when the lock is removed).
 - **CRLF-rewritten notes still refuse re-export** (diagnostic fixed —
   the error now names line endings and the remedy; see
   `split_names_crlf_line_endings_in_its_refusal`). Accepting CRLF

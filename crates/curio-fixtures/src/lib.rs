@@ -5,7 +5,7 @@
 //! (path, size, SHA-256, counts). The **determinism contract**
 //! (docs/design/roadmap.md Phase 1) holds: the same [`FixtureSpec`] produces
 //! a byte-identical database, so the hash is stable and assertable — proven
-//! by [`tests::generation_is_byte_reproducible`].
+//! by the crate's `generation_is_byte_reproducible` test.
 //!
 //! # How determinism is achieved
 //!

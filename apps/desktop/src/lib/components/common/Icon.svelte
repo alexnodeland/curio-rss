@@ -25,7 +25,10 @@ export type IconName =
     | 'tag'
     | 'folder'
     | 'activity'
-    | 'pause';
+    | 'pause'
+    | 'message'
+    | 'link'
+    | 'play';
 </script>
 
 <script lang="ts">
@@ -123,5 +126,13 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
             height="14"
             rx="1"
         />
+    {:else if name === 'message'}
+        <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 9 9 0 0 1-4-.9L3 21l1.9-5.5A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
+    {:else if name === 'link'}
+        <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path
+            d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"
+        />
+    {:else if name === 'play'}
+        <path d="M6 4.5v15l13-7.5z" fill="currentColor" stroke="none" />
     {/if}
 </svg>

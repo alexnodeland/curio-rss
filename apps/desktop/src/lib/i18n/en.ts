@@ -47,7 +47,10 @@ export const en = {
 
     'reader.youtube.play': 'Play {title}',
     'reader.youtube.hint': 'Click to load — nothing loads until you do',
-    'reader.reddit.openThread': 'Open discussion on Reddit',
+    'reader.youtube.badge': 'YouTube',
+    'reader.youtube.watch': 'Watch on YouTube',
+    'reader.reddit.openThread': 'View comments',
+    'reader.reddit.openLink': 'Open link',
 
     'typography.title': 'Typography',
     'typography.font': 'Font',

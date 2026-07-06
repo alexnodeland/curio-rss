@@ -1,21 +1,31 @@
 <script lang="ts">
 /**
- * The YouTube facade: a lightweight click-to-load poster that only mounts
- * the `youtube-nocookie.com` iframe on an explicit click. Nothing touches
- * the network until the user asks — no cookies, no player JS, no thumbnail
- * fetch (the CSP `img-src` forbids `https:`, and privacy forbids an
- * unmediated request; the poster is a token, not the real still). The
- * nocookie origin is the ONLY host the CSP `frame-src` allows.
+ * The YouTube facade: a lightweight click-to-load video card that only mounts
+ * the `youtube-nocookie.com` iframe on an explicit click. Nothing touches the
+ * network until the user asks — no cookies, no player JS, no thumbnail fetch
+ * (the CSP `img-src` forbids `https:`, and privacy forbids an unmediated
+ * request). The poster is a deterministic, self-contained card derived from
+ * the video id — a handsome token, not the real still. The nocookie origin is
+ * the ONLY host the CSP `frame-src` allows.
  */
+import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 
-let { videoId, title }: { videoId: string; title: string } = $props();
+let {
+    videoId,
+    title,
+    channel = null,
+}: { videoId: string; title: string; channel?: string | null } = $props();
 
 let loaded = $state(false);
 
 // nocookie + no related-video leakage on end; autoplay so the click that
 // loaded the frame also starts playback (one gesture, not two).
 const embedSrc = $derived(`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`);
+
+// A stable poster hue from the id, so each video reads as its own card
+// without ever fetching the real thumbnail.
+const hue = $derived([...videoId].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7));
 
 function load(): void {
     loaded = true;
@@ -36,17 +46,26 @@ function load(): void {
         <button
             class="poster"
             type="button"
+            style:--poster-hue={hue}
             onclick={load}
             aria-label={t('reader.youtube.play', { title })}
         >
+            <span class="poster-art" aria-hidden="true"></span>
+            <span class="poster-badge" aria-hidden="true">
+                <Icon name="play" size={12} />
+                <span>{t('reader.youtube.badge')}</span>
+            </span>
             <span class="play" aria-hidden="true">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M8 5v14l11-7z" />
                 </svg>
             </span>
-            <span class="poster-meta">
-                <span class="poster-title truncate">{title}</span>
-                <span class="poster-hint">{t('reader.youtube.hint')}</span>
+            <span class="poster-scrim" aria-hidden="true">
+                <span class="poster-title truncate-2">{title}</span>
+                <span class="poster-sub">
+                    {#if channel !== null}<span class="poster-channel">{channel}</span>{/if}
+                    <span class="poster-hint">{t('reader.youtube.hint')}</span>
+                </span>
             </span>
         </button>
     {/if}
@@ -57,11 +76,12 @@ function load(): void {
         position: relative;
         width: 100%;
         aspect-ratio: 16 / 9;
-        margin-bottom: var(--space-5);
+        margin-bottom: var(--space-6);
         border-radius: var(--radius-lg);
         border: 1px solid var(--hairline);
         overflow: hidden;
         background: var(--surface-inset);
+        box-shadow: var(--shadow-md);
     }
 
     .player {
@@ -74,63 +94,133 @@ function load(): void {
     .poster {
         position: absolute;
         inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-3);
+        display: block;
         width: 100%;
         height: 100%;
+        padding: 0;
         background: transparent;
-        color: var(--fg);
+        color: #fff;
         cursor: pointer;
-        transition: background var(--dur-fast) var(--ease);
     }
 
-    .poster:hover {
-        background: var(--hover);
+    /* Deterministic gradient "still" + a subtle scrim, id-derived. */
+    .poster-art {
+        position: absolute;
+        inset: 0;
+        background:
+            radial-gradient(120% 120% at 30% 20%, hsl(var(--poster-hue) 55% 40%), transparent 60%),
+            radial-gradient(120% 120% at 80% 90%, hsl(calc(var(--poster-hue) + 40) 60% 32%), transparent 55%),
+            linear-gradient(150deg, hsl(var(--poster-hue) 45% 22%), hsl(calc(var(--poster-hue) + 30) 40% 14%));
     }
 
-    .poster:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
+    .poster-art::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(to top, rgb(0 0 0 / 62%) 0%, transparent 42%, rgb(0 0 0 / 18%) 100%);
+    }
+
+    .poster-badge {
+        position: absolute;
+        top: var(--space-3);
+        left: var(--space-3);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px var(--space-2) 3px 6px;
+        border-radius: var(--radius-sm);
+        background: #ff0000;
+        color: #fff;
+        font-family: var(--font-family);
+        font-size: 0.6875rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
     }
 
     .play {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
         display: grid;
         place-items: center;
-        width: 64px;
-        height: 64px;
+        width: 66px;
+        height: 66px;
         border-radius: 50%;
-        background: var(--accent);
-        color: var(--accent-fg);
-        box-shadow: var(--shadow-md);
+        background: #ff0000;
+        color: #fff;
+        box-shadow:
+            0 6px 20px rgb(0 0 0 / 35%),
+            inset 0 0 0 1px rgb(255 255 255 / 14%);
         transition:
             background var(--dur-fast) var(--ease),
             transform var(--dur-fast) var(--ease);
     }
 
     .poster:hover .play {
-        background: var(--accent-hover);
-        transform: scale(1.05);
+        background: #ff2323;
+        transform: translate(-50%, -50%) scale(1.06);
     }
 
-    .poster-meta {
+    .poster:focus-visible {
+        outline: none;
+    }
+
+    .poster:focus-visible .play {
+        box-shadow:
+            0 6px 20px rgb(0 0 0 / 35%),
+            0 0 0 4px color-mix(in srgb, var(--accent), transparent 35%);
+    }
+
+    .poster-scrim {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
         display: flex;
         flex-direction: column;
-        align-items: center;
         gap: var(--space-1);
-        max-width: min(90%, 480px);
+        padding: var(--space-5) var(--space-4) var(--space-4);
+        text-align: left;
     }
 
     .poster-title {
-        font-size: var(--text-base);
+        font-family: var(--font-family);
+        font-size: var(--text-lg);
+        font-weight: 640;
+        line-height: 1.25;
+        letter-spacing: var(--tracking-snug);
+        text-shadow: 0 1px 3px rgb(0 0 0 / 45%);
+    }
+
+    .poster-sub {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-family: var(--font-family);
+        font-size: var(--text-xs);
+        color: rgb(255 255 255 / 82%);
+    }
+
+    .poster-channel {
         font-weight: 600;
-        max-width: 100%;
+    }
+
+    .poster-channel::after {
+        content: '·';
+        margin-left: var(--space-2);
+        opacity: 0.7;
     }
 
     .poster-hint {
-        font-size: var(--text-xs);
-        color: var(--fg-subtle);
+        color: rgb(255 255 255 / 66%);
+    }
+
+    .truncate-2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
 </style>

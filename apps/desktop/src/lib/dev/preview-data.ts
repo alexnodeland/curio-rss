@@ -201,10 +201,12 @@ export const previewArticles: PreviewArticle[] = [
         'u/serif_lover',
         '2026-07-06T09:00:00.000Z',
         60,
-        `<p>Saw this gorgeous signage in Alfama yesterday — high contrast, tall ascenders, a very distinctive ampersand. WhatTheFont came up empty. Any ideas? Reminds me of a Didone but the serifs are chunkier.</p><p>—</p><p><strong>Top comment (u/type_nerd, 340 points):</strong> That's almost certainly a custom cut, but the closest commercial match is Canela. The ampersand gives it away.</p>`,
+        `<p>Saw this gorgeous signage in Alfama yesterday — high contrast, tall ascenders, a very distinctive ampersand. WhatTheFont came up empty. Any ideas? Reminds me of a Didone but the serifs are chunkier.</p>
+<p>Someone in the comments matched it — cross-posting the foundry's specimen page since a few people asked for the source.</p>
+<table><tr><td><a href="https://www.reddit.com/r/typography/comments/abc123/what_typeface/">thumb</a></td><td> submitted by <a href="https://www.reddit.com/user/serif_lover">/u/serif_lover</a> to <a href="https://www.reddit.com/r/typography/">r/typography</a> <br/> <span><a href="https://commercialtype.com/catalog/canela">[link]</a></span> <span><a href="https://www.reddit.com/r/typography/comments/abc123/what_typeface/">[comments]</a></span> </td></tr></table>`,
         {},
         ['identification'],
-        'https://reddit.com/r/typography/comments/abc123',
+        'https://www.reddit.com/r/typography/comments/abc123/what_typeface/',
     ),
     mk(
         105,
@@ -213,10 +215,12 @@ export const previewArticles: PreviewArticle[] = [
         'Fireship',
         '2026-07-06T06:00:00.000Z',
         120,
-        `<p>Rust is a memory-safe systems programming language with no garbage collector. In this video we cover ownership, borrowing, and why everyone is rewriting their tools in it.</p>`,
+        `<p>Rust is a memory-safe systems programming language with no garbage collector. In 100 seconds we cover ownership, borrowing, lifetimes, and why everyone is rewriting their tools in it.</p>
+<p><strong>Chapters</strong><br/>0:00 — Intro<br/>0:18 — Ownership<br/>0:41 — Borrowing &amp; lifetimes<br/>1:12 — Cargo &amp; crates<br/>1:38 — Why the hype</p>
+<p>Full source and written notes at <a href="https://fireship.io">fireship.io</a>.</p>`,
         {},
         ['rust', 'video'],
-        'https://youtube.com/watch?v=5C_HPTJg5ek',
+        'https://www.youtube.com/watch?v=5C_HPTJg5ek',
     ),
     mk(
         106,

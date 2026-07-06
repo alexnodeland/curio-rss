@@ -17,7 +17,7 @@ const videoId = $derived(youTubeVideoId(article.source_url));
 
 <div class="youtube-layout">
     {#if videoId !== null}
-        <YouTubeFacade {videoId} title={article.title} />
+        <YouTubeFacade {videoId} title={article.title} channel={article.author} />
     {/if}
     <SanitizedHtml html={article.content_html} />
 </div>

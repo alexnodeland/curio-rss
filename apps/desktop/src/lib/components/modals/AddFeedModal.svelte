@@ -213,7 +213,7 @@ async function add(): Promise<void> {
     }
 
     .field-label {
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--fg-subtle);
     }
@@ -228,56 +228,71 @@ async function add(): Promise<void> {
     .tags-input {
         flex: 1 1 auto;
         min-width: 0;
+        height: 34px;
         padding: var(--space-2) var(--space-3);
         border-radius: var(--radius-md);
-        background: var(--bg);
+        background: var(--surface-inset);
         color: var(--fg);
-        border: 1px solid var(--border-subtle);
-        font-size: 0.875rem;
+        border: 1px solid var(--hairline);
+        font-size: var(--text-md);
+        transition:
+            border-color var(--dur-fast) var(--ease),
+            box-shadow var(--dur-fast) var(--ease);
     }
 
     .url-input:focus-visible,
     .tags-input:focus-visible {
         outline: none;
-        border-color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent), transparent 40%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 
     .find-button,
     .add-button {
         flex: 0 0 auto;
-        padding: var(--space-2) var(--space-3);
         border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .find-button {
+        padding: var(--space-2) var(--space-3);
         background: transparent;
-        color: var(--fg);
-        border: 1px solid var(--border);
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
     }
 
     .find-button:hover:not(:disabled) {
-        background: var(--bg-hover);
+        background: var(--hover);
+        color: var(--fg);
     }
 
     .add-button {
+        padding: var(--space-2) var(--space-4);
         background: var(--accent);
         color: var(--accent-fg);
-        font-weight: 600;
+        font-weight: 560;
+    }
+
+    .add-button:hover:not(:disabled) {
+        background: var(--accent-hover);
     }
 
     .candidates {
         display: flex;
         flex-direction: column;
-        gap: var(--space-2);
-        padding: var(--space-3);
-        border: 1px solid var(--border-subtle);
-        border-radius: var(--radius-md);
+        gap: var(--space-1);
+        padding: var(--space-2);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-lg);
     }
 
     .candidates legend {
         padding: 0 var(--space-1);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
         font-weight: 600;
         color: var(--fg-subtle);
     }
@@ -286,6 +301,14 @@ async function add(): Promise<void> {
         display: flex;
         align-items: center;
         gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .candidate:hover {
+        background: var(--hover);
     }
 
     .candidate-main {
@@ -295,18 +318,18 @@ async function add(): Promise<void> {
     }
 
     .candidate-title {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--fg);
     }
 
     .candidate-url {
-        font-size: 0.6875rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
         font-family: var(--font-mono);
     }
 
     .status {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--fg-muted);
     }
 
@@ -314,7 +337,7 @@ async function add(): Promise<void> {
         display: flex;
         gap: var(--space-2);
         align-items: flex-start;
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
     }
 
     .optin-label {
@@ -324,8 +347,8 @@ async function add(): Promise<void> {
 
     .optin-hint {
         display: block;
-        color: var(--fg-muted);
-        font-size: 0.75rem;
+        color: var(--fg-subtle);
+        font-size: var(--text-xs);
     }
 
     .actions {

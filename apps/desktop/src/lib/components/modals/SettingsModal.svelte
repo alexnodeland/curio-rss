@@ -53,8 +53,8 @@ let { onclose }: { onclose: () => void } = $props();
 
     .section h3 {
         font-size: 0.6875rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
+        font-weight: 650;
+        letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
     }

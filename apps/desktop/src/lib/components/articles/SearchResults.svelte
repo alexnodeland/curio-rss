@@ -61,7 +61,7 @@ function selectArticle(articleId: number): void {
 
     .status {
         padding: var(--space-4);
-        font-size: 0.875rem;
+        font-size: var(--text-md);
         color: var(--fg-muted);
     }
 

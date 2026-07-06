@@ -39,7 +39,11 @@ function load(): void {
             onclick={load}
             aria-label={t('reader.youtube.play', { title })}
         >
-            <span class="play" aria-hidden="true">▶</span>
+            <span class="play" aria-hidden="true">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M8 5v14l11-7z" />
+                </svg>
+            </span>
             <span class="poster-meta">
                 <span class="poster-title truncate">{title}</span>
                 <span class="poster-hint">{t('reader.youtube.hint')}</span>
@@ -54,9 +58,10 @@ function load(): void {
         width: 100%;
         aspect-ratio: 16 / 9;
         margin-bottom: var(--space-5);
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--hairline);
         overflow: hidden;
-        background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+        background: var(--surface-inset);
     }
 
     .player {
@@ -79,10 +84,11 @@ function load(): void {
         background: transparent;
         color: var(--fg);
         cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
     }
 
     .poster:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 
     .poster:focus-visible {
@@ -91,16 +97,22 @@ function load(): void {
     }
 
     .play {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: grid;
+        place-items: center;
         width: 64px;
         height: 64px;
         border-radius: 50%;
         background: var(--accent);
         color: var(--accent-fg);
-        font-size: 1.5rem;
-        padding-left: 4px;
+        box-shadow: var(--shadow-md);
+        transition:
+            background var(--dur-fast) var(--ease),
+            transform var(--dur-fast) var(--ease);
+    }
+
+    .poster:hover .play {
+        background: var(--accent-hover);
+        transform: scale(1.05);
     }
 
     .poster-meta {
@@ -112,13 +124,13 @@ function load(): void {
     }
 
     .poster-title {
-        font-size: 0.9375rem;
+        font-size: var(--text-base);
         font-weight: 600;
         max-width: 100%;
     }
 
     .poster-hint {
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
     }
 </style>

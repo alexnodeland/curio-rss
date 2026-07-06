@@ -155,32 +155,38 @@ async function diagnostics(): Promise<void> {
 
     .about,
     .stat {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--fg-muted);
     }
 
     .mono {
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
     }
 
     .doctor-actions {
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-2);
-        margin-top: var(--space-2);
+        margin-top: var(--space-4);
     }
 
     .doctor-actions button {
-        padding: var(--space-2) var(--space-3);
+        padding: var(--space-2) var(--space-4);
         border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
-        color: var(--fg);
-        border: 1px solid var(--border);
-        font-size: 0.8125rem;
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .doctor-actions button:hover:not(:disabled) {
-        background: var(--bg-hover);
+        background: var(--hover);
+        color: var(--fg);
     }
 </style>

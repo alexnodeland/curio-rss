@@ -94,20 +94,25 @@ async function runExport(): Promise<void> {
     }
 
     .opml-button {
-        padding: var(--space-2) var(--space-3);
+        padding: var(--space-2) var(--space-4);
         border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
-        color: var(--fg);
-        border: 1px solid var(--border);
-        font-size: 0.8125rem;
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .opml-button:hover:not(:disabled) {
-        background: var(--bg-hover);
+        background: var(--hover);
+        color: var(--fg);
     }
 
     .opml-hint {
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
     }
 </style>

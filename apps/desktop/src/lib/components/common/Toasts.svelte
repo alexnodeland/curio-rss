@@ -4,6 +4,7 @@
  * on command failures, and by anything else that needs a transient notice).
  * Announced politely to screen readers; every toast is dismissible.
  */
+import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { uiStore } from '$lib/state/ui.svelte';
 </script>
@@ -17,7 +18,7 @@ import { uiStore } from '$lib/state/ui.svelte';
                 onclick={() => uiStore.dismissToast(toast.id)}
                 aria-label={t('toast.dismiss')}
             >
-                ×
+                <Icon name="close" size={16} />
             </button>
         </div>
     {/each}
@@ -36,29 +37,48 @@ import { uiStore } from '$lib/state/ui.svelte';
     }
 
     .toast {
+        position: relative;
         display: flex;
         align-items: center;
         gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
-        border-radius: var(--radius-md);
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
+        padding-left: var(--space-5);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--hairline);
+        background: var(--surface-overlay);
         color: var(--fg);
-        box-shadow: var(--shadow-md);
-        font-size: 0.875rem;
+        box-shadow: var(--shadow-lg);
+        font-size: var(--text-md);
+        overflow: hidden;
+        animation: toast-in var(--dur-base) var(--ease);
     }
 
-    .toast-error {
-        border-color: var(--error);
-        background: var(--error-bg);
+    /* Tone accent as a left bar, not a full border tint. */
+    .toast::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--accent);
     }
 
-    .toast-success {
-        border-color: var(--success);
+    .toast-error::before {
+        background: var(--error);
+    }
+    .toast-success::before {
+        background: var(--success);
+    }
+    .toast-warning::before {
+        background: var(--warning);
     }
 
-    .toast-warning {
-        border-color: var(--warning);
+    @keyframes toast-in {
+        from {
+            opacity: 0;
+            transform: translateY(6px);
+        }
     }
 
     .toast-message {
@@ -69,16 +89,22 @@ import { uiStore } from '$lib/state/ui.svelte';
 
     .toast-dismiss {
         flex: 0 0 auto;
-        padding: 0 var(--space-1);
+        display: grid;
+        place-items: center;
+        width: 1.35rem;
+        height: 1.35rem;
         font-size: 1rem;
         line-height: 1;
         color: var(--fg-muted);
         background: transparent;
         border-radius: var(--radius-sm);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .toast-dismiss:hover {
         color: var(--fg);
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 </style>

@@ -45,17 +45,18 @@ const message = $derived(
 
     .message {
         padding: var(--space-1) var(--space-3);
-        border-radius: var(--radius-xl);
-        background: var(--bg-tertiary);
+        border-radius: var(--radius-pill);
+        background: var(--surface-overlay);
+        border: 1px solid var(--hairline);
         color: var(--fg-muted);
-        font-size: 0.75rem;
-        box-shadow: var(--shadow-sm);
+        font-size: var(--text-xs);
+        box-shadow: var(--shadow-md);
     }
 
     .spinner {
         width: 0.75rem;
         height: 0.75rem;
-        border: 2px solid var(--border);
+        border: 2px solid var(--hairline-strong);
         border-top-color: var(--accent);
         border-radius: 50%;
         animation: spin 0.8s linear infinite;

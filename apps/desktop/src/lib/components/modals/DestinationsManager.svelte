@@ -6,6 +6,7 @@
  * `destinationsStore`; this is only its settings-surface presentation
  * (the standalone `DestinationsPanel` is the promote-flow entry point).
  */
+import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { destinationsStore } from '$lib/state/destinations.svelte';
@@ -98,7 +99,8 @@ async function makeDefault(name: string): Promise<void> {
                         class="remove-button"
                         type="button"
                         aria-label={t('destinations.remove', { name: destination.name })}
-                        onclick={() => void remove(destination.name)}>×</button
+                        onclick={() => void remove(destination.name)}
+                        ><Icon name="close" size={14} /></button
                     >
                 </li>
             {/each}
@@ -133,11 +135,11 @@ async function makeDefault(name: string): Promise<void> {
     .manager {
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
     }
 
     .status {
-        font-size: 0.8125rem;
+        font-size: var(--text-md);
         color: var(--fg-muted);
     }
 
@@ -149,16 +151,20 @@ async function makeDefault(name: string): Promise<void> {
         list-style: none;
         display: flex;
         flex-direction: column;
-        gap: var(--space-2);
+        gap: 2px;
     }
 
     .destination {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-lg);
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .destination:hover {
+        background: var(--hover);
     }
 
     .destination-main {
@@ -170,24 +176,25 @@ async function makeDefault(name: string): Promise<void> {
     }
 
     .destination-name {
-        font-size: 0.875rem;
-        font-weight: 600;
+        font-size: var(--text-md);
+        font-weight: 560;
         color: var(--fg);
     }
 
     .destination-root {
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
         font-family: var(--font-mono);
     }
 
     .default-badge {
         flex: 0 0 auto;
         padding: 2px var(--space-2);
-        border-radius: var(--radius-xl);
-        background: var(--accent);
-        color: var(--accent-fg);
-        font-size: 0.6875rem;
+        border-radius: var(--radius-pill);
+        background: var(--selected);
+        color: var(--accent);
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 70%);
+        font-size: var(--text-xs);
         font-weight: 600;
     }
 
@@ -195,7 +202,9 @@ async function makeDefault(name: string): Promise<void> {
         flex: 0 0 auto;
         background: transparent;
         color: var(--accent);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
+        font-weight: 500;
+        transition: color var(--dur-fast) var(--ease);
     }
 
     .link-button:hover {
@@ -204,21 +213,21 @@ async function makeDefault(name: string): Promise<void> {
 
     .remove-button {
         flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.25rem;
-        height: 1.25rem;
-        border-radius: 50%;
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: var(--radius-md);
         background: transparent;
         color: var(--fg-subtle);
-        font-size: 1rem;
-        line-height: 1;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .remove-button:hover {
         color: var(--error);
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 
     .add-form {
@@ -226,51 +235,70 @@ async function makeDefault(name: string): Promise<void> {
         flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
+        padding-top: var(--space-4);
+        border-top: 1px solid var(--hairline);
     }
 
     .name-input {
         flex: 1 1 8rem;
         min-width: 0;
-        padding: var(--space-1) var(--space-2);
+        height: 34px;
+        padding: 0 var(--space-3);
         border-radius: var(--radius-md);
-        background: var(--bg);
+        background: var(--surface-inset);
         color: var(--fg);
-        border: 1px solid var(--border-subtle);
-        font-size: 0.8125rem;
+        border: 1px solid var(--hairline);
+        font-size: var(--text-md);
+        transition:
+            border-color var(--dur-fast) var(--ease),
+            box-shadow var(--dur-fast) var(--ease);
     }
 
     .name-input:focus-visible {
         outline: none;
-        border-color: var(--accent);
-    }
-
-    .choose-button,
-    .add-button {
-        flex: 0 0 auto;
-        padding: var(--space-1) var(--space-3);
-        border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        border-color: color-mix(in srgb, var(--accent), transparent 40%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 
     .choose-button {
+        flex: 0 0 auto;
+        height: 34px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-md);
+        font-size: var(--text-md);
         background: transparent;
-        color: var(--fg);
-        border: 1px solid var(--border);
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .choose-button:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
+        color: var(--fg);
     }
 
     .add-button {
+        flex: 0 0 auto;
+        height: 34px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-md);
+        font-size: var(--text-md);
+        font-weight: 560;
         background: var(--accent);
         color: var(--accent-fg);
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .add-button:hover {
+        background: var(--accent-hover);
     }
 
     .picked {
         flex: 1 1 100%;
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
         font-family: var(--font-mono);
     }
 </style>

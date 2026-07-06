@@ -43,30 +43,34 @@ const subreddit = $derived(subredditOf(article.source_url));
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        margin-bottom: var(--space-4);
-        padding-bottom: var(--space-3);
-        border-bottom: 1px solid var(--border-subtle);
+        margin-bottom: var(--space-5);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid var(--hairline);
     }
 
     .subreddit {
-        padding: var(--space-1) var(--space-2);
-        border-radius: var(--radius-xl);
-        background: var(--bg-tertiary);
-        color: var(--fg-muted);
-        font-size: 0.8125rem;
-        font-weight: 600;
+        padding: 3px var(--space-3);
+        border-radius: var(--radius-pill);
+        background: color-mix(in srgb, #ff4500, transparent 88%);
+        color: #ff6a33;
+        font-family: var(--font-family);
+        font-size: var(--text-sm);
+        font-weight: 650;
     }
 
     .discussion {
+        margin-left: auto;
         padding: var(--space-1) var(--space-3);
         border-radius: var(--radius-md);
-        background: transparent;
+        background: var(--selected);
         color: var(--accent);
-        border: 1px solid var(--accent-muted);
-        font-size: 0.8125rem;
+        font-family: var(--font-family);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        transition: background var(--dur-fast) var(--ease);
     }
 
     .discussion:hover {
-        background: var(--accent-muted);
+        background: var(--selected-strong);
     }
 </style>

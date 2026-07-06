@@ -6,6 +6,7 @@
  * the close button covers the pointer path. Only one modal is ever open, so
  * a fixed title id is safe.
  */
+import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import type { Snippet } from 'svelte';
 
@@ -41,7 +42,7 @@ $effect(() => {
         <header class="overlay-header">
             <h2 id="cx-modal-title">{title}</h2>
             <button class="overlay-close" type="button" onclick={onclose} aria-label={t('modal.close')}
-                >×</button
+                ><Icon name="close" size={16} /></button
             >
         </header>
         <div class="overlay-body">
@@ -57,61 +58,84 @@ $effect(() => {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgb(0 0 0 / 45%);
+        padding: var(--space-6);
+        background: color-mix(in srgb, #000, transparent 45%);
+        backdrop-filter: blur(3px);
         z-index: 100;
+        animation: backdrop-in var(--dur-base) var(--ease);
     }
 
     .overlay {
         width: min(560px, calc(100vw - var(--space-8)));
-        max-height: min(80vh, 720px);
+        max-height: min(82vh, 760px);
         display: flex;
         flex-direction: column;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
+        background: var(--surface-overlay);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-xl);
         box-shadow: var(--shadow-lg);
+        animation: overlay-in var(--dur-base) var(--ease);
     }
 
     .overlay.large {
-        width: min(720px, calc(100vw - var(--space-8)));
+        width: min(760px, calc(100vw - var(--space-8)));
     }
 
     .overlay:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
+        outline: none;
+    }
+
+    @keyframes backdrop-in {
+        from {
+            opacity: 0;
+        }
+    }
+
+    @keyframes overlay-in {
+        from {
+            opacity: 0;
+            transform: translateY(8px) scale(0.99);
+        }
     }
 
     .overlay-header {
+        flex: 0 0 auto;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border-subtle);
+        padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6);
+        border-bottom: 1px solid var(--hairline);
     }
 
     .overlay-header h2 {
-        font-size: 1rem;
+        font-size: var(--text-lg);
+        font-weight: 640;
+        letter-spacing: var(--tracking-snug);
     }
 
     .overlay-close {
-        padding: 0 var(--space-2);
-        font-size: 1.25rem;
-        line-height: 1;
+        display: inline-grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
         color: var(--fg-muted);
         background: transparent;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .overlay-close:hover {
         color: var(--fg);
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 
     .overlay-body {
         overflow-y: auto;
-        padding: var(--space-4) var(--space-5) var(--space-5);
+        padding: var(--space-6);
         display: flex;
         flex-direction: column;
-        gap: var(--space-5);
+        gap: var(--space-6);
     }
 </style>

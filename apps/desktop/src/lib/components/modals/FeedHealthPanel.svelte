@@ -128,29 +128,45 @@ function whenDate(iso: string): string {
     }
 
     .feed-name {
-        font-size: 0.9375rem;
+        font-size: var(--text-base);
         font-weight: 600;
+        letter-spacing: var(--tracking-snug);
         min-width: 0;
+        color: var(--fg);
     }
 
     .status-pill {
         flex: 0 0 auto;
-        padding: 2px var(--space-2);
-        border-radius: var(--radius-xl);
-        font-size: 0.6875rem;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: 3px var(--space-3);
+        border-radius: var(--radius-pill);
+        font-size: var(--text-xs);
         font-weight: 600;
-        background: var(--bg-tertiary);
+        background: var(--surface-raised);
+        border: 1px solid var(--hairline);
         color: var(--fg-muted);
     }
 
-    .status-paused {
-        background: var(--warning, #b8860b);
-        color: var(--accent-fg);
+    .status-pill::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--fg-subtle);
     }
 
-    .status-dead {
+    .status-active::before {
+        background: var(--success);
+    }
+
+    .status-paused::before {
+        background: var(--warning);
+    }
+
+    .status-dead::before {
         background: var(--error);
-        color: var(--accent-fg);
     }
 
     .controls {
@@ -159,29 +175,34 @@ function whenDate(iso: string): string {
     }
 
     .controls button {
-        padding: var(--space-2) var(--space-3);
+        padding: var(--space-2) var(--space-4);
         border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
-        color: var(--fg);
-        border: 1px solid var(--border);
-        font-size: 0.8125rem;
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-md);
+        font-weight: 500;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .controls button:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
+        color: var(--fg);
     }
 
     .recent h3 {
         font-size: 0.6875rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
+        font-weight: 650;
+        letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
         margin-bottom: var(--space-2);
     }
 
     .status {
-        font-size: 0.8125rem;
+        font-size: var(--text-md);
         color: var(--fg-muted);
     }
 
@@ -189,16 +210,21 @@ function whenDate(iso: string): string {
         list-style: none;
         display: flex;
         flex-direction: column;
-        gap: var(--space-1);
+        gap: 1px;
     }
 
     .fetch {
         display: flex;
         align-items: baseline;
-        gap: var(--space-2);
-        padding: var(--space-1) var(--space-2);
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        font-size: var(--text-xs);
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .fetch:hover {
+        background: var(--hover);
     }
 
     .fetch-error {
@@ -208,10 +234,17 @@ function whenDate(iso: string): string {
 
     .fetch-when {
         color: var(--fg-muted);
+        font-family: var(--font-mono);
         font-variant-numeric: tabular-nums;
+    }
+
+    .fetch-http {
+        color: var(--fg-subtle);
+        font-family: var(--font-mono);
     }
 
     .fetch-new {
         color: var(--accent);
+        font-weight: 500;
     }
 </style>

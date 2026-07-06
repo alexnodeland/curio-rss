@@ -7,6 +7,7 @@
  * `add_destination`. A raw filesystem path never leaves this process as a
  * free string (D6 / the named-destination contract).
  */
+import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { destinationsStore } from '$lib/state/destinations.svelte';
@@ -97,7 +98,7 @@ async function makeDefault(name: string): Promise<void> {
         <header class="overlay-header">
             <h2 id="destinations-title">{t('destinations.title')}</h2>
             <button class="overlay-close" type="button" onclick={onclose} aria-label={t('help.close')}
-                >×</button
+                ><Icon name="close" size={16} /></button
             >
         </header>
 
@@ -131,7 +132,8 @@ async function makeDefault(name: string): Promise<void> {
                                 class="remove-button"
                                 type="button"
                                 aria-label={t('destinations.remove', { name: destination.name })}
-                                onclick={() => void remove(destination.name)}>×</button
+                                onclick={() => void remove(destination.name)}
+                                ><Icon name="close" size={14} /></button
                             >
                         </li>
                     {/each}
@@ -171,62 +173,85 @@ async function makeDefault(name: string): Promise<void> {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgb(0 0 0 / 45%);
+        padding: var(--space-6);
+        background: color-mix(in srgb, #000, transparent 45%);
+        backdrop-filter: blur(3px);
         z-index: 100;
+        animation: backdrop-in var(--dur-base) var(--ease);
     }
 
     .overlay {
         width: min(560px, calc(100vw - var(--space-8)));
-        max-height: min(70vh, 640px);
+        max-height: min(82vh, 760px);
         display: flex;
         flex-direction: column;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
+        background: var(--surface-overlay);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-xl);
         box-shadow: var(--shadow-lg);
+        animation: overlay-in var(--dur-base) var(--ease);
     }
 
     .overlay:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
+        outline: none;
+    }
+
+    @keyframes backdrop-in {
+        from {
+            opacity: 0;
+        }
+    }
+
+    @keyframes overlay-in {
+        from {
+            opacity: 0;
+            transform: translateY(8px) scale(0.99);
+        }
     }
 
     .overlay-header {
+        flex: 0 0 auto;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border-subtle);
+        padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6);
+        border-bottom: 1px solid var(--hairline);
     }
 
     .overlay-header h2 {
-        font-size: 1rem;
+        font-size: var(--text-lg);
+        font-weight: 640;
+        letter-spacing: var(--tracking-snug);
     }
 
     .overlay-close {
-        padding: 0 var(--space-2);
-        font-size: 1.25rem;
-        line-height: 1;
+        display: inline-grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
         color: var(--fg-muted);
         background: transparent;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .overlay-close:hover {
         color: var(--fg);
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 
     .overlay-body {
         overflow-y: auto;
-        padding: var(--space-4) var(--space-5) var(--space-5);
+        padding: var(--space-6);
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
+        gap: var(--space-5);
     }
 
     .status {
-        font-size: 0.875rem;
+        font-size: var(--text-md);
         color: var(--fg-muted);
     }
 
@@ -238,16 +263,20 @@ async function makeDefault(name: string): Promise<void> {
         list-style: none;
         display: flex;
         flex-direction: column;
-        gap: var(--space-2);
+        gap: 2px;
     }
 
     .destination {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-lg);
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .destination:hover {
+        background: var(--hover);
     }
 
     .destination-main {
@@ -259,24 +288,25 @@ async function makeDefault(name: string): Promise<void> {
     }
 
     .destination-name {
-        font-size: 0.875rem;
-        font-weight: 600;
+        font-size: var(--text-md);
+        font-weight: 560;
         color: var(--fg);
     }
 
     .destination-root {
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
         font-family: var(--font-mono);
     }
 
     .default-badge {
         flex: 0 0 auto;
         padding: 2px var(--space-2);
-        border-radius: var(--radius-xl);
-        background: var(--accent);
-        color: var(--accent-fg);
-        font-size: 0.6875rem;
+        border-radius: var(--radius-pill);
+        background: var(--selected);
+        color: var(--accent);
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 70%);
+        font-size: var(--text-xs);
         font-weight: 600;
     }
 
@@ -284,7 +314,9 @@ async function makeDefault(name: string): Promise<void> {
         flex: 0 0 auto;
         background: transparent;
         color: var(--accent);
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
+        font-weight: 500;
+        transition: color var(--dur-fast) var(--ease);
     }
 
     .link-button:hover {
@@ -293,21 +325,21 @@ async function makeDefault(name: string): Promise<void> {
 
     .remove-button {
         flex: 0 0 auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.25rem;
-        height: 1.25rem;
-        border-radius: 50%;
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: var(--radius-md);
         background: transparent;
         color: var(--fg-subtle);
-        font-size: 1rem;
-        line-height: 1;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .remove-button:hover {
         color: var(--error);
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 
     .add-form {
@@ -316,52 +348,69 @@ async function makeDefault(name: string): Promise<void> {
         align-items: center;
         gap: var(--space-2);
         padding-top: var(--space-4);
-        border-top: 1px solid var(--border-subtle);
+        border-top: 1px solid var(--hairline);
     }
 
     .name-input {
         flex: 1 1 8rem;
         min-width: 0;
-        padding: var(--space-1) var(--space-2);
+        height: 34px;
+        padding: 0 var(--space-3);
         border-radius: var(--radius-md);
-        background: var(--bg);
+        background: var(--surface-inset);
         color: var(--fg);
-        border: 1px solid var(--border-subtle);
-        font-size: 0.8125rem;
+        border: 1px solid var(--hairline);
+        font-size: var(--text-md);
+        transition:
+            border-color var(--dur-fast) var(--ease),
+            box-shadow var(--dur-fast) var(--ease);
     }
 
     .name-input:focus-visible {
         outline: none;
-        border-color: var(--accent);
-    }
-
-    .choose-button,
-    .add-button {
-        flex: 0 0 auto;
-        padding: var(--space-1) var(--space-3);
-        border-radius: var(--radius-md);
-        font-size: 0.8125rem;
+        border-color: color-mix(in srgb, var(--accent), transparent 40%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 
     .choose-button {
+        flex: 0 0 auto;
+        height: 34px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-md);
+        font-size: var(--text-md);
         background: transparent;
-        color: var(--fg);
-        border: 1px solid var(--border);
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .choose-button:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
+        color: var(--fg);
     }
 
     .add-button {
+        flex: 0 0 auto;
+        height: 34px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-md);
+        font-size: var(--text-md);
+        font-weight: 560;
         background: var(--accent);
         color: var(--accent-fg);
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .add-button:hover {
+        background: var(--accent-hover);
     }
 
     .picked {
         flex: 1 1 100%;
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
         font-family: var(--font-mono);
     }
 </style>

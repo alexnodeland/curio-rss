@@ -1,0 +1,48 @@
+# curio-fixtures — the deterministic seeded fixture generator.
+#
+# Same seed → byte-identical `curio.db` (the determinism contract from
+# docs/design/roadmap.md Phase 1): every non-deterministic source in the
+# real write path (`CurioId::new()` UUIDv7, `Timestamp::now()`) is replaced
+# with seed-derived values, and rows are inserted in a fixed order into the
+# real migrated schema — so the file is reproducible and hash-assertable.
+#
+# The schema comes from `CoreHandle::open` (no DDL duplication); rows are
+# then written straight through a raw connection so every byte is controlled.
+# Consumed by `benches/cold_start.rs`, the workspace test suite, and
+# `just fixtures` (manual QA seeding). NOT a core crate — it is listed in the
+# coverage non-core regex (justfile + ci.yml), so it never counts against the
+# curio-core region floor.
+
+[package]
+name = "curio-fixtures"
+description = "Deterministic seeded fixture generator (feeds + articles → byte-reproducible SQLite) for benches, tests, and QA seeding"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "curio-fixtures"
+path = "src/main.rs"
+
+[[bench]]
+name = "cold_start"
+harness = false
+
+[dependencies]
+curio-core = { workspace = true }
+curio-types = { workspace = true }
+rusqlite = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

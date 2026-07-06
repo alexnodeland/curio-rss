@@ -95,7 +95,7 @@ core-cov-floor := "85"
 # Everything in the workspace that is NOT crates/curio-core, for the
 # enforced report below. A new crate counts against the core floor until
 # it is added here — the gate fails loud, never silently narrows.
-cov-non-core-regex := "(crates/curio-cli|crates/curio-types|xtask|apps/desktop/src-tauri)/"
+cov-non-core-regex := "(crates/curio-cli|crates/curio-types|crates/curio-fixtures|xtask|apps/desktop/src-tauri)/"
 
 # Coverage: workspace report + enforced region floor on crates/curio-core
 cov:
@@ -112,9 +112,16 @@ cov-html:
     cargo llvm-cov --workspace --html
     @echo "open target/llvm-cov/html/index.html"
 
-# Regenerate generated test fixtures (fixtures/generated — gitignored, never committed)
-fixtures:
-    @echo "the seeded fixture generator lands in Phase 1 (docs/design/roadmap.md) — nothing to generate yet"
+# Regenerate the deterministic perf fixture (fixtures/generated — gitignored,
+# never committed; same seed -> byte-identical curio.db, SHA-256 printed).
+# Sized for the 50k cold-start bench: 1000 feeds / 50k articles.
+fixtures *ARGS:
+    cargo run -p curio-fixtures --release -- {{ARGS}}
+
+# Cold-start acceptance bench: CoreHandle open + first page on the 50k
+# fixture (target < 1.5s). Generates the fixture once, then times the open.
+bench-cold-start:
+    cargo bench -p curio-fixtures --bench cold_start
 
 # Blob-size guard: fail if any git object in history exceeds 1MB
 # (mirrors CI's blob-guard job — catches the blob BEFORE it is pushed

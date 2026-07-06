@@ -12,6 +12,7 @@ members = [
     "apps/desktop/src-tauri",
     "crates/curio-cli",
     "crates/curio-core",
+    "crates/curio-fixtures",
     "crates/curio-types",
     "xtask",
 ]
@@ -57,6 +58,10 @@ uuid = { version = "1", features = ["v7"] }
 # dev-only
 assert_cmd = "2"
 axum = "0.8"
+# Cold-start bench harness (curio-fixtures/benches). Trimmed to the
+# cargo-bench runner only — no plotters/html_reports — to keep the license
+# surface small; github-action-benchmark reads the JSON estimates regardless.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 insta = { version = "1", features = ["glob"] }
 jsonschema = { version = "0.33", default-features = false }
 predicates = "3"

@@ -13,7 +13,7 @@ surface of a personal knowledge plane. Pre-1.0, mid-reset; the build plan is
 | `crates/curio-types` | Shared DTOs + published contract types; round-trip tests pin them to the `schemas/` artifacts |
 | `crates/curio-cli` | The v1 head (`curio`): agent/cron/scripting surface, CI proof the core is headless |
 | `xtask` | Workspace automation (`cargo run -p xtask -- boundary`) |
-| `apps/desktop/` | The parked Tauri/Svelte sketch — **outside the cargo workspace until Phase 4**; does not build, do not fix it |
+| `apps/desktop/` | The desktop head (Phase 4, in progress): `src-tauri/` is the `curio-desktop` workspace crate (thin IPC wrappers over the core, generated TS bindings); `src/` is the Svelte frontend (sketch remnants being rewritten in WP2+) |
 | `schemas/` | Published JSON Schema artifacts (versioned-immutable) + CHANGELOG |
 | `fixtures/` | Hermetic test inputs; nothing over 1MB (CI blob guard) |
 | `docs/design/` | Architecture, roadmap, contracts, decisions, history |
@@ -31,8 +31,9 @@ contract.
 
 All dev operations go through `just` (run bare to list recipes). `just ci`
 runs exactly what CI runs — fmt-check, clippy `-D warnings`, tests,
-cargo-deny, boundary check, the **85% region-coverage floor on
-curio-core** (a ratchet — see CONTRIBUTING.md), rustdoc `-D warnings`,
+cargo-deny, boundary check, the bindings drift check (`just
+bindings-check`, CI's ipc-contract job), the **85% region-coverage floor
+on curio-core** (a ratchet — see CONTRIBUTING.md), rustdoc `-D warnings`,
 and the 1MB blob guard — and must be green before any commit lands.
 Hooks are lefthook (`just setup` installs them; they cover fmt/clippy on
 commit and tests on push — the full gate is `just ci`).
@@ -46,8 +47,12 @@ chore ci build revert`. Small, logical commits.
 ## Boundary rules (binding)
 
 - **`curio-core` never depends on tauri** (or wry/tao/any webview). Enforced
-  by `deny.toml` and `cargo run -p xtask -- boundary`; the workspace stays
-  webview-free until Phase 4 deliberately moves the boundary.
+  by `deny.toml` (tauri bans `wrappers`-scoped to `curio-desktop` — the only
+  crate allowed to pull the webview) and `cargo run -p xtask -- boundary`.
+- **Desktop IPC types are generated, never hand-written.** `just bindings`
+  regenerates `apps/desktop/src/lib/bindings.ts` from the Rust command
+  surface; CI's `ipc-contract` job fails on drift. No hand-written
+  `invoke()` anywhere.
 - **Tests are hermetic.** No real network in tests — local fixtures,
   wiremock, in-process servers on `127.0.0.1` only.
 - **yt-dlp is never bundled.** Post-v1 enrichment shells out to an external,

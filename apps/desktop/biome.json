@@ -45,6 +45,16 @@
             "organizeImports": {
                 "enabled": false
             }
+        },
+        {
+            "include": ["src/lib/dev/**"],
+            "linter": {
+                "rules": {
+                    "style": {
+                        "noUnusedTemplateLiteral": "off"
+                    }
+                }
+            }
         }
     ],
     "formatter": {

@@ -460,6 +460,83 @@ fn list_articles_paginates_by_keyset() {
     assert_eq!(all.len(), 10);
 }
 
+/// Adds a feed subscription (test shorthand).
+fn add_feed(storage: &Storage, url: &str) -> curio_core::model::Feed {
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: url.to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    feed
+}
+
+/// Finds an article's row id by its (scoped) dedupe key.
+fn id_by_key(storage: &Storage, scoped_key: &str) -> ArticleId {
+    storage
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|a| a.dedupe_key == scoped_key)
+        .unwrap()
+        .id
+}
+
+#[test]
+fn unread_counts_group_by_feed_and_follow_read_flips() {
+    let (_dir, storage) = temp_storage();
+    assert!(
+        storage.unread_counts().unwrap().is_empty(),
+        "an empty database has no counts"
+    );
+
+    let feed_a = add_feed(&storage, "https://a.example/feed.xml");
+    let feed_b = add_feed(&storage, "https://b.example/feed.xml");
+    let mut a1 = new_article("a1", "A1", "alpha one");
+    a1.feed_id = Some(feed_a.id);
+    let mut a2 = new_article("a2", "A2", "alpha two");
+    a2.feed_id = Some(feed_a.id);
+    let mut b1 = new_article("b1", "B1", "beta one");
+    b1.feed_id = Some(feed_b.id);
+    let manual = new_article("m1", "Manual", "gamma");
+    storage.upsert_articles(vec![a1, a2, b1, manual]).unwrap();
+
+    // Never-touched articles (no article_state row) are unread.
+    let counts = storage.unread_counts().unwrap();
+    assert_eq!(counts.get(&Some(feed_a.id)), Some(&2));
+    assert_eq!(counts.get(&Some(feed_b.id)), Some(&1));
+    assert_eq!(counts.get(&None), Some(&1), "feedless articles count too");
+    assert_eq!(counts.values().sum::<u64>(), 4, "total = sum of the map");
+
+    // Reading moves the count; the other flags never do.
+    let a1_id = id_by_key(&storage, &format!("f{}:a1", feed_a.id.0));
+    let b1_id = id_by_key(&storage, &format!("f{}:b1", feed_b.id.0));
+    storage.mark_read(a1_id, true).unwrap();
+    storage.star_article(b1_id).unwrap();
+    storage.archive_article(b1_id).unwrap();
+    let counts = storage.unread_counts().unwrap();
+    assert_eq!(counts.get(&Some(feed_a.id)), Some(&1));
+    assert_eq!(
+        counts.get(&Some(feed_b.id)),
+        Some(&1),
+        "starring/archiving must not affect unreadness"
+    );
+
+    // Unreading restores; a fully-read feed drops out of the map.
+    storage.mark_read(a1_id, false).unwrap();
+    assert_eq!(
+        storage.unread_counts().unwrap().get(&Some(feed_a.id)),
+        Some(&2)
+    );
+    storage.mark_read(a1_id, true).unwrap();
+    let a2_id = id_by_key(&storage, &format!("f{}:a2", feed_a.id.0));
+    storage.mark_read(a2_id, true).unwrap();
+    let counts = storage.unread_counts().unwrap();
+    assert_eq!(counts.get(&Some(feed_a.id)), None, "no unread → no key");
+    assert_eq!(counts.values().sum::<u64>(), 2);
+}
+
 // ------------------------------------------------------- state and events
 
 #[test]

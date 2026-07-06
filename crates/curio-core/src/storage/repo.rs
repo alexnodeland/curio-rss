@@ -8,6 +8,8 @@
 //! intents to the JSONL log and deletes them (crash-recoverable — see
 //! `events::EventEmitter`).
 
+use std::collections::BTreeMap;
+
 use curio_types::{ArticleSnapshot, CurioId, EventEnvelope, EventPayload, Timestamp};
 use rusqlite::{Connection, OptionalExtension as _, Row};
 
@@ -464,6 +466,36 @@ impl Storage {
                 rows.collect::<Result<Vec<_>, _>>()?
             };
             raws.into_iter().map(RawArticle::into_article).collect()
+        })
+    }
+
+    /// Unread-article counts, grouped by feed (`GROUP BY feed_id` in
+    /// SQL — counts are backend-owned, never client badge math). The
+    /// `None` key counts articles that belong to no feed (manual saves,
+    /// rows orphaned by a feed removal); the total unread count is the
+    /// sum of the map's values. An article with no `article_state` row
+    /// has never been touched and counts as unread; the other flags
+    /// (starred, read-later, archived) do not affect unreadness.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn unread_counts(&self) -> Result<BTreeMap<Option<FeedId>, u64>, StorageError> {
+        self.read(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT a.feed_id, COUNT(*) FROM articles a \
+                 LEFT JOIN article_state s ON s.article_id = a.id \
+                 WHERE COALESCE(s.is_read, 0) = 0 GROUP BY a.feed_id",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows
+                .into_iter()
+                .map(|(feed_id, n)| (feed_id.map(FeedId), u64::try_from(n).unwrap_or_default()))
+                .collect())
         })
     }
 

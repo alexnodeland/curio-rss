@@ -492,6 +492,17 @@ impl CoreHandle {
         Ok(self.storage.article_tags(id)?)
     }
 
+    /// Unread-article counts grouped by feed (`None` = articles without
+    /// a feed; total = the sum of the values). Counts are backend-owned:
+    /// heads render them, they never re-derive them client-side.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn unread_counts(&self) -> Result<BTreeMap<Option<FeedId>, u64>, CoreError> {
+        Ok(self.storage.unread_counts()?)
+    }
+
     // ------------------------------------------------------------ state
 
     /// Star / unstar; emits `article.starred` (with tags) or the

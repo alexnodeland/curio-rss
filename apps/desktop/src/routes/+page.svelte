@@ -1,78 +1,63 @@
 <script lang="ts">
-import { t } from '$lib/i18n';
-import { feedsStore } from '$lib/state/feeds.svelte';
+/**
+ * The reader shell: the three-pane frame, the global keyboard wiring
+ * (registry matcher → action layer), the help overlay, and the toast
+ * outlet. Shortcuts are inert in typing contexts and while a modal owns
+ * the keyboard (Escape / `?` dismiss the help overlay).
+ */
+import ArticleList from '$components/articles/ArticleList.svelte';
+import Toasts from '$components/common/Toasts.svelte';
+import ThreePane from '$components/layout/ThreePane.svelte';
+import HelpOverlay from '$components/modals/HelpOverlay.svelte';
+import ReaderPane from '$components/reader/ReaderPane.svelte';
+import Sidebar from '$components/sidebar/Sidebar.svelte';
+import { createMatcher, shouldIgnoreKeyEvent } from '$lib/keyboard/registry';
+import { handleShortcut } from '$lib/state/actions';
+import { uiStore } from '$lib/state/ui.svelte';
+
+const matcher = createMatcher();
+
+function onKeydown(event: KeyboardEvent): void {
+    if (shouldIgnoreKeyEvent(event)) {
+        return;
+    }
+    if (uiStore.activeModal !== null) {
+        // A modal owns the keyboard; Escape (and `?` for help) dismisses.
+        const dismissesHelp = uiStore.activeModal === 'help' && event.key === '?';
+        if (event.key === 'Escape' || dismissesHelp) {
+            event.preventDefault();
+            uiStore.closeModal();
+        }
+        matcher.reset();
+        return;
+    }
+    const result = matcher.handle(event.key);
+    if (result.kind === 'none') {
+        return;
+    }
+    event.preventDefault();
+    if (result.kind === 'match') {
+        handleShortcut(result.id);
+    }
+}
 </script>
 
-<!--
-  The WP2 shell: token-styled chrome plus the live subscription/unread
-  status straight from the runes stores. WP3 replaces the status section
-  with the three-pane reader (Sidebar / ArticleList / ReaderPane).
--->
-<main class="shell">
-    <header class="shell-header">
-        <h1>{t('app.title')}</h1>
-        <p class="tagline">{t('app.tagline')}</p>
-    </header>
-    <section class="shell-status" aria-live="polite">
-        {#if feedsStore.error !== null}
-            <p class="status-error" role="alert">
-                {feedsStore.error.kind === 'user'
-                    ? feedsStore.error.message
-                    : t('app.error.internal')}
-            </p>
-        {:else if !feedsStore.loaded}
-            <p class="status-muted">{t('shell.feeds.loading')}</p>
-        {:else if feedsStore.feeds.length === 0}
-            <p class="status-muted">{t('shell.feeds.empty')}</p>
-        {:else}
-            <p>
-                {t('shell.feeds.count', { count: feedsStore.feeds.length })}
-                <span class="dot" aria-hidden="true">·</span>
-                {t('shell.unread.count', { count: feedsStore.unreadTotal })}
-            </p>
-        {/if}
-    </section>
-</main>
+<svelte:window onkeydown={onKeydown} />
 
-<style>
-    .shell {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-4);
-        height: 100vh;
-        padding: var(--space-8);
-        text-align: center;
-    }
+<ThreePane>
+    {#snippet sidebar()}
+        <Sidebar />
+    {/snippet}
+    {#snippet list()}
+        <ArticleList />
+    {/snippet}
+    {#snippet reader()}
+        <ReaderPane />
+    {/snippet}
+</ThreePane>
 
-    .shell-header h1 {
-        font-size: 2rem;
-        letter-spacing: -0.02em;
-    }
+{#if uiStore.activeModal === 'help'}
+    <HelpOverlay onclose={() => uiStore.closeModal()} />
+{/if}
 
-    .tagline {
-        color: var(--fg-muted);
-        margin-top: var(--space-1);
-    }
-
-    .shell-status {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-subtle);
-        border-radius: var(--radius-lg);
-        padding: var(--space-3) var(--space-5);
-    }
-
-    .status-muted {
-        color: var(--fg-muted);
-    }
-
-    .status-error {
-        color: var(--error);
-    }
-
-    .dot {
-        color: var(--fg-subtle);
-        margin: 0 var(--space-1);
-    }
-</style>
+<Toasts />

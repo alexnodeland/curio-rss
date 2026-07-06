@@ -19,6 +19,37 @@ export const en = {
     'view.readLater': 'Read later',
     'view.feeds': 'Feeds',
 
+    'sidebar.label': 'Subscriptions',
+    'sidebar.views': 'Views',
+    'sidebar.feeds': 'Feeds',
+
+    'list.label': 'Articles',
+    'list.loading': 'Loading articles…',
+    'list.empty': 'No articles here',
+    'list.row.unread': 'Unread',
+    'list.row.starred': 'Starred',
+
+    'reader.empty': 'Select an article to read',
+    'reader.missing': 'This article no longer exists',
+    'reader.toolbar': 'Article actions',
+    'reader.action.markRead': 'Mark read',
+    'reader.action.markUnread': 'Mark unread',
+    'reader.action.star': 'Star',
+    'reader.action.unstar': 'Unstar',
+    'reader.action.readLater': 'Read later',
+    'reader.action.readLaterRemove': 'Remove from read later',
+    'reader.action.archive': 'Archive',
+    'reader.action.unarchive': 'Unarchive',
+    'reader.action.openInBrowser': 'Open in browser',
+    'reader.meta.words': '{count} words',
+
+    'help.title': 'Keyboard shortcuts',
+    'help.close': 'Close',
+    'help.chord.then': 'then',
+
+    'pane.sidebar.resize': 'Resize sidebar',
+    'pane.list.resize': 'Resize article list',
+
     'toast.dismiss': 'Dismiss',
 
     'shortcut.category.navigation': 'Navigation',

@@ -18,6 +18,7 @@ onMount(() => {
         // localStorage mirror once the backend answers.
         await settingsStore.load();
         uiStore.initTheme();
+        uiStore.initLayout();
 
         // Event-driven invalidation: the query cache and the refresh
         // progress fields subscribe to the Rust-emitted specta events.

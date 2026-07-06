@@ -37,6 +37,26 @@ fn open_core(profile: &std::path::Path) -> CoreHandle {
     .unwrap()
 }
 
+/// A manual (feedless) article for facade tests that need rows without
+/// a network round trip.
+fn manual_article(key: &str, title: &str) -> NewArticle {
+    NewArticle {
+        feed_id: None,
+        dedupe_key: key.to_owned(),
+        title: title.to_owned(),
+        source_url: format!("https://example.com/{key}"),
+        author: None,
+        published_at: None,
+        content: ArticleContent {
+            html: "<p>body</p>".to_owned(),
+            text: "body".to_owned(),
+        },
+        lang: None,
+        word_count: None,
+        source_updated_at: None,
+    }
+}
+
 /// Subscribes to the mock feed with the W1 exemption set (the fixture
 /// lives on 127.0.0.1 — this is also the proof the exemption works).
 fn subscribe(core: &CoreHandle, url: &str) -> curio_core::model::Feed {
@@ -534,4 +554,23 @@ async fn reopening_a_profile_restores_destinations_and_state() {
     // The events dir is gitignored by construction.
     let gitignore = std::fs::read_to_string(profile.path().join(".curio/.gitignore")).unwrap();
     assert!(gitignore.contains("events/"));
+}
+
+/// The facade serves backend-owned unread counts — heads render the map,
+/// they never re-derive badge math client-side.
+#[test]
+fn unread_counts_are_served_by_the_facade() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    assert!(core.mark_read(articles[0].id, true).unwrap());
+    let counts = core.unread_counts().unwrap();
+    assert_eq!(counts.get(&None), Some(&1));
+    assert_eq!(counts.values().sum::<u64>(), 1);
 }

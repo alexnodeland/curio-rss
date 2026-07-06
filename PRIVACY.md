@@ -6,9 +6,32 @@ a SQLite database you own, and nowhere else.
 
 ## What Curio sends over the network
 
-Exactly one thing: **fetches of the feeds and articles you subscribed to**
-(and their favicons/images). Requests go to the servers you chose by adding
-a feed, with an honest User-Agent. That's it.
+Every outbound request goes through curio-core's single **policed HTTP
+client** (SSRF-guarded, size-capped, honest User-Agent) — a bare client
+anywhere in the tree is a build-gated boundary violation. These are *all* the
+classes of request the app can make; there are no others:
+
+1. **Feed fetches (refresh).** The subscription URLs you added — and only
+   those hosts. Conditional GET (`ETag`/`If-Modified-Since`) minimizes
+   transfer; loopback/private-network addresses are refused by default.
+
+2. **Favicons.** *Add feed* fetches the page you typed to discover its feeds
+   and reads its declared icon (or the site's own `/favicon.ico`) —
+   **same-origin only**. The **Google favicon service is never contacted
+   unless you explicitly opt in** (a checkbox, off by default); turning it on
+   sends only a site's *domain* to Google, and only for sites that declare no
+   icon of their own.
+
+3. **YouTube links (`youtube-nocookie.com`).** Video items show a click-to-
+   load poster. Nothing is requested from YouTube until *you* click play, and
+   then only via `youtube-nocookie.com` — the sole cross-origin frame the CSP
+   allows.
+
+4. **Article & site images (the image cache).** Remote images are fetched by
+   Rust through the policed client, cached by content-hash in your OS cache
+   dir, and served to the reader via a scoped `asset:` protocol. The webview
+   never makes an unmediated `https:` image request (the CSP `img-src` has no
+   `https:`), so images cannot become an exfiltration or fingerprinting path.
 
 ## What Curio never does
 

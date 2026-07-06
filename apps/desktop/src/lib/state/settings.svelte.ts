@@ -14,9 +14,11 @@ export const SETTING_KEYS = {
     fontSize: 'ui.typography.font-size',
     lineHeight: 'ui.typography.line-height',
     measure: 'ui.typography.measure',
+    fontFamily: 'ui.typography.font-family',
     sidebarCollapsed: 'ui.panes.sidebar-collapsed',
     sidebarWidth: 'ui.panes.sidebar-width',
     listWidth: 'ui.panes.list-width',
+    promoteDestination: 'ui.promote.destination',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

@@ -18,6 +18,7 @@ import {
     commandErrorFixture,
     dbStatsFixture,
     destinationFixture,
+    discoveryFixture,
     feedFixture,
     fetchRecordFixture,
     installIpcHarness,
@@ -45,6 +46,7 @@ interface ContractCase<K extends CommandName> {
 
 /** Exhaustive by construction: one case per generated wrapper. */
 const cases: { [K in CommandName]: ContractCase<K> } = {
+    discoverFeeds: { args: ['https://example.org'], response: discoveryFixture() },
     addFeed: {
         args: [{ url: 'https://example.org/feed.xml', title: null, tags: [] }],
         response: feedFixture(),

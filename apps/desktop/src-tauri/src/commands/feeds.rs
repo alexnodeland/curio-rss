@@ -8,9 +8,22 @@ use curio_core::model::{FeedId, FeedStatus};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
+use crate::discovery::{Discovery, DiscoveryDto};
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
+
+/// Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
+/// the page once through the policed client and scans it. Head-local
+/// platform policy; the Google favicon fallback is the frontend's opt-in.
+#[tauri::command]
+#[specta::specta]
+pub async fn discover_feeds(
+    discovery: State<'_, Discovery>,
+    url: String,
+) -> Result<DiscoveryDto, CommandError> {
+    discovery.discover(&url).await
+}
 
 /// Subscribes to a feed. Duplicate URLs are a storage error (user tier).
 // The arg is `new_feed`, not `new` — `new` is a reserved word in the

@@ -142,8 +142,8 @@ fn build_diagnostics_bundle(
     if let Ok(entries) = std::fs::read_dir(&logs_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "log")
-                && let Some(name) = path.file_name()
+            if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && is_log_file(name)
             {
                 let target = bundle.join(name);
                 if let Err(error) = std::fs::copy(&path, &target) {
@@ -153,6 +153,13 @@ fn build_diagnostics_bundle(
         }
     }
     Ok(bundle)
+}
+
+/// The allowlist: our own log files, including day-rotated ones
+/// (`curio.log`, `curio.log.2026-07-06`). Anything else in the logs dir —
+/// a stray note, an editor swapfile — is never copied.
+fn is_log_file(name: &str) -> bool {
+    name == "curio.log" || name.starts_with("curio.log.")
 }
 
 fn io_internal(path: &std::path::Path, error: &std::io::Error) -> CommandError {
@@ -173,10 +180,12 @@ mod tests {
     fn diagnostics_bundle_contains_app_info_and_only_log_files() {
         let (dir, core) = temp_core();
         seed_article(&core, "diag");
-        // A log file that must be copied, and a secret that must not.
+        // Log files that must be copied (including a day-rotated one), and a
+        // secret that must not.
         let logs = core.profile_dir().join("logs");
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join("curio.log"), "line").unwrap();
+        std::fs::write(logs.join("curio.log.2026-07-06"), "rotated").unwrap();
         std::fs::write(logs.join("secrets.txt"), "nope").unwrap();
 
         let bundle = build_diagnostics_bundle(&core, &dir.path().join("bundles")).unwrap();
@@ -184,8 +193,21 @@ mod tests {
         assert!(info.contains("article count: 1"));
         assert!(bundle.join("curio.log").is_file());
         assert!(
-            !bundle.join("secrets.txt").exists(),
-            "only *.log files are allowlisted into the bundle"
+            bundle.join("curio.log.2026-07-06").is_file(),
+            "day-rotated logs are allowlisted too"
         );
+        assert!(
+            !bundle.join("secrets.txt").exists(),
+            "only curio log files are allowlisted into the bundle"
+        );
+    }
+
+    #[test]
+    fn log_allowlist_matches_plain_and_rotated_names_only() {
+        assert!(is_log_file("curio.log"));
+        assert!(is_log_file("curio.log.2026-07-06"));
+        assert!(!is_log_file("secrets.txt"));
+        assert!(!is_log_file("curio.db"));
+        assert!(!is_log_file("notcurio.log"));
     }
 }

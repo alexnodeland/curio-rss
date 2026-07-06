@@ -31,6 +31,9 @@ tauri-build = { version = "2", features = [] }
 curio-core = { workspace = true }
 curio-types = { workspace = true }
 directories = { workspace = true }
+# HTML scan for feed autodiscovery + favicon (already in the workspace
+# graph via curio-core — adds no new licenses to triage).
+scraper = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -43,7 +46,11 @@ tauri-plugin-single-instance = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# Panic hook + rotating platform-dir logs feeding the diagnostics bundle.
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
 ulid = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 specta-typescript = "=0.0.12"

@@ -13,11 +13,13 @@
 //! `cargo run -p xtask -- boundary` enforce it mechanically.
 
 pub mod commands;
+pub mod discovery;
 pub mod dto;
 pub mod error;
 pub mod events;
 pub mod image_cache;
 pub mod ipc_policy;
+pub mod logging;
 pub mod paths;
 
 use std::sync::Arc;
@@ -39,6 +41,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .dangerously_cast_bigints_to_number()
         .commands(tauri_specta::collect_commands![
             // feeds
+            commands::feeds::discover_feeds,
             commands::feeds::add_feed,
             commands::feeds::remove_feed,
             commands::feeds::list_feeds,
@@ -121,6 +124,8 @@ pub fn run() {
             builder.mount_events(app);
 
             let profile = paths::profile_dir()?;
+            // Rotating logs + panic hook first, so anything below is captured.
+            logging::init(&profile.join("logs"));
             let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
             app.manage(Arc::new(core) as commands::SharedCore);
             app.manage(ipc_policy::PathRegistry::new());
@@ -129,6 +134,9 @@ pub fn run() {
                 image_cache::DEFAULT_MAX_CACHE_BYTES,
                 PolicedClient::new(FetchConfig::default()),
             ));
+            app.manage(discovery::Discovery::new(PolicedClient::new(
+                FetchConfig::default(),
+            )));
             Ok(())
         });
 

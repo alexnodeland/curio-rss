@@ -18,6 +18,7 @@ import type {
     CommandError,
     DbStatsDto,
     DestinationDto,
+    DiscoveryDto,
     FeedDto,
     FetchRecordDto,
     OpmlImportOutcomeDto,
@@ -270,6 +271,14 @@ export function pathTokenFixture(overrides: Partial<PathTokenDto> = {}): PathTok
     return {
         token: '01JZ0000000000000000000000',
         path: '/home/user/Downloads/subs.opml',
+        ...overrides,
+    };
+}
+
+export function discoveryFixture(overrides: Partial<DiscoveryDto> = {}): DiscoveryDto {
+    return {
+        feeds: [{ url: 'https://example.org/feed.xml', title: 'Example Feed' }],
+        favicon: 'https://example.org/favicon.ico',
         ...overrides,
     };
 }

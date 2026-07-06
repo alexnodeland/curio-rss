@@ -7,6 +7,12 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+	/**
+	 *  Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
+	 *  the page once through the policed client and scans it. Head-local
+	 *  platform policy; the Google favicon fallback is the frontend's opt-in.
+	 */
+	discoverFeeds: (url: string) => typedError<DiscoveryDto, CommandError>(__TAURI_INVOKE("discover_feeds", { url })),
 	/**  Subscribes to a feed. Duplicate URLs are a storage error (user tier). */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
 	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
@@ -357,6 +363,32 @@ export type DestinationDto = {
 	name: string,
 	/**  Root directory, for display only. */
 	root: string,
+};
+
+/**  One discovered feed candidate. */
+export type DiscoveredFeedDto = {
+	/**  Absolute feed URL (resolved against the fetched page). */
+	url: string,
+	/**  The `title` the page gave the `<link>`, if any. */
+	title: string | null,
+};
+
+/**
+ *  What one autodiscovery fetch turned up: zero or more feed candidates
+ *  plus a best-guess favicon URL (same-origin only — the Google fallback
+ *  is the frontend's opt-in concern).
+ */
+export type DiscoveryDto = {
+	/**
+	 *  Feed candidates, in document order (the page URL itself if it *is* a
+	 *  feed).
+	 */
+	feeds: DiscoveredFeedDto[],
+	/**
+	 *  A favicon URL to preview (declared icon or `/favicon.ico`), if the
+	 *  final URL was absolute enough to resolve one.
+	 */
+	favicon: string | null,
 };
 
 /**  Stable machine-readable code the frontend can branch on. */

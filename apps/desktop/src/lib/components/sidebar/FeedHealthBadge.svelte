@@ -21,21 +21,23 @@ const LABEL: Record<'paused' | 'dead', MessageKey> = {
 <style>
     .health-badge {
         flex: 0 0 auto;
-        padding: 0 var(--space-1);
-        border-radius: var(--radius-xl);
+        padding: 1px var(--space-1);
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--hairline);
         font-size: 0.625rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: var(--tracking-caps);
     }
 
     .health-paused {
-        background: var(--bg-tertiary);
+        background: var(--surface-raised);
         color: var(--fg-muted);
     }
 
     .health-dead {
-        background: var(--error);
-        color: var(--accent-fg);
+        background: var(--error-bg);
+        border-color: color-mix(in srgb, var(--error), transparent 60%);
+        color: var(--error);
     }
 </style>

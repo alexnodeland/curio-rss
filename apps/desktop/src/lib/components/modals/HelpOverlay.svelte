@@ -5,6 +5,7 @@
  * Dismissal (Escape / `?`) is handled by the shell's keydown handler; the
  * close button covers the pointer path.
  */
+import Icon from '$components/common/Icon.svelte';
 import { type MessageKey, t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutCategory } from '$lib/keyboard/registry';
 
@@ -41,7 +42,9 @@ $effect(() => {
     >
         <header class="overlay-header">
             <h2 id="help-title">{t('help.title')}</h2>
-            <button class="overlay-close" onclick={onclose} aria-label={t('help.close')}>×</button>
+            <button class="overlay-close" onclick={onclose} aria-label={t('help.close')}
+                ><Icon name="close" size={16} /></button
+            >
         </header>
         <div class="overlay-body">
             {#each CATEGORY_ORDER as category (category)}
@@ -75,8 +78,11 @@ $effect(() => {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgb(0 0 0 / 45%);
+        padding: var(--space-6);
+        background: color-mix(in srgb, #000, transparent 45%);
+        backdrop-filter: blur(3px);
         z-index: 100;
+        animation: backdrop-in var(--dur-base) var(--ease);
     }
 
     .overlay {
@@ -84,55 +90,75 @@ $effect(() => {
         max-height: min(70vh, 640px);
         display: flex;
         flex-direction: column;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
+        background: var(--surface-overlay);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-xl);
         box-shadow: var(--shadow-lg);
+        animation: overlay-in var(--dur-base) var(--ease);
     }
 
     .overlay:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
+        outline: none;
+    }
+
+    @keyframes backdrop-in {
+        from {
+            opacity: 0;
+        }
+    }
+
+    @keyframes overlay-in {
+        from {
+            opacity: 0;
+            transform: translateY(8px) scale(0.99);
+        }
     }
 
     .overlay-header {
+        flex: 0 0 auto;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border-subtle);
+        padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6);
+        border-bottom: 1px solid var(--hairline);
     }
 
     .overlay-header h2 {
-        font-size: 1rem;
+        font-size: var(--text-lg);
+        font-weight: 640;
+        letter-spacing: var(--tracking-snug);
     }
 
     .overlay-close {
-        padding: 0 var(--space-2);
-        font-size: 1.25rem;
-        line-height: 1;
+        display: inline-grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
         color: var(--fg-muted);
         background: transparent;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .overlay-close:hover {
         color: var(--fg);
-        background: var(--bg-hover);
+        background: var(--hover);
     }
 
     .overlay-body {
         overflow-y: auto;
-        padding: var(--space-4) var(--space-5) var(--space-5);
+        padding: var(--space-6);
         display: flex;
         flex-direction: column;
-        gap: var(--space-5);
+        gap: var(--space-6);
     }
 
     .shortcut-group h3 {
         font-size: 0.6875rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
+        font-weight: 650;
+        letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
         margin-bottom: var(--space-2);
@@ -159,22 +185,23 @@ $effect(() => {
     }
 
     kbd {
-        padding: 1px var(--space-2);
-        border: 1px solid var(--border);
-        border-bottom-width: 2px;
+        padding: 0.15em 0.5em;
+        border: 1px solid var(--hairline);
         border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
+        background: var(--surface-raised);
+        box-shadow: 0 1px 0 var(--hairline-strong);
         font-family: var(--font-mono);
-        font-size: 0.75rem;
+        font-size: 0.82em;
+        color: var(--fg-muted);
     }
 
     .chord-sep {
-        font-size: 0.6875rem;
+        font-size: var(--text-xs);
         color: var(--fg-subtle);
     }
 
     .description {
-        font-size: 0.875rem;
+        font-size: var(--text-md);
         color: var(--fg);
     }
 </style>

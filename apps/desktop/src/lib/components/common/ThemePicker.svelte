@@ -52,19 +52,24 @@ function pick(id: ThemePreference): void {
         flex-direction: column;
         gap: var(--space-2);
         padding: var(--space-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-lg);
+        background: var(--surface-raised);
         text-align: left;
+        transition:
+            background var(--dur-fast) var(--ease),
+            border-color var(--dur-fast) var(--ease),
+            box-shadow var(--dur-fast) var(--ease);
     }
 
     .swatch:hover {
-        border-color: var(--fg-subtle);
+        background: var(--surface-overlay);
+        border-color: var(--hairline-strong);
     }
 
     .swatch.active {
         border-color: var(--accent);
-        box-shadow: 0 0 0 1px var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent);
     }
 
     .preview {
@@ -79,7 +84,7 @@ function pick(id: ThemePreference): void {
         width: 1.25rem;
         height: 1.25rem;
         border-radius: 50%;
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--hairline);
     }
 
     .chip-bg {
@@ -95,7 +100,7 @@ function pick(id: ThemePreference): void {
     }
 
     .name {
-        font-size: 0.8125rem;
+        font-size: var(--text-sm);
         color: var(--fg);
     }
 </style>

@@ -116,14 +116,17 @@ function onKeyDown(event: KeyboardEvent): void {
         margin: 0 -2px;
         cursor: col-resize;
         background: transparent;
-        border-left: 1px solid var(--border-subtle);
-        transition: background 0.15s ease;
+        border-left: 1px solid var(--hairline);
+        transition: background var(--dur-fast) var(--ease);
         z-index: 1;
     }
 
-    .pane-handle:hover,
+    .pane-handle:hover {
+        background: var(--selected);
+    }
+
     .pane-handle.dragging {
-        background: var(--accent-muted);
+        background: var(--accent);
     }
 
     .pane-handle:focus-visible {

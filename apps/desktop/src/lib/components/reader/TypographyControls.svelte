@@ -91,17 +91,17 @@ function reset(): void {
     .typography {
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
-        padding: var(--space-4);
-        min-width: 260px;
+        gap: var(--space-4);
+        padding: var(--space-5);
+        min-width: 288px;
     }
 
     .row {
         display: grid;
         grid-template-columns: 5rem 1fr 3rem;
         align-items: center;
-        gap: var(--space-2);
-        font-size: 0.8125rem;
+        gap: var(--space-3);
+        font-size: var(--text-md);
         color: var(--fg);
     }
 
@@ -117,10 +117,10 @@ function reset(): void {
 
     select {
         padding: var(--space-1) var(--space-2);
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
+        border-radius: var(--radius-md);
+        background: var(--surface-inset);
         color: var(--fg);
-        border: 1px solid var(--border);
+        border: 1px solid var(--hairline);
     }
 
     input[type='range'] {
@@ -134,12 +134,15 @@ function reset(): void {
         border-radius: var(--radius-md);
         background: transparent;
         color: var(--fg-muted);
-        border: 1px solid var(--border);
-        font-size: 0.75rem;
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
     .reset:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
         color: var(--fg);
     }
 </style>

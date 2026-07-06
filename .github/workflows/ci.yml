@@ -1,7 +1,10 @@
-# CI for the cargo workspace. Deliberately webview-free and npm-free:
-# apps/desktop/ is outside the workspace until Phase 4, and the whole
-# point of the CLI head is that this suite passes on a bare Linux runner.
-# Local mirror: `just ci`.
+# CI for the cargo workspace. Phase 4 brought the desktop head
+# (apps/desktop/src-tauri, curio-desktop) into the workspace, so the
+# --workspace jobs compile tauri and need the webkit2gtk/gtk system
+# packages — still npm-free: the crate builds against a placeholder
+# frontendDist, and the CLI head remains the proof that curio-core
+# itself is headless (the boundary job checks its tree stays
+# webview-free). Local mirror: `just ci`.
 
 name: CI
 
@@ -37,6 +40,10 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install webview system deps (tauri workspace build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -46,6 +53,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install webview system deps (tauri workspace build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
       - run: cargo test --workspace
 
   doc:
@@ -57,6 +68,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install webview system deps (tauri workspace build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
       - run: cargo doc --workspace --no-deps
 
   coverage:
@@ -75,6 +90,10 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
+      - name: Install webview system deps (tauri workspace build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Run the workspace suite under llvm-cov
         run: cargo llvm-cov --workspace --no-report
       - name: Workspace coverage (report-only)
@@ -82,7 +101,7 @@ jobs:
       - name: Enforce the curio-core region floor
         run: |
           cargo llvm-cov report --summary-only \
-            --ignore-filename-regex '(crates/curio-cli|crates/curio-types|xtask)/' \
+            --ignore-filename-regex '(crates/curio-cli|crates/curio-types|xtask|apps/desktop/src-tauri)/' \
             --fail-under-regions 85
 
   deny:
@@ -93,6 +112,26 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  ipc-contract:
+    # The single highest-value gate: regenerate the tauri-specta TS
+    # bindings from the Rust command surface and fail on any drift from
+    # the committed file — Rust-signature changes cannot ship without
+    # their bindings. Local mirror: `just bindings-check`.
+    name: ipc-contract (bindings drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install webview system deps (tauri workspace build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Regenerate the bindings
+        run: cargo test -p curio-desktop --test export_bindings
+      - name: Fail on drift from the committed bindings
+        run: git diff --exit-code apps/desktop/src/lib/bindings.ts
 
   boundary:
     name: webview boundary (curio-core is tauri-free)

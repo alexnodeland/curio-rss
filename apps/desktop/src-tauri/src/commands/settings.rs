@@ -1,139 +1,126 @@
-//! Settings management commands.
+//! Settings K/V + app info.
+//!
+//! UI preferences ride the same store under namespaced keys (`ui.theme`,
+//! `ui.typography`, …) — no separate prefs commands. The facade-reserved
+//! `"destinations"` key is refused in both directions: that registry is
+//! owned by `add_destination`/`remove_destination`.
 
+use std::sync::Arc;
+
+use curio_core::CoreHandle;
+use curio_core::storage::Storage;
 use tauri::State;
 
-use crate::commands::AppState;
-use crate::core::models::Settings;
-use crate::core::themes::{get_builtin_themes, get_theme, Theme};
+use super::{SharedCore, run_blocking};
+use crate::dto::AppInfoDto;
 use crate::error::CommandError;
-use crate::services::{CacheStats, ImageCache};
 
-/// Get current settings
+/// The settings key owned by the core facade (its destination registry).
+const RESERVED_KEY: &str = "destinations";
+
+/// Reads a setting.
 #[tauri::command]
-pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings, CommandError> {
-    let settings = state.settings.read().await;
-    Ok(settings.clone())
+#[specta::specta]
+pub async fn get_setting(
+    core: State<'_, SharedCore>,
+    key: String,
+) -> Result<Option<String>, CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || get_setting_impl(&core, &key)).await
 }
 
-/// Update settings
+/// Writes a setting.
 #[tauri::command]
-pub async fn update_settings(
-    state: State<'_, AppState>,
-    settings: Settings,
+#[specta::specta]
+pub async fn set_setting(
+    core: State<'_, SharedCore>,
+    key: String,
+    value: String,
 ) -> Result<(), CommandError> {
-    // Write to file
-    let settings_path = state.config_dir.join("settings.json");
-    let json = serde_json::to_string_pretty(&settings)
-        .map_err(|e| CommandError::internal_msg(format!("Failed to serialize settings: {}", e)))?;
+    let core = Arc::clone(core.inner());
+    run_blocking(move || set_setting_impl(&core, &key, &value)).await
+}
 
-    tokio::fs::write(&settings_path, json)
-        .await
-        .map_err(|e| CommandError::io(format!("Failed to write settings: {}", e)))?;
+/// Version / profile / schema facts for the about box and doctor panel.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_app_info(core: State<'_, SharedCore>) -> Result<AppInfoDto, CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || get_app_info_impl(&core)).await
+}
 
-    // Update in-memory settings
-    let mut current = state.settings.write().await;
-    *current = settings;
+// ------------------------------------------------------------------ impls
 
+fn reject_reserved(key: &str) -> Result<(), CommandError> {
+    if key == RESERVED_KEY {
+        return Err(CommandError::invalid_input(
+            "the \"destinations\" settings key is facade-owned — use the destination commands",
+        ));
+    }
     Ok(())
 }
 
-/// Load settings from disk
-#[tauri::command]
-pub async fn load_settings(state: State<'_, AppState>) -> Result<Settings, CommandError> {
-    let settings_path = state.config_dir.join("settings.json");
-
-    if settings_path.exists() {
-        let json = tokio::fs::read_to_string(&settings_path)
-            .await
-            .map_err(|e| CommandError::io(format!("Failed to read settings: {}", e)))?;
-
-        let settings: Settings = serde_json::from_str(&json)
-            .map_err(|e| CommandError::internal_msg(format!("Failed to parse settings: {}", e)))?;
-
-        // Update in-memory settings
-        let mut current = state.settings.write().await;
-        *current = settings.clone();
-
-        Ok(settings)
-    } else {
-        Ok(Settings::default())
-    }
+fn get_setting_impl(core: &CoreHandle, key: &str) -> Result<Option<String>, CommandError> {
+    reject_reserved(key)?;
+    Ok(core.storage().get_setting(key)?)
 }
 
-/// Get all available themes
-#[tauri::command]
-pub async fn get_themes() -> Result<Vec<Theme>, CommandError> {
-    Ok(get_builtin_themes())
+fn set_setting_impl(core: &CoreHandle, key: &str, value: &str) -> Result<(), CommandError> {
+    reject_reserved(key)?;
+    Ok(core.storage().set_setting(key, value)?)
 }
 
-/// Get a specific theme by ID
-#[tauri::command]
-pub async fn get_theme_by_id(theme_id: String) -> Result<Theme, CommandError> {
-    get_theme(&theme_id)
-        .ok_or_else(|| CommandError::not_found(format!("Theme not found: {}", theme_id)))
+fn get_app_info_impl(core: &CoreHandle) -> Result<AppInfoDto, CommandError> {
+    Ok(AppInfoDto {
+        version: CoreHandle::version().to_owned(),
+        profile_dir: core.profile_dir().display().to_string(),
+        db_schema_version: core.storage().db_schema_version()?,
+        schema_supported: Storage::schema_version(),
+    })
 }
 
-/// Save a custom theme
-#[tauri::command]
-pub async fn save_custom_theme(
-    state: State<'_, AppState>,
-    theme: Theme,
-) -> Result<(), CommandError> {
-    let themes_dir = state.config_dir.join("themes");
-    std::fs::create_dir_all(&themes_dir)
-        .map_err(|e| CommandError::io(format!("Failed to create themes directory: {}", e)))?;
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
 
-    let theme_path = themes_dir.join(format!("{}.json", theme.id));
-    let json = serde_json::to_string_pretty(&theme)
-        .map_err(|e| CommandError::internal_msg(format!("Failed to serialize theme: {}", e)))?;
+    use super::*;
+    use crate::commands::testutil::temp_core;
+    use crate::error::{ErrorCode, ErrorKind};
 
-    tokio::fs::write(&theme_path, json)
-        .await
-        .map_err(|e| CommandError::io(format!("Failed to write theme: {}", e)))?;
-
-    Ok(())
-}
-
-/// Delete a custom theme
-#[tauri::command]
-pub async fn delete_custom_theme(
-    state: State<'_, AppState>,
-    theme_id: String,
-) -> Result<(), CommandError> {
-    // Don't allow deleting built-in themes
-    if get_theme(&theme_id).is_some() {
-        return Err(CommandError::validation("Cannot delete built-in themes"));
+    #[test]
+    fn settings_round_trip_under_namespaced_keys() {
+        let (_dir, core) = temp_core();
+        assert!(get_setting_impl(&core, "ui.theme").unwrap().is_none());
+        set_setting_impl(&core, "ui.theme", "nord").unwrap();
+        assert_eq!(
+            get_setting_impl(&core, "ui.theme").unwrap().as_deref(),
+            Some("nord")
+        );
+        set_setting_impl(&core, "ui.theme", "dark").unwrap();
+        assert_eq!(
+            get_setting_impl(&core, "ui.theme").unwrap().as_deref(),
+            Some("dark")
+        );
     }
 
-    let theme_path = state
-        .config_dir
-        .join("themes")
-        .join(format!("{}.json", theme_id));
-
-    if theme_path.exists() {
-        tokio::fs::remove_file(&theme_path)
-            .await
-            .map_err(|e| CommandError::io(format!("Failed to delete theme: {}", e)))?;
+    #[test]
+    fn the_destinations_key_is_refused_both_ways() {
+        let (_dir, core) = temp_core();
+        for result in [
+            set_setting_impl(&core, "destinations", "{}").unwrap_err(),
+            get_setting_impl(&core, "destinations").unwrap_err(),
+        ] {
+            assert_eq!(result.kind, ErrorKind::User);
+            assert_eq!(result.code, ErrorCode::InvalidInput);
+        }
     }
 
-    Ok(())
-}
-
-/// Get cache statistics
-#[tauri::command]
-pub async fn get_cache_stats(state: State<'_, AppState>) -> Result<CacheStats, CommandError> {
-    let cache = ImageCache::new(state.config_dir.join("cache"));
-    cache.get_stats().map_err(CommandError::from)
-}
-
-/// Clear image cache
-#[tauri::command]
-pub async fn clear_image_cache(
-    state: State<'_, AppState>,
-    cache_type: Option<String>,
-) -> Result<usize, CommandError> {
-    let cache = ImageCache::new(state.config_dir.join("cache"));
-    cache
-        .clear(cache_type.as_deref())
-        .map_err(CommandError::from)
+    #[test]
+    fn app_info_reports_matching_schema_versions_on_a_fresh_profile() {
+        let (_dir, core) = temp_core();
+        let info = get_app_info_impl(&core).unwrap();
+        assert_eq!(info.version, CoreHandle::version());
+        assert_eq!(info.db_schema_version, info.schema_supported);
+        assert!(info.profile_dir.ends_with("profile"));
+    }
 }

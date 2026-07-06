@@ -1,9 +1,12 @@
 # Lefthook git hooks — cargo workspace layout.
 # https://github.com/evilmartians/lefthook
 #
-# The desktop sketch under apps/desktop/ is outside the workspace until
-# Phase 4; its npm hooks return when it rejoins. Rust hooks run on the
-# whole workspace (it is small; staged-only games are not worth the drift).
+# Phase 4: the desktop head's Rust crate (apps/desktop/src-tauri) is a
+# workspace member, so the Rust hooks below cover it too. The npm hooks
+# (biome/svelte-check pre-commit, vitest pre-push) land with the frontend
+# rewrite (WP2) — the parked sketch frontend would fail them by design.
+# Rust hooks run on the whole workspace (staged-only games are not worth
+# the drift).
 
 pre-commit:
   parallel: true

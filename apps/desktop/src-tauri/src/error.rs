@@ -1,252 +1,143 @@
-//! Unified error types for Curio Reader.
+//! The one error type that crosses IPC.
 //!
-//! This module provides a hierarchical error system with:
-//! - `CoreError`: Business logic failures
-//! - `InfraError`: I/O and external service failures
-//! - `CommandError`: User-facing, serializable errors
+//! Every command returns `Result<T, CommandError>`; the wire shape is the
+//! sketch's proven three-tier model ported onto the generated contract:
+//! `{ kind, code, message, recoverable }`. `kind: "user"` means the
+//! frontend should surface the message to the human (bad input, missing
+//! row, network trouble); `kind: "internal"` means something the user
+//! cannot fix — show a generic failure and point at diagnostics.
+//!
+//! Mapping policy (from the build spec): `NotFound` / `UnknownDestination`
+//! / `InvalidTag` / `SchemaTooNew` are user-tier; `Sqlite` / `WriterGone` /
+//! `IntegrityFailed` / IO are internal-tier.
 
-use serde::Serialize;
-use std::time::Duration;
-use uuid::Uuid;
+use curio_core::CoreError;
+use curio_core::storage::StorageError;
+use curio_types::ParseDestinationNameError;
+use serde::{Deserialize, Serialize};
 
-/// Core errors - business logic failures
-#[derive(Debug, thiserror::Error)]
-pub enum CoreError {
-    #[error("Feed not found: {0}")]
-    FeedNotFound(Uuid),
-
-    #[error("Article not found: {0}")]
-    ArticleNotFound(Uuid),
-
-    #[error("Folder not found: {0}")]
-    FolderNotFound(Uuid),
-
-    #[error("Profile not found: {0}")]
-    ProfileNotFound(String),
-
-    #[error("Invalid feed URL: {0}")]
-    InvalidFeedUrl(String),
-
-    #[error("Parse error: {0}")]
-    ParseError(String),
-
-    #[error("Validation error: {0}")]
-    ValidationError(String),
-
-    #[error("Duplicate feed URL: {0}")]
-    DuplicateFeed(String),
+/// Which tier of the UI handles the error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum ErrorKind {
+    /// Actionable by the user — surface `message` verbatim.
+    User,
+    /// Not actionable by the user — show a generic failure.
+    Internal,
 }
 
-/// Infrastructure errors - I/O and external failures
-#[derive(Debug, thiserror::Error)]
-pub enum InfraError {
-    #[error("Database error: {0}")]
-    Database(#[from] rusqlite::Error),
-
-    #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
-
-    #[error("Network error: {0}")]
-    Network(String),
-
-    #[error("yt-dlp error: {0}")]
-    YtDlp(String),
-
-    #[error("File I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Rate limited, retry after {retry_after:?}")]
-    RateLimited { retry_after: Option<Duration> },
-
-    #[error("Feed parse error: {0}")]
-    FeedParse(String),
-}
-
-/// Error codes for frontend consumption
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+/// Stable machine-readable code the frontend can branch on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
+    /// The referenced feed/article/row does not exist.
     NotFound,
+    /// The input failed validation (bad tag, bad name, bad token…).
     InvalidInput,
-    NetworkError,
-    RateLimited,
-    ParseError,
-    StorageError,
-    ExternalServiceError,
-    DuplicateEntry,
+    /// No destination is registered under that name.
+    UnknownDestination,
+    /// The database was written by a newer build of Curio.
+    SchemaTooNew,
+    /// An outbound fetch failed (policed client).
+    Network,
+    /// Feed/OPML bytes did not parse.
+    Parse,
+    /// The storage layer failed.
+    Storage,
+    /// Filesystem IO failed.
+    Io,
+    /// Anything else — a bug, not a state.
+    Internal,
 }
 
-/// Command errors - user-facing, serializable
-#[derive(Debug, Serialize, thiserror::Error)]
-pub enum CommandError {
-    #[error("{message}")]
-    User {
-        message: String,
-        code: ErrorCode,
-        recoverable: bool,
-    },
-
-    #[error("Internal error: {message}")]
-    Internal {
-        message: String,
-        #[serde(skip)]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+/// The serializable error every command returns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, thiserror::Error)]
+#[error("{message}")]
+pub struct CommandError {
+    /// User-actionable vs internal.
+    pub kind: ErrorKind,
+    /// Machine-readable code.
+    pub code: ErrorCode,
+    /// Human-readable description (shown verbatim for `kind: user`).
+    pub message: String,
+    /// Whether retrying the same action can plausibly succeed.
+    pub recoverable: bool,
 }
 
 impl CommandError {
-    /// Create a validation error
-    pub fn validation(message: impl Into<String>) -> Self {
-        Self::User {
+    /// A user-tier error: surfaced verbatim in the UI.
+    pub fn user(code: ErrorCode, message: impl Into<String>, recoverable: bool) -> Self {
+        Self {
+            kind: ErrorKind::User,
+            code,
             message: message.into(),
-            code: ErrorCode::InvalidInput,
-            recoverable: true,
+            recoverable,
         }
     }
 
-    /// Create a not found error
-    pub fn not_found(message: impl Into<String>) -> Self {
-        Self::User {
+    /// An internal-tier error: logged, shown generically.
+    pub fn internal(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::Internal,
+            code,
             message: message.into(),
-            code: ErrorCode::NotFound,
             recoverable: false,
         }
     }
 
-    /// Create a storage error
-    pub fn storage(message: impl Into<String>) -> Self {
-        Self::User {
-            message: message.into(),
-            code: ErrorCode::StorageError,
-            recoverable: false,
-        }
+    /// Shorthand for invalid user input.
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::user(ErrorCode::InvalidInput, message, true)
     }
+}
 
-    /// Create an internal error from any error type
-    pub fn internal(source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::Internal {
-            message: source.to_string(),
-            source: Some(Box::new(source)),
-        }
-    }
-
-    /// Create an internal error from a message string
-    pub fn internal_msg(message: impl Into<String>) -> Self {
-        Self::Internal {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    /// Create an I/O error
-    pub fn io(message: impl Into<String>) -> Self {
-        Self::User {
-            message: message.into(),
-            code: ErrorCode::StorageError,
-            recoverable: false,
+impl From<StorageError> for CommandError {
+    fn from(error: StorageError) -> Self {
+        match &error {
+            StorageError::NotFound { .. } => {
+                Self::user(ErrorCode::NotFound, error.to_string(), false)
+            }
+            StorageError::InvalidTag => {
+                Self::user(ErrorCode::InvalidInput, error.to_string(), true)
+            }
+            StorageError::SchemaTooNew { .. } => {
+                Self::user(ErrorCode::SchemaTooNew, error.to_string(), false)
+            }
+            StorageError::Sqlite(_)
+            | StorageError::WriterGone
+            | StorageError::WalUnavailable { .. }
+            | StorageError::Corrupt { .. }
+            | StorageError::IntegrityFailed { .. }
+            | StorageError::Envelope(_) => Self::internal(ErrorCode::Storage, error.to_string()),
         }
     }
 }
 
 impl From<CoreError> for CommandError {
-    fn from(e: CoreError) -> Self {
-        match e {
-            CoreError::FeedNotFound(id) => Self::User {
-                message: format!("Feed not found: {}", id),
-                code: ErrorCode::NotFound,
-                recoverable: false,
-            },
-            CoreError::ArticleNotFound(id) => Self::User {
-                message: format!("Article not found: {}", id),
-                code: ErrorCode::NotFound,
-                recoverable: false,
-            },
-            CoreError::FolderNotFound(id) => Self::User {
-                message: format!("Folder not found: {}", id),
-                code: ErrorCode::NotFound,
-                recoverable: false,
-            },
-            CoreError::ProfileNotFound(name) => Self::User {
-                message: format!("Profile not found: {}", name),
-                code: ErrorCode::NotFound,
-                recoverable: false,
-            },
-            CoreError::InvalidFeedUrl(url) => Self::User {
-                message: format!("Invalid feed URL: {}", url),
-                code: ErrorCode::InvalidInput,
-                recoverable: true,
-            },
-            CoreError::ParseError(msg) => Self::User {
-                message: format!("Parse error: {}", msg),
-                code: ErrorCode::ParseError,
-                recoverable: false,
-            },
-            CoreError::ValidationError(msg) => Self::User {
-                message: msg,
-                code: ErrorCode::InvalidInput,
-                recoverable: true,
-            },
-            CoreError::DuplicateFeed(url) => Self::User {
-                message: format!("Feed already exists: {}", url),
-                code: ErrorCode::DuplicateEntry,
-                recoverable: true,
-            },
+    fn from(error: CoreError) -> Self {
+        match error {
+            CoreError::Storage(storage) => storage.into(),
+            CoreError::NotFound { .. } => Self::user(ErrorCode::NotFound, error.to_string(), false),
+            CoreError::UnknownDestination { .. } => {
+                Self::user(ErrorCode::UnknownDestination, error.to_string(), true)
+            }
+            CoreError::Fetch(_) => Self::user(ErrorCode::Network, error.to_string(), true),
+            CoreError::FeedParse(_) | CoreError::Opml(_) => {
+                Self::user(ErrorCode::Parse, error.to_string(), true)
+            }
+            CoreError::Io { .. } | CoreError::Export(_) | CoreError::Events(_) => {
+                Self::internal(ErrorCode::Io, error.to_string())
+            }
+            CoreError::Content(_) | CoreError::Settings(_) => {
+                Self::internal(ErrorCode::Internal, error.to_string())
+            }
         }
     }
 }
 
-impl From<InfraError> for CommandError {
-    fn from(e: InfraError) -> Self {
-        match e {
-            InfraError::Database(err) => Self::User {
-                message: format!("Database error: {}", err),
-                code: ErrorCode::StorageError,
-                recoverable: false,
-            },
-            InfraError::Http(err) => Self::User {
-                message: format!("Network error: {}", err),
-                code: ErrorCode::NetworkError,
-                recoverable: true,
-            },
-            InfraError::Network(msg) => Self::User {
-                message: format!("Network error: {}", msg),
-                code: ErrorCode::NetworkError,
-                recoverable: true,
-            },
-            InfraError::YtDlp(msg) => Self::User {
-                message: format!("YouTube extraction error: {}", msg),
-                code: ErrorCode::ExternalServiceError,
-                recoverable: true,
-            },
-            InfraError::Io(err) => Self::User {
-                message: format!("File error: {}", err),
-                code: ErrorCode::StorageError,
-                recoverable: false,
-            },
-            InfraError::Json(err) => Self::User {
-                message: format!("JSON error: {}", err),
-                code: ErrorCode::ParseError,
-                recoverable: false,
-            },
-            InfraError::RateLimited { retry_after } => Self::User {
-                message: format!(
-                    "Rate limited. {}",
-                    retry_after
-                        .map(|d| format!("Retry after {} seconds", d.as_secs()))
-                        .unwrap_or_default()
-                ),
-                code: ErrorCode::RateLimited,
-                recoverable: true,
-            },
-            InfraError::FeedParse(msg) => Self::User {
-                message: format!("Failed to parse feed: {}", msg),
-                code: ErrorCode::ParseError,
-                recoverable: false,
-            },
-        }
+impl From<ParseDestinationNameError> for CommandError {
+    fn from(error: ParseDestinationNameError) -> Self {
+        Self::invalid_input(format!("invalid destination name: {error}"))
     }
 }
 
@@ -255,108 +146,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_core_error_to_command_error_feed_not_found() {
-        let id = Uuid::new_v4();
-        let core_err = CoreError::FeedNotFound(id);
-        let cmd_err: CommandError = core_err.into();
-
-        match cmd_err {
-            CommandError::User {
-                message,
-                code,
-                recoverable,
-            } => {
-                assert!(message.contains(&id.to_string()));
-                assert_eq!(code, ErrorCode::NotFound);
-                assert!(!recoverable);
-            }
-            _ => panic!("Expected User error"),
-        }
+    fn not_found_maps_to_the_user_tier() {
+        let error = CommandError::from(CoreError::NotFound { entity: "article" });
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert!(!error.recoverable);
     }
 
     #[test]
-    fn test_core_error_to_command_error_validation() {
-        let core_err = CoreError::ValidationError("Invalid input".to_string());
-        let cmd_err: CommandError = core_err.into();
-
-        match cmd_err {
-            CommandError::User {
-                message,
-                code,
-                recoverable,
-            } => {
-                assert_eq!(message, "Invalid input");
-                assert_eq!(code, ErrorCode::InvalidInput);
-                assert!(recoverable);
-            }
-            _ => panic!("Expected User error"),
-        }
+    fn invalid_tag_is_recoverable_user_input() {
+        let error = CommandError::from(StorageError::InvalidTag);
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert!(error.recoverable);
     }
 
     #[test]
-    fn test_command_error_validation_helper() {
-        let err = CommandError::validation("test message");
-
-        match err {
-            CommandError::User {
-                message,
-                code,
-                recoverable,
-            } => {
-                assert_eq!(message, "test message");
-                assert_eq!(code, ErrorCode::InvalidInput);
-                assert!(recoverable);
-            }
-            _ => panic!("Expected User error"),
-        }
+    fn unknown_destination_is_user_tier() {
+        let error = CommandError::from(CoreError::UnknownDestination {
+            name: "vault".into(),
+        });
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::UnknownDestination);
     }
 
     #[test]
-    fn test_command_error_not_found_helper() {
-        let err = CommandError::not_found("item not found");
-
-        match err {
-            CommandError::User {
-                message,
-                code,
-                recoverable,
-            } => {
-                assert_eq!(message, "item not found");
-                assert_eq!(code, ErrorCode::NotFound);
-                assert!(!recoverable);
-            }
-            _ => panic!("Expected User error"),
-        }
+    fn writer_gone_is_internal_storage() {
+        let error = CommandError::from(StorageError::WriterGone);
+        assert_eq!(error.kind, ErrorKind::Internal);
+        assert_eq!(error.code, ErrorCode::Storage);
+        assert!(!error.recoverable);
     }
 
     #[test]
-    fn test_command_error_serialization() {
-        let err = CommandError::validation("test");
-        let json = serde_json::to_string(&err).unwrap();
-
-        assert!(json.contains("INVALID_INPUT"));
-        assert!(json.contains("test"));
-        assert!(json.contains("recoverable"));
+    fn schema_too_new_is_a_user_facing_stop() {
+        let error = CommandError::from(StorageError::SchemaTooNew {
+            found: 9,
+            supported: 1,
+        });
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::SchemaTooNew);
     }
 
     #[test]
-    fn test_infra_error_rate_limited() {
-        let err = InfraError::RateLimited {
-            retry_after: Some(Duration::from_secs(60)),
-        };
-        let cmd_err: CommandError = err.into();
-
-        match cmd_err {
-            CommandError::User {
-                message,
-                code,
-                recoverable,
-            } => {
-                assert!(message.contains("60"));
-                assert_eq!(code, ErrorCode::RateLimited);
-                assert!(recoverable);
-            }
-            _ => panic!("Expected User error"),
-        }
+    fn wire_shape_matches_the_contract() {
+        let error = CommandError::user(ErrorCode::NotFound, "feed not found", false);
+        let json = serde_json::to_value(&error).unwrap_or_else(|e| panic!("serialize: {e}"));
+        assert_eq!(json["kind"], "user");
+        assert_eq!(json["code"], "NOT_FOUND");
+        assert_eq!(json["message"], "feed not found");
+        assert_eq!(json["recoverable"], false);
     }
 }

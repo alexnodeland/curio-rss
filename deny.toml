@@ -2,10 +2,13 @@
 # https://embarkstudios.github.io/cargo-deny/
 #
 # Two jobs:
-#   1. [bans] keeps the cargo workspace webview-free: tauri and friends are
-#      banned until Phase 4 deliberately moves the boundary by bringing
-#      apps/desktop into the workspace. `cargo run -p xtask -- boundary`
-#      is the defense-in-depth twin of this rule.
+#   1. [bans] scopes the webview to the desktop head: Phase 4 moved the
+#      boundary by bringing apps/desktop/src-tauri (curio-desktop) into the
+#      workspace, so tauri and friends are no longer banned outright —
+#      each entry's `wrappers` names the only crates allowed to pull it,
+#      and curio-desktop is the sole entry point. curio-core (and every
+#      other crate) still cannot depend on the webview; `cargo run -p
+#      xtask -- boundary` is the defense-in-depth twin of this rule.
 #   2. Advisories + license allowlist for everything we ship.
 
 [graph]
@@ -19,9 +22,32 @@ yanked = "deny"
 # fetch client, whose streaming 10 MB body cap bounds the quadratic scan
 # and the namespace-allocation blowup to a fixed, small cost. Drop these
 # ignores when feed-rs releases against quick-xml >= 0.41.
+# The unmaintained-notice block below rides in with the tauri 2.x Linux
+# stack (Phase 4): tauri/wry still target the gtk-rs GTK3 bindings, and
+# tauri-utils pulls urlpattern -> unic-*. All are unmaintained NOTICES,
+# not vulnerabilities; they affect Linux builds of the desktop head only
+# and go away when tauri moves off GTK3 upstream. Re-triage on every
+# tauri upgrade.
 ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37 via feed-rs; input is size-capped (10 MB) by the policed fetch client" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.37 via feed-rs; input is size-capped (10 MB) by the policed fetch client" },
+    { id = "RUSTSEC-2024-0411", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux until upstream moves off GTK3" },
+    { id = "RUSTSEC-2024-0412", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0413", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0414", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0415", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0416", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0417", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0418", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0419", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0420", reason = "gtk-rs GTK3 bindings unmaintained; required by tauri 2.x on Linux" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained notice; transitive of the tauri Linux (glib) stack" },
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained notice; transitive of the tauri Linux stack" },
+    { id = "RUSTSEC-2025-0075", reason = "unic-* unmaintained notices; urlpattern via tauri-utils pins them" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-* unmaintained notices; urlpattern via tauri-utils pins them" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-* unmaintained notices; urlpattern via tauri-utils pins them" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-* unmaintained notices; urlpattern via tauri-utils pins them" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-* unmaintained notices; urlpattern via tauri-utils pins them" },
 ]
 
 [licenses]
@@ -60,20 +86,26 @@ exceptions = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-# The webview boundary: none of these may appear anywhere in the workspace
-# dependency graph. curio-core must build and test headless, everywhere.
+# The webview boundary, post-Phase-4 shape: every tauri-family crate stays
+# a named ban, but `wrappers` whitelists its only legitimate direct
+# parents — curio-desktop for the entry points, the tauri family itself
+# for internals. Anything else pulling a webview crate (curio-core above
+# all) still fails this gate. Never delete an entry: the boundary-canary
+# tests (xtask/tests/boundary_canary.rs) fail the test suite if one
+# vanishes. Wrapper lists are tuned against `cargo deny check` output
+# (cargo-deny matches the DIRECT parent).
 deny = [
-    { crate = "tauri", reason = "the cargo workspace is webview-free until Phase 4; the desktop head lives in apps/desktop outside the workspace" },
-    { crate = "tauri-build", reason = "webview boundary (Phase 4)" },
-    { crate = "tauri-runtime", reason = "webview boundary (Phase 4)" },
-    { crate = "tauri-runtime-wry", reason = "webview boundary (Phase 4)" },
-    { crate = "tauri-codegen", reason = "webview boundary (Phase 4)" },
-    { crate = "tauri-macros", reason = "webview boundary (Phase 4)" },
-    { crate = "tauri-utils", reason = "webview boundary (Phase 4)" },
-    { crate = "tauri-plugin", reason = "webview boundary (Phase 4)" },
-    { crate = "wry", reason = "webview boundary (Phase 4)" },
-    { crate = "tao", reason = "webview boundary (Phase 4)" },
-    { crate = "webkit2gtk", reason = "webview boundary (Phase 4)" },
+    { crate = "tauri", wrappers = ["curio-desktop", "tauri-plugin-dialog", "tauri-plugin-fs", "tauri-plugin-opener", "tauri-plugin-single-instance", "tauri-specta"], reason = "webview boundary: only the desktop head (and tauri's own family) may pull the webview" },
+    { crate = "tauri-build", wrappers = ["curio-desktop", "tauri"], reason = "webview boundary: only the desktop head builds against tauri" },
+    { crate = "tauri-runtime", wrappers = ["tauri", "tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
+    { crate = "tauri-runtime-wry", wrappers = ["tauri"], reason = "webview boundary (tauri internals)" },
+    { crate = "tauri-codegen", wrappers = ["tauri-macros"], reason = "webview boundary (tauri internals)" },
+    { crate = "tauri-macros", wrappers = ["tauri"], reason = "webview boundary (tauri internals)" },
+    { crate = "tauri-utils", wrappers = ["tauri", "tauri-build", "tauri-codegen", "tauri-macros", "tauri-plugin", "tauri-plugin-fs", "tauri-runtime", "tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
+    { crate = "tauri-plugin", wrappers = ["tauri-plugin-dialog", "tauri-plugin-fs", "tauri-plugin-opener"], reason = "webview boundary (tauri internals)" },
+    { crate = "wry", wrappers = ["tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
+    { crate = "tao", wrappers = ["tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
+    { crate = "webkit2gtk", wrappers = ["wry", "tauri", "tauri-runtime", "tauri-runtime-wry"], reason = "webview boundary (Linux transitive of wry)" },
 ]
 
 [sources]

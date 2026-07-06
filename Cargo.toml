@@ -1,19 +1,20 @@
 # Curio — cargo workspace (core-plus-heads).
 #
-# The webview lives in apps/desktop, which is deliberately OUTSIDE this
-# workspace until Phase 4 moves the boundary. `deny.toml` bans tauri from the
-# workspace graph and `cargo run -p xtask -- boundary` double-checks
-# curio-core's tree — the core must always build headless.
+# Phase 4 moved the webview boundary: the desktop head (curio-desktop, in
+# apps/desktop/src-tauri) is a workspace member and the ONLY crate allowed
+# to pull tauri — `deny.toml` scopes the webview bans to it via `wrappers`,
+# and `cargo run -p xtask -- boundary` still proves curio-core's own tree
+# is webview-free. The core must always build headless.
 
 [workspace]
 resolver = "2"
 members = [
+    "apps/desktop/src-tauri",
     "crates/curio-cli",
     "crates/curio-core",
     "crates/curio-types",
     "xtask",
 ]
-exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

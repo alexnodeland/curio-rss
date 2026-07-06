@@ -105,7 +105,7 @@ jobs:
       - name: Enforce the curio-core region floor
         run: |
           cargo llvm-cov report --summary-only \
-            --ignore-filename-regex '(crates/curio-cli|crates/curio-types|xtask|apps/desktop/src-tauri)/' \
+            --ignore-filename-regex '(crates/curio-cli|crates/curio-types|crates/curio-fixtures|xtask|apps/desktop/src-tauri)/' \
             --fail-under-regions 85
 
   deny:

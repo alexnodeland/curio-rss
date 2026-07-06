@@ -1,103 +1,55 @@
-[package]
-name = "curio-reader"
-version = "0.1.0"
-description = "A fast, themeable RSS reader with native YouTube, Reddit, and podcast experiences"
-authors = ["Curio Team"]
-license = "MIT"
-repository = ""
-edition = "2021"
-rust-version = "1.75"
+# curio-desktop — the Tauri desktop head (Phase 4).
+#
+# A thin head over Arc<CoreHandle>: ~45 #[tauri::command] wrappers with zero
+# business logic, tauri-specta-generated TS bindings (committed at
+# apps/desktop/src/lib/bindings.ts, CI-diffed by the ipc-contract job), and
+# a strict security posture (see tauri.conf.json + capabilities/).
+#
+# This is the only workspace crate allowed to depend on tauri — deny.toml
+# scopes the webview bans to it via `wrappers`, and
+# `cargo run -p xtask -- boundary` proves curio-core stays webview-free.
+#
+# tauri-specta / specta / specta-typescript are pinned EXACT (`=`): the
+# specta 2.x release candidates couple tightly to each other and to
+# tauri 2.x — bump all three together, then regenerate + commit bindings.
 
-[lib]
-name = "curio_reader_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+[package]
+name = "curio-desktop"
+description = "Curio's desktop head: a thin Tauri shell over the curio-core engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Tauri
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "gzip", "brotli"] }
-
-# RSS/Atom parsing
-feed-rs = "2"
-
-# XML parsing for OPML
-quick-xml = { version = "0.36", features = ["serialize"] }
-
-# HTML sanitization
-ammonia = "4"
-
-# HTML to Markdown
-htmd = "0.1"
-
-# HTML parsing
-scraper = "0.20"
-
-# Database
-rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
-
-# UUIDs
-uuid = { version = "1", features = ["v4", "serde"] }
-
-# DateTime handling
-chrono = { version = "0.4", features = ["serde"] }
-
-# Error handling
-thiserror = "1"
-anyhow = "1"
-
-# URL parsing
-url = "2"
-
-# Regex
-regex = "1"
-
-# Directory paths
-dirs = "5"
-
-# Async trait support
-async-trait = "0.1"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Image processing
-image = "0.25"
-
-# MD5 hashing for cache keys
-md5 = "0.7"
-
-# Futures utilities
-futures = "0.3"
-
-# Type generation for TypeScript
-ts-rs = { version = "9", optional = true }
+curio-core = { workspace = true }
+curio-types = { workspace = true }
+directories = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+# protocol-asset serves the image cache through the scoped asset: protocol
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ulid = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
-mockall = "0.13"
-tokio-test = "0.4"
-pretty_assertions = "1"
+specta-typescript = "=0.0.12"
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = { workspace = true }
 
-[features]
-default = ["custom-protocol"]
-custom-protocol = ["tauri/custom-protocol"]
-ts-rs = ["dep:ts-rs"]
-
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true
+[lints]
+workspace = true

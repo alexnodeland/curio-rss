@@ -1,8 +1,11 @@
 # Curio — DX front door. `just` lists the recipes; `just ci` is the gate.
 #
-# The cargo workspace is webview-free (no Node, no npm, no webview needed).
-# apps/desktop/ is the parked desktop sketch, outside the workspace until
-# Phase 4 — nothing here touches it.
+# Phase 4 brought the desktop head (apps/desktop/src-tauri, curio-desktop)
+# into the cargo workspace: the Rust gates below now compile it (on Linux
+# that needs the webkit2gtk/gtk system packages — see ci.yml), but only
+# the desktop head may depend on the webview (deny.toml wrappers + the
+# boundary check). The Svelte frontend keeps its own npm toolchain under
+# apps/desktop/.
 
 # List available recipes
 default:
@@ -50,6 +53,25 @@ deny:
 boundary:
     cargo run -p xtask -- boundary
 
+# The export test IS the generator:
+# Regenerate the committed TS bindings (apps/desktop/src/lib/bindings.ts)
+bindings:
+    cargo test -p curio-desktop --test export_bindings
+
+# The ipc-contract gate (mirrors CI):
+# Regenerate the bindings, then fail on drift from the committed file
+bindings-check: bindings
+    git diff --exit-code apps/desktop/src/lib/bindings.ts
+
+# Needs `npm install` under apps/desktop first:
+# Run the desktop head in dev mode (webview + vite)
+desktop-dev:
+    cd apps/desktop && npm run tauri dev
+
+# The desktop head's Rust test suite (commands against a temp-profile core)
+desktop-test:
+    cargo test -p curio-desktop
+
 # Region-coverage floor on crates/curio-core — the enforced number. Ratchet
 # rule in CONTRIBUTING.md: it only moves up, and it moves here and in
 # .github/workflows/ci.yml together.
@@ -58,7 +80,7 @@ core-cov-floor := "85"
 # Everything in the workspace that is NOT crates/curio-core, for the
 # enforced report below. A new crate counts against the core floor until
 # it is added here — the gate fails loud, never silently narrows.
-cov-non-core-regex := "(crates/curio-cli|crates/curio-types|xtask)/"
+cov-non-core-regex := "(crates/curio-cli|crates/curio-types|xtask|apps/desktop/src-tauri)/"
 
 # Coverage: workspace report + enforced region floor on crates/curio-core
 cov:
@@ -98,5 +120,5 @@ blob-guard:
     echo "blob guard: OK — no object in history exceeds 1MB"
 
 # Everything CI runs, in CI order — green here means green there
-ci: fmt-check clippy test deny boundary cov doc blob-guard
+ci: fmt-check clippy test deny boundary bindings-check cov doc blob-guard
     @echo "ci suite green"

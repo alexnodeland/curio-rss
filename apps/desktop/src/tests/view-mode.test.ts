@@ -2,7 +2,13 @@
  * View-mode heuristics: which reader layout an article resolves to, and the
  * RSS-native id/name extraction the layouts lean on. Pure — no IPC.
  */
-import { detectViewMode, subredditOf, youTubeVideoId } from '$lib/reader/view-mode';
+import {
+    detectViewMode,
+    parseRedditPost,
+    stripRedditFooter,
+    subredditOf,
+    youTubeVideoId,
+} from '$lib/reader/view-mode';
 import { describe, expect, it } from 'vitest';
 
 describe('detectViewMode', () => {
@@ -75,5 +81,50 @@ describe('subredditOf', () => {
     it('returns null without an /r/ segment', () => {
         expect(subredditOf('https://www.reddit.com/user/someone')).toBeNull();
         expect(subredditOf('nonsense')).toBeNull();
+    });
+});
+
+const LINK_POST = `<p>body text</p><table><tr><td><a href="https://www.reddit.com/r/typography/comments/abc/x/">t</a></td><td> submitted by <a href="https://www.reddit.com/user/serif_lover">/u/serif_lover</a> to <a href="https://www.reddit.com/r/typography/">r/typography</a> <br/> <span><a href="https://foundry.example/canela">[link]</a></span> <span><a href="https://www.reddit.com/r/typography/comments/abc/x/">[comments]</a></span> </td></tr></table>`;
+
+const SELF_POST = `<p>a self post</p><table><tr><td> submitted by <a href="https://www.reddit.com/user/writer">/u/writer</a> to <a href="https://www.reddit.com/r/rust/">r/rust</a> <br/> <span><a href="https://www.reddit.com/r/rust/comments/def/y/">[link]</a></span> <span><a href="https://www.reddit.com/r/rust/comments/def/y/">[comments]</a></span> </td></tr></table>`;
+
+describe('parseRedditPost', () => {
+    it('reads author, comments, and the external link of a link post', () => {
+        const p = parseRedditPost(LINK_POST, 'https://www.reddit.com/r/typography/comments/abc/x/');
+        expect(p.author).toBe('serif_lover');
+        expect(p.commentsUrl).toBe('https://www.reddit.com/r/typography/comments/abc/x/');
+        expect(p.linkUrl).toBe('https://foundry.example/canela');
+        expect(p.isLinkPost).toBe(true);
+    });
+
+    it('treats a self post (link === comments) as having no external link', () => {
+        const p = parseRedditPost(SELF_POST, 'https://www.reddit.com/r/rust/comments/def/y/');
+        expect(p.author).toBe('writer');
+        expect(p.linkUrl).toBeNull();
+        expect(p.isLinkPost).toBe(false);
+    });
+
+    it('degrades to the source URL when the footer is absent', () => {
+        const p = parseRedditPost(
+            '<p>no footer here</p>',
+            'https://www.reddit.com/r/x/comments/z/',
+        );
+        expect(p.commentsUrl).toBe('https://www.reddit.com/r/x/comments/z/');
+        expect(p.linkUrl).toBeNull();
+        expect(p.author).toBeNull();
+    });
+});
+
+describe('stripRedditFooter', () => {
+    it('prunes the submitted-by/[comments] boilerplate block', () => {
+        const out = stripRedditFooter(LINK_POST);
+        expect(out).toContain('body text');
+        expect(out).not.toContain('[comments]');
+        expect(out).not.toContain('submitted by');
+    });
+
+    it('leaves a body with no footer untouched', () => {
+        const html = '<p>just a body</p>';
+        expect(stripRedditFooter(html)).toContain('just a body');
     });
 });

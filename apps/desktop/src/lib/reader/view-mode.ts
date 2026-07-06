@@ -108,3 +108,78 @@ export function subredditOf(url: string): string | null {
     const match = parsed.pathname.match(/\/r\/([A-Za-z0-9_]+)/);
     return match === null ? null : match[1];
 }
+
+/**
+ * The RSS-native structure of a Reddit item, extracted from the feed's own
+ * `content_html` footer — Reddit RSS ends every item with `submitted by
+ * /u/<author> … [link] [comments]`. Parsing the feed's markup is not
+ * enrichment (no API, no fetch); it just reads what the feed already sent.
+ * Every field degrades to `null` when the shape isn't recognised.
+ */
+export interface RedditPost {
+    /** `/u/<name>` author, without the leading slash-u. */
+    author: string | null;
+    /** The comments/permalink URL (the `[comments]` anchor, else the source). */
+    commentsUrl: string;
+    /** The external link for a link post; `null` for a self/text post. */
+    linkUrl: string | null;
+    /** True when the post points off-site (link post) vs. a self post. */
+    isLinkPost: boolean;
+}
+
+function anchorByText(doc: Document, text: string): HTMLAnchorElement | null {
+    for (const a of doc.querySelectorAll('a[href]')) {
+        if (a.textContent?.trim().toLowerCase() === text) {
+            return a as HTMLAnchorElement;
+        }
+    }
+    return null;
+}
+
+/** The `/u/<name>` author from a Reddit item's footer anchors, or `null`. */
+function redditAuthorOf(doc: Document): string | null {
+    for (const a of doc.querySelectorAll('a[href]')) {
+        if (/\/(?:u|user)\//.test(a.getAttribute('href') ?? '')) {
+            return (a.textContent ?? '').trim().replace(/^\/?u\//, '') || null;
+        }
+    }
+    return null;
+}
+
+export function parseRedditPost(html: string, sourceUrl: string): RedditPost {
+    // No DOM (e.g. SSR/tests without jsdom) → degrade to the source URL only.
+    if (typeof DOMParser === 'undefined') {
+        return { author: null, commentsUrl: sourceUrl, linkUrl: null, isLinkPost: false };
+    }
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    const commentsUrl = anchorByText(doc, '[comments]')?.getAttribute('href') ?? sourceUrl;
+    const rawLink = anchorByText(doc, '[link]')?.getAttribute('href') ?? null;
+    // A self post's [link] equals its [comments] permalink — treat that as no
+    // external link.
+    const linkUrl = rawLink !== null && rawLink !== commentsUrl ? rawLink : null;
+
+    return { author: redditAuthorOf(doc), commentsUrl, linkUrl, isLinkPost: linkUrl !== null };
+}
+
+/**
+ * The article body with Reddit's boilerplate footer removed — the trailing
+ * `submitted by … [link] [comments]` block, whose data we surface as buttons
+ * instead. Returns the input unchanged when no such footer is found or when
+ * no DOM is available. Never adds content; only prunes the known footer node.
+ */
+export function stripRedditFooter(html: string): string {
+    if (typeof DOMParser === 'undefined') {
+        return html;
+    }
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const commentsAnchor = anchorByText(doc, '[comments]');
+    if (commentsAnchor === null) {
+        return html;
+    }
+    // Remove the smallest self-contained block that holds the footer anchor
+    // (Reddit wraps it in a <table> or a trailing <p>).
+    const footer = commentsAnchor.closest('table, p, div');
+    footer?.remove();
+    return doc.body.innerHTML.trim();
+}

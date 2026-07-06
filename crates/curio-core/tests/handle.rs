@@ -556,6 +556,78 @@ async fn reopening_a_profile_restores_destinations_and_state() {
     assert!(gitignore.contains("events/"));
 }
 
+/// Removing a destination forgets the name (persisted across reopen) but
+/// never touches the notes already exported under its root.
+#[test]
+fn remove_destination_forgets_the_name_but_keeps_notes() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let dest: DestinationName = "vault".parse().unwrap();
+    let note_path = {
+        let core = open_core(profile.path());
+        core.add_destination(dest.clone(), vault.path().to_path_buf())
+            .unwrap();
+        core.storage()
+            .upsert_articles(vec![manual_article("k1", "One")])
+            .unwrap();
+        let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+        let saved = core.save_to_destination(article, &dest).unwrap();
+
+        core.remove_destination(&dest).unwrap();
+        assert!(core.destinations().is_empty());
+        // The name is gone from the operation surface…
+        let err = core.save_to_destination(article, &dest).unwrap_err();
+        assert!(matches!(
+            err,
+            curio_core::CoreError::UnknownDestination { .. }
+        ));
+        // …and removing it again reports the same.
+        assert!(matches!(
+            core.remove_destination(&dest).unwrap_err(),
+            curio_core::CoreError::UnknownDestination { .. }
+        ));
+        saved.path
+    };
+    // The exported note survives, and the removal persisted.
+    assert!(vault.path().join(&note_path).is_file());
+    let core = open_core(profile.path());
+    assert!(core.destinations().is_empty(), "removal survives reopen");
+}
+
+/// The retention sweep is facade-owned (single-writer event log): expired
+/// files go, the live file stays.
+#[test]
+fn sweep_event_retention_removes_only_expired_files() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    // Today's file exists because add_feed emits feed.added.
+    core.add_feed(NewFeed {
+        url: "https://example.com/feed.xml".to_owned(),
+        title: None,
+        tags: Vec::new(),
+    })
+    .unwrap();
+    let events_dir = profile.path().join(".curio/events");
+    let expired = events_dir.join("events-20200101.jsonl");
+    std::fs::write(&expired, "").unwrap();
+    let foreign = events_dir.join("notes.txt");
+    std::fs::write(&foreign, "not a log file").unwrap();
+
+    let removed = core.sweep_event_retention().unwrap();
+    assert_eq!(removed, vec![expired.clone()]);
+    assert!(!expired.exists(), "expired log swept");
+    assert!(foreign.exists(), "foreign files are ignored");
+    let survivors: Vec<_> = std::fs::read_dir(&events_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.starts_with("events-"))
+        .collect();
+    assert_eq!(survivors.len(), 1, "today's file survives: {survivors:?}");
+
+    // Idempotent: nothing left to sweep.
+    assert!(core.sweep_event_retention().unwrap().is_empty());
+}
+
 /// The facade serves backend-owned unread counts — heads render the map,
 /// they never re-derive badge math client-side.
 #[test]

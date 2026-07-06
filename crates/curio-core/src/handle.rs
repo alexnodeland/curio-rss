@@ -614,13 +614,30 @@ impl CoreHandle {
         let mut map = self.lock_destinations_mut();
         let mut next = map.clone();
         next.insert(name, root);
-        let serialized = serde_json::to_string(
-            &next
-                .iter()
-                .map(|(n, p)| (n.to_string(), p.display().to_string()))
-                .collect::<BTreeMap<_, _>>(),
-        )?;
-        self.storage.set_setting(DESTINATIONS_KEY, &serialized)?;
+        self.persist_destinations(&next)?;
+        *map = next;
+        Ok(())
+    }
+
+    /// Unregisters a named destination and persists the registry.
+    /// Exported notes under the old root are untouched — removal only
+    /// forgets the name (the event stream already told their story).
+    /// Same persist-then-adopt discipline as [`CoreHandle::add_destination`].
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::UnknownDestination`] if no destination is registered
+    /// under `name`; settings errors.
+    pub fn remove_destination(&self, name: &DestinationName) -> Result<(), CoreError> {
+        let mut map = self.lock_destinations_mut();
+        if !map.contains_key(name) {
+            return Err(CoreError::UnknownDestination {
+                name: name.to_string(),
+            });
+        }
+        let mut next = map.clone();
+        next.remove(name);
+        self.persist_destinations(&next)?;
         *map = next;
         Ok(())
     }
@@ -768,7 +785,48 @@ impl CoreHandle {
         Ok(crate::feeds::export_opml("Curio subscriptions", &feeds)?)
     }
 
+    // ------------------------------------------------------ maintenance
+
+    /// Deletes event-log files older than the retention window (≥ 90
+    /// days — the `curio.events.v1` floor), measured from today (UTC).
+    /// Returns the removed paths.
+    ///
+    /// Facade-owned on purpose: the event log is single-writer and the
+    /// handle owns that writer, so heads must never open their own
+    /// [`crate::events::EventLog`] to sweep.
+    ///
+    /// # Errors
+    ///
+    /// Filesystem errors scanning or deleting log files.
+    pub fn sweep_event_retention(&self) -> Result<Vec<PathBuf>, CoreError> {
+        let today = Timestamp::now().as_datetime().date_naive();
+        let removed = self
+            .emitter
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .log_mut()
+            .sweep_retention(today)
+            .map_err(EventsError::Log)?;
+        Ok(removed)
+    }
+
     // ---------------------------------------------------------- private
+
+    /// Serializes the registry into the reserved settings key. Callers
+    /// adopt the new map only after this succeeds — a failed persist must
+    /// never leave an in-memory registry that vanishes on the next open.
+    fn persist_destinations(
+        &self,
+        map: &BTreeMap<DestinationName, PathBuf>,
+    ) -> Result<(), CoreError> {
+        let serialized = serde_json::to_string(
+            &map.iter()
+                .map(|(n, p)| (n.to_string(), p.display().to_string()))
+                .collect::<BTreeMap<_, _>>(),
+        )?;
+        self.storage.set_setting(DESTINATIONS_KEY, &serialized)?;
+        Ok(())
+    }
 
     /// Drains staged event intents to the JSONL log (fsync before the
     /// intents are deleted — the crash-safe ordering).

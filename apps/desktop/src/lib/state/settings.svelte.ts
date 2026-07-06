@@ -19,6 +19,7 @@ export const SETTING_KEYS = {
     sidebarWidth: 'ui.panes.sidebar-width',
     listWidth: 'ui.panes.list-width',
     promoteDestination: 'ui.promote.destination',
+    faviconAllowRemote: 'ui.favicon.allow-remote',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

@@ -25,6 +25,8 @@ export type ShortcutId =
     | 'view.starred'
     | 'view.readLater'
     | 'view.feeds'
+    | 'app.addFeed'
+    | 'app.settings'
     | 'help.toggle';
 
 export type ShortcutCategory = 'navigation' | 'actions' | 'views' | 'app';
@@ -91,6 +93,8 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         category: 'views',
     },
     { id: 'view.feeds', keys: ['g', 'f'], description: 'shortcut.viewFeeds', category: 'views' },
+    { id: 'app.addFeed', keys: ['a'], description: 'shortcut.addFeed', category: 'app' },
+    { id: 'app.settings', keys: [','], description: 'shortcut.settings', category: 'app' },
     { id: 'help.toggle', keys: ['?'], description: 'shortcut.help', category: 'app' },
 ] as const;
 

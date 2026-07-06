@@ -178,8 +178,8 @@ function refreshSelectedFeed(): void {
     void run(() => feedsStore.refreshFeed(feedId));
 }
 
-/** Kicks off a full refresh sweep (the `Shift+R` shortcut). */
-function refreshAllFeeds(): void {
+/** Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar). */
+export function refreshAll(): void {
     void run(() => feedsStore.refreshAll());
 }
 
@@ -237,7 +237,13 @@ export function handleShortcut(id: ShortcutId): void {
             refreshSelectedFeed();
             break;
         case 'app.refreshAll':
-            refreshAllFeeds();
+            refreshAll();
+            break;
+        case 'app.addFeed':
+            uiStore.openModal('add-feed');
+            break;
+        case 'app.settings':
+            uiStore.openModal('settings');
             break;
         case 'search.focus':
             focusSearch();

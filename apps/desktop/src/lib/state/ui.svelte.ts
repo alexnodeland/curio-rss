@@ -52,7 +52,7 @@ export function isThemePreference(value: string): value is ThemePreference {
     return value === 'system' || isThemeId(value);
 }
 
-export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations';
+export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'feed-health';
 
 /** Reader body font — an id mapped to a concrete CSS font stack. */
 export type ReaderFontId = 'sans' | 'serif' | 'mono';
@@ -125,6 +125,16 @@ export class UiStore {
     listWidth: number = $state(360);
 
     activeModal: ModalKind | null = $state(null);
+
+    /** The feed the feed-health panel is bound to while it is open. */
+    healthFeedId: number | null = $state(null);
+
+    /**
+     * Opt-in: when a site declares no favicon, may Curio fall back to
+     * Google's favicon service? Off by default — a privacy choice, since it
+     * tells Google which sites you preview (see PRIVACY.md).
+     */
+    allowRemoteFavicon: boolean = $state(false);
 
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
@@ -205,6 +215,17 @@ export class UiStore {
         }
     }
 
+    /** Adopts persisted reading prefs at startup (after `settingsStore.load()`). */
+    initReading(): void {
+        this.allowRemoteFavicon = settingsStore.get(SETTING_KEYS.faviconAllowRemote) === 'true';
+    }
+
+    /** Sets (and persists) the Google-favicon-fallback opt-in. */
+    async setAllowRemoteFavicon(value: boolean): Promise<void> {
+        this.allowRemoteFavicon = value;
+        await settingsStore.set(SETTING_KEYS.faviconAllowRemote, String(value));
+    }
+
     /** Sets the reader font size (px), clamped, and persists it. */
     async setFontSize(px: number): Promise<void> {
         const { min, max } = TYPOGRAPHY_LIMITS.fontSize;
@@ -254,8 +275,15 @@ export class UiStore {
         this.activeModal = modal;
     }
 
+    /** Opens the feed-health panel bound to one feed. */
+    openHealth(feedId: number): void {
+        this.healthFeedId = feedId;
+        this.activeModal = 'feed-health';
+    }
+
     closeModal(): void {
         this.activeModal = null;
+        this.healthFeedId = null;
     }
 
     /** Queues a toast; duration 0 keeps it until dismissed. */
@@ -291,6 +319,8 @@ export class UiStore {
         this.#toastTimers.clear();
         this.toasts = [];
         this.activeModal = null;
+        this.healthFeedId = null;
+        this.allowRemoteFavicon = false;
         this.themePreference = 'system';
         this.sidebarCollapsed = false;
         this.fontSize = TYPOGRAPHY_LIMITS.fontSize.default;

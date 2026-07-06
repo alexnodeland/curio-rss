@@ -5,11 +5,15 @@
  * outlet. Shortcuts are inert in typing contexts and while a modal owns
  * the keyboard (Escape / `?` dismiss the help overlay).
  */
+import RefreshStatus from '$components/common/RefreshStatus.svelte';
 import Toasts from '$components/common/Toasts.svelte';
 import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
+import AddFeedModal from '$components/modals/AddFeedModal.svelte';
 import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
+import FeedHealthPanel from '$components/modals/FeedHealthPanel.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
+import SettingsModal from '$components/modals/SettingsModal.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { createMatcher, shouldIgnoreKeyEvent } from '$lib/keyboard/registry';
@@ -64,5 +68,19 @@ function onKeydown(event: KeyboardEvent): void {
 {#if uiStore.activeModal === 'destinations'}
     <DestinationsPanel onclose={() => uiStore.closeModal()} />
 {/if}
+
+{#if uiStore.activeModal === 'add-feed'}
+    <AddFeedModal onclose={() => uiStore.closeModal()} />
+{/if}
+
+{#if uiStore.activeModal === 'settings'}
+    <SettingsModal onclose={() => uiStore.closeModal()} />
+{/if}
+
+{#if uiStore.activeModal === 'feed-health' && uiStore.healthFeedId !== null}
+    <FeedHealthPanel feedId={uiStore.healthFeedId} onclose={() => uiStore.closeModal()} />
+{/if}
+
+<RefreshStatus />
 
 <Toasts />

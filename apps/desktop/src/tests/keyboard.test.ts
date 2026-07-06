@@ -30,6 +30,8 @@ describe('shortcut table', () => {
             'view.starred': ['g', 's'],
             'view.readLater': ['g', 'l'],
             'view.feeds': ['g', 'f'],
+            'app.addFeed': ['a'],
+            'app.settings': [','],
             'help.toggle': ['?'],
         };
         expect(Object.fromEntries(byId)).toEqual(expected);
@@ -85,7 +87,12 @@ describe('matcher', () => {
     it('expires the chord prefix after the timeout', () => {
         const matcher = createMatcher();
         matcher.handle('g', 0);
-        expect(matcher.handle('a', CHORD_TIMEOUT_MS + 1)).toEqual({ kind: 'none' });
+        // The chord expired, so `a` no longer completes `g a` (view.all) — it
+        // falls through to its own single-key binding (add feed).
+        expect(matcher.handle('a', CHORD_TIMEOUT_MS + 1)).toEqual({
+            kind: 'match',
+            id: 'app.addFeed',
+        });
         // At exactly the timeout boundary the chord still fires.
         matcher.handle('g', 5000);
         expect(matcher.handle('a', 5000 + CHORD_TIMEOUT_MS)).toEqual({
@@ -98,7 +105,8 @@ describe('matcher', () => {
         const matcher = createMatcher();
         matcher.handle('g', 0);
         matcher.reset();
-        expect(matcher.handle('a', 1)).toEqual({ kind: 'none' });
+        // Prefix dropped: `a` is its own single-key shortcut, not `g a`.
+        expect(matcher.handle('a', 1)).toEqual({ kind: 'match', id: 'app.addFeed' });
     });
 
     it('unknown keys are none', () => {

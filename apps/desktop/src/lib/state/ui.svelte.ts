@@ -54,6 +54,12 @@ export function isThemePreference(value: string): value is ThemePreference {
 
 export type ModalKind = 'add-feed' | 'settings' | 'help';
 
+/** Resize bounds per pane — ThreePane and `initLayout` share them. */
+export const PANE_LIMITS = {
+    sidebar: { min: 200, max: 420 },
+    list: { min: 260, max: 600 },
+} as const;
+
 export type ToastTone = 'info' | 'success' | 'warning' | 'error';
 
 export interface Toast {
@@ -110,6 +116,19 @@ export class UiStore {
             }
         }
         this.#applyTheme();
+    }
+
+    /**
+     * Adopts persisted pane layout at startup (after `settingsStore.load()`).
+     * Unparseable or out-of-range values fall back to the defaults.
+     */
+    initLayout(): void {
+        const collapsed = settingsStore.get(SETTING_KEYS.sidebarCollapsed);
+        if (collapsed !== undefined) {
+            this.sidebarCollapsed = collapsed === 'true';
+        }
+        this.sidebarWidth = readWidth(SETTING_KEYS.sidebarWidth, PANE_LIMITS.sidebar, 280);
+        this.listWidth = readWidth(SETTING_KEYS.listWidth, PANE_LIMITS.list, 360);
     }
 
     /** Picks a theme: applies it, mirrors it, persists it. */
@@ -174,6 +193,22 @@ export class UiStore {
         this.themePreference = 'system';
         this.sidebarCollapsed = false;
     }
+}
+
+function readWidth(
+    key: (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS],
+    limits: { min: number; max: number },
+    fallback: number,
+): number {
+    const raw = settingsStore.get(key);
+    if (raw === undefined) {
+        return fallback;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isNaN(parsed)) {
+        return fallback;
+    }
+    return Math.min(limits.max, Math.max(limits.min, parsed));
 }
 
 function readMirror(): ThemePreference | null {

@@ -1,4 +1,6 @@
-/* Curio Reader - Global Styles */
+/* Curio — global styles: reset, the CSS custom-property token system, and
+   the 9 [data-theme] themes (selected by the app.html preload script before
+   first paint, owned at runtime by src/lib/state/ui.svelte.ts). */
 
 /* CSS Reset */
 *,
@@ -402,4 +404,17 @@ a:hover {
 
 a:visited {
     color: var(--link-visited);
+}
+
+/* Reduced Motion — collapse every animation and transition for users who
+   ask for it; smooth scrolling falls back to instant jumps. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

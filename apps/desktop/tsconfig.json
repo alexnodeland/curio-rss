@@ -17,6 +17,6 @@
         "target": "ES2022",
         "lib": ["ES2022", "DOM", "DOM.Iterable"]
     },
-    "include": ["src/**/*", "tests/**/*"],
-    "exclude": ["node_modules", "src/lib/types/generated"]
+    "include": ["src/**/*"],
+    "exclude": ["node_modules"]
 }

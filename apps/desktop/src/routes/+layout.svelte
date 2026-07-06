@@ -20,6 +20,7 @@ onMount(() => {
         uiStore.initTheme();
         uiStore.initLayout();
         uiStore.initTypography();
+        uiStore.initReading();
 
         // Event-driven invalidation: the query cache and the refresh
         // progress fields subscribe to the Rust-emitted specta events.

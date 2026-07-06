@@ -7,6 +7,7 @@
  * JSONL event log — that file belongs to the contract, not the UI.
  */
 import { events, type ArticlesChanged, type CommandError } from '$lib/bindings';
+import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 
 /** The result shape every generated command wrapper resolves to. */
@@ -81,7 +82,10 @@ const registry = new SvelteMap<string, Query<unknown>>();
 
 /**
  * Returns the cached query under `key`, creating (and immediately loading)
- * it on first use. The fetcher and scope are fixed at creation.
+ * it on first use. The fetcher and scope are fixed at creation. Creation is
+ * `untrack`ed so components may call this from template expressions —
+ * registry bookkeeping is not a reactive dependency of the caller; the
+ * reactivity lives in the returned query's fields.
  */
 export function ensureQuery<T>(
     key: string,
@@ -92,12 +96,14 @@ export function ensureQuery<T>(
     if (existing !== undefined) {
         return existing as Query<T>;
     }
-    const created = new Query(key, fetcher, scope);
-    registry.set(key, created as Query<unknown>);
-    // Deferred a microtask so a fetcher may close over state its owner
-    // finishes constructing after `ensureQuery` returns.
-    queueMicrotask(() => void created.refetch());
-    return created;
+    return untrack(() => {
+        const created = new Query(key, fetcher, scope);
+        registry.set(key, created as Query<unknown>);
+        // Deferred a microtask so a fetcher may close over state its owner
+        // finishes constructing after `ensureQuery` returns.
+        queueMicrotask(() => void created.refetch());
+        return created;
+    });
 }
 
 /** Drops one entry (e.g. when a filter combination goes out of use). */

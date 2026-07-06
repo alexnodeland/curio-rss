@@ -162,3 +162,70 @@ describe('ui store — toasts', () => {
         expect(ui.toasts).toHaveLength(0);
     });
 });
+
+describe('ui store — pane layout', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        settingsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('initLayout adopts persisted widths and collapse state', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => {
+                const key = args.key as string;
+                if (key === 'ui.panes.sidebar-width') {
+                    return '320';
+                }
+                if (key === 'ui.panes.list-width') {
+                    return '420';
+                }
+                if (key === 'ui.panes.sidebar-collapsed') {
+                    return 'true';
+                }
+                return null;
+            },
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initLayout();
+        expect(ui.sidebarWidth).toBe(320);
+        expect(ui.listWidth).toBe(420);
+        expect(ui.sidebarCollapsed).toBe(true);
+    });
+
+    it('initLayout clamps out-of-range widths and ignores garbage', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => {
+                const key = args.key as string;
+                if (key === 'ui.panes.sidebar-width') {
+                    return '9999';
+                }
+                if (key === 'ui.panes.list-width') {
+                    return 'wide, please';
+                }
+                return null;
+            },
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initLayout();
+        expect(ui.sidebarWidth).toBe(420); // clamped to PANE_LIMITS.sidebar.max
+        expect(ui.listWidth).toBe(360); // fallback: unparseable value
+        expect(ui.sidebarCollapsed).toBe(false);
+    });
+
+    it('initLayout leaves the defaults without persisted values', async () => {
+        harness = installIpcHarness({ get_setting: null });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initLayout();
+        expect(ui.sidebarWidth).toBe(280);
+        expect(ui.listWidth).toBe(360);
+    });
+});

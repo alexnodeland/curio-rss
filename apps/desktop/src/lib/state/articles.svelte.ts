@@ -12,6 +12,7 @@ import {
     type ListArticlesDto,
     commands,
 } from '$lib/bindings';
+import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
 
@@ -165,15 +166,22 @@ export class ArticlesStore {
     /** The filter set the main list currently shows. */
     filters: ArticleFilters = $state(ALL_ARTICLES);
 
-    /** The list state for an arbitrary filter combination (cached). */
+    /**
+     * The list state for an arbitrary filter combination (cached). Creation
+     * is `untrack`ed so templates may reach for `current` directly —
+     * registry bookkeeping is not a reactive dependency of the caller.
+     */
     list(filters: ArticleFilters): ArticleListState {
         const key = filterKey(filters);
-        let state = this.#lists.get(key);
-        if (state === undefined) {
-            state = new ArticleListState(filters);
-            this.#lists.set(key, state);
+        const existing = this.#lists.get(key);
+        if (existing !== undefined) {
+            return existing;
         }
-        return state;
+        return untrack(() => {
+            const created = new ArticleListState(filters);
+            this.#lists.set(key, created);
+            return created;
+        });
     }
 
     /** The list state for the current filters. */

@@ -5,11 +5,18 @@
  * body. Reads ride the query cache (invalidated by the Rust-emitted
  * events); displaying an article marks it read, idempotently, core-side.
  */
-import { type ArticleDto, type ArticleStateDto, type CommandError, commands } from '$lib/bindings';
+import {
+    type ArticleDto,
+    type ArticleStateDto,
+    type CommandError,
+    type FeedDto,
+    commands,
+} from '$lib/bindings';
 import { formatIntlDateTime, t } from '$lib/i18n';
 import {
     markReadOnOpen,
     openInBrowser,
+    promoteSelected,
     toggleArchived,
     toggleRead,
     toggleReadLater,
@@ -20,7 +27,11 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
-import SanitizedHtml from './SanitizedHtml.svelte';
+import ArticleTags from './ArticleTags.svelte';
+import TypographyControls from './TypographyControls.svelte';
+import ViewModeDispatch from './ViewModeDispatch.svelte';
+
+let showTypography = $state(false);
 
 function article(): ArticleDto | null {
     const articleId = selectionStore.selectedArticleId;
@@ -64,13 +75,17 @@ function flags(): ArticleStateDto | null {
     );
 }
 
-function feedTitle(current: ArticleDto): string | null {
+function currentFeed(current: ArticleDto): FeedDto | null {
     const feedId = current.feed_id;
     if (feedId === null) {
         return null;
     }
-    const feed = feedsStore.feeds.find((candidate) => candidate.id === feedId);
-    if (feed === undefined) {
+    return feedsStore.feeds.find((candidate) => candidate.id === feedId) ?? null;
+}
+
+function feedTitle(current: ArticleDto): string | null {
+    const feed = currentFeed(current);
+    if (feed === null) {
         return null;
     }
     return feed.title ?? feed.url;
@@ -146,6 +161,26 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         : t('reader.action.archive')}
                 </button>
                 <span class="toolbar-spring"></span>
+                <button class="tool" onclick={() => void promoteSelected()}>
+                    {t('reader.action.promote')}
+                </button>
+                <div class="typography-anchor">
+                    <button
+                        class="tool"
+                        aria-haspopup="dialog"
+                        aria-expanded={showTypography}
+                        onclick={() => {
+                            showTypography = !showTypography;
+                        }}
+                    >
+                        {t('reader.action.typography')}
+                    </button>
+                    {#if showTypography}
+                        <div class="typography-popover">
+                            <TypographyControls />
+                        </div>
+                    {/if}
+                </div>
                 <button
                     class="tool"
                     onclick={() => void openInBrowser(current.id, current.source_url)}
@@ -159,6 +194,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     style:font-size="{uiStore.fontSize}px"
                     style:line-height={uiStore.lineHeight}
                     style:max-width="{uiStore.measure}px"
+                    style:font-family={uiStore.readerFontStack}
                 >
                     <header class="reader-header">
                         <h2 class="reader-title">
@@ -182,8 +218,9 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                                 <span>{t('reader.meta.words', { count: current.word_count })}</span>
                             {/if}
                         </p>
+                        <ArticleTags articleId={current.id} />
                     </header>
-                    <SanitizedHtml html={current.content_html} />
+                    <ViewModeDispatch article={current} feed={currentFeed(current)} />
                 </article>
             </div>
         {/if}
@@ -243,6 +280,22 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         color: var(--accent);
         border-color: var(--accent-muted);
         background: var(--accent-muted);
+    }
+
+    .typography-anchor {
+        position: relative;
+        display: flex;
+    }
+
+    .typography-popover {
+        position: absolute;
+        top: calc(100% + var(--space-2));
+        right: 0;
+        z-index: 50;
+        border-radius: var(--radius-lg);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-lg);
     }
 
     .reader-scroll {

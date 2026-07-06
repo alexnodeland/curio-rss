@@ -14,6 +14,7 @@ import {
 } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -22,6 +23,7 @@ import {
     articleStateFixture,
     commandErrorFixture,
     installIpcHarness,
+    refreshOutcomeFixture,
     rejectWith,
 } from './ipc-harness';
 
@@ -94,6 +96,7 @@ describe('actions — views and shortcut routing', () => {
         articlesStore.reset();
         selectionStore.reset();
         uiStore.reset();
+        searchStore.reset();
         harness?.teardown();
         harness = null;
     });
@@ -115,15 +118,57 @@ describe('actions — views and shortcut routing', () => {
         expect(activeView({ ...ALL_ARTICLES, read: false })).toBeNull();
     });
 
-    it('unwired registry ids are deliberate no-ops (WP4/WP5 surfaces)', () => {
+    it('the g-chord view shortcuts swap the backend filter set', () => {
         harness = installIpcHarness({});
-        handleShortcut('article.promote');
-        handleShortcut('feed.refresh');
-        handleShortcut('app.refreshAll');
-        handleShortcut('search.focus');
         handleShortcut('view.starred');
+        expect(activeView(articlesStore.filters)).toBe('starred');
+        handleShortcut('view.readLater');
+        expect(activeView(articlesStore.filters)).toBe('readLater');
+        handleShortcut('view.all');
+        expect(activeView(articlesStore.filters)).toBe('all');
+    });
+
+    it('a view switch leaves search mode', () => {
+        harness = installIpcHarness({});
+        searchStore.setQuery('rust', 0);
+        expect(searchStore.active).toBe(true);
+        handleShortcut('view.starred');
+        expect(searchStore.active).toBe(false);
+    });
+
+    it('search.focus bumps the search focus nonce (drives the `/` shortcut)', () => {
+        harness = installIpcHarness({});
+        const before = searchStore.focusNonce;
+        handleShortcut('search.focus');
+        expect(searchStore.focusNonce).toBe(before + 1);
         expect(harness.calls).toHaveLength(0);
-        expect(uiStore.toasts).toHaveLength(0);
+    });
+
+    it('view.feeds moves focus to the sidebar and clears search', () => {
+        harness = installIpcHarness({});
+        searchStore.setQuery('rust', 0);
+        handleShortcut('view.feeds');
+        expect(selectionStore.focus).toBe('sidebar');
+        expect(searchStore.active).toBe(false);
+    });
+
+    it('app.refreshAll kicks off a full sweep', async () => {
+        harness = installIpcHarness({ refresh_all: [] });
+        handleShortcut('app.refreshAll');
+        await Promise.resolve();
+        expect(harness.callsFor('refresh_all')).toHaveLength(1);
+    });
+
+    it('feed.refresh refreshes the selected feed, and no-ops with none selected', async () => {
+        harness = installIpcHarness({ refresh_feed: refreshOutcomeFixture() });
+        handleShortcut('feed.refresh');
+        await Promise.resolve();
+        expect(harness.callsFor('refresh_feed')).toHaveLength(0);
+
+        selectionStore.selectedFeedId = 3;
+        handleShortcut('feed.refresh');
+        await Promise.resolve();
+        expect(harness.callsFor('refresh_feed')).toEqual([{ feedId: 3 }]);
     });
 
     it('shortcut actions on an empty selection are no-ops', () => {

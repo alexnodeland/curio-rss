@@ -12,7 +12,10 @@ import type { ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { isOpenableUrl, openExternal } from '$lib/utils/external';
 import { ALL_ARTICLES, type ArticleFilters, articlesStore, filterKey } from './articles.svelte';
+import { destinationsStore } from './destinations.svelte';
+import { feedsStore } from './feeds.svelte';
 import type { CommandResult } from './query-cache.svelte';
+import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
 import { uiStore } from './ui.svelte';
 
@@ -109,8 +112,9 @@ const VIEW_FILTERS: Record<ViewId, ArticleFilters> = {
     readLater: { ...ALL_ARTICLES, readLater: true },
 };
 
-/** Switches the article list to a built-in view (clears feed selection). */
+/** Switches the article list to a built-in view (clears feed + search). */
 export function selectView(view: ViewId): void {
+    searchStore.clear(); // a view switch leaves search mode
     selectionStore.selectedFeedId = null;
     selectionStore.selectedArticleId = null;
     articlesStore.filters = VIEW_FILTERS[view];
@@ -129,9 +133,54 @@ export function activeView(filters: ArticleFilters): ViewId | null {
 
 function selectNext(): void {
     const nearEnd = selectionStore.selectNextArticle();
-    if (nearEnd) {
+    // Search results are a fixed FTS window — only the filter list pages.
+    if (nearEnd && !searchStore.active) {
         void articlesStore.current.loadMore();
     }
+}
+
+/**
+ * Promotes the selected article to a destination by NAME. Uses the chosen
+ * default (or the sole destination); with no clear target it opens the
+ * destinations panel to pick one. A raw path never crosses IPC — only the
+ * registry name. The outcome disposition drives the toast copy.
+ */
+export async function promoteSelected(): Promise<void> {
+    const articleId = selectionStore.selectedArticleId;
+    if (articleId === null) {
+        return;
+    }
+    const target = destinationsStore.promoteTarget;
+    if (target === null) {
+        uiStore.openModal('destinations');
+        return;
+    }
+    const outcome = await run(() => destinationsStore.promote(articleId, target));
+    if (outcome === undefined) {
+        return;
+    }
+    const key =
+        outcome.disposition === 'unchanged' ? 'toast.promote.unchanged' : 'toast.promote.saved';
+    uiStore.showToast(t(key, { name: target }), 'success');
+}
+
+/** Focuses the search input (the `/` shortcut). */
+function focusSearch(): void {
+    searchStore.requestFocus();
+}
+
+/** Refreshes the selected feed, if any (the `r` shortcut). */
+function refreshSelectedFeed(): void {
+    const feedId = selectionStore.selectedFeedId;
+    if (feedId === null) {
+        return;
+    }
+    void run(() => feedsStore.refreshFeed(feedId));
+}
+
+/** Kicks off a full refresh sweep (the `Shift+R` shortcut). */
+function refreshAllFeeds(): void {
+    void run(() => feedsStore.refreshAll());
 }
 
 function openSelected(): void {
@@ -157,9 +206,9 @@ function toggleHelp(): void {
 }
 
 /**
- * Executes one shortcut id. WP3 wires the core set (j/k, o, s, l, m, ?);
- * the rest of the registry (promote, refresh, search, g-chords) arrives
- * with the WP4/WP5 surfaces and is a deliberate no-op until then.
+ * Executes one shortcut id. The core set (j/k, o, s, l, m, ?) landed in
+ * WP3; WP4 wires the reader-breadth surfaces: `p` promote, `/` search
+ * focus, `r`/`Shift+R` refresh, and the `g`-chord view switches.
  */
 export function handleShortcut(id: ShortcutId): void {
     switch (id) {
@@ -180,6 +229,31 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'article.toggleRead':
             withSelected(toggleRead);
+            break;
+        case 'article.promote':
+            void promoteSelected();
+            break;
+        case 'feed.refresh':
+            refreshSelectedFeed();
+            break;
+        case 'app.refreshAll':
+            refreshAllFeeds();
+            break;
+        case 'search.focus':
+            focusSearch();
+            break;
+        case 'view.all':
+            selectView('all');
+            break;
+        case 'view.starred':
+            selectView('starred');
+            break;
+        case 'view.readLater':
+            selectView('readLater');
+            break;
+        case 'view.feeds':
+            searchStore.clear();
+            selectionStore.focus = 'sidebar';
             break;
         case 'help.toggle':
             toggleHelp();

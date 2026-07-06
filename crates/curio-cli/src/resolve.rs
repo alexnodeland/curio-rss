@@ -27,6 +27,7 @@ pub(crate) fn article_by_prefix(core: &CoreHandle, fragment: &str) -> anyhow::Re
             feed_id: None,
             before,
             limit: PAGE,
+            ..ListArticles::default()
         })?;
         let page_len = page.len();
         for article in page {

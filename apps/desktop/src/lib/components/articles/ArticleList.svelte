@@ -12,19 +12,25 @@ export const ROW_HEIGHT = 84;
  */
 import { t } from '$lib/i18n';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import { untrack } from 'svelte';
 import ArticleRow from './ArticleRow.svelte';
 import VirtualList from './VirtualList.svelte';
 
-function list() {
-    return articlesStore.current;
-}
+// Rows resolve feed titles — prime the feed queries outside the template.
+untrack(() => feedsStore.prime());
 
-function listError(): string {
-    const failure = list().error;
-    return failure === null ? '' : commandErrorMessage(failure);
-}
+/**
+ * The current filter combination's list state. Created through a $derived
+ * — never inline in a template expression — because svelte excludes state
+ * created inside a reaction from that reaction's dependencies: a template
+ * that both created and read the query would go blind to its updates.
+ */
+const list = $derived(articlesStore.current);
+
+const listError = $derived(list.error === null ? '' : commandErrorMessage(list.error));
 
 function selectArticle(articleId: number): void {
     selectionStore.selectedArticleId = articleId;
@@ -32,26 +38,26 @@ function selectArticle(articleId: number): void {
 </script>
 
 <div class="article-list">
-    {#if list().error !== null}
-        <p class="list-status error" role="alert">{listError()}</p>
-    {:else if !list().loaded}
+    {#if list.error !== null}
+        <p class="list-status error" role="alert">{listError}</p>
+    {:else if !list.loaded}
         <p class="list-status">{t('list.loading')}</p>
-    {:else if list().items.length === 0}
+    {:else if list.items.length === 0}
         <p class="list-status">{t('list.empty')}</p>
     {:else}
         <VirtualList
-            items={list().items}
+            items={list.items}
             rowHeight={ROW_HEIGHT}
             key={(article) => article.id}
             selectedIndex={selectionStore.selectedIndex}
             label={t('list.label')}
-            onnearend={() => void list().loadMore()}
+            onnearend={() => void list.loadMore()}
         >
             {#snippet row(article, index)}
                 <ArticleRow
                     {article}
                     {index}
-                    setsize={list().items.length}
+                    setsize={list.items.length}
                     selected={article.id === selectionStore.selectedArticleId}
                     onselect={selectArticle}
                 />

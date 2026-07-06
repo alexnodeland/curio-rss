@@ -10,7 +10,7 @@ import { type CommandError, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import type { ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
-import { openExternal } from '$lib/utils/external';
+import { isOpenableUrl, openExternal } from '$lib/utils/external';
 import { ALL_ARTICLES, type ArticleFilters, articlesStore, filterKey } from './articles.svelte';
 import type { CommandResult } from './query-cache.svelte';
 import { selectionStore } from './selection.svelte';
@@ -83,8 +83,14 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
     await run(() => commands.markRead(articleId, true));
 }
 
-/** Opens the article's source in the OS browser and records the open. */
+/**
+ * Opens the article's source in the OS browser and records the open.
+ * Non-http(s) URLs are refused outright — no open, no `article.opened`.
+ */
 export async function openInBrowser(articleId: number, url: string): Promise<void> {
+    if (!isOpenableUrl(url)) {
+        return;
+    }
     try {
         await openExternal(url);
     } catch {

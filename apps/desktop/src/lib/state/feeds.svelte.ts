@@ -31,6 +31,17 @@ export class FeedsStore {
         return ensureQuery(queryKeys.unreadCounts, commands.getUnreadCounts);
     }
 
+    /**
+     * Creates the feed + unread-count queries ahead of rendering. Svelte
+     * excludes state created inside a reaction from that reaction's
+     * dependencies, so a component must prime in init (or a $derived) and
+     * only read from its template.
+     */
+    prime(): void {
+        void this.#feedsQuery;
+        void this.#countsQuery;
+    }
+
     get feeds(): FeedDto[] {
         return this.#feedsQuery.data ?? [];
     }

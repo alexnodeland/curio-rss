@@ -19,6 +19,12 @@ const VIEWS: readonly { id: ViewId; label: MessageKey }[] = [
     { id: 'readLater', label: 'view.readLater' },
 ];
 
+// Prime the feed + unread-count queries during init, NOT from the template:
+// state created inside the render reaction is excluded from that reaction's
+// dependencies, so a fetch kicked off by a template read would never
+// re-render on completion (the error/loaded transition would be lost).
+feedsStore.prime();
+
 function currentView(): ViewId | null {
     if (selectionStore.selectedFeedId !== null) {
         return null;

@@ -17,4 +17,24 @@ if (typeof globalThis.localStorage === 'undefined' && jsdomInstance !== undefine
     }
 }
 
+/**
+ * jsdom has no ResizeObserver, which Svelte's `bind:clientHeight` needs.
+ * A no-op stub is enough: components that measure fall back to explicit
+ * fallback dimensions in tests (see VirtualList's fallbackViewportHeight).
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+    class ResizeObserverStub {
+        observe(): void {
+            // no layout in jsdom — nothing to observe
+        }
+        unobserve(): void {
+            // no-op
+        }
+        disconnect(): void {
+            // no-op
+        }
+    }
+    globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
 export {};

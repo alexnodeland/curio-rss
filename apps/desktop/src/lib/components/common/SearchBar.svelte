@@ -6,6 +6,7 @@
  * blurs. Being an input, it is a typing context — global shortcuts stay
  * inert while it holds focus (see `shouldIgnoreKeyEvent`).
  */
+import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { searchStore } from '$lib/state/search.svelte';
 
@@ -36,7 +37,7 @@ function onKeydown(event: KeyboardEvent): void {
 </script>
 
 <div class="search">
-    <span class="search-icon" aria-hidden="true">⌕</span>
+    <span class="search-icon" aria-hidden="true"><Icon name="search" size={16} /></span>
     <input
         bind:this={input}
         class="search-input"
@@ -52,7 +53,7 @@ function onKeydown(event: KeyboardEvent): void {
             class="search-clear"
             type="button"
             aria-label={t('search.clear')}
-            onclick={() => searchStore.clear()}>×</button
+            onclick={() => searchStore.clear()}><Icon name="close" size={14} /></button
         >
     {/if}
 </div>
@@ -62,20 +63,25 @@ function onKeydown(event: KeyboardEvent): void {
         display: flex;
         align-items: center;
         gap: var(--space-2);
-        padding: 0 var(--space-2);
+        height: 34px;
+        padding: 0 var(--space-3);
         border-radius: var(--radius-md);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-subtle);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        transition:
+            border-color var(--dur-fast) var(--ease),
+            box-shadow var(--dur-fast) var(--ease);
     }
 
     .search:focus-within {
-        border-color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent), transparent 40%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 
     .search-icon {
         flex: 0 0 auto;
+        display: flex;
         color: var(--fg-subtle);
-        font-size: 0.9375rem;
     }
 
     .search-input {
@@ -85,7 +91,7 @@ function onKeydown(event: KeyboardEvent): void {
         background: transparent;
         color: var(--fg);
         border: none;
-        font-size: 0.8125rem;
+        font-size: var(--text-md);
     }
 
     .search-input:focus-visible {

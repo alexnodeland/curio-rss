@@ -91,33 +91,66 @@ function onKeyDown(event: KeyboardEvent): void {
 
 <style>
     .article-row {
+        position: relative;
         display: flex;
         align-items: center;
-        gap: var(--space-2);
+        gap: var(--space-3);
         height: 84px; /* = ROW_HEIGHT in ArticleList */
-        padding: 0 var(--space-3);
-        border-bottom: 1px solid var(--border-subtle);
+        padding: 0 var(--space-4);
+        margin: 0 var(--space-2);
+        border-radius: var(--radius-lg);
         cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    /* Hairline between rows, inset so it doesn't touch the rounded edges. */
+    .article-row::after {
+        content: '';
+        position: absolute;
+        left: var(--space-4);
+        right: var(--space-4);
+        bottom: 0;
+        height: 1px;
+        background: var(--hairline);
     }
 
     .article-row:hover {
-        background: var(--bg-hover);
+        background: var(--hover);
+    }
+
+    .article-row:hover::after,
+    .article-row.selected::after {
+        opacity: 0;
     }
 
     .article-row.selected {
-        background: var(--accent-muted);
+        background: var(--selected);
+    }
+
+    /* Accent spine on the selected row. */
+    .article-row.selected::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 12px;
+        bottom: 12px;
+        width: 3px;
+        border-radius: var(--radius-pill);
+        background: var(--accent);
     }
 
     .row-dot {
         flex: 0 0 auto;
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
         background: transparent;
+        transition: background var(--dur-fast) var(--ease);
     }
 
     .article-row.unread .row-dot {
         background: var(--unread);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--unread), transparent 82%);
     }
 
     .row-main {
@@ -125,33 +158,44 @@ function onKeyDown(event: KeyboardEvent): void {
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-1);
+        gap: 3px;
     }
 
     .row-title {
-        font-size: 0.9375rem;
+        font-size: var(--text-base);
         font-weight: 500;
-        color: var(--fg);
+        line-height: 1.35;
+        color: var(--fg-muted);
+        letter-spacing: var(--tracking-snug);
     }
 
     .article-row.unread .row-title {
         font-weight: 600;
+        color: var(--fg);
     }
 
     .row-meta {
         display: flex;
+        align-items: center;
         gap: var(--space-2);
-        font-size: 0.75rem;
-        color: var(--fg-muted);
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
     }
 
     .row-feed {
+        color: var(--fg-muted);
+        font-weight: 500;
+    }
+
+    .row-meta .row-feed + span::before {
+        content: '·';
+        margin-right: var(--space-2);
         color: var(--fg-subtle);
     }
 
     .row-star {
         flex: 0 0 auto;
         color: var(--warning);
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
     }
 </style>

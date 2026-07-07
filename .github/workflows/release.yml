@@ -1,0 +1,104 @@
+# Release workflow — pushing a `vX.Y.Z` tag builds the unsigned macOS bundles
+# and publishes a DRAFT GitHub release with the two DMGs under the stable
+# names the Homebrew cask expects (Curio-arm64.dmg / Curio-x64.dmg, which back
+# `releases/latest/download/Curio-<arch>.dmg`). The release is a DRAFT on
+# purpose: nothing is public — and `brew` sees nothing — until a human reviews
+# it and clicks Publish. macOS is the shipped channel (unsigned, per
+# docs/design/decisions.md); Linux/Windows stay informational via nightly.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release + upload assets
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build macOS (${{ matrix.cask_arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: macos-14, cask_arch: arm64, tauri_arch: aarch64 }
+          - { os: macos-13, cask_arch: x64, tauri_arch: x64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Build the unsigned bundle
+        working-directory: apps/desktop
+        # No signing env — unsigned by decision (see nightly.yml / decisions.md).
+        run: npm run tauri build
+      - name: Rename the DMG to the cask's stable name
+        # tauri emits Curio_<version>_<tauri_arch>.dmg; the cask URL resolves
+        # Curio-<cask_arch>.dmg. Rename so a routine release needs no cask edit.
+        run: |
+          set -euo pipefail
+          src=$(ls target/release/bundle/dmg/Curio_*_${{ matrix.tauri_arch }}.dmg)
+          cp "$src" "Curio-${{ matrix.cask_arch }}.dmg"
+          shasum -a 256 "Curio-${{ matrix.cask_arch }}.dmg"
+      - name: Upload the DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.cask_arch }}
+          path: Curio-${{ matrix.cask_arch }}.dmg
+          if-no-files-found: error
+
+  release:
+    name: draft the GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect the DMGs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Assemble release notes
+        # The unsigned/Gatekeeper banner, then this version's CHANGELOG section
+        # (everything between the first and second `## ` heading).
+        run: |
+          set -euo pipefail
+          {
+            echo "**Unsigned build** — Apple notarization is intentionally skipped."
+            echo "On first launch macOS Gatekeeper will block it; open it once via"
+            echo "**right-click → Open** (macOS 12–14) or **System Settings → Privacy"
+            echo "& Security → Open Anyway** (macOS 15+), or clear quarantine:"
+            echo '```sh'
+            echo 'xattr -dr com.apple.quarantine "/Applications/Curio.app"'
+            echo '```'
+            echo "Install via Homebrew: \`brew install --cask alexnodeland/tap/curio\`"
+            echo
+            awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md || true
+          } > NOTES.md
+          cat NOTES.md
+      - name: Draft the release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: false
+          name: Curio ${{ github.ref_name }}
+          body_path: NOTES.md
+          fail_on_unmatched_files: true
+          files: |
+            dist/Curio-arm64.dmg
+            dist/Curio-x64.dmg

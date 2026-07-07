@@ -721,6 +721,58 @@ fn mark_all_read_scopes_to_one_feed() {
     assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap(), 0);
 }
 
+#[test]
+fn feed_tag_filter_scopes_articles_to_the_folder_subtree() {
+    let (_dir, storage) = temp_storage();
+    let feed = |url: &str, tag: &str| {
+        storage
+            .add_feed(NewFeed {
+                url: url.to_owned(),
+                title: None,
+                tags: vec![tag.to_owned()],
+            })
+            .unwrap()
+            .0
+    };
+    let tech = feed("https://tech.example/f", "Tech");
+    let db = feed("https://db.example/f", "Tech/Databases");
+    let cook = feed("https://cook.example/f", "Cooking");
+    let article = |key: &str, feed_id| {
+        let mut a = new_article(key, key, "body");
+        a.feed_id = Some(feed_id);
+        a
+    };
+    storage
+        .upsert_articles(vec![
+            article("tech", tech.id),
+            article("db", db.id),
+            article("cook", cook.id),
+        ])
+        .unwrap();
+
+    let titles = |feed_tag: &str| {
+        let mut t = storage
+            .list_articles(ListArticles {
+                feed_tag: Some(feed_tag.to_owned()),
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .map(|a| a.title)
+            .collect::<Vec<_>>();
+        t.sort();
+        t
+    };
+
+    // A top-level folder covers its own feed AND nested subfolders.
+    assert_eq!(titles("Tech"), vec!["db".to_owned(), "tech".to_owned()]);
+    // A nested folder is narrower; a sibling folder is disjoint.
+    assert_eq!(titles("Tech/Databases"), vec!["db".to_owned()]);
+    assert_eq!(titles("Cooking"), vec!["cook".to_owned()]);
+    // `Tec` must NOT match `Tech` (prefix guarded by the `/` boundary).
+    assert!(titles("Tec").is_empty());
+}
+
 // ------------------------------------------------------- state and events
 
 #[test]

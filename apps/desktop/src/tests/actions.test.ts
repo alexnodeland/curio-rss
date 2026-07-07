@@ -8,6 +8,7 @@ import {
     activeView,
     handleShortcut,
     openInBrowser,
+    selectFolder,
     selectView,
     toggleArchived,
     toggleStar,
@@ -106,6 +107,16 @@ describe('actions — views and shortcut routing', () => {
         selectionStore.selectedArticleId = 9;
         selectView('starred');
         expect(articlesStore.filters).toEqual({ ...ALL_ARTICLES, starred: true });
+        expect(selectionStore.selectedFeedId).toBeNull();
+        expect(selectionStore.selectedArticleId).toBeNull();
+    });
+
+    it('selectFolder scopes the filters to a feed-tag and clears feed + selection', () => {
+        harness = installIpcHarness({});
+        selectionStore.selectedFeedId = 5;
+        selectionStore.selectedArticleId = 9;
+        selectFolder('Tech/Databases');
+        expect(articlesStore.filters).toEqual({ ...ALL_ARTICLES, feedTag: 'Tech/Databases' });
         expect(selectionStore.selectedFeedId).toBeNull();
         expect(selectionStore.selectedArticleId).toBeNull();
     });

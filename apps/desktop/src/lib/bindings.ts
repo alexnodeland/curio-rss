@@ -540,6 +540,11 @@ export type ListArticlesDto = {
 	archived: boolean | null,
 	/**  Keep only articles carrying this tag. */
 	tag: string | null,
+	/**
+	 *  Keep only articles whose feed is in this folder (a `/`-path tag equal
+	 *  to this or nested beneath it) — the folder-tree filter.
+	 */
+	feed_tag: string | null,
 };
 
 /**  Args for adding a subscription. */

@@ -73,6 +73,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
                 read_later: null,
                 archived: null,
                 tag: null,
+                feed_tag: null,
             },
         ],
         response: [articleSummaryFixture()],

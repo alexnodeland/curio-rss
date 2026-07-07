@@ -25,6 +25,8 @@ export interface ArticleFilters {
     readLater: boolean | null;
     archived: boolean | null;
     tag: string | null;
+    /** Folder scope: the feed's `/`-path tag (or a parent of it). */
+    feedTag: string | null;
 }
 
 /**
@@ -40,6 +42,7 @@ export const ALL_ARTICLES: ArticleFilters = {
     readLater: null,
     archived: false,
     tag: null,
+    feedTag: null,
 };
 
 export const DEFAULT_PAGE_SIZE = 50;
@@ -55,6 +58,7 @@ export function filterKey(filters: ArticleFilters): string {
         `later=${part(filters.readLater)}`,
         `archived=${part(filters.archived)}`,
         `tag=${part(filters.tag)}`,
+        `feedTag=${part(filters.feedTag)}`,
     ].join(';');
 }
 
@@ -68,6 +72,7 @@ function toDto(filters: ArticleFilters, before: number | null, limit: number): L
         read_later: filters.readLater,
         archived: filters.archived,
         tag: filters.tag,
+        feed_tag: filters.feedTag,
     };
 }
 

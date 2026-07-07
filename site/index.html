@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Curio — a local-first RSS reader that lives in your notes</title>
+        <meta
+            name="description"
+            content="Curio is a local-first desktop RSS &amp; read-later reader that treats your notes as the destination — plain-markdown export and an append-only event log, no telemetry."
+        />
+        <link rel="icon" href="assets/favicon.svg" />
+        <link rel="stylesheet" href="styles.css" />
+    </head>
+    <body>
+        <nav class="nav">
+            <div class="wrap nav-inner">
+                <a class="brand" href="#top">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                        <path d="M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4L12 2z" stroke-linejoin="round" />
+                    </svg>
+                    Curio
+                </a>
+                <div class="nav-links">
+                    <a href="#features">Features</a>
+                    <a href="#architecture">How it works</a>
+                    <a href="#install">Install</a>
+                    <a href="#reference">Reference</a>
+                    <a href="https://github.com/alexnodeland/curio-rss">GitHub</a>
+                </div>
+                <a class="nav-cta" href="#install">Download</a>
+            </div>
+        </nav>
+
+        <header id="top" class="hero">
+            <div class="wrap">
+                <div class="badges">
+                    <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/alexnodeland/curio-rss/ci.yml?branch=main&label=CI&labelColor=1a1b1e&color=4c8bf5" />
+                    <img alt="Latest release" src="https://img.shields.io/github/v/release/alexnodeland/curio-rss?label=release&labelColor=1a1b1e&color=4c8bf5&include_prereleases" />
+                    <img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4c8bf5?labelColor=1a1b1e" />
+                    <img alt="Platform" src="https://img.shields.io/badge/platform-macOS-4c8bf5?labelColor=1a1b1e" />
+                    <img alt="Built with" src="https://img.shields.io/badge/Rust%20%C2%B7%20Tauri%20%C2%B7%20Svelte-1a1b1e?labelColor=1a1b1e&color=7f858d" />
+                </div>
+                <h1>Your reading,<br />in your notes.</h1>
+                <p class="tag">
+                    Curio is a <b>local-first</b> desktop reader for RSS, Atom and read-later. It
+                    treats your notes as the destination, not a silo — everything you save becomes
+                    <b>plain markdown</b> you own, and how you read is an <b>append-only event log</b>
+                    your own tools can replay. No accounts, no telemetry, no phone-home.
+                </p>
+                <div class="cta-row">
+                    <a class="btn btn-primary" href="#install">Download for macOS</a>
+                    <a class="btn btn-ghost" href="https://github.com/alexnodeland/curio-rss">View on GitHub</a>
+                </div>
+                <div class="brew"><span class="prompt">$</span> brew install --cask alexnodeland/tap/curio</div>
+                <span class="shot"><img src="assets/reader-dark.png" alt="The Curio three-pane reader: folder sidebar, article list, and a reading pane with an RSS-native YouTube card." /></span>
+            </div>
+        </header>
+
+        <section id="features">
+            <div class="wrap">
+                <div class="section-head">
+                    <div class="eyebrow">Why Curio</div>
+                    <h2>A reader that respects your data</h2>
+                    <p>Everything runs on your machine. The only thing that leaves it is fetching the feeds you subscribed to.</p>
+                </div>
+                <div class="grid">
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>Notes as the destination</h3>
+                        <p>Save any article to your own directories as markdown with typed YAML frontmatter — a byte-preserved managed region means your edits are never clobbered on re-export.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 8l9-5 9 5"/></svg></span>Folders &amp; a real reading flow</h3>
+                        <p>Nested folders, drag-to-reorder, full-text search, star / read-later / archive, on-demand full-article readability, and next-unread navigation across feeds.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"/></svg></span>Bring your library</h3>
+                        <p>Import from OPML, plus Pocket, Instapaper and Readwise CSV exports — saved articles arrive as read-later items with their tags intact.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20"/></svg></span>Private by default</h3>
+                        <p>No telemetry, no accounts, no phone-home. Remote media and favicon fallbacks are opt-in. An append-only event log stays under <code>.curio/</code>, never committed to git.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>Nine themes, eight languages</h3>
+                        <p>System / Light / Dark plus six editorial palettes, adjustable reading typography, and a fully translated UI in eight locales — with WCAG-AA contrast on every theme.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3H5a2 2 0 00-2 2v4M15 3h4a2 2 0 012 2v4M9 21H5a2 2 0 01-2-2v-4M15 21h4a2 2 0 002-2v-4"/></svg></span>Keyboard-first &amp; accessible</h3>
+                        <p>Full keyboard control, a focus-trapped modal system, a listbox article list with roving selection, live-region toasts, and a labelled reader toolbar.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="wrap">
+                <blockquote>
+                    “The reading surface of a personal knowledge plane: your vault and your scripts are
+                    first-class consumers, via two small, versioned, published contracts.”
+                </blockquote>
+            </div>
+        </section>
+
+        <section id="architecture">
+            <div class="wrap">
+                <div class="section-head">
+                    <div class="eyebrow">How it works</div>
+                    <h2>One engine, your data, two contracts</h2>
+                    <p>A headless Rust engine drives both the desktop app and a CLI, and emits two small published contracts your own tools consume.</p>
+                </div>
+                <div class="diagram">
+                    <pre class="mermaid">
+flowchart LR
+    feeds["RSS / Atom feeds"]
+    subgraph curio["Curio"]
+        direction TB
+        core["curio-core<br/>headless engine"]
+        head["Desktop app"]
+        cli["curio CLI"]
+        core --> head
+        core --> cli
+    end
+    feeds -->|"policed fetch"| core
+    core -->|"curio.frontmatter.v1"| notes["Your notes<br/>markdown + frontmatter"]
+    core -->|"curio.events.v1"| log[".curio/events/<br/>append-only JSONL"]
+    notes --> tools["Your vault &amp; scripts"]
+    log --> tools
+                    </pre>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="wrap">
+                <div class="split">
+                    <div class="copy">
+                        <h2>Make it yours</h2>
+                        <p>
+                            Nine themes from clean Light/Dark to Nord, Catppuccin, Dracula, Gruvbox,
+                            Tokyo Night and Solarized. Tune the reading column — font, size, line
+                            height and measure — and pick your interface language.
+                        </p>
+                        <div class="chips">
+                            <span class="chip">English</span>
+                            <span class="chip">Español</span>
+                            <span class="chip">Français</span>
+                            <span class="chip">Deutsch</span>
+                            <span class="chip">Italiano</span>
+                            <span class="chip">Polski</span>
+                            <span class="chip">简体中文</span>
+                            <span class="chip">廣東話</span>
+                        </div>
+                    </div>
+                    <img src="assets/settings-themes.png" alt="Curio settings showing the nine-theme picker, language selector and reading-typography controls." />
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="wrap">
+                <div class="split rev">
+                    <div class="copy">
+                        <h2>Comfortable in any light</h2>
+                        <p>
+                            A serif reading column, editorial rhythm and RSS-native Reddit / YouTube
+                            layouts that load <em>nothing</em> from the network until you click. Here's
+                            the same reader in Solarized Light.
+                        </p>
+                    </div>
+                    <img src="assets/reader-light.png" alt="The Curio reader in the Solarized Light theme." />
+                </div>
+            </div>
+        </section>
+
+        <section id="install">
+            <div class="wrap">
+                <div class="section-head">
+                    <div class="eyebrow">Install</div>
+                    <h2>Get Curio for macOS</h2>
+                    <p>Homebrew is the easiest path; a direct <code>.dmg</code> is on every release.</p>
+                </div>
+                <p><strong>Homebrew</strong></p>
+                <div class="codeblock">brew install --cask alexnodeland/tap/curio</div>
+                <p style="margin-top:22px"><strong>Direct download</strong> — grab <code>Curio-arm64.dmg</code> (Apple silicon) or <code>Curio-x64.dmg</code> (Intel) from the <a href="https://github.com/alexnodeland/curio-rss/releases/latest">latest release</a>.</p>
+                <p class="note" style="margin-top:22px">
+                    Curio is <strong>not signed or notarized</strong> (Apple Developer enrollment is
+                    deliberately skipped), so Gatekeeper blocks it on first launch. Open it once via
+                    <strong>right-click → Open</strong> (macOS 12–14) or
+                    <strong>System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security → Open&nbsp;Anyway</strong>
+                    (macOS 15+), or clear quarantine:
+                </p>
+                <div class="codeblock">xattr -dr com.apple.quarantine "/Applications/Curio.app"</div>
+                <p class="note" style="margin-top:16px">Windows and Linux bundles are built nightly and downloadable as CI artifacts, but are not a shipped channel yet.</p>
+            </div>
+        </section>
+
+        <section id="reference">
+            <div class="wrap">
+                <div class="section-head">
+                    <div class="eyebrow">Reference</div>
+                    <h2>Keyboard shortcuts</h2>
+                    <p>Curio is built to fly under your fingers. Press <span class="kbd">?</span> in the app for the full, always-current list.</p>
+                </div>
+                <div class="tablewrap">
+                    <table>
+                        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+                        <tbody>
+                            <tr><td><span class="kbd">j</span> / <span class="kbd">k</span></td><td>Next / previous article</td></tr>
+                            <tr><td><span class="kbd">n</span></td><td>Next unread, across feeds</td></tr>
+                            <tr><td><span class="kbd">s</span> · <span class="kbd">l</span></td><td>Star · read-later</td></tr>
+                            <tr><td><span class="kbd">m</span> · <span class="kbd">a</span></td><td>Mark read/unread · archive</td></tr>
+                            <tr><td><span class="kbd">o</span></td><td>Open in browser</td></tr>
+                            <tr><td><span class="kbd">p</span></td><td>Save to a notes destination</td></tr>
+                            <tr><td><span class="kbd">g</span> then <span class="kbd">a/s/l/e</span></td><td>Go to All / Starred / Read-later / Archived</td></tr>
+                            <tr><td><span class="kbd">?</span></td><td>Keyboard reference</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="section-head" style="margin-top:56px">
+                    <h2>Importers</h2>
+                    <p>Move your library over in one step.</p>
+                </div>
+                <div class="tablewrap">
+                    <table>
+                        <thead><tr><th>Source</th><th>Format</th><th>Imports as</th></tr></thead>
+                        <tbody>
+                            <tr><td>OPML</td><td><code>.opml</code></td><td>Feed subscriptions (with folders)</td></tr>
+                            <tr><td>Pocket</td><td><code>.csv</code></td><td>Read-later articles + tags</td></tr>
+                            <tr><td>Instapaper</td><td><code>.csv</code></td><td>Read-later articles (folders → tags)</td></tr>
+                            <tr><td>Readwise Reader</td><td><code>.csv</code></td><td>Read-later articles + tags</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="section-head" style="margin-top:56px">
+                    <h2>The two contracts</h2>
+                    <p>Curio is a good citizen of your knowledge plane. Everything it writes is documented and versioned.</p>
+                </div>
+                <div class="tablewrap">
+                    <table>
+                        <thead><tr><th>Contract</th><th>What it is</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>curio.frontmatter.v1</code></td><td>Every saved article → a markdown note with machine frontmatter and a managed region; your edits outside it survive re-export byte-for-byte.</td></tr>
+                            <tr><td><code>curio.events.v1</code></td><td>Saved / starred / read-later / tagged / opened events as append-only JSONL under <code>.curio/events/</code>, built for downstream replay.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="note" style="margin-top:16px">Machine-readable schemas live in <a href="https://github.com/alexnodeland/curio-rss/tree/main/schemas"><code>schemas/</code></a>. There's also a <a href="https://github.com/alexnodeland/curio-rss/blob/main/docs/cli.md">command-line interface</a> over the same engine.</p>
+            </div>
+        </section>
+
+        <footer>
+            <div class="wrap foot-inner">
+                <div>Curio — local-first reading. © 2026 · MIT OR Apache-2.0.</div>
+                <div class="foot-links">
+                    <a href="https://github.com/alexnodeland/curio-rss">GitHub</a>
+                    <a href="https://github.com/alexnodeland/curio-rss/releases/latest">Releases</a>
+                    <a href="https://github.com/alexnodeland/curio-rss/blob/main/PRIVACY.md">Privacy</a>
+                    <a href="https://github.com/alexnodeland/curio-rss/blob/main/docs/cli.md">CLI</a>
+                </div>
+            </div>
+        </footer>
+
+        <script type="module">
+            import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+            mermaid.initialize({
+                startOnLoad: true,
+                theme: "dark",
+                themeVariables: {
+                    background: "#212327",
+                    primaryColor: "#26282d",
+                    primaryTextColor: "#e6e7ea",
+                    primaryBorderColor: "#4c8bf5",
+                    lineColor: "#7f858d",
+                    fontFamily: "-apple-system, Segoe UI, system-ui, sans-serif",
+                },
+            });
+        </script>
+    </body>
+</html>

@@ -4,8 +4,12 @@
  * intact), and `set()` persists the choice and drives `<html lang>`.
  */
 import { LOCALES, localeStore, t } from '$lib/i18n';
+import { de } from '$lib/i18n/de';
 import { en } from '$lib/i18n/en';
 import { es } from '$lib/i18n/es';
+import { fr } from '$lib/i18n/fr';
+import { it as itCatalog } from '$lib/i18n/it';
+import { pl } from '$lib/i18n/pl';
 import { yue } from '$lib/i18n/yue';
 import { zhHans } from '$lib/i18n/zh-Hans';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -15,6 +19,10 @@ type MessageKey = keyof typeof en;
 
 const CATALOGS = [
     { id: 'es', catalog: es },
+    { id: 'fr', catalog: fr },
+    { id: 'de', catalog: de },
+    { id: 'it', catalog: itCatalog },
+    { id: 'pl', catalog: pl },
     { id: 'zh-Hans', catalog: zhHans },
     { id: 'yue', catalog: yue },
 ];
@@ -33,9 +41,9 @@ describe('locale switching', () => {
         harness = null;
     });
 
-    it('ships English plus Spanish, Mandarin and Cantonese', () => {
+    it('ships English plus seven translated locales', () => {
         expect(LOCALES.map((locale) => locale.id)).toEqual(
-            expect.arrayContaining(['en', 'es', 'zh-Hans', 'yue']),
+            expect.arrayContaining(['en', 'es', 'fr', 'de', 'it', 'pl', 'zh-Hans', 'yue']),
         );
     });
 
@@ -57,6 +65,18 @@ describe('locale switching', () => {
 
         localeStore.active = 'es';
         expect(t('modal.close')).toBe('Cerrar');
+
+        localeStore.active = 'fr';
+        expect(t('modal.close')).toBe('Fermer');
+
+        localeStore.active = 'de';
+        expect(t('modal.close')).toBe('Schließen');
+
+        localeStore.active = 'it';
+        expect(t('modal.close')).toBe('Chiudi');
+
+        localeStore.active = 'pl';
+        expect(t('modal.close')).toBe('Zamknij');
 
         localeStore.active = 'zh-Hans';
         expect(t('modal.close')).toBe('关闭'); // mainland Simplified

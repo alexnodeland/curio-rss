@@ -6,9 +6,13 @@
  * re-renders every string that flows through them. English is the complete
  * base catalog; every key call site is typechecked against it.
  */
+import { de } from './de';
 import { en } from './en';
 import { es } from './es';
+import { fr } from './fr';
+import { it } from './it';
 import { type LocaleId, localeStore } from './locale.svelte';
+import { pl } from './pl';
 import { yue } from './yue';
 import { zhHans } from './zh-Hans';
 
@@ -21,6 +25,10 @@ export type MessageKey = keyof typeof en;
 const CATALOGS: Record<LocaleId, Partial<Record<MessageKey, string>>> = {
     en,
     es,
+    fr,
+    de,
+    it,
+    pl,
     'zh-Hans': zhHans,
     yue,
 };

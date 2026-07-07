@@ -11,14 +11,14 @@ export const ROW_HEIGHT = 84;
  * page). Selection lives in `selectionStore`; the reader reacts to it.
  */
 import { t } from '$lib/i18n';
-import { markReadOnScroll } from '$lib/state/actions';
+import { handleShortcut, markReadOnScroll } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { untrack } from 'svelte';
-import ArticleRow from './ArticleRow.svelte';
+import ArticleRow, { articleOptionId } from './ArticleRow.svelte';
 import VirtualList from './VirtualList.svelte';
 
 // Rows resolve feed titles — prime the feed queries outside the template.
@@ -34,8 +34,33 @@ const list = $derived(articlesStore.current);
 
 const listError = $derived(list.error === null ? '' : commandErrorMessage(list.error));
 
+/** The listbox's active option: the selected row, when one is selected. */
+const activeDescendantId = $derived(
+    selectionStore.selectedArticleId === null
+        ? undefined
+        : articleOptionId(selectionStore.selectedArticleId),
+);
+
 function selectArticle(articleId: number): void {
     selectionStore.selectedArticleId = articleId;
+}
+
+/**
+ * Arrow-key navigation while the listbox holds focus. Down/Up reuse the exact
+ * `j`/`k` path (so paging-in stays wired); Home/End jump to the ends of the
+ * loaded window.
+ */
+function moveSelection(to: 'next' | 'previous' | 'first' | 'last'): void {
+    const items = list.items;
+    if (to === 'next') {
+        handleShortcut('nav.nextArticle');
+    } else if (to === 'previous') {
+        handleShortcut('nav.previousArticle');
+    } else if (to === 'first' && items.length > 0) {
+        selectionStore.selectedArticleId = items[0].id;
+    } else if (to === 'last' && items.length > 0) {
+        selectionStore.selectedArticleId = items[items.length - 1].id;
+    }
 }
 
 /**
@@ -85,8 +110,10 @@ function onScrollPast(firstVisibleIndex: number): void {
             key={(article) => article.id}
             selectedIndex={selectionStore.selectedIndex}
             label={t('list.label')}
+            {activeDescendantId}
             onnearend={() => void list.loadMore()}
             onscrollpast={onScrollPast}
+            onmove={moveSelection}
         >
             {#snippet row(article, index)}
                 <ArticleRow

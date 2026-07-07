@@ -135,6 +135,18 @@ export function selectView(view: ViewId): void {
     articlesStore.filters = VIEW_FILTERS[view];
 }
 
+/**
+ * Scopes the article list to a folder — every article whose feed carries this
+ * `/`-path tag or a tag nested beneath it (backend-owned via `feed_tag`).
+ * Clears the feed scope + search so the folder is the active selection.
+ */
+export function selectFolder(path: string): void {
+    searchStore.clear();
+    selectionStore.selectedFeedId = null;
+    selectionStore.selectedArticleId = null;
+    articlesStore.filters = { ...ALL_ARTICLES, feedTag: path };
+}
+
 /** The built-in view a filter set corresponds to, if any (highlighting). */
 export function activeView(filters: ArticleFilters): ViewId | null {
     const key = filterKey(filters);

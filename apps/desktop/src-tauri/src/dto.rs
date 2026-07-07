@@ -305,6 +305,9 @@ pub struct ListArticlesDto {
     pub archived: Option<bool>,
     /// Keep only articles carrying this tag.
     pub tag: Option<String>,
+    /// Keep only articles whose feed is in this folder (a `/`-path tag equal
+    /// to this or nested beneath it) — the folder-tree filter.
+    pub feed_tag: Option<String>,
 }
 
 impl From<ListArticlesDto> for ListArticles {
@@ -318,6 +321,7 @@ impl From<ListArticlesDto> for ListArticles {
             read_later: params.read_later,
             archived: params.archived,
             tag: params.tag,
+            feed_tag: params.feed_tag,
         }
     }
 }
@@ -549,11 +553,13 @@ mod tests {
             read_later: None,
             archived: Some(false),
             tag: Some("rust".into()),
+            feed_tag: Some("Tech/Databases".into()),
         });
         assert_eq!(params.feed_id, Some(FeedId(7)));
         assert_eq!(params.before, Some(curio_core::model::ArticleId(100)));
         assert_eq!(params.limit, 25);
         assert_eq!(params.read, Some(false));
         assert_eq!(params.tag.as_deref(), Some("rust"));
+        assert_eq!(params.feed_tag.as_deref(), Some("Tech/Databases"));
     }
 }

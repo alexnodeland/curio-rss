@@ -23,6 +23,7 @@ export const en = {
     'sidebar.label': 'Subscriptions',
     'sidebar.views': 'Views',
     'sidebar.feeds': 'Feeds',
+    'folder.toggle': 'Toggle {name}',
 
     'list.label': 'Articles',
     'list.loading': 'Loading articles…',

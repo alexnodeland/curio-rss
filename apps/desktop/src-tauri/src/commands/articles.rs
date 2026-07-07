@@ -179,6 +179,7 @@ mod tests {
             read_later: None,
             archived: None,
             tag: None,
+            feed_tag: None,
         }
     }
 

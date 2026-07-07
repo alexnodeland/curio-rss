@@ -173,24 +173,40 @@ describe('Sidebar — folder tree', () => {
         expect(getByText('15')).toBeTruthy();
     });
 
-    it('collapsing a folder hides its subtree but not ungrouped feeds', async () => {
+    it('the disclosure collapses a folder, hiding its subtree but not ungrouped feeds', async () => {
         harness = taggedHarness();
-        const { getByText, queryByText } = render(Sidebar);
+        const { getByText, getByLabelText, queryByText } = render(Sidebar);
         await flushIpc();
         expect(getByText('SQLite')).toBeTruthy();
 
-        const techHeader = getByText('Tech').closest('button');
-        expect(techHeader?.getAttribute('aria-expanded')).toBe('true');
-        await fireEvent.click(getByText('Tech'));
+        const disclosure = getByLabelText('Toggle Tech');
+        expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+        await fireEvent.click(disclosure);
 
         expect(queryByText('Databases')).toBeNull();
         expect(queryByText('SQLite')).toBeNull();
         expect(queryByText('Rust Blog')).toBeNull();
         // The ungrouped feed and the folder header itself survive.
         expect(getByText('Loose')).toBeTruthy();
-        expect(getByText('Tech').closest('button')?.getAttribute('aria-expanded')).toBe('false');
+        expect(getByLabelText('Toggle Tech').getAttribute('aria-expanded')).toBe('false');
+
+        await fireEvent.click(getByLabelText('Toggle Tech'));
+        expect(getByText('SQLite')).toBeTruthy();
+    });
+
+    it('clicking a folder name scopes the article list to its feed-tag subtree', async () => {
+        harness = taggedHarness();
+        const { getByText } = render(Sidebar);
+        await flushIpc();
 
         await fireEvent.click(getByText('Tech'));
-        expect(getByText('SQLite')).toBeTruthy();
+        expect(articlesStore.filters.feedTag).toBe('Tech');
+        expect(articlesStore.filters.feedId).toBeNull();
+        expect(selectionStore.selectedFeedId).toBeNull();
+        expect(getByText('Tech').closest('button')?.getAttribute('aria-current')).toBe('true');
+
+        // The nested folder scopes narrower.
+        await fireEvent.click(getByText('Databases'));
+        expect(articlesStore.filters.feedTag).toBe('Tech/Databases');
     });
 });

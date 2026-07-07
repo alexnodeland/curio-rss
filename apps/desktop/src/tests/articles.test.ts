@@ -62,6 +62,7 @@ describe('article list state', () => {
             // The default hides archived (archiving = out of the flow).
             archived: false,
             tag: 'rust',
+            feed_tag: null,
         });
     });
 

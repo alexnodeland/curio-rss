@@ -55,6 +55,11 @@ pub struct ListArticles {
     /// Keep only articles carrying this tag (trimmed before matching,
     /// mirroring how tags are stored).
     pub tag: Option<String>,
+    /// Keep only articles whose *feed* sits in this folder — i.e. the feed
+    /// carries a `/`-path tag equal to this value or nested beneath it
+    /// (`Tech` matches `Tech` and `Tech/Databases`). The folder-tree filter;
+    /// distinct from `tag`, which matches an *article's* own tags.
+    pub feed_tag: Option<String>,
 }
 
 impl Default for ListArticles {
@@ -68,6 +73,7 @@ impl Default for ListArticles {
             read_later: None,
             archived: None,
             tag: None,
+            feed_tag: None,
         }
     }
 }
@@ -1223,6 +1229,18 @@ fn list_articles_query(params: &ListArticles) -> (String, Vec<Box<dyn ToSql>>) {
         );
         binds.push(Box::new(tag.trim().to_owned()));
     }
+    if let Some(feed_tag) = &params.feed_tag {
+        // Folder scope: the feed carries a path tag equal to `feed_tag` or
+        // nested beneath it (`Tech` → `Tech`, `Tech/Databases`, …).
+        let feed_tag = feed_tag.trim().to_owned();
+        clauses.push(
+            "a.feed_id IN (SELECT f.id FROM feeds f, json_each(f.tags) je \
+             WHERE je.value = ? OR je.value LIKE ? || '/%')"
+                .to_owned(),
+        );
+        binds.push(Box::new(feed_tag.clone()));
+        binds.push(Box::new(feed_tag));
+    }
     sql.push_str(" WHERE ");
     sql.push_str(&clauses.join(" AND "));
     sql.push_str(" ORDER BY a.id DESC LIMIT ?");
@@ -1532,5 +1550,27 @@ mod tests {
             "tag alone needs no state join"
         );
         assert_eq!(binds.len(), 3, "before + tag + limit");
+    }
+
+    #[test]
+    fn feed_tag_filter_matches_the_folder_subtree_via_bound_params() {
+        let (sql, binds) = list_articles_query(&ListArticles {
+            feed_tag: Some("Tech".to_owned()),
+            ..ListArticles::default()
+        });
+        assert!(sql.contains("json_each(f.tags)"));
+        assert!(
+            sql.contains("je.value = ? OR je.value LIKE ? || '/%'"),
+            "matches the folder itself and its subtree: {sql}"
+        );
+        assert!(
+            !sql.contains("article_state"),
+            "feed_tag alone needs no state join"
+        );
+        assert_eq!(
+            binds.len(),
+            4,
+            "before + feed_tag (exact + subtree) + limit"
+        );
     }
 }

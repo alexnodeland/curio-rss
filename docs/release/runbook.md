@@ -5,8 +5,8 @@ How a Curio release is cut. Distribution is an **unsigned** macOS Homebrew cask
 workflows back this: the per-PR gate (`ci.yml`), the nightly/on-demand tier
 (`nightly.yml`: the 3-OS `tauri build` matrix, the Linux/Windows smoke, and the
 cold-start bench), and the tag-triggered `release.yml` (builds the unsigned
-macOS DMGs, renames them to the cask's stable names, and drafts the GitHub
-release). macOS correctness is signed off by hand via
+macOS **universal** DMG, renames it to the cask's stable name, and drafts the
+GitHub release). macOS correctness is signed off by hand via
 [`macos-checklist.md`](macos-checklist.md).
 
 ## 0. Preconditions
@@ -23,11 +23,12 @@ release). macOS correctness is signed off by hand via
 ## 2. Tag → automated draft release
 
 Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
-it builds the unsigned macOS DMGs (arm64 + x64), renames them to the cask's
-stable names (`Curio-arm64.dmg` / `Curio-x64.dmg`), and creates a **draft**
-GitHub release with them attached and the CHANGELOG section + unsigned banner
-as the notes. Nothing is public — and `brew` sees nothing — until you publish
-the draft in §5.
+it builds the unsigned macOS **universal** DMG (arm64 + x64 in one, on a single
+Apple-silicon runner — avoids the scarce Intel-runner queue), renames it to the
+cask's stable name (`Curio-universal.dmg`), and creates a **draft** GitHub
+release with it attached and the CHANGELOG section + unsigned banner as the
+notes. Nothing is public — and `brew` sees nothing — until you publish the
+draft in §5.
 
 ```sh
 git checkout main && git pull
@@ -36,7 +37,7 @@ git push origin vX.Y.Z          # → release.yml drafts the release
 ```
 
 - [ ] `release.yml` run for the tag is green and a **draft** `vX.Y.Z` release
-      exists with `Curio-arm64.dmg` + `Curio-x64.dmg` attached.
+      exists with `Curio-universal.dmg` attached.
 
 ## 3. (Optional) other-platform bundles
 

@@ -38,9 +38,12 @@ production feed).
 
 ## Publish
 
-- [ ] Rename DMGs to the cask's stable names: `Curio-arm64.dmg`, `Curio-x64.dmg`.
-- [ ] Upload both to the GitHub release for `vX.Y.Z` (they back `releases/latest/download/Curio-<arch>.dmg`).
-- [ ] `brew update && brew install --cask curio` installs the new build on a clean machine.
+`release.yml` builds the unsigned universal DMG, renames it to
+`Curio-universal.dmg`, and drafts the release automatically on the tag — so
+this is verification, not manual assembly.
+
+- [ ] The draft `vX.Y.Z` release has `Curio-universal.dmg` attached (it backs `releases/latest/download/Curio-universal.dmg`).
+- [ ] Publish the draft, then `brew update && brew install --cask alexnodeland/tap/curio` installs it on a clean machine.
 - [ ] `docs/release/runbook.md` steps all completed.
 
 ## Acceptance (Phase 4 gate)

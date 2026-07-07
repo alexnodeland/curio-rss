@@ -76,8 +76,8 @@ The desktop app ships for macOS. Via Homebrew:
 brew install --cask alexnodeland/tap/curio
 ```
 
-or download `Curio-arm64.dmg` (Apple silicon) / `Curio-x64.dmg` (Intel) from
-the [latest release](https://github.com/alexnodeland/curio-rss/releases/latest).
+or download the universal `Curio-universal.dmg` (Apple silicon **and** Intel)
+from the [latest release](https://github.com/alexnodeland/curio-rss/releases/latest).
 
 Curio is **not signed or notarized** (Apple Developer enrollment is
 deliberately skipped — see [docs/design/decisions.md](docs/design/decisions.md)),

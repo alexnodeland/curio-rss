@@ -1,10 +1,12 @@
-# Release workflow — pushing a `vX.Y.Z` tag builds the unsigned macOS bundles
-# and publishes a DRAFT GitHub release with the two DMGs under the stable
-# names the Homebrew cask expects (Curio-arm64.dmg / Curio-x64.dmg, which back
-# `releases/latest/download/Curio-<arch>.dmg`). The release is a DRAFT on
-# purpose: nothing is public — and `brew` sees nothing — until a human reviews
-# it and clicks Publish. macOS is the shipped channel (unsigned, per
-# docs/design/decisions.md); Linux/Windows stay informational via nightly.
+# Release workflow — pushing a `vX.Y.Z` tag builds the unsigned macOS
+# **universal** bundle (arm64 + x64 in one binary) on a single Apple-silicon
+# runner, and publishes a DRAFT GitHub release with the DMG under the stable
+# name the Homebrew cask expects (Curio-universal.dmg, which backs
+# `releases/latest/download/Curio-universal.dmg`). A universal build avoids
+# the scarce Intel (`macos-13`) runner queue entirely and matches the tap's
+# other casks. The release is a DRAFT on purpose: nothing is public — and
+# `brew` sees nothing — until a human reviews it and clicks Publish. macOS is
+# the shipped channel, unsigned (docs/design/decisions.md).
 name: release
 
 on:
@@ -19,19 +21,15 @@ env:
 
 jobs:
   build:
-    name: build macOS (${{ matrix.cask_arch }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - { os: macos-14, cask_arch: arm64, tauri_arch: aarch64 }
-          - { os: macos-13, cask_arch: x64, tauri_arch: x64 }
+    name: build macOS (universal)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
@@ -43,23 +41,24 @@ jobs:
       - name: Install frontend deps
         working-directory: apps/desktop
         run: npm ci
-      - name: Build the unsigned bundle
+      - name: Build the unsigned universal bundle
         working-directory: apps/desktop
         # No signing env — unsigned by decision (see nightly.yml / decisions.md).
-        run: npm run tauri build
+        # Universal lipo of arm64 + x64 on the arm64 runner.
+        run: npm run tauri build -- --target universal-apple-darwin
       - name: Rename the DMG to the cask's stable name
-        # tauri emits Curio_<version>_<tauri_arch>.dmg; the cask URL resolves
-        # Curio-<cask_arch>.dmg. Rename so a routine release needs no cask edit.
+        # tauri emits Curio_<version>_universal.dmg under the target-specific
+        # bundle dir; the cask URL resolves Curio-universal.dmg.
         run: |
           set -euo pipefail
-          src=$(ls target/release/bundle/dmg/Curio_*_${{ matrix.tauri_arch }}.dmg)
-          cp "$src" "Curio-${{ matrix.cask_arch }}.dmg"
-          shasum -a 256 "Curio-${{ matrix.cask_arch }}.dmg"
+          src=$(ls target/universal-apple-darwin/release/bundle/dmg/Curio_*_universal.dmg)
+          cp "$src" "Curio-universal.dmg"
+          shasum -a 256 "Curio-universal.dmg"
       - name: Upload the DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dmg-${{ matrix.cask_arch }}
-          path: Curio-${{ matrix.cask_arch }}.dmg
+          name: dmg-universal
+          path: Curio-universal.dmg
           if-no-files-found: error
 
   release:
@@ -68,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Collect the DMGs
+      - name: Collect the DMG
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -99,6 +98,4 @@ jobs:
           name: Curio ${{ github.ref_name }}
           body_path: NOTES.md
           fail_on_unmatched_files: true
-          files: |
-            dist/Curio-arm64.dmg
-            dist/Curio-x64.dmg
+          files: dist/Curio-universal.dmg

@@ -77,6 +77,15 @@ function toDto(filters: ArticleFilters, before: number | null, limit: number): L
 }
 
 /**
+ * A limit-1 `list_articles` request for the next unread article in a scope
+ * strictly below `before` — the backend-owned query behind next-unread
+ * navigation. Forces `read: false` over whatever the scope's read filter was.
+ */
+export function unreadScopeDto(filters: ArticleFilters, before: number | null): ListArticlesDto {
+    return toDto({ ...filters, read: false }, before, 1);
+}
+
+/**
  * One filter combination's loaded window: a query-cache entry whose data is
  * the concatenated pages, plus the cursor bookkeeping around it.
  */

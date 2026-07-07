@@ -4,8 +4,10 @@
  * verbatim, internal generic), view selection swaps the backend filter
  * set, and unwired registry ids are deliberate no-ops.
  */
+import type { ListArticlesDto } from '$lib/bindings';
 import {
     activeView,
+    goToNextUnread,
     handleShortcut,
     openInBrowser,
     selectFolder,
@@ -14,6 +16,7 @@ import {
     toggleStar,
 } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
@@ -22,10 +25,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     type IpcHarness,
     articleStateFixture,
+    articleSummaryFixture,
     commandErrorFixture,
+    feedFixture,
+    flushIpc,
     installIpcHarness,
     refreshOutcomeFixture,
     rejectWith,
+    unreadCountsFixture,
 } from './ipc-harness';
 
 describe('actions — toggles', () => {
@@ -98,8 +105,44 @@ describe('actions — views and shortcut routing', () => {
         selectionStore.reset();
         uiStore.reset();
         searchStore.reset();
+        feedsStore.reset();
         harness?.teardown();
         harness = null;
+    });
+
+    it('goToNextUnread selects the next unread and enters unread-only', async () => {
+        harness = installIpcHarness({ list_articles: [articleSummaryFixture({ id: 42 })] });
+        selectionStore.selectedArticleId = 100;
+        await goToNextUnread();
+
+        expect(selectionStore.selectedArticleId).toBe(42);
+        expect(articlesStore.filters.read).toBe(false);
+        const sent = harness.callsFor('list_articles')[0].params as ListArticlesDto;
+        expect(sent.read).toBe(false);
+        expect(sent.before).toBe(100);
+        expect(sent.limit).toBe(1);
+    });
+
+    it('goToNextUnread hops to the next feed with unread when the scope is dry', async () => {
+        harness = installIpcHarness({
+            list_feeds: [
+                feedFixture({ id: 1, title: 'A' }),
+                feedFixture({ id: 2, title: 'B', url: 'https://b.example/feed' }),
+            ],
+            get_unread_counts: unreadCountsFixture({ total: 3, by_feed: [[2, 3]] }),
+            list_articles: (args) => {
+                const params = args.params as ListArticlesDto;
+                return params.feed_id === 2 ? [articleSummaryFixture({ id: 99 })] : [];
+            },
+        });
+        feedsStore.prime();
+        await flushIpc();
+
+        await goToNextUnread();
+        expect(selectionStore.selectedFeedId).toBe(2);
+        expect(articlesStore.filters.feedId).toBe(2);
+        expect(articlesStore.filters.read).toBe(false);
+        expect(selectionStore.selectedArticleId).toBe(99);
     });
 
     it('selectView swaps the backend filter set and clears selection', () => {

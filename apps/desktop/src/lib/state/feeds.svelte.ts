@@ -78,6 +78,24 @@ export class FeedsStore {
         return pair?.[1] ?? 0;
     }
 
+    /**
+     * The next feed (in sidebar order, wrapping) after `afterFeedId` that has
+     * unread articles — the cross-feed hop for next-unread triage. Never
+     * returns `afterFeedId` itself; `null` if no other feed has unread.
+     */
+    nextFeedWithUnread(afterFeedId: number | null): number | null {
+        const feeds = this.feeds;
+        const start =
+            afterFeedId === null ? -1 : feeds.findIndex((feed) => feed.id === afterFeedId);
+        for (let step = 1; step <= feeds.length; step += 1) {
+            const feed = feeds[(((start + step) % feeds.length) + feeds.length) % feeds.length];
+            if (feed.id !== afterFeedId && this.unreadFor(feed.id) > 0) {
+                return feed.id;
+            }
+        }
+        return null;
+    }
+
     /** Whether a sidebar folder is collapsed (expanded by default). */
     isFolderCollapsed(path: string): boolean {
         return this.#collapsedFolders.has(path);

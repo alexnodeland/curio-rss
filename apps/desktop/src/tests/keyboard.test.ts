@@ -18,6 +18,7 @@ describe('shortcut table', () => {
         const expected: Record<ShortcutId, readonly string[]> = {
             'nav.nextArticle': ['j'],
             'nav.previousArticle': ['k'],
+            'nav.nextUnread': ['n'],
             'article.open': ['o'],
             'article.toggleStar': ['s'],
             'article.toggleReadLater': ['l'],

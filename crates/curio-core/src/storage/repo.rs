@@ -87,7 +87,7 @@ const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modif
 
 const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url, author, \
                             published_at, content_html, content_text, lang, word_count, \
-                            saved_at, source_updated_at";
+                            saved_at, source_updated_at, lead_image";
 
 impl Storage {
     // ------------------------------------------------------------ feeds
@@ -392,8 +392,8 @@ impl Storage {
                     tx.prepare_cached(
                         "UPDATE articles SET title = ?2, source_url = ?3, author = ?4, \
                          published_at = ?5, content_html = ?6, content_text = ?7, lang = ?8, \
-                         word_count = ?9, source_updated_at = ?10, modified_at = ?11 \
-                         WHERE id = ?1",
+                         word_count = ?9, lead_image = ?10, source_updated_at = ?11, \
+                         modified_at = ?12 WHERE id = ?1",
                     )?
                     .execute((
                         id,
@@ -405,6 +405,7 @@ impl Storage {
                         &article.content.text,
                         &article.lang,
                         article.word_count,
+                        &article.lead_image,
                         article.source_updated_at.map(|t| t.to_string()),
                         &now,
                     ))?;
@@ -413,8 +414,9 @@ impl Storage {
                     tx.prepare_cached(
                         "INSERT INTO articles (curio_id, feed_id, dedupe_key, title, \
                          source_url, author, published_at, content_html, content_text, lang, \
-                         word_count, saved_at, source_updated_at, modified_at) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                         word_count, lead_image, saved_at, source_updated_at, modified_at) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
+                         ?15)",
                     )?
                     .execute((
                         CurioId::new().to_string(),
@@ -428,6 +430,7 @@ impl Storage {
                         &article.content.text,
                         &article.lang,
                         article.word_count,
+                        &article.lead_image,
                         &now,
                         article.source_updated_at.map(|t| t.to_string()),
                         &now,
@@ -1323,6 +1326,7 @@ struct RawArticle {
     word_count: Option<u32>,
     saved_at: String,
     source_updated_at: Option<String>,
+    lead_image: Option<String>,
 }
 
 fn raw_article(row: &Row<'_>) -> rusqlite::Result<RawArticle> {
@@ -1341,6 +1345,7 @@ fn raw_article(row: &Row<'_>) -> rusqlite::Result<RawArticle> {
         word_count: row.get(11)?,
         saved_at: row.get(12)?,
         source_updated_at: row.get(13)?,
+        lead_image: row.get(14)?,
     })
 }
 
@@ -1363,6 +1368,7 @@ impl RawArticle {
             word_count: self.word_count,
             saved_at: parse_ts("articles.saved_at", &self.saved_at)?,
             source_updated_at: parse_opt_ts("articles.source_updated_at", self.source_updated_at)?,
+            lead_image: self.lead_image,
         })
     }
 }
@@ -1397,7 +1403,7 @@ mod tests {
     fn article_cols_prefixed_prefixes_every_column() {
         let cols = article_cols_prefixed("a");
         assert!(cols.starts_with("a.id, a.curio_id"));
-        assert!(cols.ends_with("a.source_updated_at"));
+        assert!(cols.ends_with("a.lead_image"));
         assert!(!cols.contains(" ,"));
     }
 

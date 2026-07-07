@@ -183,6 +183,10 @@ pub struct ArticleSummaryDto {
     pub word_count: Option<u32>,
     /// BCP-47 language guess.
     pub lang: Option<String>,
+    /// Lead image URL (feed-declared or the body's first `<img>`), if any.
+    /// An absolute `http(s)` URL the frontend loads through the policed
+    /// image cache — never fetched directly.
+    pub image: Option<String>,
 }
 
 impl From<Article> for ArticleSummaryDto {
@@ -197,6 +201,7 @@ impl From<Article> for ArticleSummaryDto {
             saved_at: article.saved_at.to_string(),
             word_count: article.word_count,
             lang: article.lang,
+            image: article.lead_image,
         }
     }
 }

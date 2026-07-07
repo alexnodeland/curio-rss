@@ -115,6 +115,7 @@ function mk(
     state: Partial<ArticleStateDto> = {},
     tags: string[] = [],
     sourceUrl = 'https://example.com/post',
+    image: string | null = null,
 ): PreviewArticle {
     const summary: ArticleSummaryDto = {
         id,
@@ -126,6 +127,7 @@ function mk(
         saved_at: published,
         word_count: words,
         lang: 'en',
+        image,
     };
     return {
         summary,
@@ -160,6 +162,9 @@ function yt(
         state,
         ['video'],
         `https://www.youtube.com/watch?v=${videoId}`,
+        // YouTube RSS declares a media:thumbnail; ingest would populate this,
+        // so list rows show the still just like the home grid does.
+        `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
     );
 }
 
@@ -185,6 +190,7 @@ function rd(
         state,
         ['reddit'],
         permalink,
+        image,
     );
 }
 
@@ -211,6 +217,8 @@ export const previewArticles: PreviewArticle[] = [
 <p>None of this is new advice. What is new is that the framework finally makes the good path the <em>default</em> path.</p>`,
         { starred: true },
         ['react', 'architecture'],
+        'https://example.com/post',
+        'https://picsum.photos/seed/tworeacts/400/400',
     ),
     mk(
         102,
@@ -254,6 +262,7 @@ export const previewArticles: PreviewArticle[] = [
         {},
         ['identification'],
         'https://www.reddit.com/r/typography/comments/abc123/what_typeface/',
+        'https://picsum.photos/seed/lisbon/900/600',
     ),
     mk(
         105,
@@ -284,6 +293,8 @@ export const previewArticles: PreviewArticle[] = [
 <p>And yet the finished thing feels different in the hand. You cannot fake it. The care is legible even when the details are not.</p>`,
         {},
         ['essays', 'craft'],
+        'https://example.com/post',
+        'https://picsum.photos/seed/nakasendo/400/400',
     ),
     mk(
         107,
@@ -358,6 +369,7 @@ export const previewArticles: PreviewArticle[] = [
         'u/ligature_life',
         '2026-07-04T11:00:00.000Z',
         { starred: true },
+        'https://picsum.photos/seed/pairing/900/560',
     ),
     rd(
         119,
@@ -371,6 +383,8 @@ export const previewArticles: PreviewArticle[] = [
         'Identified: the mystery serif from last week was Freight Text',
         'u/type_nerd',
         '2026-07-02T09:00:00.000Z',
+        {},
+        'https://picsum.photos/seed/freight/900/600',
     ),
 ];
 

@@ -323,6 +323,12 @@ export type ArticleSummaryDto = {
 	word_count: number | null,
 	/**  BCP-47 language guess. */
 	lang: string | null,
+	/**
+	 *  Lead image URL (feed-declared or the body's first `<img>`), if any.
+	 *  An absolute `http(s)` URL the frontend loads through the policed
+	 *  image cache — never fetched directly.
+	 */
+	image: string | null,
 };
 
 /**

@@ -1,30 +1,38 @@
 <script lang="ts">
 /**
- * A video poster background: the real YouTube still (fetched through the
- * policed image cache → `asset:`) when the remote-media prefetch setting is
- * on and it resolves, otherwise a deterministic id-derived gradient. Fills
- * its positioned parent; overlays (play button, scrim) are the parent's.
- * Never makes an unmediated `https:` request — the cache is the only path.
+ * A video poster background: the real still (fetched through the policed
+ * image cache → `asset:`) when the remote-media prefetch setting is on and
+ * it resolves, otherwise a deterministic id-derived gradient. The still is
+ * the YouTube thumbnail when a video id is known, else the feed's own
+ * declared image (`fallbackImage`) — so a video card without a parseable id
+ * still shows real RSS imagery. Fills its positioned parent; overlays (play
+ * button, scrim) are the parent's. Never makes an unmediated `https:`
+ * request — the cache is the only path.
  */
 import { posterHue, youTubeThumbnailUrl } from '$lib/reader/view-mode';
 import { uiStore } from '$lib/state/ui.svelte';
 import { loadCachedImage } from '$lib/utils/images';
 
-let { videoId, seed }: { videoId: string | null; seed: string } = $props();
+let {
+    videoId,
+    seed,
+    fallbackImage = null,
+}: { videoId: string | null; seed: string; fallbackImage?: string | null } = $props();
 
 const hue = $derived(posterHue(videoId ?? seed));
+const stillUrl = $derived(videoId !== null ? youTubeThumbnailUrl(videoId) : fallbackImage);
 
 let thumb: string | null = $state(null);
 
 $effect(() => {
-    const id = videoId;
+    const url = stillUrl;
     const on = uiStore.mediaPrefetch;
     thumb = null;
-    if (!on || id === null) {
+    if (!on || url === null) {
         return;
     }
     let cancelled = false;
-    void loadCachedImage(youTubeThumbnailUrl(id)).then((result) => {
+    void loadCachedImage(url).then((result) => {
         if (!cancelled && result.status === 'ok') {
             thumb = result.data;
         }

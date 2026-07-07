@@ -357,6 +357,7 @@ fn seed_article(storage: &Storage) -> curio_core::model::ArticleId {
             lang: None,
             word_count: None,
             source_updated_at: None,
+            lead_image: None,
         }])
         .unwrap();
     storage.list_articles(ListArticles::default()).unwrap()[0].id

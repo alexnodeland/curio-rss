@@ -108,6 +108,7 @@ pub(crate) mod testutil {
                 lang: None,
                 word_count: Some(1),
                 source_updated_at: Some(Timestamp::now()),
+                lead_image: None,
             }])
             .unwrap();
         assert_eq!(outcome.inserted, 1);

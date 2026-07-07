@@ -22,8 +22,10 @@ let {
     nearEndMargin = 10,
     fallbackViewportHeight = 600,
     label,
+    activeDescendantId,
     onnearend,
     onscrollpast,
+    onmove,
     row,
 }: {
     items: readonly T[];
@@ -34,6 +36,9 @@ let {
     nearEndMargin?: number;
     fallbackViewportHeight?: number;
     label: string;
+    /** The `id` of the active option — mirrored into `aria-activedescendant`
+     *  so a screen reader tracks selection while focus stays on the listbox. */
+    activeDescendantId?: string;
     onnearend?: () => void;
     /**
      * The count of rows that have fully scrolled up past the viewport top —
@@ -42,8 +47,33 @@ let {
      * (mark-on-scroll uses it to mark those rows read).
      */
     onscrollpast?: (firstVisibleIndex: number) => void;
+    /**
+     * A listbox navigation key was pressed while the list held focus. The
+     * owner moves selection (the same move `j`/`k` make); the listbox itself
+     * stays selection-agnostic.
+     */
+    onmove?: (to: 'next' | 'previous' | 'first' | 'last') => void;
     row: Snippet<[T, number]>;
 } = $props();
+
+/** Maps the roving-navigation keys to a move; other keys fall through. */
+const MOVE_KEYS: Record<string, 'next' | 'previous' | 'first' | 'last'> = {
+    ArrowDown: 'next',
+    ArrowUp: 'previous',
+    Home: 'first',
+    End: 'last',
+};
+
+function onKeydown(event: KeyboardEvent): void {
+    const move = MOVE_KEYS[event.key];
+    if (move === undefined || onmove === undefined) {
+        return;
+    }
+    // We do our own selection move + scroll-into-view; suppress the
+    // listbox's native line-scroll so the two don't fight.
+    event.preventDefault();
+    onmove(move);
+}
 
 let viewport: HTMLDivElement | undefined = $state();
 let measuredHeight = $state(0);
@@ -99,10 +129,12 @@ $effect(() => {
     class="virtual-list"
     role="listbox"
     aria-label={label}
+    aria-activedescendant={activeDescendantId}
     tabindex="0"
     bind:this={viewport}
     bind:clientHeight={measuredHeight}
     onscroll={onScroll}
+    onkeydown={onKeydown}
 >
     <div class="virtual-spacer" role="presentation" style:height="{items.length * rowHeight}px">
         <div

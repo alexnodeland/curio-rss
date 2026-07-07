@@ -1,3 +1,14 @@
+<script lang="ts" module>
+/**
+ * The DOM id of the row for one article — the listbox points at it through
+ * `aria-activedescendant`, so the id scheme lives here next to the row it
+ * names (ArticleList and VirtualList reference the same helper).
+ */
+export function articleOptionId(articleId: number): string {
+    return `article-option-${articleId}`;
+}
+</script>
+
 <script lang="ts">
 /**
  * One virtualized list row. Summaries carry no state flags by design (list
@@ -58,6 +69,7 @@ function onKeyDown(event: KeyboardEvent): void {
 </script>
 
 <div
+    id={articleOptionId(article.id)}
     class="article-row"
     class:selected
     class:unread={flags()?.read === false}

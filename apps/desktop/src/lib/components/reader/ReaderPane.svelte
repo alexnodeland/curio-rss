@@ -156,6 +156,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class="tool"
                     class:on={flags()?.read === true}
                     aria-pressed={flags()?.read === true}
+                    aria-label={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
                     title={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
                     onclick={() => void toggleRead(current.id)}
                 >
@@ -165,6 +166,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class="tool"
                     class:on={flags()?.starred === true}
                     aria-pressed={flags()?.starred === true}
+                    aria-label={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
                     title={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
                     onclick={() => void toggleStar(current.id)}
                 >
@@ -174,6 +176,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class="tool"
                     class:on={flags()?.read_later === true}
                     aria-pressed={flags()?.read_later === true}
+                    aria-label={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
                     title={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
                     onclick={() => void toggleReadLater(current.id)}
                 >
@@ -183,13 +186,19 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class="tool"
                     class:on={flags()?.archived === true}
                     aria-pressed={flags()?.archived === true}
+                    aria-label={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
                     title={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
                     onclick={() => void toggleArchived(current.id)}
                 >
                     <Icon name="archive" />
                 </button>
                 <span class="toolbar-spring"></span>
-                <button class="tool" title={t('reader.action.promote')} onclick={() => void promoteSelected()}>
+                <button
+                    class="tool"
+                    aria-label={t('reader.action.promote')}
+                    title={t('reader.action.promote')}
+                    onclick={() => void promoteSelected()}
+                >
                     <Icon name="save" />
                 </button>
                 <div class="typography-anchor">
@@ -198,6 +207,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         class:on={showTypography}
                         aria-haspopup="dialog"
                         aria-expanded={showTypography}
+                        aria-label={t('reader.action.typography')}
                         title={t('reader.action.typography')}
                         onclick={() => {
                             showTypography = !showTypography;
@@ -206,7 +216,17 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         <Icon name="type" />
                     </button>
                     {#if showTypography}
-                        <div class="typography-popover">
+                        <div
+                            class="typography-popover"
+                            role="dialog"
+                            aria-label={t('reader.action.typography')}
+                            tabindex="-1"
+                            onkeydown={(event) => {
+                                if (event.key === 'Escape') {
+                                    showTypography = false;
+                                }
+                            }}
+                        >
                             <TypographyControls />
                         </div>
                     {/if}

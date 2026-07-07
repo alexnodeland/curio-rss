@@ -20,6 +20,9 @@ export const SETTING_KEYS = {
     listWidth: 'ui.panes.list-width',
     promoteDestination: 'ui.promote.destination',
     faviconAllowRemote: 'ui.favicon.allow-remote',
+    homeYoutube: 'ui.home.youtube',
+    homeReddit: 'ui.home.reddit',
+    mediaPrefetch: 'ui.media.prefetch',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

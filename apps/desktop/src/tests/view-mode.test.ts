@@ -4,9 +4,12 @@
  */
 import {
     detectViewMode,
+    feedHomeType,
     parseRedditPost,
+    posterHue,
     stripRedditFooter,
     subredditOf,
+    youTubeThumbnailUrl,
     youTubeVideoId,
 } from '$lib/reader/view-mode';
 import { describe, expect, it } from 'vitest';
@@ -126,5 +129,32 @@ describe('stripRedditFooter', () => {
     it('leaves a body with no footer untouched', () => {
         const html = '<p>just a body</p>';
         expect(stripRedditFooter(html)).toContain('just a body');
+    });
+});
+
+describe('feedHomeType', () => {
+    it('maps YouTube/Reddit feeds to a home type and others to null', () => {
+        expect(feedHomeType('https://youtube.com/@Fireship/videos.rss')).toBe('youtube');
+        expect(feedHomeType('https://reddit.com/r/typography/.rss')).toBe('reddit');
+        expect(feedHomeType('https://overreacted.io/rss.xml')).toBeNull();
+        expect(feedHomeType(null)).toBeNull();
+    });
+});
+
+describe('posterHue', () => {
+    it('is deterministic and in range', () => {
+        const a = posterHue('dQw4w9WgXcQ');
+        expect(a).toBe(posterHue('dQw4w9WgXcQ'));
+        expect(a).toBeGreaterThanOrEqual(0);
+        expect(a).toBeLessThan(360);
+        expect(posterHue('other')).not.toBe(a);
+    });
+});
+
+describe('youTubeThumbnailUrl', () => {
+    it('builds the hqdefault still URL', () => {
+        expect(youTubeThumbnailUrl('dQw4w9WgXcQ')).toBe(
+            'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+        );
     });
 });

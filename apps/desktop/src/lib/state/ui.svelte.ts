@@ -124,6 +124,14 @@ export class UiStore {
     sidebarWidth: number = $state(280);
     listWidth: number = $state(360);
 
+    /**
+     * Per-feed-type list layout: when a YouTube- or Reddit-typed feed is
+     * selected, the middle pane can render its "home page" (a video grid /
+     * a post feed) instead of the compact rows. Remembered per type.
+     */
+    homeYoutube: boolean = $state(false);
+    homeReddit: boolean = $state(false);
+
     activeModal: ModalKind | null = $state(null);
 
     /** The feed the feed-health panel is bound to while it is open. */
@@ -135,6 +143,14 @@ export class UiStore {
      * tells Google which sites you preview (see PRIVACY.md).
      */
     allowRemoteFavicon: boolean = $state(false);
+
+    /**
+     * Load remote media (YouTube thumbnails, images embedded in posts)
+     * through the policed image cache. Off by default — privacy-first, no
+     * network until asked; on, real thumbnails replace the gradient posters
+     * and inline post images resolve via the `asset:` cache.
+     */
+    mediaPrefetch: boolean = $state(false);
 
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
@@ -186,6 +202,24 @@ export class UiStore {
         }
         this.sidebarWidth = readWidth(SETTING_KEYS.sidebarWidth, PANE_LIMITS.sidebar, 280);
         this.listWidth = readWidth(SETTING_KEYS.listWidth, PANE_LIMITS.list, 360);
+        this.homeYoutube = settingsStore.get(SETTING_KEYS.homeYoutube) === 'true';
+        this.homeReddit = settingsStore.get(SETTING_KEYS.homeReddit) === 'true';
+    }
+
+    /** Whether the "home" layout is on for a feed type. */
+    isHomeLayout(type: 'youtube' | 'reddit'): boolean {
+        return type === 'youtube' ? this.homeYoutube : this.homeReddit;
+    }
+
+    /** Toggle/set the "home" layout for a feed type, persisted. */
+    async setHomeLayout(type: 'youtube' | 'reddit', on: boolean): Promise<void> {
+        if (type === 'youtube') {
+            this.homeYoutube = on;
+            await settingsStore.set(SETTING_KEYS.homeYoutube, String(on));
+        } else {
+            this.homeReddit = on;
+            await settingsStore.set(SETTING_KEYS.homeReddit, String(on));
+        }
     }
 
     /**
@@ -218,12 +252,19 @@ export class UiStore {
     /** Adopts persisted reading prefs at startup (after `settingsStore.load()`). */
     initReading(): void {
         this.allowRemoteFavicon = settingsStore.get(SETTING_KEYS.faviconAllowRemote) === 'true';
+        this.mediaPrefetch = settingsStore.get(SETTING_KEYS.mediaPrefetch) === 'true';
     }
 
     /** Sets (and persists) the Google-favicon-fallback opt-in. */
     async setAllowRemoteFavicon(value: boolean): Promise<void> {
         this.allowRemoteFavicon = value;
         await settingsStore.set(SETTING_KEYS.faviconAllowRemote, String(value));
+    }
+
+    /** Sets (and persists) the remote-media prefetch opt-in. */
+    async setMediaPrefetch(value: boolean): Promise<void> {
+        this.mediaPrefetch = value;
+        await settingsStore.set(SETTING_KEYS.mediaPrefetch, String(value));
     }
 
     /** Sets the reader font size (px), clamped, and persists it. */

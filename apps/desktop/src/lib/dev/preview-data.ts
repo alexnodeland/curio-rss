@@ -141,6 +141,53 @@ function mk(
     };
 }
 
+/** A Fireship (feed 4) YouTube item — for the home-grid preview. */
+function yt(
+    id: number,
+    title: string,
+    published: string,
+    videoId: string,
+    state: Partial<ArticleStateDto> = {},
+): PreviewArticle {
+    return mk(
+        id,
+        4,
+        title,
+        'Fireship',
+        published,
+        120,
+        `<p>${title} — a high-intensity code tutorial. Ownership, borrowing, and why everyone is talking about it, in about 100 seconds.</p>`,
+        state,
+        ['video'],
+        `https://www.youtube.com/watch?v=${videoId}`,
+    );
+}
+
+/** An r/typography (feed 3) Reddit item — for the home-feed preview. */
+function rd(
+    id: number,
+    title: string,
+    redditor: string,
+    published: string,
+    state: Partial<ArticleStateDto> = {},
+    image: string | null = null,
+): PreviewArticle {
+    const permalink = `https://www.reddit.com/r/typography/comments/${id}/x/`;
+    const figure = image === null ? '' : `<p><img src="${image}" alt="${title}"/></p>\n`;
+    return mk(
+        id,
+        3,
+        title,
+        redditor,
+        published,
+        80,
+        `<p>${title}</p>\n${figure}<table><tr><td> submitted by <a href="https://www.reddit.com/user/${redditor.replace(/^u\//, '')}">${redditor}</a> to <a href="https://www.reddit.com/r/typography/">r/typography</a> <br/> <span><a href="${permalink}">[link]</a></span> <span><a href="${permalink}">[comments]</a></span> </td></tr></table>`,
+        state,
+        ['reddit'],
+        permalink,
+    );
+}
+
 export const previewArticles: PreviewArticle[] = [
     mk(
         101,
@@ -282,6 +329,48 @@ export const previewArticles: PreviewArticle[] = [
         `<p>Two hundred kilometers on foot, one pizza toast at a time. A note on why the small, repeated ritual outlasts the grand gesture.</p>`,
         { starred: true },
         ['walking', 'japan'],
+    ),
+    // More Fireship (YouTube, feed 4) items — populate the home grid. The
+    // video ids are real so the thumbnail (when media prefetch is on) resolves.
+    yt(111, 'TypeScript in 100 Seconds', '2026-07-05T06:00:00.000Z', 'zQnBQ4tB3ZA'),
+    yt(112, 'The Truth about WebAssembly', '2026-07-04T06:00:00.000Z', 'cbB3QEwWMlA', {
+        read: true,
+    }),
+    yt(113, 'SQLite is Taking Over', '2026-07-03T06:00:00.000Z', 'e_oCU9C-lRU'),
+    yt(114, 'CSS Grid in 100 Seconds', '2026-07-02T06:00:00.000Z', 'uuOXPWCh-6o'),
+    yt(115, '10 Rust Concepts Explained', '2026-07-01T06:00:00.000Z', '5C_HPTJg5ek', {
+        read: true,
+    }),
+    yt(116, 'Tauri vs Electron', '2026-06-30T06:00:00.000Z', 'DwYb5thFyGc', { starred: true }),
+    // More r/typography (Reddit, feed 3) items — populate the home feed; one
+    // carries an inline image to exercise the cached body-image path.
+    rd(
+        117,
+        'The kerning on this album cover is driving me insane',
+        'u/leading_lady',
+        '2026-07-05T14:00:00.000Z',
+        {},
+        'https://picsum.photos/seed/kerning/900/506',
+    ),
+    rd(
+        118,
+        'Free variable font pairing resource I made over the weekend',
+        'u/ligature_life',
+        '2026-07-04T11:00:00.000Z',
+        { starred: true },
+    ),
+    rd(
+        119,
+        'Why do so many startups use the same geometric sans?',
+        'u/grotesque_fan',
+        '2026-07-03T20:00:00.000Z',
+        { read: true },
+    ),
+    rd(
+        120,
+        'Identified: the mystery serif from last week was Freight Text',
+        'u/type_nerd',
+        '2026-07-02T09:00:00.000Z',
     ),
 ];
 

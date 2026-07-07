@@ -5,12 +5,30 @@
  * reader reacts to selection regardless of which list is showing.
  */
 import ArticleList from '$components/articles/ArticleList.svelte';
+import RedditFeed from '$components/articles/RedditFeed.svelte';
 import SearchResults from '$components/articles/SearchResults.svelte';
+import YouTubeGrid from '$components/articles/YouTubeGrid.svelte';
 import Icon from '$components/common/Icon.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
 import { t } from '$lib/i18n';
+import { feedHomeType } from '$lib/reader/view-mode';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { searchStore } from '$lib/state/search.svelte';
+import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
+
+// The home layout only applies when a single YouTube/Reddit-typed feed is
+// selected (not "All articles" — a mixed corpus has no one home page).
+const homeType = $derived.by(() => {
+    const feedId = selectionStore.selectedFeedId;
+    if (feedId === null) {
+        return null;
+    }
+    const feed = feedsStore.feeds.find((candidate) => candidate.id === feedId);
+    return feed === undefined ? null : feedHomeType(feed.url);
+});
+
+const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
 </script>
 
 <div class="list-pane">
@@ -18,8 +36,20 @@ import { uiStore } from '$lib/state/ui.svelte';
         <div class="search-slot">
             <SearchBar />
         </div>
+        {#if homeType !== null && !searchStore.active}
+            <button
+                class="list-tool"
+                type="button"
+                aria-pressed={homeOn}
+                title={homeOn ? t('list.view.rows') : t('list.view.home')}
+                aria-label={homeOn ? t('list.view.rows') : t('list.view.home')}
+                onclick={() => void uiStore.setHomeLayout(homeType, !homeOn)}
+            >
+                <Icon name={homeOn ? 'rows' : 'grid'} />
+            </button>
+        {/if}
         <button
-            class="destinations-button"
+            class="list-tool"
             type="button"
             title={t('destinations.open')}
             aria-label={t('destinations.open')}
@@ -30,6 +60,10 @@ import { uiStore } from '$lib/state/ui.svelte';
     </div>
     {#if searchStore.active}
         <SearchResults />
+    {:else if homeOn && homeType === 'youtube'}
+        <YouTubeGrid />
+    {:else if homeOn && homeType === 'reddit'}
+        <RedditFeed />
     {:else}
         <ArticleList />
     {/if}
@@ -60,7 +94,7 @@ import { uiStore } from '$lib/state/ui.svelte';
         min-width: 0;
     }
 
-    .destinations-button {
+    .list-tool {
         flex: 0 0 auto;
         display: inline-grid;
         place-items: center;
@@ -75,8 +109,13 @@ import { uiStore } from '$lib/state/ui.svelte';
             color var(--dur-fast) var(--ease);
     }
 
-    .destinations-button:hover {
+    .list-tool:hover {
         background: var(--hover);
         color: var(--fg);
+    }
+
+    .list-tool[aria-pressed='true'] {
+        background: var(--selected);
+        color: var(--accent);
     }
 </style>

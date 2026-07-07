@@ -26,6 +26,8 @@ export const en = {
     'list.label': 'Articles',
     'list.loading': 'Loading articles…',
     'list.empty': 'No articles here',
+    'list.view.home': 'Home view',
+    'list.view.rows': 'List view',
     'list.row.unread': 'Unread',
     'list.row.starred': 'Starred',
 
@@ -121,6 +123,10 @@ export const en = {
     'settings.title': 'Settings',
     'settings.section.appearance': 'Appearance',
     'settings.section.reading': 'Reading',
+    'settings.section.media': 'Media',
+    'settings.media.prefetch': 'Load remote media',
+    'settings.media.prefetch.hint':
+        'Fetch YouTube thumbnails and images embedded in posts through the local cache. Off by default — nothing loads from the network until you turn this on.',
     'settings.section.destinations': 'Destinations',
     'settings.section.data': 'Data',
     'settings.section.diagnostics': 'Diagnostics',

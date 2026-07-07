@@ -50,10 +50,51 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 
 <script lang="ts">
 import { openExternal } from '$lib/utils/external';
+import { uiStore } from '$lib/state/ui.svelte';
+import { loadCachedImage } from '$lib/utils/images';
 
 let { html }: { html: string } = $props();
 
 const clean = $derived(DOMPurify.sanitize(html, SANITIZE_CONFIG));
+
+let contentEl: HTMLElement | undefined = $state();
+
+/**
+ * Remote body images (`http(s)`) never load unmediated — the CSP `img-src`
+ * forbids `https:`. When the media-prefetch setting is on we resolve each
+ * through the policed cache (→ `asset:`) and swap the src; when off, the src
+ * is cleared so nothing hits the network. `data:image/*` (inline) is left
+ * alone — it needs no fetch and the CSP already allows it.
+ */
+$effect(() => {
+    void clean; // re-run when the sanitized body changes
+    const on = uiStore.mediaPrefetch;
+    const root = contentEl;
+    if (root === undefined) {
+        return;
+    }
+    let cancelled = false;
+    for (const img of root.querySelectorAll('img')) {
+        const original = img.dataset.origSrc ?? img.getAttribute('src') ?? '';
+        img.dataset.origSrc = original;
+        if (!/^https?:\/\//i.test(original)) {
+            continue; // data: / already-local — leave as-is
+        }
+        img.removeAttribute('src');
+        img.toggleAttribute('data-media-off', !on);
+        if (on) {
+            void loadCachedImage(original).then((result) => {
+                if (!cancelled && result.status === 'ok') {
+                    img.setAttribute('src', result.data);
+                    img.removeAttribute('data-media-off');
+                }
+            });
+        }
+    }
+    return () => {
+        cancelled = true;
+    };
+});
 
 /** Delegates anchor clicks to the OS browser; the webview never navigates. */
 function interceptLinks(node: HTMLElement): { destroy(): void } {
@@ -82,7 +123,7 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
 </script>
 
 <!-- eslint-disable-next-line svelte/no-at-html-tags -- the ONE sanctioned {@html} site: DOMPurify-wrapped, grep-gated (scripts/check-frontend-bans.sh) -->
-<div class="sanitized-content" use:interceptLinks>{@html clean}</div>
+<div class="sanitized-content" bind:this={contentEl} use:interceptLinks>{@html clean}</div>
 
 <style>
     /* Editorial reading rhythm. The article sets the font-family / size /
@@ -141,6 +182,12 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
         height: auto;
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-md);
+    }
+
+    /* Remote images with prefetch off never load — collapse them cleanly
+       (no broken glyph) rather than leave a gap. */
+    .sanitized-content :global(img[data-media-off]) {
+        display: none;
     }
 
     .sanitized-content :global(figcaption) {

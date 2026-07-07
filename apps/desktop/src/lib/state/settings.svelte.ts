@@ -23,6 +23,7 @@ export const SETTING_KEYS = {
     homeYoutube: 'ui.home.youtube',
     homeReddit: 'ui.home.reddit',
     mediaPrefetch: 'ui.media.prefetch',
+    markOnScroll: 'ui.reading.mark-on-scroll',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

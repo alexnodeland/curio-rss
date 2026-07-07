@@ -11,9 +11,11 @@ export const ROW_HEIGHT = 84;
  * page). Selection lives in `selectionStore`; the reader reacts to it.
  */
 import { t } from '$lib/i18n';
+import { markReadOnScroll } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
+import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { untrack } from 'svelte';
 import ArticleRow from './ArticleRow.svelte';
@@ -35,6 +37,38 @@ const listError = $derived(list.error === null ? '' : commandErrorMessage(list.e
 function selectArticle(articleId: number): void {
     selectionStore.selectedArticleId = articleId;
 }
+
+/**
+ * Mark-on-scroll high-water: the number of leading rows already marked read
+ * this filter-session. It only advances (scrolling back up never re-marks),
+ * and resets when the filter changes to a fresh list.
+ */
+let markedThrough = 0;
+
+$effect(() => {
+    // Re-key on the list identity: a new filter is a fresh reading session.
+    void list;
+    markedThrough = 0;
+});
+
+/**
+ * When the setting is on, rows that scrolled up past the top mark themselves
+ * read. Only the newly passed rows (past the high-water) are touched, so a
+ * fast scroll costs one mark per row, once.
+ */
+function onScrollPast(firstVisibleIndex: number): void {
+    if (!uiStore.markOnScroll) {
+        return;
+    }
+    const items = list.items;
+    const target = Math.min(firstVisibleIndex, items.length);
+    for (let index = markedThrough; index < target; index++) {
+        void markReadOnScroll(items[index].id);
+    }
+    if (target > markedThrough) {
+        markedThrough = target;
+    }
+}
 </script>
 
 <div class="article-list">
@@ -52,6 +86,7 @@ function selectArticle(articleId: number): void {
             selectedIndex={selectionStore.selectedIndex}
             label={t('list.label')}
             onnearend={() => void list.loadMore()}
+            onscrollpast={onScrollPast}
         >
             {#snippet row(article, index)}
                 <ArticleRow

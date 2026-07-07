@@ -131,6 +131,9 @@ export const en = {
     'settings.title': 'Settings',
     'settings.section.appearance': 'Appearance',
     'settings.section.reading': 'Reading',
+    'settings.markOnScroll': 'Mark read while scrolling',
+    'settings.markOnScroll.hint':
+        'As articles scroll up out of the list, mark them read automatically. Off by default — your unread count only changes when you say so.',
     'settings.section.media': 'Media',
     'settings.media.prefetch': 'Load remote media',
     'settings.media.prefetch.hint':

@@ -93,6 +93,20 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
 }
 
 /**
+ * Mark-on-scroll: a row that scrolled up out of the list marks itself read.
+ * Silent by design — this is a background sweep that can fire once per row,
+ * so a transient failure must never raise a toast. Core no-ops when the row
+ * was already read, so re-scrolling the same rows costs nothing.
+ */
+export async function markReadOnScroll(articleId: number): Promise<void> {
+    try {
+        await commands.markRead(articleId, true);
+    } catch {
+        // A background read-mark that fails is not worth interrupting for.
+    }
+}
+
+/**
  * Fetches the article's source page and replaces its stored content with the
  * readability-extracted full article; the reader + list refetch off the
  * emitted `ArticlesChanged`. Returns whether it succeeded (for a loading UI).

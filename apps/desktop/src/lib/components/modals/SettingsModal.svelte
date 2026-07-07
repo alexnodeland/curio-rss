@@ -27,6 +27,17 @@ let { onclose }: { onclose: () => void } = $props();
     <section class="section" aria-labelledby="settings-reading">
         <h3 id="settings-reading">{t('settings.section.reading')}</h3>
         <TypographyControls />
+        <label class="toggle">
+            <input
+                type="checkbox"
+                checked={uiStore.markOnScroll}
+                onchange={(event) => void uiStore.setMarkOnScroll(event.currentTarget.checked)}
+            />
+            <span class="toggle-text">
+                <span class="toggle-label">{t('settings.markOnScroll')}</span>
+                <span class="toggle-hint">{t('settings.markOnScroll.hint')}</span>
+            </span>
+        </label>
     </section>
 
     <section class="section" aria-labelledby="settings-media">

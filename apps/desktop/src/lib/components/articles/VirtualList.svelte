@@ -23,6 +23,7 @@ let {
     fallbackViewportHeight = 600,
     label,
     onnearend,
+    onscrollpast,
     row,
 }: {
     items: readonly T[];
@@ -34,6 +35,13 @@ let {
     fallbackViewportHeight?: number;
     label: string;
     onnearend?: () => void;
+    /**
+     * The count of rows that have fully scrolled up past the viewport top —
+     * i.e. `items[0..firstVisibleIndex)` are no longer visible above. Fires
+     * whenever that count changes; the owner decides what "passed" means
+     * (mark-on-scroll uses it to mark those rows read).
+     */
+    onscrollpast?: (firstVisibleIndex: number) => void;
     row: Snippet<[T, number]>;
 } = $props();
 
@@ -59,6 +67,12 @@ $effect(() => {
     if (items.length > 0 && end >= items.length - nearEndMargin) {
         onnearend?.();
     }
+});
+
+// Rows whose bottom edge has cleared the viewport top have "scrolled past".
+const firstVisibleIndex = $derived(Math.floor(scrollTop / rowHeight));
+$effect(() => {
+    onscrollpast?.(firstVisibleIndex);
 });
 
 // Scroll-into-view on selection change: scrollTop math, not

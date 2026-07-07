@@ -10,6 +10,8 @@ import { SETTING_KEYS, settingsStore } from '$lib/state/settings.svelte';
 export const LOCALES = [
     { id: 'en', name: 'English' },
     { id: 'es', name: 'Español' },
+    { id: 'zh-Hans', name: '简体中文' },
+    { id: 'yue', name: '廣東話' },
 ] as const;
 
 export type LocaleId = (typeof LOCALES)[number]['id'];

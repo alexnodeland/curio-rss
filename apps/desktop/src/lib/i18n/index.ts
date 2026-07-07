@@ -9,6 +9,8 @@
 import { en } from './en';
 import { es } from './es';
 import { type LocaleId, localeStore } from './locale.svelte';
+import { yue } from './yue';
+import { zhHans } from './zh-Hans';
 
 export { LOCALES, type LocaleId, localeStore } from './locale.svelte';
 
@@ -16,7 +18,12 @@ export { LOCALES, type LocaleId, localeStore } from './locale.svelte';
 export type MessageKey = keyof typeof en;
 
 /** Per-locale catalogs: `en` is complete, the rest are partial (fall back). */
-const CATALOGS: Record<LocaleId, Partial<Record<MessageKey, string>>> = { en, es };
+const CATALOGS: Record<LocaleId, Partial<Record<MessageKey, string>>> = {
+    en,
+    es,
+    'zh-Hans': zhHans,
+    yue,
+};
 
 function interpolate(template: string, params?: Record<string, string | number>): string {
     if (params === undefined) {

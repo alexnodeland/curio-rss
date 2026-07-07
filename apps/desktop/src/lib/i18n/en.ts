@@ -1,8 +1,9 @@
 /**
  * English message catalog — the complete base locale. Every user-visible
  * string routes through `t()`, and every key is typechecked against this
- * object; other locales (see `es.ts`) are partial and fall back here for any
- * key they haven't translated. Placeholders use `{name}` syntax.
+ * object. The other locales (`es.ts`, `zh-Hans.ts`, `yue.ts`) fully cover
+ * this catalog today and fall back here for any key a future addition
+ * hasn't reached yet. Placeholders use `{name}` syntax.
  */
 export const en = {
     'app.title': 'Curio',

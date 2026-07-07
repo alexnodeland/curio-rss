@@ -152,6 +152,13 @@ export class UiStore {
      */
     mediaPrefetch: boolean = $state(false);
 
+    /**
+     * Mark articles read as they scroll up out of the list viewport. Off by
+     * default — reading is deliberate, not incidental; on, the unread count
+     * melts away as you skim past, the way a river reader expects.
+     */
+    markOnScroll: boolean = $state(false);
+
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
     measure: number = $state(TYPOGRAPHY_LIMITS.measure.default);
@@ -253,6 +260,7 @@ export class UiStore {
     initReading(): void {
         this.allowRemoteFavicon = settingsStore.get(SETTING_KEYS.faviconAllowRemote) === 'true';
         this.mediaPrefetch = settingsStore.get(SETTING_KEYS.mediaPrefetch) === 'true';
+        this.markOnScroll = settingsStore.get(SETTING_KEYS.markOnScroll) === 'true';
     }
 
     /** Sets (and persists) the Google-favicon-fallback opt-in. */
@@ -265,6 +273,12 @@ export class UiStore {
     async setMediaPrefetch(value: boolean): Promise<void> {
         this.mediaPrefetch = value;
         await settingsStore.set(SETTING_KEYS.mediaPrefetch, String(value));
+    }
+
+    /** Sets (and persists) the mark-as-read-on-scroll opt-in. */
+    async setMarkOnScroll(value: boolean): Promise<void> {
+        this.markOnScroll = value;
+        await settingsStore.set(SETTING_KEYS.markOnScroll, String(value));
     }
 
     /** Sets the reader font size (px), clamped, and persists it. */
@@ -362,6 +376,8 @@ export class UiStore {
         this.activeModal = null;
         this.healthFeedId = null;
         this.allowRemoteFavicon = false;
+        this.mediaPrefetch = false;
+        this.markOnScroll = false;
         this.themePreference = 'system';
         this.sidebarCollapsed = false;
         this.fontSize = TYPOGRAPHY_LIMITS.fontSize.default;

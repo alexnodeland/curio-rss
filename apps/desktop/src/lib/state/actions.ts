@@ -87,6 +87,19 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
 }
 
 /**
+ * Marks every unread article in a feed (`feedId`) — or the whole library
+ * (`null`) — read, and toasts how many changed. The sidebar badges and the
+ * list refresh off the Rust-emitted `ArticlesChanged`.
+ */
+export async function markAllRead(feedId: number | null): Promise<void> {
+    const changed = await run(() => commands.markAllRead(feedId));
+    if (changed === undefined) {
+        return;
+    }
+    uiStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+}
+
+/**
  * Opens the article's source in the OS browser and records the open.
  * Non-http(s) URLs are refused outright — no open, no `article.opened`.
  */

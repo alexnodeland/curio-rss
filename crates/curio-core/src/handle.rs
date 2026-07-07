@@ -606,6 +606,16 @@ impl CoreHandle {
         Ok(self.storage.mark_read(id, read)?)
     }
 
+    /// Marks every unread article read — one feed (`Some`) or the whole
+    /// library (`None`). Returns how many were changed. DB-local, no event.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn mark_all_read(&self, feed_id: Option<FeedId>) -> Result<u64, CoreError> {
+        Ok(self.storage.mark_all_read(feed_id)?)
+    }
+
     /// Records an open-for-reading; emits `article.opened`.
     ///
     /// # Errors

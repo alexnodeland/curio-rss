@@ -670,6 +670,42 @@ impl Storage {
         })
     }
 
+    /// Marks every currently-unread article read in one statement — a whole
+    /// feed (`Some`) or the entire library (`None`, feedless rows included).
+    /// A set-based upsert: articles with no `article_state` row get one,
+    /// articles with `is_read = 0` are flipped, already-read ones are skipped
+    /// (so the returned count is the number actually changed). DB-local, like
+    /// [`Self::mark_read`] — no event.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn mark_all_read(&self, feed_id: Option<FeedId>) -> Result<u64, StorageError> {
+        const ON_CONFLICT: &str = "ON CONFLICT(article_id) DO UPDATE SET \
+             is_read = 1, updated_at = excluded.updated_at";
+        const UNREAD: &str = "NOT EXISTS (SELECT 1 FROM article_state s \
+             WHERE s.article_id = a.id AND s.is_read = 1)";
+        self.write(move |conn| {
+            let now = Timestamp::now().to_string();
+            let n = match feed_id {
+                Some(fid) => conn
+                    .prepare_cached(&format!(
+                        "INSERT INTO article_state (article_id, is_read, updated_at) \
+                         SELECT a.id, 1, ?2 FROM articles a \
+                         WHERE a.feed_id = ?1 AND {UNREAD} {ON_CONFLICT}"
+                    ))?
+                    .execute((fid.0, &now))?,
+                None => conn
+                    .prepare_cached(&format!(
+                        "INSERT INTO article_state (article_id, is_read, updated_at) \
+                         SELECT a.id, 1, ?1 FROM articles a WHERE {UNREAD} {ON_CONFLICT}"
+                    ))?
+                    .execute([&now])?,
+            };
+            Ok(u64::try_from(n).unwrap_or_default())
+        })
+    }
+
     /// Adds the article to the starred set; stages `article.starred`
     /// (with tags — the tags-in-payload rule). Idempotent: `None` when
     /// already starred, and no event is staged.

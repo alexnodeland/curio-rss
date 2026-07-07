@@ -14,7 +14,7 @@ import {
     commands,
 } from '$lib/bindings';
 import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
-import { selectView, toastCommandError } from '$lib/state/actions';
+import { markAllRead, selectView, toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 
@@ -147,6 +147,9 @@ function whenDate(iso: string): string {
             {:else}
                 <button type="button" onclick={() => void setStatus('active')}>{t('feedHealth.revive')}</button>
             {/if}
+            <button type="button" onclick={() => void markAllRead(feedId)}
+                >{t('feedMarkRead.action')}</button
+            >
         </div>
 
         <section class="tags-edit">

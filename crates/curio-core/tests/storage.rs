@@ -698,6 +698,29 @@ fn unread_counts_group_by_feed_and_follow_read_flips() {
     );
 }
 
+#[test]
+fn mark_all_read_scopes_to_one_feed() {
+    let (_dir, storage) = temp_storage();
+    let feed_a = add_feed(&storage, "https://a.example/feed.xml");
+    let feed_b = add_feed(&storage, "https://b.example/feed.xml");
+    let mut a1 = new_article("a1", "A1", "alpha one");
+    a1.feed_id = Some(feed_a.id);
+    let mut a2 = new_article("a2", "A2", "alpha two");
+    a2.feed_id = Some(feed_a.id);
+    let mut b1 = new_article("b1", "B1", "beta one");
+    b1.feed_id = Some(feed_b.id);
+    storage.upsert_articles(vec![a1, a2, b1]).unwrap();
+
+    // Marking feed A read flips both of its articles; feed B is untouched.
+    assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap(), 2);
+    let counts = storage.unread_counts().unwrap();
+    assert_eq!(counts.get(&Some(feed_a.id)), None, "feed A fully read");
+    assert_eq!(counts.get(&Some(feed_b.id)), Some(&1), "feed B untouched");
+
+    // A second sweep of A changes nothing.
+    assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap(), 0);
+}
+
 // ------------------------------------------------------- state and events
 
 #[test]

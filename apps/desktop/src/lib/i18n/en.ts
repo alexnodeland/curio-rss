@@ -92,6 +92,7 @@ export const en = {
 
     'toast.promote.saved': 'Saved to {name}',
     'toast.promote.unchanged': 'Already up to date in {name}',
+    'toast.markAllRead': 'Marked {count} read',
 
     'help.title': 'Keyboard shortcuts',
     'help.close': 'Close',
@@ -192,6 +193,7 @@ export const en = {
 
     'feedName.label': 'Name',
     'feedName.save': 'Rename',
+    'feedMarkRead.action': 'Mark all read',
 
     'feedTags.label': 'Folders & tags',
     'feedTags.placeholder': 'Tech/Databases, favorites',

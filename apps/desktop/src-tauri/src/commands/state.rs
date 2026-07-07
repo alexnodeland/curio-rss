@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use curio_core::CoreHandle;
-use curio_core::model::ArticleId;
+use curio_core::model::{ArticleId, FeedId};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
@@ -27,6 +27,24 @@ pub async fn mark_read(
     let changed = run_blocking(move || mark_read_impl(&core, article_id, read)).await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    }
+    Ok(changed)
+}
+
+/// Marks every unread article read — one feed (`Some`) or the whole
+/// library (`None`). Returns how many changed; invalidates only if something
+/// did (the `ArticlesChanged` refresh also updates the unread badges).
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_all_read(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    feed_id: Option<i64>,
+) -> Result<u64, CommandError> {
+    let core = Arc::clone(core.inner());
+    let changed = run_blocking(move || mark_all_read_impl(&core, feed_id)).await?;
+    if changed > 0 {
+        emit_or_log(&app, &ArticlesChanged { feed_id });
     }
     Ok(changed)
 }
@@ -102,6 +120,10 @@ fn mark_read_impl(core: &CoreHandle, article_id: i64, read: bool) -> Result<bool
     Ok(core.mark_read(ArticleId(article_id), read)?)
 }
 
+fn mark_all_read_impl(core: &CoreHandle, feed_id: Option<i64>) -> Result<u64, CommandError> {
+    Ok(core.mark_all_read(feed_id.map(FeedId))?)
+}
+
 fn record_opened_impl(
     core: &CoreHandle,
     article_id: i64,
@@ -165,6 +187,26 @@ mod tests {
 
         assert!(set_starred_impl(&core, id, false).unwrap());
         assert!(!article_state_of(&core, id).starred);
+    }
+
+    #[test]
+    fn mark_all_read_flips_every_unread_once() {
+        let (_dir, core) = temp_core();
+        let a = seed_article(&core, "one");
+        let b = seed_article(&core, "two");
+        // `a` is already read; only the still-unread `b` should flip.
+        assert!(mark_read_impl(&core, a, true).unwrap());
+
+        assert_eq!(
+            mark_all_read_impl(&core, None).unwrap(),
+            1,
+            "only the still-unread article is counted"
+        );
+        assert!(article_state_of(&core, a).read);
+        assert!(article_state_of(&core, b).read);
+
+        // Nothing left unread → a second sweep changes nothing.
+        assert_eq!(mark_all_read_impl(&core, None).unwrap(), 0);
     }
 
     #[test]

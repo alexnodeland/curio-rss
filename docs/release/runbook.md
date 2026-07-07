@@ -2,7 +2,7 @@
 
 How a Curio release is cut. Distribution is an **unsigned** macOS Homebrew cask
 (Apple enrollment skipped, Windows deferred — docs/design/decisions.md). Three
-workflows back this: the per-PR gate (`ci.yml`), the merge/nightly tier
+workflows back this: the per-PR gate (`ci.yml`), the nightly/on-demand tier
 (`nightly.yml`: the 3-OS `tauri build` matrix, the Linux/Windows smoke, and the
 cold-start bench), and the tag-triggered `release.yml` (builds the unsigned
 macOS DMGs, renames them to the cask's stable names, and drafts the GitHub

@@ -31,6 +31,7 @@ function harnessFor(status: 'active' | 'paused' | 'dead'): IpcHarness {
             }),
         ],
         set_feed_status: null,
+        remove_feed: null,
     });
 }
 
@@ -77,5 +78,36 @@ describe('FeedHealthPanel', () => {
         await flushIpc();
 
         expect(harness.callsFor('set_feed_status')).toEqual([{ feedId: 1, status: 'active' }]);
+    });
+
+    it('unsubscribes only after a two-step confirm, then closes the panel', async () => {
+        harness = harnessFor('active');
+        const onclose = vi.fn();
+        const { getByText } = render(FeedHealthPanel, { feedId: 1, onclose });
+        await flushIpc();
+
+        // First click only arms the confirm — nothing is removed yet.
+        await fireEvent.click(getByText('Unsubscribe'));
+        expect(harness.callsFor('remove_feed')).toHaveLength(0);
+        expect(onclose).not.toHaveBeenCalled();
+
+        await fireEvent.click(getByText('Remove'));
+        await flushIpc();
+
+        expect(harness.callsFor('remove_feed')).toEqual([{ feedId: 1 }]);
+        expect(onclose).toHaveBeenCalledTimes(1);
+    });
+
+    it('cancel backs out of the confirm without removing', async () => {
+        harness = harnessFor('active');
+        const { getByText, queryByText } = render(FeedHealthPanel, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+
+        await fireEvent.click(getByText('Unsubscribe'));
+        await fireEvent.click(getByText('Cancel'));
+        expect(harness.callsFor('remove_feed')).toHaveLength(0);
+        // Back to the single trigger; the confirm actions are gone.
+        expect(queryByText('Remove')).toBeNull();
+        expect(getByText('Unsubscribe')).toBeTruthy();
     });
 });

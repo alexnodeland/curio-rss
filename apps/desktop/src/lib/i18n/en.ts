@@ -184,6 +184,10 @@ export const en = {
     'feedHealth.fetch.ok': 'OK',
     'feedHealth.fetch.not_modified': 'Not modified',
     'feedHealth.fetch.error': 'Error',
+    'feedHealth.unsubscribe': 'Unsubscribe',
+    'feedHealth.unsubscribe.confirm': 'Remove this subscription? Saved articles are kept.',
+    'feedHealth.unsubscribe.remove': 'Remove',
+    'feedHealth.unsubscribe.cancel': 'Cancel',
 
     'refresh.announce.start': 'Refreshing feeds',
     'refresh.announce.done': 'Refresh complete: {count} new articles across {feeds} feeds',

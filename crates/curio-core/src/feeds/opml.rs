@@ -1,10 +1,13 @@
 //! OPML subscription-list exchange (quick-xml).
 //!
 //! Import walks `<outline>` elements: an outline with an `xmlUrl` is a
-//! feed; an outline without one is a folder, and the folder path becomes
-//! the feed's tags. Export writes a flat OPML 2.0 document carrying tags
-//! in the `category` attribute (comma-separated, per the OPML 2.0 spec),
-//! which import *also* reads — so import → export → import is lossless.
+//! feed; an outline without one is a folder, and the enclosing folder path
+//! collapses into ONE hierarchical tag on the feed (`Tech/Databases`), so
+//! arbitrary nesting survives import as a single `/`-joined tag rather than
+//! a flat bag of sibling names. Export writes a flat OPML 2.0 document
+//! carrying tags in the `category` attribute (comma-separated, per the OPML
+//! 2.0 spec), which import *also* reads — so import → export → import is
+//! lossless (the `/` rides inside a category entry, opaque to OPML).
 
 use std::io::Cursor;
 
@@ -21,8 +24,9 @@ pub struct OpmlFeed {
     pub title: Option<String>,
     /// The feed's website (`htmlUrl`).
     pub html_url: Option<String>,
-    /// Tags: enclosing folder path (outermost first) plus any `category`
-    /// attribute entries, deduplicated in first-seen order.
+    /// Tags: the enclosing folder path as one `/`-joined hierarchical tag
+    /// (outermost first), plus any `category` attribute entries, deduplicated
+    /// in first-seen order.
     pub tags: Vec<String>,
 }
 
@@ -188,9 +192,17 @@ fn read_outline(el: &BytesStart<'_>, folders: &[String]) -> Result<Outline, Opml
                     tags.push(tag.to_owned());
                 }
             };
-            for folder in folders {
-                push(folder);
-            }
+            // The enclosing folder path collapses into ONE hierarchical tag
+            // ("Tech/Databases"): join the non-empty levels outermost-first so
+            // nesting survives as a single `/`-joined tag. Empty levels (a
+            // feed outline that also nests children pushes "") are skipped.
+            let folder_path = folders
+                .iter()
+                .map(|segment| segment.trim())
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>()
+                .join("/");
+            push(&folder_path);
             for tag in category.as_deref().unwrap_or_default().split(',') {
                 push(tag);
             }
@@ -243,15 +255,44 @@ mod tests {
     }
 
     #[test]
-    fn imports_folders_as_tags() {
+    fn imports_nested_folders_as_path_tags() {
         let feeds = import_opml(&fixture("nested.opml")).unwrap();
         assert_eq!(feeds.len(), 4);
         assert_eq!(feeds[0].title.as_deref(), Some("Rust Blog"));
-        assert_eq!(feeds[0].tags, vec!["Tech"]);
+        assert_eq!(
+            feeds[0].tags,
+            vec!["Tech"],
+            "single-level folder → bare tag"
+        );
         assert_eq!(feeds[1].title.as_deref(), Some("SQLite News"));
-        assert_eq!(feeds[1].tags, vec!["Tech", "Databases"]);
+        assert_eq!(
+            feeds[1].tags,
+            vec!["Tech/Databases"],
+            "nesting collapses to one `/`-joined path tag, not a flat bag"
+        );
         assert_eq!(feeds[2].tags, vec!["Cooking"]);
         assert!(feeds[3].tags.is_empty());
+    }
+
+    #[test]
+    fn deep_nesting_joins_every_level_into_one_path_tag() {
+        // Four levels deep — the whole path rides as a single tag, and a
+        // `category` on the leaf is kept as a separate flat tag.
+        let xml = r#"<?xml version="1.0"?>
+<opml version="2.0"><body>
+  <outline text="A">
+    <outline text="B">
+      <outline text="C">
+        <outline text="D">
+          <outline type="rss" text="Deep" xmlUrl="https://deep.example/feed" category="starred"/>
+        </outline>
+      </outline>
+    </outline>
+  </outline>
+</body></opml>"#;
+        let feeds = import_opml(xml).unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].tags, vec!["A/B/C/D", "starred"]);
     }
 
     #[test]

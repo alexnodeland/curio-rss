@@ -7,10 +7,11 @@
 //! source HTML: sanitization happens in [`crate::content`] before
 //! anything reaches storage.
 //!
-//! [`import_opml`] / [`export_opml`] exchange subscription lists;
-//! folder nesting maps onto tags (folder path → tags on import, tags →
-//! the `category` attribute on export, which import also reads — so an
-//! import/export cycle is lossless after one normalization).
+//! [`import_opml`] / [`export_opml`] exchange subscription lists; folder
+//! nesting maps onto tags — the enclosing folder path becomes one
+//! `/`-joined hierarchical tag on import, and tags export as the `category`
+//! attribute (which import also reads), so an import/export cycle is
+//! lossless after one normalization.
 
 mod opml;
 mod parse;

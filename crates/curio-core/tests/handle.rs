@@ -405,8 +405,8 @@ async fn opml_round_trips_through_the_facade() {
     // persisted on the feed row, not only in the one-time feed.added
     // event, so export writes them back as OPML categories.
     assert!(
-        exported.contains(r#"category="Tech,Databases""#),
-        "feed tags must ride the OPML export:\n{exported}"
+        exported.contains(r#"category="Tech/Databases""#),
+        "the nested folder path must ride the OPML export as one path tag:\n{exported}"
     );
     let reimported = crate_reimport(&exported);
     assert_eq!(
@@ -415,7 +415,7 @@ async fn opml_round_trips_through_the_facade() {
             .find(|f| f.xml_url == "https://sqlite.example/news.xml")
             .unwrap()
             .tags,
-        vec!["Tech".to_owned(), "Databases".to_owned()]
+        vec!["Tech/Databases".to_owned()]
     );
 
     // Every import emitted feed.added with its folder tags.
@@ -424,7 +424,7 @@ async fn opml_round_trips_through_the_facade() {
     assert_eq!(folded.feeds.len(), 4);
     assert_eq!(
         folded.feeds["https://sqlite.example/news.xml"].tags,
-        vec!["Tech".to_owned(), "Databases".to_owned()]
+        vec!["Tech/Databases".to_owned()]
     );
 }
 

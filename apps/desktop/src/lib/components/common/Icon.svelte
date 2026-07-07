@@ -31,7 +31,8 @@ export type IconName =
     | 'play'
     | 'grid'
     | 'rows'
-    | 'dot';
+    | 'dot'
+    | 'chevron';
 </script>
 
 <script lang="ts">
@@ -155,5 +156,7 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
         <path d="M3 6h18M3 12h18M3 18h18" />
     {:else if name === 'dot'}
         <circle cx="12" cy="12" r="5" fill="currentColor" stroke="none" />
+    {:else if name === 'chevron'}
+        <path d="m9 6 6 6-6 6" />
     {/if}
 </svg>

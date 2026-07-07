@@ -9,11 +9,13 @@ import Icon, { type IconName } from '$components/common/Icon.svelte';
 import { type MessageKey, t } from '$lib/i18n';
 import { activeView, refreshAll, selectView, type ViewId } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { buildFeedTree } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import FeedItem from './FeedItem.svelte';
+import FolderNode from './FolderNode.svelte';
 
 const VIEWS: readonly { id: ViewId; label: MessageKey; icon: IconName }[] = [
     { id: 'all', label: 'view.all', icon: 'inbox' },
@@ -26,6 +28,10 @@ const VIEWS: readonly { id: ViewId; label: MessageKey; icon: IconName }[] = [
 // dependencies, so a fetch kicked off by a template read would never
 // re-render on completion (the error/loaded transition would be lost).
 feedsStore.prime();
+
+// The folder tree derived from each feed's `/`-path tags; feeds with no tags
+// fall into `ungrouped` and render flat below the folders.
+const feedTree = $derived(buildFeedTree(feedsStore.feeds));
 
 function currentView(): ViewId | null {
     if (selectionStore.selectedFeedId !== null) {
@@ -110,7 +116,10 @@ function feedsError(): string {
                 <p class="sidebar-status">{t('shell.feeds.empty')}</p>
             {:else}
                 <ul class="sidebar-list">
-                    {#each feedsStore.feeds as feed (feed.id)}
+                    {#each feedTree.folders as folder (folder.path)}
+                        <FolderNode {folder} depth={0} />
+                    {/each}
+                    {#each feedTree.ungrouped as feed (feed.id)}
                         <li>
                             <FeedItem
                                 {feed}

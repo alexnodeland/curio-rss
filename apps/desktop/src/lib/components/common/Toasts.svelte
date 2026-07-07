@@ -2,16 +2,20 @@
 /**
  * The toast outlet — renders `uiStore.toasts` (queued by the action layer
  * on command failures, and by anything else that needs a transient notice).
- * Announced politely to screen readers; every toast is dismissible.
+ * Errors interrupt as `role="alert"` (assertive); everything else announces
+ * politely as `role="status"`. Every toast is dismissible.
  */
 import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { uiStore } from '$lib/state/ui.svelte';
 </script>
 
-<div class="toasts" aria-live="polite">
+<div class="toasts">
     {#each uiStore.toasts as toast (toast.id)}
-        <div class="toast toast-{toast.tone}" role="status">
+        <div
+            class="toast toast-{toast.tone}"
+            role={toast.tone === 'error' ? 'alert' : 'status'}
+        >
             <span class="toast-message">{toast.message}</span>
             <button
                 class="toast-dismiss"

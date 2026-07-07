@@ -14,15 +14,20 @@ describe('Toasts', () => {
         vi.useRealTimers();
     });
 
-    it('renders queued toasts with their tone and a polite live region', async () => {
-        const { container, getByText } = render(Toasts);
+    it('announces errors assertively and everything else politely', async () => {
+        const { getByText } = render(Toasts);
         uiStore.showToast('note saved', 'success', 0);
         uiStore.showToast('fetch failed', 'error', 0);
         await tick();
 
-        expect(container.querySelector('[aria-live="polite"]')).not.toBeNull();
-        expect(getByText('note saved').closest('.toast')?.className).toContain('toast-success');
-        expect(getByText('fetch failed').closest('.toast')?.className).toContain('toast-error');
+        const saved = getByText('note saved').closest('.toast');
+        const failed = getByText('fetch failed').closest('.toast');
+        // role="status" is an implicit polite live region; role="alert" is
+        // assertive — an error interrupts, a success waits its turn.
+        expect(saved?.getAttribute('role')).toBe('status');
+        expect(saved?.className).toContain('toast-success');
+        expect(failed?.getAttribute('role')).toBe('alert');
+        expect(failed?.className).toContain('toast-error');
     });
 
     it('dismisses on click', async () => {

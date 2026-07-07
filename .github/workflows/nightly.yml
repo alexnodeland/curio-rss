@@ -1,5 +1,6 @@
-# Merge + nightly workflow — deliberately NOT per-PR (see ci.yml for the
-# fast PR gate). This is the heavy tier: the 3-OS `tauri build` matrix that
+# Nightly + on-demand workflow — deliberately NOT per-PR or per-merge (see
+# ci.yml for the fast PR gate). This is the heavy tier: the 3-OS `tauri build`
+# matrix that
 # produces the shippable (unsigned) bundles, the WebdriverIO + tauri-driver
 # smoke on the two platforms a driver exists for (Linux + Windows — there is
 # no macOS tauri-driver, so macOS is covered by the manual release checklist),
@@ -12,8 +13,11 @@
 name: nightly
 
 on:
-  push:
-    branches: [main]
+  # Daily + on-demand only — NOT per-push. The per-PR gate (ci.yml) already
+  # validates every change, and release.yml builds the shipped bundles on a
+  # tag, so building the full 3-OS matrix on every merge just hammered the
+  # (scarce) macOS runners. Dispatch a run manually before a release if you
+  # want a fresh cross-platform bundle + e2e + bench.
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:

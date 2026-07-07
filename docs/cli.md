@@ -6,12 +6,39 @@ fetch policy, sanitize-at-ingest pipeline, SQLite store, event log, and
 export machinery all live in the core and behave identically under any
 future head.
 
-- Install (until a release exists): `cargo install --path crates/curio-cli`
+- Install: `cargo install --path crates/curio-cli`
 - Every **read command takes `--json`** and then prints exactly one JSON
   document on stdout — parse, don't scrape.
 - Diagnostics go to stderr, driven by `RUST_LOG` (e.g.
   `RUST_LOG=curio_core=debug curio fetch`).
 - Errors exit non-zero with a one-line `error: …` on stderr.
+
+## Commands at a glance
+
+| Command | What it does |
+|---------|--------------|
+| `curio init [dir]` | Scaffold a profile (`curio.toml`, `curio.db`, events log) |
+| `curio feed add <url> [--tags …]` | Subscribe (autodiscovers the feed on a site URL) |
+| `curio feed list` / `curio feed rm <id>` | List / unsubscribe |
+| `curio fetch` | Refresh every feed; reports new-article counts |
+| `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
+| `curio show <id>` | Render an article as markdown in the terminal |
+| `curio star` / `later` / `archive` / `tag` / `untag` `<id>` | Flip state — each is a `curio.events.v1` event |
+| `curio search <query>` | Full-text search (FTS5) |
+| `curio dest add <name> <path>` | Register a save destination |
+| `curio save <id> --dest <name>` | Export a note per `curio.frontmatter.v1` |
+| `curio events tail [-n N]` | Watch the behavioral event stream |
+| `curio doctor` | DB integrity, FTS sync, events-log health |
+
+A typical reading loop:
+
+```mermaid
+flowchart LR
+    add["feed add"] --> fetch["fetch"] --> list["list --unread"]
+    list --> show["show <id>"] --> flip["star / later / tag"]
+    flip -->|append| events[".curio/events/"]
+    show --> save["save --dest"] -->|write| note["markdown note"]
+```
 
 ## The profile
 

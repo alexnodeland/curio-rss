@@ -158,7 +158,7 @@ h6 {
     --bg-hover: #373a40;
     --fg: #c1c2c5;
     --fg-muted: #909296;
-    --fg-subtle: #5c5f66;
+    --fg-subtle: #696c72;
     --accent: #228be6;
     --accent-hover: #1c7ed6;
     --accent-fg: #fff;
@@ -182,8 +182,8 @@ h6 {
     --bg-tertiary: #f1f3f5;
     --bg-hover: #e9ecef;
     --fg: #212529;
-    --fg-muted: #868e96;
-    --fg-subtle: #adb5bd;
+    --fg-muted: #6e747b;
+    --fg-subtle: #878d93;
     --accent: #228be6;
     --accent-hover: #1c7ed6;
     --accent-fg: #fff;
@@ -208,7 +208,7 @@ h6 {
     --bg-hover: #4c566a;
     --fg: #eceff4;
     --fg-muted: #d8dee9;
-    --fg-subtle: #4c566a;
+    --fg-subtle: #7b8291;
     --accent: #88c0d0;
     --accent-hover: #8fbcbb;
     --accent-fg: #2e3440;
@@ -258,7 +258,7 @@ h6 {
     --bg-hover: #6272a4;
     --fg: #f8f8f2;
     --fg-muted: #bfbfbf;
-    --fg-subtle: #6272a4;
+    --fg-subtle: #6878a8;
     --accent: #bd93f9;
     --accent-hover: #ff79c6;
     --accent-fg: #282a36;
@@ -283,7 +283,7 @@ h6 {
     --bg-hover: #665c54;
     --fg: #ebdbb2;
     --fg-muted: #a89984;
-    --fg-subtle: #665c54;
+    --fg-subtle: #7e766f;
     --accent: #458588;
     --accent-hover: #83a598;
     --accent-fg: #ebdbb2;
@@ -308,7 +308,7 @@ h6 {
     --bg-hover: #3b4261;
     --fg: #c0caf5;
     --fg-muted: #a9b1d6;
-    --fg-subtle: #565f89;
+    --fg-subtle: #646c92;
     --accent: #7aa2f7;
     --accent-hover: #7dcfff;
     --accent-fg: #1a1b26;
@@ -332,8 +332,8 @@ h6 {
     --bg-tertiary: #094452;
     --bg-hover: #586e75;
     --fg: #839496;
-    --fg-muted: #657b83;
-    --fg-subtle: #586e75;
+    --fg-muted: #819399;
+    --fg-subtle: #657a80;
     --accent: #268bd2;
     --accent-hover: #2aa198;
     --accent-fg: #fdf6e3;
@@ -356,9 +356,9 @@ h6 {
     --bg-secondary: #eee8d5;
     --bg-tertiary: #e4dcc8;
     --bg-hover: #93a1a1;
-    --fg: #657b83;
-    --fg-muted: #839496;
-    --fg-subtle: #93a1a1;
+    --fg: #5d7179;
+    --fg-muted: #647072;
+    --fg-subtle: #7e8a8a;
     --accent: #268bd2;
     --accent-hover: #2aa198;
     --accent-fg: #fdf6e3;

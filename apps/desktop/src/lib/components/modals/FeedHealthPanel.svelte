@@ -14,8 +14,9 @@ import {
     commands,
 } from '$lib/bindings';
 import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
-import { toastCommandError } from '$lib/state/actions';
+import { selectView, toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { selectionStore } from '$lib/state/selection.svelte';
 
 let { feedId, onclose }: { feedId: number; onclose: () => void } = $props();
 
@@ -33,6 +34,7 @@ const STATUS_LABEL: Record<FeedStatusDto, MessageKey> = {
 
 let fetches: FetchRecordDto[] = $state([]);
 let loadingFetches = $state(true);
+let confirmingRemove = $state(false);
 
 feedsStore.prime();
 
@@ -63,6 +65,24 @@ async function setStatus(status: FeedStatusDto): Promise<void> {
     if (result.status === 'error') {
         toastCommandError(result.error);
     }
+}
+
+/**
+ * Unsubscribes and closes the panel. Stored articles survive (core sets
+ * their `feed_id` to null); the sidebar + list refresh off the Rust-emitted
+ * `FeedsChanged`/`ArticlesChanged`. If we were scoped to this feed, fall back
+ * to All so the list is never stuck on a subscription that no longer exists.
+ */
+async function unsubscribe(): Promise<void> {
+    const result = await feedsStore.removeFeed(feedId);
+    if (result.status === 'error') {
+        toastCommandError(result.error);
+        return;
+    }
+    if (selectionStore.selectedFeedId === feedId) {
+        selectView('all');
+    }
+    onclose();
 }
 
 function whenDate(iso: string): string {
@@ -114,6 +134,24 @@ function whenDate(iso: string): string {
                         </li>
                     {/each}
                 </ul>
+            {/if}
+        </section>
+
+        <section class="danger-zone" aria-label={t('feedHealth.unsubscribe')}>
+            {#if confirmingRemove}
+                <p class="danger-prompt">{t('feedHealth.unsubscribe.confirm')}</p>
+                <div class="danger-actions">
+                    <button type="button" class="danger" onclick={() => void unsubscribe()}
+                        >{t('feedHealth.unsubscribe.remove')}</button
+                    >
+                    <button type="button" onclick={() => (confirmingRemove = false)}
+                        >{t('feedHealth.unsubscribe.cancel')}</button
+                    >
+                </div>
+            {:else}
+                <button type="button" class="danger-trigger" onclick={() => (confirmingRemove = true)}
+                    >{t('feedHealth.unsubscribe')}</button
+                >
             {/if}
         </section>
     {/if}
@@ -246,5 +284,52 @@ function whenDate(iso: string): string {
     .fetch-new {
         color: var(--accent);
         font-weight: 500;
+    }
+
+    .danger-zone {
+        margin-top: var(--space-4);
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--hairline);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .danger-trigger,
+    .danger-actions button {
+        align-self: flex-start;
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-md);
+        background: transparent;
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-md);
+        font-weight: 500;
+        color: var(--fg-muted);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease),
+            border-color var(--dur-fast) var(--ease);
+    }
+
+    .danger-prompt {
+        font-size: var(--text-md);
+        color: var(--fg-muted);
+    }
+
+    .danger-actions {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .danger {
+        color: var(--error);
+        border-color: color-mix(in srgb, var(--error), transparent 40%);
+    }
+
+    .danger-trigger:hover,
+    .danger:hover {
+        background: color-mix(in srgb, var(--error), transparent 88%);
+        border-color: var(--error);
+        color: var(--error);
     }
 </style>

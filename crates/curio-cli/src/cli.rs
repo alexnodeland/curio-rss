@@ -158,7 +158,7 @@ pub(crate) enum DestCommand {
 #[derive(Debug, Subcommand)]
 pub(crate) enum OpmlCommand {
     /// Subscribe to every feed in an OPML file (already-known URLs are
-    /// skipped; folder names become tags).
+    /// skipped; the folder path becomes one `/`-joined tag).
     Import { file: PathBuf },
     /// Write every subscription as OPML 2.0 ("-" for stdout).
     Export { file: PathBuf },

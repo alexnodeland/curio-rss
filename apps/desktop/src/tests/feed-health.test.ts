@@ -110,4 +110,33 @@ describe('FeedHealthPanel', () => {
         expect(queryByText('Remove')).toBeNull();
         expect(getByText('Unsubscribe')).toBeTruthy();
     });
+
+    it('edits a feed’s folders/tags through set_feed_tags', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Alpha', tags: ['Tech'] })],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+            recent_fetches: [],
+            set_feed_tags: null,
+        });
+        const { getByLabelText, getByText } = render(FeedHealthPanel, {
+            feedId: 1,
+            onclose: vi.fn(),
+        });
+        await flushIpc();
+
+        const input = getByLabelText('Folders & tags') as HTMLInputElement;
+        expect(input.value).toBe('Tech');
+        const save = getByText('Save');
+        // Save stays disabled until the field diverges from the stored tags.
+        expect(save.hasAttribute('disabled')).toBe(true);
+
+        await fireEvent.input(input, { target: { value: 'Tech/Databases, fav' } });
+        expect(save.hasAttribute('disabled')).toBe(false);
+        await fireEvent.click(save);
+        await flushIpc();
+
+        expect(harness.callsFor('set_feed_tags')).toEqual([
+            { feedId: 1, tags: ['Tech/Databases', 'fav'] },
+        ]);
+    });
 });

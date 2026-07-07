@@ -128,6 +128,15 @@ export class FeedsStore {
         return commands.setFeedStatus(feedId, status);
     }
 
+    /**
+     * Replaces a feed's tags (move-to-folder / re-tag). Tags are `/`-path
+     * strings the sidebar renders as folders. Wholesale overwrite; the tree
+     * refreshes off the Rust-emitted `FeedsChanged`.
+     */
+    setFeedTags(feedId: number, tags: string[]): Promise<CommandResult<null>> {
+        return commands.setFeedTags(feedId, tags);
+    }
+
     /** Refreshes one feed; fetch/parse failures are outcomes, not errors. */
     refreshFeed(feedId: number): Promise<CommandResult<RefreshOutcomeDto>> {
         return commands.refreshFeed(feedId);

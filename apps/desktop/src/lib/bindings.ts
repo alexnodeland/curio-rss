@@ -69,6 +69,12 @@ export const commands = {
 	 */
 	updateFeedMetadata: (feedId: number, title: string | null, siteUrl: string | null, description: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("update_feed_metadata", { feedId, title, siteUrl, description })),
 	/**
+	 *  Replaces a feed's tags (move-to-folder / re-tag). Tags are `/`-path
+	 *  strings; the sidebar renders them as a folder tree. Wholesale overwrite,
+	 *  DB-local (no event).
+	 */
+	setFeedTags: (feedId: number, tags: string[]) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_tags", { feedId, tags })),
+	/**
 	 *  Refreshes one feed. Fetch/parse failures are *outcomes*, not errors;
 	 *  same-feed refreshes are serialized core-side (validator-race fix).
 	 */

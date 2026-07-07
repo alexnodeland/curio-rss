@@ -37,6 +37,22 @@ pub async fn get_article(
     run_blocking(move || get_article_impl(&core, article_id)).await
 }
 
+/// Fetches the article's source page and replaces its stored content with the
+/// readability-extracted full article (on-demand). Returns the refreshed
+/// article; emits `ArticlesChanged` so the open reader + list refetch.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_full_article(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    article_id: i64,
+) -> Result<ArticleDto, CommandError> {
+    let core = Arc::clone(core.inner());
+    let article = load_full_article_impl(&core, article_id).await?;
+    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    Ok(article)
+}
+
 /// The read/starred/read-later/archived flag projection.
 #[tauri::command]
 #[specta::specta]
@@ -124,6 +140,13 @@ fn get_article_impl(
     Ok(core
         .get_article(ArticleId(article_id))?
         .map(ArticleDto::from))
+}
+
+async fn load_full_article_impl(
+    core: &CoreHandle,
+    article_id: i64,
+) -> Result<ArticleDto, CommandError> {
+    Ok(core.hydrate_article(ArticleId(article_id)).await?.into())
 }
 
 fn get_article_state_impl(

@@ -34,6 +34,7 @@ anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
+dom_smoothie = "0.18"
 ego-tree = "0.11"
 feed-rs = "2"
 htmd = "0.5"

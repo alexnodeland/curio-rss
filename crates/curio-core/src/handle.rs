@@ -511,6 +511,61 @@ impl CoreHandle {
         Ok(self.storage.get_article(id)?)
     }
 
+    /// Fetches the article's source page and replaces its stored content with
+    /// the readability-extracted main content — the on-demand "load full
+    /// article" enrichment. Uses the SAME policed client as refresh (the SSRF
+    /// guard applies; the private-network exemption is taken only from the
+    /// owning feed's flag, never widened for a manual fetch). Never clobbers
+    /// good content: a non-2xx response, or an empty/shorter extract, leaves
+    /// the article unchanged. DB-local like [`Self::mark_read`] — the events
+    /// contract has no article-content event, so nothing is staged.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::NotFound`] for an unknown article; fetch, content or
+    /// storage errors.
+    pub async fn hydrate_article(&self, id: ArticleId) -> Result<Article, CoreError> {
+        let article = self
+            .storage
+            .get_article(id)?
+            .ok_or(CoreError::NotFound { entity: "article" })?;
+        let allow_private_network = match article.feed_id {
+            Some(feed_id) => self
+                .storage
+                .get_feed(feed_id)?
+                .is_some_and(|feed| feed.allow_private_network),
+            None => false,
+        };
+        let response = self
+            .client
+            .fetch(&FetchRequest {
+                url: article.source_url.clone(),
+                allow_private_network,
+                ..FetchRequest::default()
+            })
+            .await?;
+        if !response.is_success() {
+            return Ok(article);
+        }
+        let raw = String::from_utf8_lossy(&response.body);
+        let processed = content::process_full_page(&raw, &response.final_url)?;
+        // A mis-scored thin page must not clobber real feed content.
+        if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len() {
+            return Ok(article);
+        }
+        self.storage.update_article_content(
+            id,
+            &ArticleContent {
+                html: processed.html,
+                text: processed.text,
+            },
+            Some(processed.word_count),
+        )?;
+        self.storage
+            .get_article(id)?
+            .ok_or(CoreError::NotFound { entity: "article" })
+    }
+
     /// Full-text search (escaped FTS5 — user input is never raw MATCH).
     ///
     /// # Errors

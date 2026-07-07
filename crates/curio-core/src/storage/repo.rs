@@ -633,6 +633,37 @@ impl Storage {
         })
     }
 
+    /// Replaces an article's stored content in place — the readability
+    /// "hydrate full article" write. Unlike [`Self::upsert_articles`]
+    /// (dedupe-key ingest of new rows), this is a by-id overwrite of the
+    /// content columns of an existing row; the `articles_fts_au` trigger
+    /// reindexes on the `content_text` change automatically.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the article does not exist.
+    pub fn update_article_content(
+        &self,
+        id: ArticleId,
+        content: &ArticleContent,
+        word_count: Option<u32>,
+    ) -> Result<(), StorageError> {
+        let html = content.html.clone();
+        let text = content.text.clone();
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached(
+                    "UPDATE articles SET content_html = ?2, content_text = ?3, \
+                     word_count = ?4, modified_at = ?5 WHERE id = ?1",
+                )?
+                .execute((id.0, html, text, word_count, Timestamp::now().to_string()))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "article" });
+            }
+            Ok(())
+        })
+    }
+
     // ------------------------------------------------------------ state
 
     /// The article's current flag projection (all-false if never touched).

@@ -47,6 +47,7 @@ export const en = {
     'reader.action.archive': 'Archive',
     'reader.action.unarchive': 'Unarchive',
     'reader.action.openInBrowser': 'Open in browser',
+    'reader.action.loadFull': 'Load full article',
     'reader.action.promote': 'Save to notes',
     'reader.action.typography': 'Typography',
     'reader.meta.words': '{count} words',

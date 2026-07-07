@@ -126,6 +126,7 @@ function feedsError(): string {
                                 {feed}
                                 unread={feedsStore.unreadFor(feed.id)}
                                 selected={selectionStore.selectedFeedId === feed.id}
+                                siblings={feedTree.ungrouped.map((candidate) => candidate.id)}
                                 onselect={(feedId) => selectionStore.selectFeed(feedId)}
                                 onhealth={(feedId) => uiStore.openHealth(feedId)}
                             />

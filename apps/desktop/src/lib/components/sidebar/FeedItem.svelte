@@ -7,22 +7,63 @@
  */
 import type { FeedDto } from '$lib/bindings';
 import { t } from '$lib/i18n';
+import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 
 let {
     feed,
     unread,
     selected,
+    siblings,
     onselect,
     onhealth,
 }: {
     feed: FeedDto;
     unread: number;
     selected: boolean;
+    /** The ordered ids of this feed's drag group; enables reordering when set. */
+    siblings?: number[];
     onselect: (feedId: number) => void;
     onhealth: (feedId: number) => void;
 } = $props();
 
 const label = $derived(feed.title ?? feed.url);
+
+let dropTarget = $state(false);
+
+/** True while a same-group feed (not this one) is being dragged. */
+function isValidDrag(): boolean {
+    const dragging = feedDnd.draggingId;
+    return (
+        siblings !== undefined &&
+        dragging !== null &&
+        dragging !== feed.id &&
+        siblings.includes(dragging)
+    );
+}
+
+function onDragOver(event: DragEvent): void {
+    if (isValidDrag()) {
+        event.preventDefault(); // permit the drop
+        dropTarget = true;
+    }
+}
+
+function onDrop(event: DragEvent): void {
+    dropTarget = false;
+    const dragged = feedDnd.draggingId;
+    if (siblings === undefined || dragged === null || !isValidDrag()) {
+        return;
+    }
+    event.preventDefault();
+    const newGroup = moveWithinGroup(siblings, dragged, feed.id);
+    const globalOrder = rebuildGlobalOrder(
+        feedsStore.feeds.map((candidate) => candidate.id),
+        newGroup,
+    );
+    void feedsStore.reorderFeeds(globalOrder);
+    feedDnd.clear();
+}
 
 /** A stable per-feed hue for the monogram, derived from the title. */
 function hue(text: string): number {
@@ -34,7 +75,23 @@ function hue(text: string): number {
 }
 </script>
 
-<div class="feed-item" class:active={selected} class:unhealthy={feed.status !== 'active'}>
+<div
+    class="feed-item"
+    class:active={selected}
+    class:unhealthy={feed.status !== 'active'}
+    class:drop-target={dropTarget}
+    class:dragging={feedDnd.draggingId === feed.id}
+    draggable={siblings !== undefined}
+    ondragstart={() => feedDnd.start(feed.id)}
+    ondragover={onDragOver}
+    ondragleave={() => {
+        dropTarget = false;
+    }}
+    ondrop={onDrop}
+    ondragend={() => feedDnd.clear()}
+    role="group"
+    aria-label={label}
+>
     <button
         class="feed-select"
         aria-current={selected ? 'true' : undefined}
@@ -76,6 +133,19 @@ function hue(text: string): number {
 
     .feed-item.active {
         background: var(--selected);
+    }
+
+    .feed-item[draggable='true'] {
+        cursor: grab;
+    }
+
+    .feed-item.dragging {
+        opacity: 0.5;
+    }
+
+    /* A line where the dragged feed would land. */
+    .feed-item.drop-target {
+        box-shadow: inset 0 2px 0 var(--accent);
     }
 
     .feed-item.active::before {

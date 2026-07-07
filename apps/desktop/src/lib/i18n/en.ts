@@ -28,6 +28,8 @@ export const en = {
     'list.empty': 'No articles here',
     'list.view.home': 'Home view',
     'list.view.rows': 'List view',
+    'list.filter.unreadOnly': 'Show unread only',
+    'list.filter.all': 'Show all articles',
     'list.row.unread': 'Unread',
     'list.row.starred': 'Starred',
 

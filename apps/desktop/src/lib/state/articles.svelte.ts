@@ -190,6 +190,22 @@ export class ArticlesStore {
         return this.list(this.filters);
     }
 
+    /** Whether the current view is restricted to unread articles. */
+    get unreadOnly(): boolean {
+        return this.filters.read === false;
+    }
+
+    /**
+     * Flips the unread-only filter on whatever the list currently shows,
+     * preserving every other dimension (feed, starred, tag, …). `read: false`
+     * keeps only unread; `null` shows read and unread alike. Filtering is
+     * backend-owned — the query-cache window switches via `filterKey`, with no
+     * client-side re-filter.
+     */
+    toggleUnreadOnly(): void {
+        this.filters = { ...this.filters, read: this.filters.read === false ? null : false };
+    }
+
     /**
      * The rows the middle pane and selection navigation act on: search
      * results while a search is active, otherwise the current filter

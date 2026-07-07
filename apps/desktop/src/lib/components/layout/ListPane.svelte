@@ -12,6 +12,7 @@ import Icon from '$components/common/Icon.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
 import { t } from '$lib/i18n';
 import { feedHomeType } from '$lib/reader/view-mode';
+import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
@@ -36,6 +37,20 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
         <div class="search-slot">
             <SearchBar />
         </div>
+        {#if !searchStore.active}
+            <button
+                class="list-tool"
+                type="button"
+                aria-pressed={articlesStore.unreadOnly}
+                title={articlesStore.unreadOnly ? t('list.filter.all') : t('list.filter.unreadOnly')}
+                aria-label={articlesStore.unreadOnly
+                    ? t('list.filter.all')
+                    : t('list.filter.unreadOnly')}
+                onclick={() => articlesStore.toggleUnreadOnly()}
+            >
+                <Icon name="dot" />
+            </button>
+        {/if}
         {#if homeType !== null && !searchStore.active}
             <button
                 class="list-tool"

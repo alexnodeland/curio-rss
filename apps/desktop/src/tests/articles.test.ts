@@ -190,6 +190,38 @@ describe('articles store', () => {
         expect(sent.some((p) => p.read_later === true)).toBe(true);
     });
 
+    it('toggleUnreadOnly flips read between false and null, preserving other filters', async () => {
+        harness = installIpcHarness({ list_articles: [] });
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: 5, starred: true };
+
+        expect(articlesStore.unreadOnly).toBe(false);
+        articlesStore.toggleUnreadOnly();
+        expect(articlesStore.unreadOnly).toBe(true);
+        expect(articlesStore.filters).toEqual({
+            ...ALL_ARTICLES,
+            feedId: 5,
+            starred: true,
+            read: false,
+        });
+
+        articlesStore.toggleUnreadOnly();
+        expect(articlesStore.unreadOnly).toBe(false);
+        expect(articlesStore.filters.read).toBeNull();
+        // The other dimensions never move.
+        expect(articlesStore.filters.feedId).toBe(5);
+        expect(articlesStore.filters.starred).toBe(true);
+    });
+
+    it('the unread-only window is its own cached list, sending read:false to the backend', async () => {
+        harness = installIpcHarness({ list_articles: [] });
+        articlesStore.toggleUnreadOnly();
+        void articlesStore.current;
+        await flushIpc();
+
+        const sent = harness.callsFor('list_articles').map((c) => c.params as ListArticlesDto);
+        expect(sent.some((p) => p.read === false)).toBe(true);
+    });
+
     it('passes state mutations through and returns the changed flag', async () => {
         harness = installIpcHarness({ mark_read: true, set_starred: false });
         const marked = await articlesStore.markRead(9, true);

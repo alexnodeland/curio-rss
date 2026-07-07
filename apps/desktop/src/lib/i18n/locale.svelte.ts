@@ -10,6 +10,10 @@ import { SETTING_KEYS, settingsStore } from '$lib/state/settings.svelte';
 export const LOCALES = [
     { id: 'en', name: 'English' },
     { id: 'es', name: 'Español' },
+    { id: 'fr', name: 'Français' },
+    { id: 'de', name: 'Deutsch' },
+    { id: 'it', name: 'Italiano' },
+    { id: 'pl', name: 'Polski' },
     { id: 'zh-Hans', name: '简体中文' },
     { id: 'yue', name: '廣東話' },
 ] as const;

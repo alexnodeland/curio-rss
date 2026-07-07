@@ -150,6 +150,12 @@ export const commands = {
 	/**  Marks read/unread. Returns whether anything changed. */
 	markRead: (articleId: number, read: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("mark_read", { articleId, read })),
 	/**
+	 *  Marks every unread article read — one feed (`Some`) or the whole
+	 *  library (`None`). Returns how many changed; invalidates only if something
+	 *  did (the `ArticlesChanged` refresh also updates the unread badges).
+	 */
+	markAllRead: (feedId: number | null) => typedError<number, CommandError>(__TAURI_INVOKE("mark_all_read", { feedId })),
+	/**
 	 *  Records an open (emits the `article.opened` contract event with the
 	 *  optional dwell time). No invalidation — opening changes no list.
 	 */

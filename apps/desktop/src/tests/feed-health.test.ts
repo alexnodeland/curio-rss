@@ -6,6 +6,7 @@
 import FeedHealthPanel from '$components/modals/FeedHealthPanel.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -32,6 +33,7 @@ function harnessFor(status: 'active' | 'paused' | 'dead'): IpcHarness {
         ],
         set_feed_status: null,
         remove_feed: null,
+        mark_all_read: 3,
     });
 }
 
@@ -43,6 +45,7 @@ describe('FeedHealthPanel', () => {
         resetQueryCache();
         feedsStore.refreshing = false;
         feedsStore.refreshOutcomes = [];
+        uiStore.reset();
         harness?.teardown();
         harness = null;
     });
@@ -164,5 +167,18 @@ describe('FeedHealthPanel', () => {
         await flushIpc();
 
         expect(harness.callsFor('set_feed_title')).toEqual([{ feedId: 1, title: 'Company Blog' }]);
+    });
+
+    it('marks all of a feed’s articles read via mark_all_read', async () => {
+        harness = harnessFor('active');
+        const { getByText } = render(FeedHealthPanel, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+
+        await fireEvent.click(getByText('Mark all read'));
+        await flushIpc();
+
+        expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: 1 }]);
+        // The changed count comes back as a success toast.
+        expect(uiStore.toasts.some((toast) => toast.message === 'Marked 3 read')).toBe(true);
     });
 });

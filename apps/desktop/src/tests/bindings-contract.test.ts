@@ -85,6 +85,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     deleteArticle: { args: [100], response: null },
     searchArticles: { args: ['rust', 20], response: [articleSummaryFixture()] },
     markRead: { args: [100, true], response: true },
+    markAllRead: { args: [1], response: 3 },
     recordOpened: { args: [100, 1500], response: null },
     setArchived: { args: [100, true], response: true },
     setStarred: { args: [100, true], response: true },

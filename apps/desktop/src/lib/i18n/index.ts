@@ -1,21 +1,24 @@
 /**
  * String routing — `t()` resolves a typed message key against the active
- * catalog (en only in v1) and interpolates `{placeholder}` params. Dates go
- * through `Intl` via the helpers below so locale handling stays in one place.
+ * locale's catalog, falling back to English for any key that locale has not
+ * translated, and interpolates `{placeholder}` params. `t()` and the Intl
+ * date helpers read the reactive `localeStore.active`, so switching language
+ * re-renders every string that flows through them. English is the complete
+ * base catalog; every key call site is typechecked against it.
  */
 import { en } from './en';
+import { es } from './es';
+import { type LocaleId, localeStore } from './locale.svelte';
+
+export { LOCALES, type LocaleId, localeStore } from './locale.svelte';
 
 /** Every known message key — adding a call site with a typo fails typecheck. */
 export type MessageKey = keyof typeof en;
 
-/** The active BCP-47 locale. v1 ships English only; the type stays open. */
-export const locale: string = 'en';
+/** Per-locale catalogs: `en` is complete, the rest are partial (fall back). */
+const CATALOGS: Record<LocaleId, Partial<Record<MessageKey, string>>> = { en, es };
 
-const catalog: Record<MessageKey, string> = en;
-
-/** Resolves `key`, interpolating `{name}` placeholders from `params`. */
-export function t(key: MessageKey, params?: Record<string, string | number>): string {
-    const template = catalog[key];
+function interpolate(template: string, params?: Record<string, string | number>): string {
     if (params === undefined) {
         return template;
     }
@@ -25,19 +28,28 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
     });
 }
 
-/** `June 3` this year, `June 3, 2024` otherwise — via `Intl`. */
+/**
+ * Resolves `key` against the active locale (English fallback) and interpolates
+ * `{name}` placeholders from `params`.
+ */
+export function t(key: MessageKey, params?: Record<string, string | number>): string {
+    const template = CATALOGS[localeStore.active][key] ?? en[key];
+    return interpolate(template, params);
+}
+
+/** `June 3` this year, `June 3, 2024` otherwise — in the active locale. */
 export function formatIntlDate(date: Date, now: Date = new Date()): string {
     const sameYear = date.getFullYear() === now.getFullYear();
-    return new Intl.DateTimeFormat(locale, {
+    return new Intl.DateTimeFormat(localeStore.active, {
         month: 'long',
         day: 'numeric',
         ...(sameYear ? {} : { year: 'numeric' }),
     }).format(date);
 }
 
-/** Full date + time, e.g. `Jun 3, 2025, 4:05 PM` — via `Intl`. */
+/** Full date + time, e.g. `Jun 3, 2025, 4:05 PM` — in the active locale. */
 export function formatIntlDateTime(date: Date): string {
-    return new Intl.DateTimeFormat(locale, {
+    return new Intl.DateTimeFormat(localeStore.active, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',

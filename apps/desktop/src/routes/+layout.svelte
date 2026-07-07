@@ -1,6 +1,7 @@
 <script lang="ts">
 import '../app.css';
 import { onMount } from 'svelte';
+import { localeStore } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { wireInvalidation } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
@@ -17,6 +18,7 @@ onMount(() => {
         // Settings first: the persisted theme wins over the preload's
         // localStorage mirror once the backend answers.
         await settingsStore.load();
+        localeStore.init();
         uiStore.initTheme();
         uiStore.initLayout();
         uiStore.initTypography();

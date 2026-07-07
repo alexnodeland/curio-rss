@@ -1,7 +1,8 @@
 /**
- * English message catalog — the only locale in v1. Every user-visible string
- * routes through `t()` (retrofit-proofing: translations post-1.0 swap the
- * catalog, not the call sites). Placeholders use `{name}` syntax.
+ * English message catalog — the complete base locale. Every user-visible
+ * string routes through `t()`, and every key is typechecked against this
+ * object; other locales (see `es.ts`) are partial and fall back here for any
+ * key they haven't translated. Placeholders use `{name}` syntax.
  */
 export const en = {
     'app.title': 'Curio',
@@ -130,6 +131,8 @@ export const en = {
 
     'settings.title': 'Settings',
     'settings.section.appearance': 'Appearance',
+    'settings.language': 'Language',
+    'settings.language.hint': 'The interface language. Untranslated text falls back to English.',
     'settings.section.reading': 'Reading',
     'settings.markOnScroll': 'Mark read while scrolling',
     'settings.markOnScroll.hint':

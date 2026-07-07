@@ -137,6 +137,22 @@ pub async fn set_feed_tags(
     Ok(())
 }
 
+/// Renames a feed (unconditional title overwrite; an empty title clears it,
+/// falling back to the URL). DB-local, no event.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_feed_title(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    feed_id: i64,
+    title: Option<String>,
+) -> Result<(), CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || set_feed_title_impl(&core, feed_id, title)).await?;
+    emit_or_log(&app, &FeedsChanged);
+    Ok(())
+}
+
 /// Refreshes one feed. Fetch/parse failures are *outcomes*, not errors;
 /// same-feed refreshes are serialized core-side (validator-race fix).
 #[tauri::command]
@@ -252,6 +268,14 @@ fn set_feed_tags_impl(
     tags: Vec<String>,
 ) -> Result<(), CommandError> {
     Ok(core.set_feed_tags(FeedId(feed_id), tags)?)
+}
+
+fn set_feed_title_impl(
+    core: &CoreHandle,
+    feed_id: i64,
+    title: Option<String>,
+) -> Result<(), CommandError> {
+    Ok(core.set_feed_title(FeedId(feed_id), title)?)
 }
 
 async fn refresh_feed_impl(
@@ -402,6 +426,40 @@ mod tests {
         );
 
         let error = set_feed_tags_impl(&core, 9999, vec!["x".into()]).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn set_feed_title_overwrites_unconditionally_and_clears() {
+        let (_dir, core) = temp_core();
+        let feed = add_feed_impl(
+            &core,
+            NewFeedDto {
+                url: "https://example.test/feed.xml".into(),
+                title: Some("Original".into()),
+                tags: vec![],
+            },
+        )
+        .unwrap();
+
+        // Unconditional rename (unlike update_feed_metadata's COALESCE fill,
+        // which would keep "Original").
+        set_feed_title_impl(&core, feed.id, Some("Renamed".into())).unwrap();
+        assert_eq!(
+            get_feed_impl(&core, feed.id)
+                .unwrap()
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("Renamed")
+        );
+
+        // An empty/whitespace title clears it to None (the URL fallback).
+        set_feed_title_impl(&core, feed.id, Some("   ".into())).unwrap();
+        assert_eq!(get_feed_impl(&core, feed.id).unwrap().unwrap().title, None);
+
+        let error = set_feed_title_impl(&core, 9999, Some("x".into())).unwrap_err();
         assert_eq!(error.kind, ErrorKind::User);
         assert_eq!(error.code, ErrorCode::NotFound);
     }

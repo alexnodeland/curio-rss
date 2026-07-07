@@ -108,6 +108,22 @@ async function saveTags(): Promise<void> {
     tagsDraft = null;
 }
 
+// The feed's display name (same draft/live pattern as tags). An empty name
+// clears the title so the feed shows its URL again.
+let titleDraft: string | null = $state(null);
+const currentTitle = $derived(feed?.title ?? '');
+const titleValue = $derived(titleDraft ?? currentTitle);
+
+async function saveTitle(): Promise<void> {
+    const trimmed = titleValue.trim();
+    const result = await feedsStore.setFeedTitle(feedId, trimmed === '' ? null : trimmed);
+    if (result.status === 'error') {
+        toastCommandError(result.error);
+        return;
+    }
+    titleDraft = null;
+}
+
 function whenDate(iso: string): string {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso : formatIntlDateTime(date);
@@ -132,6 +148,26 @@ function whenDate(iso: string): string {
                 <button type="button" onclick={() => void setStatus('active')}>{t('feedHealth.revive')}</button>
             {/if}
         </div>
+
+        <section class="tags-edit">
+            <label class="tags-label" for="feed-name-input">{t('feedName.label')}</label>
+            <div class="tags-row">
+                <input
+                    id="feed-name-input"
+                    class="tags-input"
+                    type="text"
+                    value={titleValue}
+                    placeholder={feed.url}
+                    oninput={(event) => (titleDraft = event.currentTarget.value)}
+                />
+                <button
+                    type="button"
+                    class="tags-save"
+                    disabled={titleValue === currentTitle}
+                    onclick={() => void saveTitle()}>{t('feedName.save')}</button
+                >
+            </div>
+        </section>
 
         <section class="tags-edit">
             <label class="tags-label" for="feed-tags-input">{t('feedTags.label')}</label>

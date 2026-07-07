@@ -284,6 +284,19 @@ impl CoreHandle {
         Ok(self.storage.set_feed_tags(id, tags)?)
     }
 
+    /// Renames a feed — an unconditional title overwrite (an empty title
+    /// clears it, falling back to the URL). DB-local, no event: the display
+    /// title is not part of the published contract, and consumers key feeds
+    /// by URL. This is the user-rename counterpart to the fetch-fill
+    /// `update_feed_metadata`, which can only fill a NULL title.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::NotFound`] for an unknown feed; storage errors.
+    pub fn set_feed_title(&self, id: FeedId, title: Option<String>) -> Result<(), CoreError> {
+        Ok(self.storage.set_feed_title(id, title)?)
+    }
+
     /// Refreshes one feed: policed conditional GET → parse → sanitize →
     /// upsert → fetch-log row. Fetch/parse failures are *outcomes*
     /// (recorded, validators preserved), not errors; only storage-level

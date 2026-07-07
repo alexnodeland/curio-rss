@@ -137,6 +137,11 @@ export class FeedsStore {
         return commands.setFeedTags(feedId, tags);
     }
 
+    /** Renames a feed (an empty title clears it → the URL shows instead). */
+    setFeedTitle(feedId: number, title: string | null): Promise<CommandResult<null>> {
+        return commands.setFeedTitle(feedId, title);
+    }
+
     /** Refreshes one feed; fetch/parse failures are outcomes, not errors. */
     refreshFeed(feedId: number): Promise<CommandResult<RefreshOutcomeDto>> {
         return commands.refreshFeed(feedId);

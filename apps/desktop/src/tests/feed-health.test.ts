@@ -139,4 +139,30 @@ describe('FeedHealthPanel', () => {
             { feedId: 1, tags: ['Tech/Databases', 'fav'] },
         ]);
     });
+
+    it('renames a feed through set_feed_title', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Alpha' })],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+            recent_fetches: [],
+            set_feed_title: null,
+        });
+        const { getByLabelText, getByText } = render(FeedHealthPanel, {
+            feedId: 1,
+            onclose: vi.fn(),
+        });
+        await flushIpc();
+
+        const input = getByLabelText('Name') as HTMLInputElement;
+        expect(input.value).toBe('Alpha');
+        const rename = getByText('Rename');
+        expect(rename.hasAttribute('disabled')).toBe(true);
+
+        await fireEvent.input(input, { target: { value: 'Company Blog' } });
+        expect(rename.hasAttribute('disabled')).toBe(false);
+        await fireEvent.click(rename);
+        await flushIpc();
+
+        expect(harness.callsFor('set_feed_title')).toEqual([{ feedId: 1, title: 'Company Blog' }]);
+    });
 });

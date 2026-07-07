@@ -75,6 +75,11 @@ export const commands = {
 	 */
 	setFeedTags: (feedId: number, tags: string[]) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_tags", { feedId, tags })),
 	/**
+	 *  Renames a feed (unconditional title overwrite; an empty title clears it,
+	 *  falling back to the URL). DB-local, no event.
+	 */
+	setFeedTitle: (feedId: number, title: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_title", { feedId, title })),
+	/**
 	 *  Refreshes one feed. Fetch/parse failures are *outcomes*, not errors;
 	 *  same-feed refreshes are serialized core-side (validator-race fix).
 	 */

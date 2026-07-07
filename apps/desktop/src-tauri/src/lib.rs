@@ -50,6 +50,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::feeds::set_feed_status,
             commands::feeds::update_feed_metadata,
             commands::feeds::set_feed_tags,
+            commands::feeds::set_feed_title,
             commands::feeds::refresh_feed,
             commands::feeds::refresh_all,
             commands::feeds::recent_fetches,

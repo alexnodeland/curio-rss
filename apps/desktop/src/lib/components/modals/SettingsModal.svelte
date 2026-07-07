@@ -12,7 +12,7 @@ import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
-import { t } from '$lib/i18n';
+import { LOCALES, type LocaleId, localeStore, t } from '$lib/i18n';
 import { uiStore } from '$lib/state/ui.svelte';
 
 let { onclose }: { onclose: () => void } = $props();
@@ -22,6 +22,19 @@ let { onclose }: { onclose: () => void } = $props();
     <section class="section" aria-labelledby="settings-appearance">
         <h3 id="settings-appearance">{t('settings.section.appearance')}</h3>
         <ThemePicker />
+        <label class="field">
+            <span class="field-label">{t('settings.language')}</span>
+            <select
+                class="field-select"
+                value={localeStore.active}
+                onchange={(event) =>
+                    void localeStore.set(event.currentTarget.value as LocaleId)}
+            >
+                {#each LOCALES as option (option.id)}
+                    <option value={option.id}>{option.name}</option>
+                {/each}
+            </select>
+        </label>
     </section>
 
     <section class="section" aria-labelledby="settings-reading">
@@ -84,6 +97,27 @@ let { onclose }: { onclose: () => void } = $props();
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
+    }
+
+    .field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+    }
+
+    .field-label {
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+    }
+
+    .field-select {
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-md);
+        background: var(--bg-inset, transparent);
+        color: var(--fg);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
     }
 
     .toggle {

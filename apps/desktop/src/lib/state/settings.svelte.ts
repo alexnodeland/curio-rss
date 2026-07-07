@@ -24,6 +24,7 @@ export const SETTING_KEYS = {
     homeReddit: 'ui.home.reddit',
     mediaPrefetch: 'ui.media.prefetch',
     markOnScroll: 'ui.reading.mark-on-scroll',
+    locale: 'ui.locale',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

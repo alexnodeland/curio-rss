@@ -21,13 +21,13 @@ Then open once via **right-click → Open** (or `xattr -dr com.apple.quarantine
 The cask here is the **source of truth template**; the tap is a thin mirror.
 This repo never pushes to the tap. To publish an update:
 
-1. Cut a GitHub release (see [`docs/release/macos-checklist.md`](../../docs/release/macos-checklist.md))
-   that uploads the two stably-named DMGs the cask URL expects:
-   - `Curio-arm64.dmg`
-   - `Curio-x64.dmg`
+1. Cut a GitHub release (push a `vX.Y.Z` tag — `release.yml` builds + drafts it;
+   see [`docs/release/runbook.md`](../../docs/release/runbook.md)) with the
+   stably-named universal DMG the cask URL expects:
+   - `Curio-universal.dmg`
 
    Because the cask uses `version :latest` + `sha256 :no_check`, the download
-   URL (`releases/latest/download/Curio-<arch>.dmg`) resolves without editing
+   URL (`releases/latest/download/Curio-universal.dmg`) resolves without editing
    the formula — nothing to bump per release.
 
 2. Copy this template into the tap repo and push it:

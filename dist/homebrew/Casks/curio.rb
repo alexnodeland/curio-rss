@@ -9,14 +9,14 @@
 # copying it into the tap repo `alexnodeland/homebrew-tap` under `Casks/` —
 # see ../README.md. Do NOT expect `brew` to find it here.
 cask "curio" do
-  arch arm: "arm64", intel: "x64"
-
   # Unsigned + always-latest: the tap always installs whatever the latest
-  # GitHub release published, so there is no per-release sha256 to bump.
+  # GitHub release published, so there is no per-release sha256 to bump. One
+  # universal DMG (arm64 + x64) — matches the tap's other casks and avoids the
+  # scarce Intel CI runner.
   version :latest
   sha256 :no_check
 
-  url "https://github.com/alexnodeland/curio-rss/releases/latest/download/Curio-#{arch}.dmg",
+  url "https://github.com/alexnodeland/curio-rss/releases/latest/download/Curio-universal.dmg",
       verified: "github.com/alexnodeland/curio-rss/"
   name "Curio"
   desc "Local-first RSS reader"

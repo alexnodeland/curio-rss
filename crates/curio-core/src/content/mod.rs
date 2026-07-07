@@ -99,6 +99,24 @@ pub fn plain_text(html: &str) -> String {
     out
 }
 
+/// The first `http(s)` `<img>` source in a fragment, in document order —
+/// the inline-image fallback for an article's lead image when the feed
+/// declared none in its metadata. Runs over the *sanitized* body, so the
+/// `src` is already base-resolved to an absolute URL and scheme-allowlisted;
+/// `data:` and other non-fetchable schemes are skipped (the lead image is a
+/// URL to load through the policed cache, not inline bytes).
+#[must_use]
+pub fn first_image(html: &str) -> Option<String> {
+    // A fragment-local selector parse can't fail; unwrap is unreachable.
+    let selector = scraper::Selector::parse("img[src]").ok()?;
+    scraper::Html::parse_fragment(html)
+        .select(&selector)
+        .filter_map(|img| img.value().attr("src"))
+        .map(str::trim)
+        .find(|src| src.starts_with("http://") || src.starts_with("https://"))
+        .map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +143,34 @@ mod tests {
         let processed = process("", None);
         assert_eq!(processed.text, "");
         assert_eq!(processed.word_count, 0);
+    }
+
+    #[test]
+    fn first_image_takes_the_leading_http_img() {
+        let html = "<p>intro</p><img src=\"https://cdn.example.com/a.jpg\"/>\
+                    <img src=\"https://cdn.example.com/b.jpg\"/>";
+        assert_eq!(
+            first_image(html).as_deref(),
+            Some("https://cdn.example.com/a.jpg"),
+            "document order wins"
+        );
+    }
+
+    #[test]
+    fn first_image_skips_non_http_sources() {
+        let html = "<img src=\"data:image/png;base64,AAAA\"/>\
+                    <img src=\"/relative.png\"/>\
+                    <img src=\"https://cdn.example.com/real.png\"/>";
+        assert_eq!(
+            first_image(html).as_deref(),
+            Some("https://cdn.example.com/real.png"),
+            "data: and relative srcs can't be fetched by the cache"
+        );
+    }
+
+    #[test]
+    fn first_image_is_none_without_a_usable_img() {
+        assert_eq!(first_image("<p>just words</p>"), None);
+        assert_eq!(first_image("<img src=\"/only-relative.png\"/>"), None);
     }
 }

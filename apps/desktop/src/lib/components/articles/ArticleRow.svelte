@@ -7,6 +7,7 @@
  * ArticleList (the virtualizer's fixed row height).
  */
 import { type ArticleSummaryDto, commands } from '$lib/bindings';
+import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import { formatIntlDate, t } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
@@ -87,6 +88,7 @@ function onKeyDown(event: KeyboardEvent): void {
         <span class="row-star" aria-hidden="true">★</span>
         <span class="sr-only">{t('list.row.starred')}</span>
     {/if}
+    <ArticleThumb variant="row" image={article.image} alt="" />
 </div>
 
 <style>

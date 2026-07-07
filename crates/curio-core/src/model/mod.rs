@@ -146,6 +146,11 @@ pub struct NewArticle {
     /// The source's own last-update time (distinct from Curio's row
     /// `modified_at`), if the feed carried one.
     pub source_updated_at: Option<Timestamp>,
+    /// Lead image URL, if the feed declared one (`media:thumbnail` /
+    /// `media:content` / image `enclosure`) or the body carried a
+    /// leading `<img>`. Always an absolute `http(s)` URL — consumers
+    /// load it through the policed image cache, never directly.
+    pub lead_image: Option<String>,
 }
 
 /// A stored article.
@@ -179,6 +184,10 @@ pub struct Article {
     pub saved_at: Timestamp,
     /// The source's own last-update time, if any.
     pub source_updated_at: Option<Timestamp>,
+    /// Lead image URL, if known — the feed's declared image or the body's
+    /// first inline `<img>`. Always an absolute `http(s)` URL, loaded
+    /// through the policed image cache, never directly.
+    pub lead_image: Option<String>,
 }
 
 impl Article {
@@ -331,6 +340,7 @@ mod tests {
             word_count: Some(12),
             saved_at: Timestamp::now(),
             source_updated_at: None,
+            lead_image: None,
         };
         let checksum: Checksum =
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

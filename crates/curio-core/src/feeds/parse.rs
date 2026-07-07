@@ -2,7 +2,7 @@
 //! entries with total dedupe keys.
 
 use curio_types::Timestamp;
-use feed_rs::model::{Entry, Feed, Link};
+use feed_rs::model::{Entry, Feed, Link, MediaObject};
 
 use super::dedupe_key;
 
@@ -40,6 +40,15 @@ pub struct ParsedEntry {
     pub content_html: String,
     /// Entry language, if declared.
     pub lang: Option<String>,
+    /// A lead image URL declared in the feed metadata itself
+    /// (`media:thumbnail` → `media:content` image → image `enclosure`),
+    /// when the source carried one. This is the *first-class* RSS image
+    /// signal; ingest falls back to the first inline `<img>` only when
+    /// this is absent. Left as the source declared it (absolute or
+    /// relative); the content pipeline's URL policing does not run over
+    /// it, so consumers treat it as untrusted and load it through the
+    /// policed image cache, never directly.
+    pub lead_image: Option<String>,
 }
 
 /// A parsed feed: metadata plus normalized entries in document order.
@@ -104,6 +113,7 @@ fn normalize_entry(entry: Entry) -> ParsedEntry {
         .find(|name| !name.trim().is_empty());
     let published = entry.published.map(Timestamp::new);
     let updated = entry.updated.map(Timestamp::new);
+    let lead_image = feed_image(&entry.media, &entry.links);
     let content_html = entry
         .content
         .and_then(|content| content.body)
@@ -120,7 +130,60 @@ fn normalize_entry(entry: Entry) -> ParsedEntry {
         updated,
         content_html,
         lang: entry.language,
+        lead_image,
     }
+}
+
+/// The feed's own declared lead image for an entry, if any, preferring the
+/// most explicit signal: a `media:thumbnail`, then an image `media:content`,
+/// then an image `enclosure`. Only absolute `http(s)` URLs qualify — a
+/// relative or scheme-less reference can't be fetched by the image cache
+/// (which has no base to resolve against), so it's dropped here rather than
+/// stored as an un-loadable value. The inline-`<img>` fallback lives in
+/// ingest, over the base-resolved, sanitized body.
+fn feed_image(media: &[MediaObject], links: &[Link]) -> Option<String> {
+    let thumbnail = || {
+        media
+            .iter()
+            .flat_map(|object| object.thumbnails.iter())
+            .map(|thumb| thumb.image.uri.trim())
+            .find(|uri| is_http_url(uri))
+            .map(ToOwned::to_owned)
+    };
+    let content = || {
+        media
+            .iter()
+            .flat_map(|object| object.content.iter())
+            .filter(|content| {
+                content
+                    .content_type
+                    .as_ref()
+                    .is_some_and(|mime| mime.ty().as_str() == "image")
+            })
+            .filter_map(|content| content.url.as_ref())
+            .map(ToString::to_string)
+            .find(|uri| is_http_url(uri))
+    };
+    let enclosure = || {
+        links
+            .iter()
+            .filter(|link| link.rel.as_deref() == Some("enclosure"))
+            .filter(|link| {
+                link.media_type
+                    .as_deref()
+                    .is_some_and(|mime| mime.starts_with("image/"))
+            })
+            .map(|link| link.href.trim())
+            .find(|uri| is_http_url(uri))
+            .map(ToOwned::to_owned)
+    };
+    thumbnail().or_else(content).or_else(enclosure)
+}
+
+/// Whether `uri` is an absolute `http`/`https` URL — the only shape the
+/// image cache can fetch.
+fn is_http_url(uri: &str) -> bool {
+    uri.starts_with("http://") || uri.starts_with("https://")
 }
 
 /// The entry/site link: prefer an explicit `alternate` (or rel-less)
@@ -200,6 +263,80 @@ mod tests {
         assert!(one.published.is_some());
         let two = &feed.entries[1];
         assert_eq!(two.content_html, "Only a summary here.");
+    }
+
+    #[test]
+    fn lead_image_prefers_media_thumbnail_over_enclosure() {
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+<channel><title>t</title>
+<item><title>a</title><guid>g1</guid>
+<media:thumbnail url="https://cdn.example.com/thumb.jpg"/>
+<enclosure url="https://cdn.example.com/clip.mp3" type="audio/mpeg" length="1"/>
+</item></channel></rss>"#;
+        let feed = parse_feed(xml, None).unwrap();
+        assert_eq!(
+            feed.entries[0].lead_image.as_deref(),
+            Some("https://cdn.example.com/thumb.jpg"),
+            "a media:thumbnail is the strongest signal"
+        );
+    }
+
+    #[test]
+    fn lead_image_takes_an_image_enclosure_when_no_thumbnail() {
+        // feed-rs models an RSS <enclosure> as a MediaContent, so an image
+        // enclosure surfaces through the media:content path.
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0">
+<channel><title>t</title>
+<item><title>a</title><guid>g2</guid>
+<enclosure url="https://cdn.example.com/pic.jpg" type="image/jpeg" length="1"/>
+</item></channel></rss>"#;
+        let feed = parse_feed(xml, None).unwrap();
+        assert_eq!(
+            feed.entries[0].lead_image.as_deref(),
+            Some("https://cdn.example.com/pic.jpg")
+        );
+    }
+
+    #[test]
+    fn lead_image_ignores_a_non_image_enclosure() {
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0">
+<channel><title>t</title>
+<item><title>a</title><guid>g3</guid>
+<enclosure url="https://cdn.example.com/clip.mp3" type="audio/mpeg" length="1"/>
+</item></channel></rss>"#;
+        let feed = parse_feed(xml, None).unwrap();
+        assert_eq!(
+            feed.entries[0].lead_image, None,
+            "an audio enclosure is not a lead image"
+        );
+    }
+
+    #[test]
+    fn lead_image_takes_an_atom_image_enclosure_link() {
+        let xml = br#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>t</title>
+<entry><id>a1</id><title>a</title>
+<link rel="alternate" href="https://example.com/a"/>
+<link rel="enclosure" type="image/png" href="https://cdn.example.com/a.png"/>
+</entry></feed>"#;
+        let feed = parse_feed(xml, None).unwrap();
+        assert_eq!(
+            feed.entries[0].lead_image.as_deref(),
+            Some("https://cdn.example.com/a.png")
+        );
+    }
+
+    #[test]
+    fn is_http_url_requires_an_absolute_http_scheme() {
+        assert!(is_http_url("https://example.com/x.jpg"));
+        assert!(is_http_url("http://example.com/x.jpg"));
+        assert!(!is_http_url("/relative/x.jpg"));
+        assert!(!is_http_url("data:image/png;base64,AAAA"));
+        assert!(!is_http_url("//protocol.relative/x.jpg"));
     }
 
     #[test]

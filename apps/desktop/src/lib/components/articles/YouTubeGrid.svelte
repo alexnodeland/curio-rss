@@ -72,6 +72,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
                         <VideoPoster
                             videoId={youTubeVideoId(article.source_url)}
                             seed={String(article.id)}
+                            fallbackImage={article.image}
                         />
                         <span class="play"><Icon name="play" size={16} /></span>
                     </span>

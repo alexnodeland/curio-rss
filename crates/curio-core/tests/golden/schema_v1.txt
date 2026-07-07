@@ -56,7 +56,7 @@ CREATE TABLE articles (
     saved_at          TEXT    NOT NULL,
     source_updated_at TEXT,
     modified_at       TEXT    NOT NULL
-)
+, lead_image TEXT)
 
 -- table articles_fts
 CREATE VIRTUAL TABLE articles_fts USING fts5(

@@ -54,6 +54,7 @@ fn manual_article(key: &str, title: &str) -> NewArticle {
         lang: None,
         word_count: None,
         source_updated_at: None,
+        lead_image: None,
     }
 }
 
@@ -511,6 +512,7 @@ fn a_crash_before_the_manifest_write_never_loses_article_saved() {
                 lang: None,
                 word_count: None,
                 source_updated_at: None,
+                lead_image: None,
             }])
             .unwrap();
         let article = core

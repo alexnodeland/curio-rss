@@ -93,6 +93,15 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
 }
 
 /**
+ * Fetches the article's source page and replaces its stored content with the
+ * readability-extracted full article; the reader + list refetch off the
+ * emitted `ArticlesChanged`. Returns whether it succeeded (for a loading UI).
+ */
+export async function loadFullArticle(articleId: number): Promise<boolean> {
+    return (await run(() => commands.loadFullArticle(articleId))) !== undefined;
+}
+
+/**
  * Marks every unread article in a feed (`feedId`) — or the whole library
  * (`null`) — read, and toasts how many changed. The sidebar badges and the
  * list refresh off the Rust-emitted `ArticlesChanged`.

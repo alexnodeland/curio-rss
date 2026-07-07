@@ -79,6 +79,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
         response: [articleSummaryFixture()],
     },
     getArticle: { args: [100], response: articleFixture() },
+    loadFullArticle: { args: [100], response: articleFixture() },
     getArticleState: { args: [100], response: articleStateFixture() },
     getArticleTags: { args: [100], response: ['rust'] },
     getUnreadCounts: { args: [], response: unreadCountsFixture() },

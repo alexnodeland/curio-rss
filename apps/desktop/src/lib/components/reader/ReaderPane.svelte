@@ -14,6 +14,7 @@ import {
 } from '$lib/bindings';
 import { formatIntlDateTime, t } from '$lib/i18n';
 import {
+    loadFullArticle,
     markReadOnOpen,
     openInBrowser,
     promoteSelected,
@@ -42,6 +43,17 @@ function feedHue(label: string): number {
 }
 
 let showTypography = $state(false);
+let hydrating = $state(false);
+
+/** Loads the full readability-extracted article; content updates via events. */
+async function hydrate(articleId: number): Promise<void> {
+    hydrating = true;
+    try {
+        await loadFullArticle(articleId);
+    } finally {
+        hydrating = false;
+    }
+}
 
 function article(): ArticleDto | null {
     const articleId = selectionStore.selectedArticleId;
@@ -201,6 +213,17 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 </div>
                 <button
                     class="tool"
+                    disabled={hydrating}
+                    aria-busy={hydrating}
+                    aria-label={t('reader.action.loadFull')}
+                    title={t('reader.action.loadFull')}
+                    onclick={() => void hydrate(current.id)}
+                >
+                    <Icon name="article" />
+                </button>
+                <button
+                    class="tool"
+                    aria-label={t('reader.action.openInBrowser')}
                     title={t('reader.action.openInBrowser')}
                     onclick={() => void openInBrowser(current.id, current.source_url)}
                 >

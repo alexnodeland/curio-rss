@@ -57,6 +57,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             // articles
             commands::articles::list_articles,
             commands::articles::get_article,
+            commands::articles::load_full_article,
             commands::articles::get_article_state,
             commands::articles::get_article_tags,
             commands::articles::get_unread_counts,

@@ -7,8 +7,10 @@
 //!                    → htmd HTML→CommonMark at export time
 //! ```
 //!
-//! Raw HTML never reaches storage: [`process`] is the only door, and it
-//! sanitizes first. Scripts, iframes, event handlers, inline style,
+//! Raw HTML never reaches storage: [`process`] (feed fragments, sanitize
+//! first) and [`process_full_page`] (fetched full pages, readability-extract
+//! first, then sanitize) are the only doors — either way ammonia is the last
+//! gate before storage. Scripts, iframes, event handlers, inline style,
 //! `javascript:`/`data:` URLs and `<base>` are gone by construction —
 //! the desktop head's CSP is defense-in-depth, not the primary defense.
 //! Markdown conversion is a DOM walk (htmd); the sketch's regex
@@ -16,10 +18,12 @@
 
 mod extract;
 mod markdown;
+mod readable;
 mod sanitize;
 
 pub use extract::extract_main_content;
 pub use markdown::to_markdown;
+pub use readable::extract_full_page;
 pub use sanitize::sanitize;
 
 /// Storage-ready content: sanitized/extracted HTML plus the extracted
@@ -40,6 +44,9 @@ pub enum ContentError {
     /// htmd failed to serialize the DOM walk.
     #[error("markdown conversion: {0}")]
     Markdown(#[from] std::io::Error),
+    /// The readability extractor could not parse or score the page.
+    #[error("readability: {0}")]
+    Readability(#[from] dom_smoothie::ReadabilityError),
 }
 
 /// The full ingest pipeline: sanitize → extract → text. `base_url`
@@ -56,6 +63,28 @@ pub fn process(raw_html: &str, base_url: Option<&str>) -> ProcessedContent {
         text,
         word_count,
     }
+}
+
+/// The full-**page** pipeline for a fetched article: readability extract →
+/// ammonia sanitize → text. Distinct from [`process`] (feed fragments, which
+/// sanitize first): a full page is *extracted* first to find the article body
+/// amid nav/comments/chrome, then the extractor's output passes the sanitize
+/// gate. `url` is the article's final (post-redirect) URL — the relative-link
+/// base and scheme-allowlist context.
+///
+/// # Errors
+///
+/// [`ContentError::Readability`] if the page cannot be parsed or scored.
+pub fn process_full_page(raw_html: &str, url: &str) -> Result<ProcessedContent, ContentError> {
+    let extracted = extract_full_page(raw_html, url)?;
+    let html = sanitize(&extracted, Some(url));
+    let text = plain_text(&html);
+    let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
+    Ok(ProcessedContent {
+        html,
+        text,
+        word_count,
+    })
 }
 
 /// Elements whose boundaries do *not* split words: `<b>old</b>er` reads
@@ -119,6 +148,8 @@ pub fn first_image(html: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     #[test]
@@ -127,6 +158,35 @@ mod tests {
         assert_eq!(processed.text, "Hello world, again.");
         assert_eq!(processed.word_count, 3);
         assert!(processed.html.contains("world"));
+    }
+
+    #[test]
+    fn process_full_page_extracts_the_body_and_sanitizes() {
+        let page = r"<html><head><title>Ignored</title></head><body>
+            <header><nav>Home · About · Contact · Subscribe</nav></header>
+            <article>
+              <h1>The Real Headline</h1>
+              <p>This is the first substantial paragraph of the genuine article body,
+                 written with enough real sentences that a readability scorer prefers
+                 this region over the surrounding navigation and footer chrome.</p>
+              <p>A second full paragraph continues the argument with more meaningful
+                 prose, cementing this container as the densest block of text on the
+                 page and therefore the main content the reader actually wants.</p>
+              <script>alert('xss')</script>
+            </article>
+            <footer>Copyright, related links, more navigation, cookie notice.</footer>
+            </body></html>";
+        let processed = process_full_page(page, "https://example.com/post").unwrap();
+        assert!(
+            processed.text.contains("first substantial paragraph"),
+            "extracted the article body: {}",
+            processed.text
+        );
+        assert!(
+            !processed.html.contains("<script"),
+            "output passed the sanitize gate"
+        );
+        assert!(processed.word_count > 20);
     }
 
     #[test]

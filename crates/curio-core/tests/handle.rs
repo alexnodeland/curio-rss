@@ -716,3 +716,58 @@ fn unread_counts_are_served_by_the_facade() {
     assert_eq!(counts.get(&None), Some(&1));
     assert_eq!(counts.values().sum::<u64>(), 1);
 }
+
+#[tokio::test]
+async fn hydrate_article_replaces_the_excerpt_with_the_extracted_full_body() {
+    let server = MockServer::start().await;
+    let page = r"<html><body>
+        <nav>menu · menu · menu</nav>
+        <article>
+          <h1>Full Title</h1>
+          <p>The complete article body that the feed only excerpted, written with
+             enough genuine sentences that the readability scorer locks onto this
+             container as the densest, most meaningful block of text on the page.</p>
+          <p>A second substantial paragraph continues the piece so the extraction is
+             unambiguous and comfortably longer than the short feed excerpt it
+             replaces, which is exactly the point of loading the full article.</p>
+        </article>
+        <footer>footer chrome and related links</footer></body></html>";
+    Mock::given(method("GET"))
+        .and(path("/post"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page, "text/html"))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    // The feed carries the W1 exemption (its content lives on 127.0.0.1); the
+    // article's source page is on the same host, so hydrate is allowed.
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    let mut article = manual_article("k1", "Short excerpt");
+    article.feed_id = Some(feed.id);
+    article.source_url = format!("{}/post", server.uri());
+    core.storage().upsert_articles(vec![article]).unwrap();
+    let stored = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    assert!(stored.content.text.len() < 20, "starts as a tiny excerpt");
+
+    let hydrated = core.hydrate_article(stored.id).await.unwrap();
+    assert!(
+        hydrated.content.text.contains("complete article body"),
+        "extracted the full body: {}",
+        hydrated.content.text
+    );
+    assert!(
+        hydrated
+            .content
+            .html
+            .contains("second substantial paragraph")
+    );
+    assert!(
+        !hydrated.content.html.contains("<nav"),
+        "chrome stripped by extract + sanitize"
+    );
+    assert!(hydrated.word_count.unwrap_or(0) > 20);
+}

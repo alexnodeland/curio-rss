@@ -132,6 +132,12 @@ export const commands = {
 	/**  Source-declared update time (RFC 3339 UTC). */
 	source_updated_at: string | null,
 } | null, CommandError>(__TAURI_INVOKE("get_article", { articleId })),
+	/**
+	 *  Fetches the article's source page and replaces its stored content with the
+	 *  readability-extracted full article (on-demand). Returns the refreshed
+	 *  article; emits `ArticlesChanged` so the open reader + list refetch.
+	 */
+	loadFullArticle: (articleId: number) => typedError<ArticleDto, CommandError>(__TAURI_INVOKE("load_full_article", { articleId })),
 	/**  The read/starred/read-later/archived flag projection. */
 	getArticleState: (articleId: number) => typedError<ArticleStateDto, CommandError>(__TAURI_INVOKE("get_article_state", { articleId })),
 	/**  The article's tags, sorted. */

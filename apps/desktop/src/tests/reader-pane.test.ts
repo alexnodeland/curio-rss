@@ -169,6 +169,20 @@ describe('ReaderPane', () => {
         expect(getByRole('alert').textContent).not.toContain('sql');
     });
 
+    it('the load-full-article button hydrates through load_full_article', async () => {
+        harness = installIpcHarness({
+            ...baseResponders(),
+            load_full_article: articleFixture({ id: 100, content_html: '<p>Full body</p>' }),
+        });
+        selectionStore.selectedArticleId = 100;
+        const { getByRole } = render(ReaderPane);
+        await flushIpc();
+
+        await fireEvent.click(getByRole('button', { name: 'Load full article' }));
+        await flushIpc();
+        expect(harness.callsFor('load_full_article')).toEqual([{ articleId: 100 }]);
+    });
+
     it('shows the missing state when the article no longer exists', async () => {
         harness = installIpcHarness({
             ...baseResponders(),

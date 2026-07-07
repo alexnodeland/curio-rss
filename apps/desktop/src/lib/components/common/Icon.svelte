@@ -30,7 +30,8 @@ export type IconName =
     | 'link'
     | 'play'
     | 'grid'
-    | 'rows';
+    | 'rows'
+    | 'dot';
 </script>
 
 <script lang="ts">
@@ -152,5 +153,7 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
         />
     {:else if name === 'rows'}
         <path d="M3 6h18M3 12h18M3 18h18" />
+    {:else if name === 'dot'}
+        <circle cx="12" cy="12" r="5" fill="currentColor" stroke="none" />
     {/if}
 </svg>

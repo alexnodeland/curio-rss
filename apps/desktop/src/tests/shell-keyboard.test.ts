@@ -42,6 +42,7 @@ function articleSummary(id: number): ArticleSummaryDto {
         saved_at: '2026-07-01T10:00:00.000Z',
         word_count: 100,
         lang: 'en',
+        image: null,
     };
 }
 

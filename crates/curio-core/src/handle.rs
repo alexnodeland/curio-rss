@@ -898,6 +898,13 @@ impl CoreHandle {
 fn ingest_entry(feed_id: FeedId, feed_url: &str, entry: ParsedEntry) -> NewArticle {
     let base = entry.link.as_deref().unwrap_or(feed_url).to_owned();
     let processed = content::process(&entry.content_html, Some(&base));
+    // Prefer the feed's own declared image (media:thumbnail / media:content /
+    // enclosure); fall back to the first inline <img> in the sanitized body
+    // (already base-resolved). Either way it's a URL loaded through the
+    // policed image cache, never fetched directly.
+    let lead_image = entry
+        .lead_image
+        .or_else(|| content::first_image(&processed.html));
     NewArticle {
         feed_id: Some(feed_id),
         dedupe_key: entry.dedupe_key,
@@ -912,6 +919,7 @@ fn ingest_entry(feed_id: FeedId, feed_url: &str, entry: ParsedEntry) -> NewArtic
         lang: entry.lang,
         word_count: Some(processed.word_count),
         source_updated_at: entry.updated,
+        lead_image,
     }
 }
 

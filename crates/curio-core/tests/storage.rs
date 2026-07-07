@@ -33,6 +33,7 @@ fn new_article(key: &str, title: &str, text: &str) -> NewArticle {
         lang: None,
         word_count: None,
         source_updated_at: None,
+        lead_image: None,
     }
 }
 
@@ -1061,4 +1062,47 @@ fn parallel_writers_serialize_through_the_writer_thread() {
         writer.join().unwrap().unwrap();
     }
     assert_eq!(storage.list_feeds().unwrap().len(), 8);
+}
+
+// --------------------------------------------------------- lead image
+
+#[test]
+fn lead_image_round_trips_through_insert_and_update() {
+    let (_dir, storage) = temp_storage();
+    let mut article = new_article("img:1", "Has an image", "body");
+    article.lead_image = Some("https://cdn.example.com/lead.jpg".to_owned());
+    storage.upsert_articles(vec![article.clone()]).unwrap();
+
+    let stored = storage
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|a| a.dedupe_key == "m:img:1")
+        .unwrap();
+    assert_eq!(
+        stored.lead_image.as_deref(),
+        Some("https://cdn.example.com/lead.jpg"),
+        "the lead image survives insert and the list read path"
+    );
+    // The full read path (get_article) carries it too.
+    let full = storage.get_article(stored.id).unwrap().unwrap();
+    assert_eq!(full.lead_image, stored.lead_image);
+
+    // Re-ingesting the same dedupe key updates the lead image in place.
+    article.lead_image = Some("https://cdn.example.com/updated.jpg".to_owned());
+    let outcome = storage.upsert_articles(vec![article]).unwrap();
+    assert_eq!(outcome.updated, 1);
+    let updated = storage.get_article(stored.id).unwrap().unwrap();
+    assert_eq!(
+        updated.lead_image.as_deref(),
+        Some("https://cdn.example.com/updated.jpg")
+    );
+}
+
+#[test]
+fn absent_lead_image_reads_back_as_none() {
+    let (_dir, storage) = temp_storage();
+    let id = insert_one(&storage, "img:none", "No image", "body");
+    let stored = storage.get_article(id).unwrap().unwrap();
+    assert_eq!(stored.lead_image, None);
 }

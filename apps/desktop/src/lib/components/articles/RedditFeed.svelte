@@ -9,6 +9,7 @@
  */
 import { type ArticleSummaryDto, commands } from '$lib/bindings';
 import { formatIntlDate, t } from '$lib/i18n';
+import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import Icon from '$components/common/Icon.svelte';
 import { subredditOf } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
@@ -74,6 +75,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
                                 >{/if}
                         </span>
                         <span class="title">{article.title}</span>
+                        <ArticleThumb variant="card" image={article.image} alt="" />
                         <span class="foot">
                             <span class="comments"><Icon name="message" size={13} /> {t('reader.reddit.openThread')}</span>
                         </span>

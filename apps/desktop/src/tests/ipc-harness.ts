@@ -149,6 +149,7 @@ export function articleSummaryFixture(
         saved_at: '2026-07-01T10:00:00.000Z',
         word_count: 250,
         lang: 'en',
+        image: null,
         ...overrides,
     };
 }

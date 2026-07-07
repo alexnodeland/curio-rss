@@ -104,12 +104,14 @@ export async function openInBrowser(articleId: number, url: string): Promise<voi
 }
 
 /** The sidebar's built-in views over the backend-owned filters. */
-export type ViewId = 'all' | 'starred' | 'readLater';
+export type ViewId = 'all' | 'starred' | 'readLater' | 'archived';
 
 const VIEW_FILTERS: Record<ViewId, ArticleFilters> = {
     all: ALL_ARTICLES,
     starred: { ...ALL_ARTICLES, starred: true },
     readLater: { ...ALL_ARTICLES, readLater: true },
+    // The one view that shows archived items (everything else hides them).
+    archived: { ...ALL_ARTICLES, archived: true },
 };
 
 /** Switches the article list to a built-in view (clears feed + search). */
@@ -256,6 +258,9 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'view.readLater':
             selectView('readLater');
+            break;
+        case 'view.archived':
+            selectView('archived');
             break;
         case 'view.feeds':
             searchStore.clear();

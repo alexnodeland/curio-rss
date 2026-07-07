@@ -29,6 +29,7 @@ describe('shortcut table', () => {
             'view.all': ['g', 'a'],
             'view.starred': ['g', 's'],
             'view.readLater': ['g', 'l'],
+            'view.archived': ['g', 'e'],
             'view.feeds': ['g', 'f'],
             'app.addFeed': ['a'],
             'app.settings': [','],

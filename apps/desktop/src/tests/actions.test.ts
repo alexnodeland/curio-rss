@@ -114,6 +114,7 @@ describe('actions — views and shortcut routing', () => {
         expect(activeView(ALL_ARTICLES)).toBe('all');
         expect(activeView({ ...ALL_ARTICLES, starred: true })).toBe('starred');
         expect(activeView({ ...ALL_ARTICLES, readLater: true })).toBe('readLater');
+        expect(activeView({ ...ALL_ARTICLES, archived: true })).toBe('archived');
         expect(activeView({ ...ALL_ARTICLES, feedId: 3 })).toBeNull();
         expect(activeView({ ...ALL_ARTICLES, read: false })).toBeNull();
     });
@@ -124,8 +125,12 @@ describe('actions — views and shortcut routing', () => {
         expect(activeView(articlesStore.filters)).toBe('starred');
         handleShortcut('view.readLater');
         expect(activeView(articlesStore.filters)).toBe('readLater');
+        handleShortcut('view.archived');
+        expect(activeView(articlesStore.filters)).toBe('archived');
+        expect(articlesStore.filters.archived).toBe(true);
         handleShortcut('view.all');
         expect(activeView(articlesStore.filters)).toBe('all');
+        expect(articlesStore.filters.archived).toBe(false);
     });
 
     it('a view switch leaves search mode', () => {

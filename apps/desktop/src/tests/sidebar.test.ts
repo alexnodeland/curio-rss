@@ -89,8 +89,12 @@ describe('Sidebar', () => {
         await fireEvent.click(getByText('Read later'));
         expect(articlesStore.filters).toEqual({ ...ALL_ARTICLES, readLater: true });
 
+        await fireEvent.click(getByText('Archived'));
+        expect(articlesStore.filters).toEqual({ ...ALL_ARTICLES, archived: true });
+
         await fireEvent.click(getByText('All articles'));
         expect(articlesStore.filters).toEqual(ALL_ARTICLES);
+        expect(articlesStore.filters.archived).toBe(false);
         expect(selectionStore.selectedFeedId).toBeNull();
     });
 

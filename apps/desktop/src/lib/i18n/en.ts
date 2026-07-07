@@ -17,6 +17,7 @@ export const en = {
     'view.all': 'All articles',
     'view.starred': 'Starred',
     'view.readLater': 'Read later',
+    'view.archived': 'Archived',
     'view.feeds': 'Feeds',
 
     'sidebar.label': 'Subscriptions',
@@ -224,6 +225,7 @@ export const en = {
     'shortcut.viewAll': 'Go to all articles',
     'shortcut.viewStarred': 'Go to starred',
     'shortcut.viewReadLater': 'Go to read later',
+    'shortcut.viewArchived': 'Go to archived',
     'shortcut.viewFeeds': 'Go to the feed list',
     'shortcut.help': 'Keyboard shortcut help',
     'shortcut.addFeed': 'Add a feed',

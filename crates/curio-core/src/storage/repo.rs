@@ -543,8 +543,9 @@ impl Storage {
     /// `None` key counts articles that belong to no feed (manual saves,
     /// rows orphaned by a feed removal); the total unread count is the
     /// sum of the map's values. An article with no `article_state` row
-    /// has never been touched and counts as unread; the other flags
-    /// (starred, read-later, archived) do not affect unreadness.
+    /// has never been touched and counts as unread; starred and read-later
+    /// do not affect unreadness, but **archived articles are excluded** —
+    /// archiving takes an item out of the reading flow, badge included.
     ///
     /// # Errors
     ///
@@ -554,7 +555,8 @@ impl Storage {
             let mut stmt = conn.prepare_cached(
                 "SELECT a.feed_id, COUNT(*) FROM articles a \
                  LEFT JOIN article_state s ON s.article_id = a.id \
-                 WHERE COALESCE(s.is_read, 0) = 0 GROUP BY a.feed_id",
+                 WHERE COALESCE(s.is_read, 0) = 0 AND COALESCE(s.is_archived, 0) = 0 \
+                 GROUP BY a.feed_id",
             )?;
             let rows = stmt
                 .query_map([], |row| {

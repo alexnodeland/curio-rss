@@ -217,6 +217,7 @@ export const en = {
 
     'shortcut.nextArticle': 'Next article',
     'shortcut.previousArticle': 'Previous article',
+    'shortcut.nextUnread': 'Next unread (across feeds)',
     'shortcut.openArticle': 'Open article in browser',
     'shortcut.toggleStar': 'Star / unstar article',
     'shortcut.toggleReadLater': 'Add to / remove from read later',

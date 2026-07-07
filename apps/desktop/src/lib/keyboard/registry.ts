@@ -13,6 +13,7 @@ import type { MessageKey } from '$lib/i18n';
 export type ShortcutId =
     | 'nav.nextArticle'
     | 'nav.previousArticle'
+    | 'nav.nextUnread'
     | 'article.open'
     | 'article.toggleStar'
     | 'article.toggleReadLater'
@@ -55,6 +56,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         id: 'nav.previousArticle',
         keys: ['k'],
         description: 'shortcut.previousArticle',
+        category: 'navigation',
+    },
+    {
+        id: 'nav.nextUnread',
+        keys: ['n'],
+        description: 'shortcut.nextUnread',
         category: 'navigation',
     },
     { id: 'article.open', keys: ['o'], description: 'shortcut.openArticle', category: 'actions' },

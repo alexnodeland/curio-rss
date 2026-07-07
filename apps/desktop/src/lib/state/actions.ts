@@ -11,7 +11,13 @@ import { t } from '$lib/i18n';
 import type { ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { isOpenableUrl, openExternal } from '$lib/utils/external';
-import { ALL_ARTICLES, type ArticleFilters, articlesStore, filterKey } from './articles.svelte';
+import {
+    ALL_ARTICLES,
+    type ArticleFilters,
+    articlesStore,
+    filterKey,
+    unreadScopeDto,
+} from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
 import { feedsStore } from './feeds.svelte';
 import type { CommandResult } from './query-cache.svelte';
@@ -147,6 +153,37 @@ export function selectFolder(path: string): void {
     articlesStore.filters = { ...ALL_ARTICLES, feedTag: path };
 }
 
+/**
+ * Jumps to the next unread article, crossing feed boundaries. The current
+ * scope switches to unread-only (so the target is guaranteed in the list) and
+ * the next unread strictly below the selection is chosen; when the scope is
+ * out of unread, it hops to the next feed with unread and takes its first.
+ */
+export async function goToNextUnread(): Promise<void> {
+    const before = selectionStore.selectedArticleId;
+    const next = await run(() =>
+        commands.listArticles(unreadScopeDto(articlesStore.filters, before)),
+    );
+    if (next !== undefined && next.length > 0) {
+        articlesStore.filters = { ...articlesStore.filters, read: false };
+        selectionStore.selectedArticleId = next[0].id;
+        return;
+    }
+    const feed = feedsStore.nextFeedWithUnread(selectionStore.selectedFeedId);
+    if (feed === null) {
+        return;
+    }
+    searchStore.clear();
+    selectionStore.selectedFeedId = feed;
+    articlesStore.filters = { ...ALL_ARTICLES, feedId: feed, read: false };
+    const first = await run(() =>
+        commands.listArticles(unreadScopeDto({ ...ALL_ARTICLES, feedId: feed }, null)),
+    );
+    if (first !== undefined && first.length > 0) {
+        selectionStore.selectedArticleId = first[0].id;
+    }
+}
+
 /** The built-in view a filter set corresponds to, if any (highlighting). */
 export function activeView(filters: ArticleFilters): ViewId | null {
     const key = filterKey(filters);
@@ -244,6 +281,9 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'nav.previousArticle':
             selectionStore.selectPreviousArticle();
+            break;
+        case 'nav.nextUnread':
+            void goToNextUnread();
             break;
         case 'article.open':
             openSelected();

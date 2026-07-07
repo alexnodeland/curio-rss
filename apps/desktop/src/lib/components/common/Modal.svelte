@@ -1,12 +1,15 @@
 <script lang="ts">
 /**
  * A reusable modal shell: backdrop, a focus-trapped dialog with a labelled
- * header and close button, and a scrollable body snippet. Dismissal by
- * Escape is owned by the shell keydown handler (it closes `activeModal`);
- * the close button covers the pointer path. Only one modal is ever open, so
- * a fixed title id is safe.
+ * header and close button, and a scrollable body snippet. `trapFocus` keeps
+ * Tab inside the dialog and restores focus to the trigger on close; the
+ * background is made `inert` by the shell. Dismissal by Escape is owned by
+ * the shell keydown handler (it closes `activeModal`); the close button
+ * covers the pointer path. Only one modal is ever open, so a fixed title id
+ * is safe.
  */
 import Icon from '$components/common/Icon.svelte';
+import { trapFocus } from '$lib/actions/trap-focus';
 import { t } from '$lib/i18n';
 import type { Snippet } from 'svelte';
 
@@ -21,12 +24,6 @@ let {
     size?: 'medium' | 'large';
     children: Snippet;
 } = $props();
-
-let dialog: HTMLElement | undefined = $state();
-
-$effect(() => {
-    dialog?.focus();
-});
 </script>
 
 <div class="overlay-backdrop">
@@ -37,7 +34,7 @@ $effect(() => {
         aria-modal="true"
         aria-labelledby="cx-modal-title"
         tabindex="-1"
-        bind:this={dialog}
+        use:trapFocus
     >
         <header class="overlay-header">
             <h2 id="cx-modal-title">{title}</h2>

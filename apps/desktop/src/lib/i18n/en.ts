@@ -9,6 +9,8 @@ export const en = {
     'app.loading': 'Loading…',
     'app.error.internal': 'Something went wrong. Retrying may help.',
 
+    'a11y.skipToContent': 'Skip to content',
+
     'shell.feeds.loading': 'Loading subscriptions…',
     'shell.feeds.empty': 'No subscriptions yet',
     'shell.feeds.count': '{count} feeds',

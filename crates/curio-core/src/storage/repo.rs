@@ -286,6 +286,33 @@ impl Storage {
         })
     }
 
+    /// Replaces a feed's tags wholesale — the move-to-folder / re-tag path
+    /// (folders are a `/`-path-tag rendering). Unlike [`Self::update_feed_metadata`]
+    /// this is an unconditional overwrite: a user reorganizing folders means
+    /// *exactly* these tags. Tags are normalized (trimmed, empties dropped,
+    /// deduped first-seen) so the row keeps the shape `add_feed` writes.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist; JSON or
+    /// database errors.
+    pub fn set_feed_tags(&self, id: FeedId, tags: Vec<String>) -> Result<(), StorageError> {
+        let tags = normalize_tags(tags);
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached("UPDATE feeds SET tags = ?2, modified_at = ?3 WHERE id = ?1")?
+                .execute((
+                    id.0,
+                    serde_json::to_string(&tags)?,
+                    Timestamp::now().to_string(),
+                ))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
     /// Adopts a permanent-redirect target as the feed's stored URL.
     /// A conflict with another subscription's URL leaves the row
     /// unchanged (`UPDATE OR IGNORE`) — better a stale URL than a

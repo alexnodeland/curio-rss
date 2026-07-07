@@ -189,6 +189,11 @@ export const en = {
     'feedHealth.unsubscribe.remove': 'Remove',
     'feedHealth.unsubscribe.cancel': 'Cancel',
 
+    'feedTags.label': 'Folders & tags',
+    'feedTags.placeholder': 'Tech/Databases, favorites',
+    'feedTags.hint': 'Comma-separated. Use / to nest into folders, e.g. Tech/Databases.',
+    'feedTags.save': 'Save',
+
     'refresh.announce.start': 'Refreshing feeds',
     'refresh.announce.done': 'Refresh complete: {count} new articles across {feeds} feeds',
     'refresh.inProgress': 'Refreshing… {done} of {total}',

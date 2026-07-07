@@ -49,6 +49,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::feeds::get_feed_by_url,
             commands::feeds::set_feed_status,
             commands::feeds::update_feed_metadata,
+            commands::feeds::set_feed_tags,
             commands::feeds::refresh_feed,
             commands::feeds::refresh_all,
             commands::feeds::recent_fetches,

@@ -271,6 +271,19 @@ impl CoreHandle {
         Ok(self.storage.set_feed_allow_private_network(id, allow)?)
     }
 
+    /// Replaces a feed's tags — the move-to-folder / re-tag path (folders
+    /// are a `/`-path-tag rendering in the head). A wholesale overwrite that
+    /// is DB-local, like the feed-metadata edit: it stages no event, since
+    /// consumers key feeds by URL and folder membership is a local
+    /// reading-organization concern, not part of the published contract.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::NotFound`] for an unknown feed; storage errors.
+    pub fn set_feed_tags(&self, id: FeedId, tags: Vec<String>) -> Result<(), CoreError> {
+        Ok(self.storage.set_feed_tags(id, tags)?)
+    }
+
     /// Refreshes one feed: policed conditional GET → parse → sanitize →
     /// upsert → fetch-log row. Fetch/parse failures are *outcomes*
     /// (recorded, validators preserved), not errors; only storage-level

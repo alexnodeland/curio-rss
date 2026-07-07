@@ -120,6 +120,23 @@ pub async fn update_feed_metadata(
     Ok(())
 }
 
+/// Replaces a feed's tags (move-to-folder / re-tag). Tags are `/`-path
+/// strings; the sidebar renders them as a folder tree. Wholesale overwrite,
+/// DB-local (no event).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_feed_tags(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    feed_id: i64,
+    tags: Vec<String>,
+) -> Result<(), CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || set_feed_tags_impl(&core, feed_id, tags)).await?;
+    emit_or_log(&app, &FeedsChanged);
+    Ok(())
+}
+
 /// Refreshes one feed. Fetch/parse failures are *outcomes*, not errors;
 /// same-feed refreshes are serialized core-side (validator-race fix).
 #[tauri::command]
@@ -227,6 +244,14 @@ fn update_feed_metadata_impl(
     Ok(core
         .storage()
         .update_feed_metadata(FeedId(feed_id), title, site_url, description)?)
+}
+
+fn set_feed_tags_impl(
+    core: &CoreHandle,
+    feed_id: i64,
+    tags: Vec<String>,
+) -> Result<(), CommandError> {
+    Ok(core.set_feed_tags(FeedId(feed_id), tags)?)
 }
 
 async fn refresh_feed_impl(
@@ -342,6 +367,43 @@ mod tests {
         let reloaded = get_feed_impl(&core, feed.id).unwrap().unwrap();
         assert_eq!(reloaded.status, FeedStatusDto::Paused);
         assert_eq!(reloaded.title.as_deref(), Some("Titled"));
+    }
+
+    #[test]
+    fn set_feed_tags_overwrites_wholesale_and_normalizes() {
+        let (_dir, core) = temp_core();
+        let feed = add_feed_impl(
+            &core,
+            NewFeedDto {
+                url: "https://example.test/feed.xml".into(),
+                title: None,
+                tags: vec!["Tech".into()],
+            },
+        )
+        .unwrap();
+
+        // Overwrite (not merge) with a nested path tag; trims, drops empties,
+        // dedupes — the same normalization add_feed applies.
+        set_feed_tags_impl(
+            &core,
+            feed.id,
+            vec![
+                "  Tech/Databases  ".into(),
+                String::new(),
+                "fav".into(),
+                "fav".into(),
+            ],
+        )
+        .unwrap();
+        let reloaded = get_feed_impl(&core, feed.id).unwrap().unwrap();
+        assert_eq!(
+            reloaded.tags,
+            vec!["Tech/Databases".to_owned(), "fav".to_owned()]
+        );
+
+        let error = set_feed_tags_impl(&core, 9999, vec!["x".into()]).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::NotFound);
     }
 
     #[tokio::test]

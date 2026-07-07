@@ -85,6 +85,29 @@ async function unsubscribe(): Promise<void> {
     onclose();
 }
 
+// The feed's tags as a comma-separated string. `tagsDraft` holds the user's
+// in-progress edit (null = untouched, so the field tracks the live tags);
+// saving clears it back to null to re-sync to the freshly-stored tags.
+let tagsDraft: string | null = $state(null);
+const currentTags = $derived(feed?.tags.join(', ') ?? '');
+const tagsValue = $derived(tagsDraft ?? currentTags);
+
+function parseTags(value: string): string[] {
+    return value
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+}
+
+async function saveTags(): Promise<void> {
+    const result = await feedsStore.setFeedTags(feedId, parseTags(tagsValue));
+    if (result.status === 'error') {
+        toastCommandError(result.error);
+        return;
+    }
+    tagsDraft = null;
+}
+
 function whenDate(iso: string): string {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso : formatIntlDateTime(date);
@@ -109,6 +132,27 @@ function whenDate(iso: string): string {
                 <button type="button" onclick={() => void setStatus('active')}>{t('feedHealth.revive')}</button>
             {/if}
         </div>
+
+        <section class="tags-edit">
+            <label class="tags-label" for="feed-tags-input">{t('feedTags.label')}</label>
+            <div class="tags-row">
+                <input
+                    id="feed-tags-input"
+                    class="tags-input"
+                    type="text"
+                    value={tagsValue}
+                    placeholder={t('feedTags.placeholder')}
+                    oninput={(event) => (tagsDraft = event.currentTarget.value)}
+                />
+                <button
+                    type="button"
+                    class="tags-save"
+                    disabled={tagsValue === currentTags}
+                    onclick={() => void saveTags()}>{t('feedTags.save')}</button
+                >
+            </div>
+            <p class="tags-hint">{t('feedTags.hint')}</p>
+        </section>
 
         <section class="recent" aria-label={t('feedHealth.recent')}>
             <h3>{t('feedHealth.recent')}</h3>
@@ -331,5 +375,63 @@ function whenDate(iso: string): string {
         background: color-mix(in srgb, var(--error), transparent 88%);
         border-color: var(--error);
         color: var(--error);
+    }
+
+    .tags-edit {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .tags-label {
+        font-size: 0.6875rem;
+        font-weight: 650;
+        letter-spacing: var(--tracking-caps);
+        text-transform: uppercase;
+        color: var(--fg-subtle);
+    }
+
+    .tags-row {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .tags-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--surface-raised);
+        border: 1px solid var(--hairline-strong);
+        color: var(--fg);
+        font-size: var(--text-md);
+    }
+
+    .tags-save {
+        flex: 0 0 auto;
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-md);
+        background: transparent;
+        border: 1px solid var(--hairline-strong);
+        color: var(--fg-muted);
+        font-size: var(--text-md);
+        font-weight: 500;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .tags-save:hover:not(:disabled) {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .tags-save:disabled {
+        opacity: 0.5;
+    }
+
+    .tags-hint {
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
     }
 </style>

@@ -21,6 +21,7 @@ const VIEWS: readonly { id: ViewId; label: MessageKey; icon: IconName }[] = [
     { id: 'all', label: 'view.all', icon: 'inbox' },
     { id: 'starred', label: 'view.starred', icon: 'star' },
     { id: 'readLater', label: 'view.readLater', icon: 'bookmark' },
+    { id: 'archived', label: 'view.archived', icon: 'archive' },
 ];
 
 // Prime the feed + unread-count queries during init, NOT from the template:

@@ -23,8 +23,8 @@ describe('HelpOverlay', () => {
             expect(getByText(t(shortcut.description))).toBeTruthy();
         }
         // Chords render both keys (g appears once per g-chord).
-        expect(getAllByText('g').length).toBe(4);
-        expect(getAllByText('then').length).toBe(4);
+        expect(getAllByText('g').length).toBe(5);
+        expect(getAllByText('then').length).toBe(5);
     });
 
     it('renders the category headings in registry order', () => {

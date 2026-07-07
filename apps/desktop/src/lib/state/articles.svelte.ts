@@ -27,13 +27,18 @@ export interface ArticleFilters {
     tag: string | null;
 }
 
-/** The unfiltered everything view. */
+/**
+ * The default everything view. `archived: false` keeps archived items out of
+ * All / Starred / Read-Later / per-feed — archiving takes an article out of
+ * the reading flow; the dedicated Archived view (`archived: true`) is the only
+ * place they resurface.
+ */
 export const ALL_ARTICLES: ArticleFilters = {
     feedId: null,
     read: null,
     starred: null,
     readLater: null,
-    archived: null,
+    archived: false,
     tag: null,
 };
 

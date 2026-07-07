@@ -659,18 +659,25 @@ fn unread_counts_group_by_feed_and_follow_read_flips() {
     assert_eq!(counts.get(&None), Some(&1), "feedless articles count too");
     assert_eq!(counts.values().sum::<u64>(), 4, "total = sum of the map");
 
-    // Reading moves the count; the other flags never do.
+    // Reading moves the count; starring does not.
     let a1_id = id_by_key(&storage, &format!("f{}:a1", feed_a.id.0));
     let b1_id = id_by_key(&storage, &format!("f{}:b1", feed_b.id.0));
     storage.mark_read(a1_id, true).unwrap();
     storage.star_article(b1_id).unwrap();
-    storage.archive_article(b1_id).unwrap();
     let counts = storage.unread_counts().unwrap();
     assert_eq!(counts.get(&Some(feed_a.id)), Some(&1));
     assert_eq!(
         counts.get(&Some(feed_b.id)),
         Some(&1),
-        "starring/archiving must not affect unreadness"
+        "starring must not affect unreadness"
+    );
+
+    // Archiving DOES take an article out of the unread count (out of the flow).
+    storage.archive_article(b1_id).unwrap();
+    assert_eq!(
+        storage.unread_counts().unwrap().get(&Some(feed_b.id)),
+        None,
+        "an archived (still-unread) article leaves the unread count"
     );
 
     // Unreading restores; a fully-read feed drops out of the map.
@@ -684,7 +691,11 @@ fn unread_counts_group_by_feed_and_follow_read_flips() {
     storage.mark_read(a2_id, true).unwrap();
     let counts = storage.unread_counts().unwrap();
     assert_eq!(counts.get(&Some(feed_a.id)), None, "no unread → no key");
-    assert_eq!(counts.values().sum::<u64>(), 2);
+    assert_eq!(
+        counts.values().sum::<u64>(),
+        1,
+        "feed_a fully read, feed_b's only article archived — just the manual one remains"
+    );
 }
 
 // ------------------------------------------------------- state and events

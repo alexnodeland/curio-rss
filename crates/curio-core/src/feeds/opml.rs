@@ -4,11 +4,13 @@
 //! feed; an outline without one is a folder, and the enclosing folder path
 //! collapses into ONE hierarchical tag on the feed (`Tech/Databases`), so
 //! arbitrary nesting survives import as a single `/`-joined tag rather than
-//! a flat bag of sibling names. Export writes a flat OPML 2.0 document
-//! carrying tags in the `category` attribute (comma-separated, per the OPML
-//! 2.0 spec), which import *also* reads — so import → export → import is
-//! lossless (the `/` rides inside a category entry, opaque to OPML).
+//! a flat bag of sibling names. Export mirrors this: a feed's first tag is
+//! its folder **path** (`/`-split back into nested `<outline>` folders) and
+//! its remaining tags ride the `category` attribute, so folders render as
+//! folders in other readers too. Import → export → import is lossless
+//! (modulo feed order, which OPML does not make meaningful).
 
+use std::collections::BTreeMap;
 use std::io::Cursor;
 
 use quick_xml::Reader;
@@ -106,13 +108,33 @@ pub fn import_opml(xml: &str) -> Result<Vec<OpmlFeed>, OpmlError> {
     Ok(feeds)
 }
 
-/// Renders feeds as a flat OPML 2.0 document (tags → `category`).
+/// Renders feeds as a **nested** OPML 2.0 document: a feed's first tag is its
+/// folder path (`/`-split into nested `<outline>` folders), its remaining tags
+/// the `category` attribute. Feeds with no tags sit at the root.
 ///
 /// # Errors
 ///
 /// [`OpmlError::Xml`] on a writer failure (practically unreachable for
 /// an in-memory writer).
 pub fn export_opml(title: &str, feeds: &[OpmlFeed]) -> Result<String, OpmlError> {
+    let mut root = ExportFolder::default();
+    for feed in feeds {
+        // The first tag is the feed's folder path (`/`-split into nesting);
+        // the remaining tags become its `category` attribute. No tags → root.
+        let segments: Vec<&str> = feed.tags.first().map_or_else(Vec::new, |tag| {
+            tag.split('/')
+                .map(str::trim)
+                .filter(|segment| !segment.is_empty())
+                .collect()
+        });
+        let category: Vec<&str> = feed.tags.iter().skip(1).map(String::as_str).collect();
+        let mut node = &mut root;
+        for segment in segments {
+            node = node.subfolders.entry(segment.to_owned()).or_default();
+        }
+        node.feeds.push((feed, category));
+    }
+
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
     writer.write_event(Event::Start(
@@ -124,7 +146,32 @@ pub fn export_opml(title: &str, feeds: &[OpmlFeed]) -> Result<String, OpmlError>
     writer.write_event(Event::End(BytesEnd::new("title")))?;
     writer.write_event(Event::End(BytesEnd::new("head")))?;
     writer.write_event(Event::Start(BytesStart::new("body")))?;
-    for feed in feeds {
+    write_folder(&mut writer, &root)?;
+    writer.write_event(Event::End(BytesEnd::new("body")))?;
+    writer.write_event(Event::End(BytesEnd::new("opml")))?;
+    let bytes = writer.into_inner().into_inner();
+    let mut out = String::from_utf8_lossy(&bytes).into_owned();
+    out.push('\n');
+    Ok(out)
+}
+
+/// A node of the export folder tree, keyed on `/`-path-tag segments.
+#[derive(Default)]
+struct ExportFolder<'a> {
+    /// Subfolders by segment name — a `BTreeMap` for deterministic output.
+    subfolders: BTreeMap<String, ExportFolder<'a>>,
+    /// Feeds directly in this folder, each with its remaining (non-folder)
+    /// tags to write as the `category` attribute.
+    feeds: Vec<(&'a OpmlFeed, Vec<&'a str>)>,
+}
+
+/// Emits a folder's feeds as `<outline type="rss">` leaves, then recurses
+/// into each subfolder wrapped in a titled `<outline>`.
+fn write_folder<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    folder: &ExportFolder<'_>,
+) -> Result<(), OpmlError> {
+    for (feed, category) in &folder.feeds {
         let mut outline = BytesStart::new("outline");
         outline.push_attribute(("type", "rss"));
         let text = feed.title.as_deref().unwrap_or(feed.xml_url.as_str());
@@ -136,17 +183,19 @@ pub fn export_opml(title: &str, feeds: &[OpmlFeed]) -> Result<String, OpmlError>
         if let Some(html_url) = &feed.html_url {
             outline.push_attribute(("htmlUrl", html_url.as_str()));
         }
-        if !feed.tags.is_empty() {
-            outline.push_attribute(("category", feed.tags.join(",").as_str()));
+        if !category.is_empty() {
+            outline.push_attribute(("category", category.join(",").as_str()));
         }
         writer.write_event(Event::Empty(outline))?;
     }
-    writer.write_event(Event::End(BytesEnd::new("body")))?;
-    writer.write_event(Event::End(BytesEnd::new("opml")))?;
-    let bytes = writer.into_inner().into_inner();
-    let mut out = String::from_utf8_lossy(&bytes).into_owned();
-    out.push('\n');
-    Ok(out)
+    for (name, subfolder) in &folder.subfolders {
+        let mut folder_outline = BytesStart::new("outline");
+        folder_outline.push_attribute(("text", name.as_str()));
+        writer.write_event(Event::Start(folder_outline))?;
+        write_folder(writer, subfolder)?;
+        writer.write_event(Event::End(BytesEnd::new("outline")))?;
+    }
+    Ok(())
 }
 
 enum Outline {
@@ -238,6 +287,14 @@ mod tests {
         import_opml(&export_opml("roundtrip", feeds).unwrap()).unwrap()
     }
 
+    /// Sorted by feed URL — nested export reorders feeds by folder, and OPML
+    /// makes feed order no more meaningful than folder order, so round-trip
+    /// equality is compared as a set.
+    fn sorted(mut feeds: Vec<OpmlFeed>) -> Vec<OpmlFeed> {
+        feeds.sort_by(|a, b| a.xml_url.cmp(&b.xml_url));
+        feeds
+    }
+
     #[test]
     fn imports_a_flat_document() {
         let feeds = import_opml(&fixture("simple.opml")).unwrap();
@@ -318,11 +375,44 @@ mod tests {
         for name in ["simple.opml", "nested.opml", "sparse.opml"] {
             let imported = import_opml(&fixture(name)).unwrap();
             assert_eq!(
-                roundtrip(&imported),
-                imported,
+                sorted(roundtrip(&imported)),
+                sorted(imported),
                 "{name} must survive import → export → import"
             );
         }
+    }
+
+    #[test]
+    fn export_rebuilds_nested_outline_folders_from_path_tags() {
+        // First tag = folder path (nested outlines); the rest = category.
+        let feeds = vec![
+            OpmlFeed {
+                xml_url: "https://sqlite.example/news.xml".to_owned(),
+                title: Some("SQLite News".to_owned()),
+                html_url: None,
+                tags: vec!["Tech/Databases".to_owned(), "fav".to_owned()],
+            },
+            OpmlFeed {
+                xml_url: "https://top.example/feed.xml".to_owned(),
+                title: None,
+                html_url: None,
+                tags: vec![],
+            },
+        ];
+        let xml = export_opml("nested", &feeds).unwrap();
+        // The path became real nested folders, not a flat `category`.
+        assert!(xml.contains(r#"<outline text="Tech">"#), "{xml}");
+        assert!(xml.contains(r#"<outline text="Databases">"#), "{xml}");
+        assert!(
+            xml.contains(r#"category="fav""#),
+            "remaining tags stay category"
+        );
+        assert!(
+            !xml.contains("Tech/Databases"),
+            "path is folders, not a tag string"
+        );
+        // …and it still round-trips to the same tags.
+        assert_eq!(sorted(roundtrip(&feeds)), sorted(feeds));
     }
 
     #[test]
@@ -335,6 +425,6 @@ mod tests {
         }];
         let xml = export_opml("escapes", &feeds).unwrap();
         assert!(!xml.contains("b=<2>"), "raw angle bracket leaked: {xml}");
-        assert_eq!(roundtrip(&feeds), feeds);
+        assert_eq!(sorted(roundtrip(&feeds)), sorted(feeds));
     }
 }

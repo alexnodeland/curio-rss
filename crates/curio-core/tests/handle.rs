@@ -403,10 +403,11 @@ async fn opml_round_trips_through_the_facade() {
     }
     // Folder/category structure survives the full facade cycle: tags are
     // persisted on the feed row, not only in the one-time feed.added
-    // event, so export writes them back as OPML categories.
+    // event, so export rebuilds the folder path as nested <outline> folders.
     assert!(
-        exported.contains(r#"category="Tech/Databases""#),
-        "the nested folder path must ride the OPML export as one path tag:\n{exported}"
+        exported.contains(r#"<outline text="Tech">"#)
+            && exported.contains(r#"<outline text="Databases">"#),
+        "the folder path must export as nested <outline> folders:\n{exported}"
     );
     let reimported = crate_reimport(&exported);
     assert_eq!(

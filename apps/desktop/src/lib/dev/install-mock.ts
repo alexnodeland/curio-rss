@@ -194,13 +194,13 @@ export async function installDevMock(): Promise<void> {
                     return {
                         version: '0.1.0',
                         profile_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
-                        db_schema_version: 3,
+                        db_schema_version: 5,
                         schema_supported: true,
                     };
                 case 'db_stats':
                     return {
                         article_count: articles.length,
-                        schema_version: 3,
+                        schema_version: 5,
                         db_path:
                             '~/Library/Application Support/io.github.alexnodeland.curio/curio.db',
                     };

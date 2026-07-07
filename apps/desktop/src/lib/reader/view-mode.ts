@@ -59,6 +59,34 @@ export function detectViewMode(feedUrl: string | null, sourceUrl: string): ViewM
     return 'article';
 }
 
+/**
+ * The home-page-style list layout a feed can offer, from its own URL, or
+ * `null` when the feed isn't a YouTube/Reddit type. The list pane uses this
+ * to decide whether to show the grid/feed toggle.
+ */
+export function feedHomeType(feedUrl: string | null): 'youtube' | 'reddit' | null {
+    const mode = detectViewMode(feedUrl, feedUrl ?? '');
+    return mode === 'article' ? null : mode;
+}
+
+/**
+ * A stable hue (0–359) from a seed string — the deterministic poster tint
+ * for a video card, so each reads as its own without ever fetching the real
+ * thumbnail (shared by the YouTube facade and the home grid).
+ */
+export function posterHue(seed: string): number {
+    return [...seed].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+}
+
+/**
+ * The canonical still URL for a YouTube video id. `hqdefault` (480×360)
+ * always exists for a valid id (unlike `maxresdefault`). Only fetched when
+ * the remote-media prefetch setting is on, through the policed image cache.
+ */
+export function youTubeThumbnailUrl(videoId: string): string {
+    return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+}
+
 /** A canonical YouTube video id is exactly 11 url-safe base64 characters. */
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 

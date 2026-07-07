@@ -28,7 +28,9 @@ export type IconName =
     | 'pause'
     | 'message'
     | 'link'
-    | 'play';
+    | 'play'
+    | 'grid'
+    | 'rows';
 </script>
 
 <script lang="ts">
@@ -134,5 +136,21 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
         />
     {:else if name === 'play'}
         <path d="M6 4.5v15l13-7.5z" fill="currentColor" stroke="none" />
+    {:else if name === 'grid'}
+        <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect
+            x="14"
+            y="3"
+            width="7"
+            height="7"
+            rx="1.5"
+        /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect
+            x="14"
+            y="14"
+            width="7"
+            height="7"
+            rx="1.5"
+        />
+    {:else if name === 'rows'}
+        <path d="M3 6h18M3 12h18M3 18h18" />
     {/if}
 </svg>

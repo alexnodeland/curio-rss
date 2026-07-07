@@ -13,6 +13,7 @@ import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
 import { t } from '$lib/i18n';
+import { uiStore } from '$lib/state/ui.svelte';
 
 let { onclose }: { onclose: () => void } = $props();
 </script>
@@ -26,6 +27,21 @@ let { onclose }: { onclose: () => void } = $props();
     <section class="section" aria-labelledby="settings-reading">
         <h3 id="settings-reading">{t('settings.section.reading')}</h3>
         <TypographyControls />
+    </section>
+
+    <section class="section" aria-labelledby="settings-media">
+        <h3 id="settings-media">{t('settings.section.media')}</h3>
+        <label class="toggle">
+            <input
+                type="checkbox"
+                checked={uiStore.mediaPrefetch}
+                onchange={(event) => void uiStore.setMediaPrefetch(event.currentTarget.checked)}
+            />
+            <span class="toggle-text">
+                <span class="toggle-label">{t('settings.media.prefetch')}</span>
+                <span class="toggle-hint">{t('settings.media.prefetch.hint')}</span>
+            </span>
+        </label>
     </section>
 
     <section class="section" aria-labelledby="settings-destinations">
@@ -56,6 +72,37 @@ let { onclose }: { onclose: () => void } = $props();
         font-weight: 650;
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
+        color: var(--fg-subtle);
+    }
+
+    .toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-3);
+        cursor: pointer;
+    }
+
+    .toggle input {
+        margin-top: 2px;
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        accent-color: var(--accent);
+    }
+
+    .toggle-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .toggle-label {
+        font-size: var(--text-md);
+        color: var(--fg);
+    }
+
+    .toggle-hint {
+        font-size: var(--text-xs);
         color: var(--fg-subtle);
     }
 </style>

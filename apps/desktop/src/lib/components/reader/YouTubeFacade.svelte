@@ -9,6 +9,7 @@
  * the ONLY host the CSP `frame-src` allows.
  */
 import Icon from '$components/common/Icon.svelte';
+import VideoPoster from '$components/common/VideoPoster.svelte';
 import { t } from '$lib/i18n';
 
 let {
@@ -22,10 +23,6 @@ let loaded = $state(false);
 // nocookie + no related-video leakage on end; autoplay so the click that
 // loaded the frame also starts playback (one gesture, not two).
 const embedSrc = $derived(`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`);
-
-// A stable poster hue from the id, so each video reads as its own card
-// without ever fetching the real thumbnail.
-const hue = $derived([...videoId].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7));
 
 function load(): void {
     loaded = true;
@@ -46,11 +43,11 @@ function load(): void {
         <button
             class="poster"
             type="button"
-            style:--poster-hue={hue}
             onclick={load}
             aria-label={t('reader.youtube.play', { title })}
         >
-            <span class="poster-art" aria-hidden="true"></span>
+            <VideoPoster {videoId} seed={videoId} />
+            <span class="scrim" aria-hidden="true"></span>
             <span class="poster-badge" aria-hidden="true">
                 <Icon name="play" size={12} />
                 <span>{t('reader.youtube.badge')}</span>
@@ -103,18 +100,8 @@ function load(): void {
         cursor: pointer;
     }
 
-    /* Deterministic gradient "still" + a subtle scrim, id-derived. */
-    .poster-art {
-        position: absolute;
-        inset: 0;
-        background:
-            radial-gradient(120% 120% at 30% 20%, hsl(var(--poster-hue) 55% 40%), transparent 60%),
-            radial-gradient(120% 120% at 80% 90%, hsl(calc(var(--poster-hue) + 40) 60% 32%), transparent 55%),
-            linear-gradient(150deg, hsl(var(--poster-hue) 45% 22%), hsl(calc(var(--poster-hue) + 30) 40% 14%));
-    }
-
-    .poster-art::after {
-        content: '';
+    /* A scrim over the poster (gradient or real still) for text legibility. */
+    .scrim {
         position: absolute;
         inset: 0;
         background: linear-gradient(to top, rgb(0 0 0 / 62%) 0%, transparent 42%, rgb(0 0 0 / 18%) 100%);

@@ -1,9 +1,7 @@
 # Curio
 
-> **Status: pre-1.0 — workspace reset in progress.** The original desktop
-> sketch is parked in `apps/desktop/` while the engine is rebuilt properly
-> from the core out. Nothing here is released yet; contracts and layout are
-> settling. Follow [docs/design/roadmap.md](docs/design/roadmap.md).
+> **v0.1.0** — the first public release: a complete local-first desktop
+> reader (macOS). Roadmap: [docs/design/roadmap.md](docs/design/roadmap.md).
 
 Curio is a **local-first reader** — RSS/Atom feeds and read-later — that
 treats your notes as the destination, not a silo. It exports what you read
@@ -25,9 +23,33 @@ Artifacts: [schemas/](schemas/) ·
 Privacy stance: [PRIVACY.md](PRIVACY.md) — no telemetry, no phone-home; the
 only thing that leaves your machine is fetching the feeds you subscribed to.
 
-## Quickstart
+## Install (macOS)
 
-Once released: `cargo install curio-cli`. Until then, from a clone,
+The desktop app ships for macOS. Via Homebrew:
+
+```sh
+brew install --cask alexnodeland/tap/curio
+```
+
+or download `Curio-arm64.dmg` (Apple silicon) / `Curio-x64.dmg` (Intel) from
+the [latest release](https://github.com/alexnodeland/curio-rss/releases/latest).
+
+Curio is **not signed or notarized** (Apple Developer enrollment is
+deliberately skipped — see [docs/design/decisions.md](docs/design/decisions.md)),
+so Gatekeeper blocks it on first launch. Open it once via **right-click →
+Open** (macOS 12–14) or **System Settings → Privacy & Security → Open Anyway**
+(macOS 15+), or clear the quarantine flag:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Curio.app"
+```
+
+Windows and Linux bundles are built nightly and downloadable as CI artifacts,
+but are not a shipped channel yet.
+
+## Command-line interface
+
+Curio also ships a CLI over the same engine. From a clone,
 `cargo install --path crates/curio-cli` (or run via `cargo run -p
 curio-cli --`). Then:
 

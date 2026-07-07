@@ -1,16 +1,14 @@
 # Contributing to Curio
 
-Thanks for your interest. Curio is pre-1.0 and mid-reset — the ground rules
-below are stable, the code is not yet. Issues and small PRs are welcome;
-coordinate before starting anything large.
+Thanks for your interest. Curio is early (0.x) but shipping — issues and small
+PRs are welcome; coordinate before starting anything large.
 
 ## Dev setup
 
-> **Publication status:** this repository is not yet published — the
-> GitHub URL below goes live with the first public release, and the CI
-> workflows in `.github/workflows/` run from that moment on. Until then,
-> `just ci` **is** the gate: it runs the same suite locally (including
-> the blob guard), and nothing lands without it being green.
+> **CI:** every push and PR runs the fast gate (`.github/workflows/ci.yml`);
+> `just ci` runs the same suite locally (including the blob guard), so nothing
+> lands without it being green. The heavy tier (3-OS bundles, e2e smoke,
+> cold-start bench) runs on merge and nightly (`nightly.yml`).
 
 Everything goes through [`just`](https://github.com/casey/just) — run `just`
 with no arguments to list the recipes.

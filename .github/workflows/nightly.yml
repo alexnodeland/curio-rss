@@ -5,10 +5,10 @@
 # no macOS tauri-driver, so macOS is covered by the manual release checklist),
 # and the criterion cold-start benchmark that hosts the Phase-4 <1.5s gate.
 #
-# Signing is intentionally OFF: distribution is an unsigned Homebrew cask
-# (Apple enrollment skipped, Windows deferred — docs/design/decisions.md).
-# The signing env below reads from secrets so that when/if a key lands it is
-# picked up, and forks with no secrets still build green (empty => unsigned).
+# Signing is intentionally OFF, permanently: distribution is an unsigned
+# Homebrew cask (Apple enrollment skipped, Windows deferred —
+# docs/design/decisions.md). The build passes NO signing env, so tauri never
+# attempts codesign; the app runs via right-click → Open / xattr.
 name: nightly
 
 on:
@@ -61,15 +61,11 @@ jobs:
         run: npm ci
       - name: Build the unsigned bundle
         working-directory: apps/desktop
-        # Unsigned by decision. These env vars stay empty on forks / when no
-        # key is configured, so `tauri build` produces an unsigned artifact
-        # instead of failing — the "conditional on secrets" contract.
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # Unsigned, permanently: Apple Developer enrollment is skipped
+        # (docs/design/decisions.md), so we pass NO signing env — tauri then
+        # produces an unsigned artifact instead of trying (and failing) to
+        # `security import` a certificate. Distribution is the unsigned
+        # Homebrew cask; the app is run via right-click → Open / xattr.
         run: npm run tauri build
       - name: Upload the bundle
         uses: actions/upload-artifact@v4
@@ -138,6 +134,10 @@ jobs:
     # curio-fixtures depends on curio-core only (no webview), so this job
     # needs no gtk/webkit system packages.
     runs-on: ubuntu-22.04
+    # `contents: write` so github-action-benchmark can post the alert commit
+    # comment (the job otherwise inherits the top-level read-only default).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -154,6 +154,7 @@ jobs:
           name: cold-start (open + first page @50k)
           tool: cargo
           output-file-path: bench-output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: "130%"
           comment-on-alert: true
           fail-on-alert: true

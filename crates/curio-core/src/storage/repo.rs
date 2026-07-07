@@ -313,6 +313,28 @@ impl Storage {
         })
     }
 
+    /// Renames a feed — an unconditional title overwrite (unlike
+    /// [`Self::update_feed_metadata`], which only *fills* a NULL title so a
+    /// fetch never clobbers a human edit). An empty/whitespace title clears it
+    /// to NULL, so the feed falls back to showing its URL; a later fetch may
+    /// then re-fill the feed-provided title.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist.
+    pub fn set_feed_title(&self, id: FeedId, title: Option<String>) -> Result<(), StorageError> {
+        let title = title.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached("UPDATE feeds SET title = ?2, modified_at = ?3 WHERE id = ?1")?
+                .execute((id.0, title, Timestamp::now().to_string()))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
     /// Adopts a permanent-redirect target as the feed's stored URL.
     /// A conflict with another subscription's URL leaves the row
     /// unchanged (`UPDATE OR IGNORE`) — better a stale URL than a

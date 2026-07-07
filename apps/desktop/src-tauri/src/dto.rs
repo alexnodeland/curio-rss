@@ -20,7 +20,7 @@ use curio_core::model::{
     Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewFeed,
 };
 use curio_core::storage::ListArticles;
-use curio_core::{OpmlImportOutcome, RefreshOutcome, SaveOutcome};
+use curio_core::{ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, SaveOutcome};
 use curio_types::Destination;
 use serde::{Deserialize, Serialize};
 
@@ -446,6 +446,56 @@ impl From<OpmlImportOutcome> for OpmlImportOutcomeDto {
         Self {
             added: u64::try_from(outcome.added).unwrap_or(u64::MAX),
             skipped: u64::try_from(outcome.skipped).unwrap_or(u64::MAX),
+        }
+    }
+}
+
+/// Mirror of [`ImportSource`] — the refugee-import format the user picked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportSourceDto {
+    /// OPML 2.0 subscription list.
+    Opml,
+    /// Pocket CSV export.
+    PocketCsv,
+    /// Instapaper CSV export.
+    InstapaperCsv,
+    /// Readwise Reader CSV export.
+    ReadwiseCsv,
+}
+
+impl From<ImportSourceDto> for ImportSource {
+    fn from(source: ImportSourceDto) -> Self {
+        match source {
+            ImportSourceDto::Opml => Self::Opml,
+            ImportSourceDto::PocketCsv => Self::PocketCsv,
+            ImportSourceDto::InstapaperCsv => Self::InstapaperCsv,
+            ImportSourceDto::ReadwiseCsv => Self::ReadwiseCsv,
+        }
+    }
+}
+
+/// Mirror of [`ImportOutcome`] — feeds and articles counted separately so
+/// the UI can report "N feeds, M articles" without guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ImportOutcomeDto {
+    /// Feeds newly subscribed.
+    pub feeds_added: u64,
+    /// Feeds skipped (already subscribed).
+    pub feeds_skipped: u64,
+    /// Articles saved as feedless read-later items.
+    pub articles_added: u64,
+    /// Articles skipped (already imported).
+    pub articles_skipped: u64,
+}
+
+impl From<ImportOutcome> for ImportOutcomeDto {
+    fn from(outcome: ImportOutcome) -> Self {
+        Self {
+            feeds_added: u64::try_from(outcome.feeds_added).unwrap_or(u64::MAX),
+            feeds_skipped: u64::try_from(outcome.feeds_skipped).unwrap_or(u64::MAX),
+            articles_added: u64::try_from(outcome.articles_added).unwrap_or(u64::MAX),
+            articles_skipped: u64::try_from(outcome.articles_skipped).unwrap_or(u64::MAX),
         }
     }
 }

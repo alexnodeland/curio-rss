@@ -1,0 +1,7 @@
+title,url,time_added,tags,status
+"Designing Data-Intensive Applications, a review",https://example.com/ddia,1700000000,"databases|distributed-systems",unread
+The Log: What every engineer should know,https://example.com/the-log,1700000100,streaming,unread
+An untagged saved link,https://example.com/untagged,1700000200,,archive
+,https://example.com/no-title,1700000300,misc,unread
+"A trailing blank row below should be ignored",https://example.com/last,1700000400,reading,unread
+,,,,

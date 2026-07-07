@@ -29,13 +29,16 @@ pub mod export;
 pub mod feeds;
 pub mod fetch;
 mod handle;
+pub mod import;
 pub mod model;
 pub mod storage;
 
 pub use curio_types as types;
 pub use handle::{
-    CoreError, CoreHandle, CoreOptions, OpmlImportOutcome, RefreshOutcome, SaveOutcome,
+    CoreError, CoreHandle, CoreOptions, ImportOutcome, OpmlImportOutcome, RefreshOutcome,
+    SaveOutcome,
 };
+pub use import::{ImportError, ImportKind, ImportSource, ImportedItem};
 
 #[cfg(test)]
 mod tests {

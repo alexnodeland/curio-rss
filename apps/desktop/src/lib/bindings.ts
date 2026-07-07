@@ -201,6 +201,13 @@ export const commands = {
 	 *  subscribed URLs are skipped; OPML folders land as feed tags.
 	 */
 	importOpml: (pathToken: string) => typedError<OpmlImportOutcomeDto, CommandError>(__TAURI_INVOKE("import_opml", { pathToken })),
+	/**
+	 *  Imports a dialog-picked refugee export (OPML, or a Pocket / Instapaper
+	 *  / Readwise CSV). Feeds become subscriptions; saved articles become
+	 *  feedless read-later items carrying their source tags. Re-importing the
+	 *  same file is idempotent — already-known URLs are skipped.
+	 */
+	importFile: (pathToken: string, source: ImportSourceDto) => typedError<ImportOutcomeDto, CommandError>(__TAURI_INVOKE("import_file", { pathToken, source })),
 	/**  Exports every subscription as OPML 2.0 to a dialog-picked path. */
 	exportOpml: (pathToken: string) => typedError<null, CommandError>(__TAURI_INVOKE("export_opml", { pathToken })),
 	/**  Reads a setting. */
@@ -234,7 +241,10 @@ export const commands = {
 	 *  is transmitted anywhere.
 	 */
 	copyDiagnosticsBundle: () => typedError<PathTokenDto, CommandError>(__TAURI_INVOKE("copy_diagnostics_bundle")),
-	/**  Opens a native open-file dialog for OPML import; `None` = cancelled. */
+	/**
+	 *  Opens a native open-file dialog for a subscription/refugee import
+	 *  (OPML or a Pocket/Instapaper/Readwise CSV); `None` = cancelled.
+	 */
 	pickImportFile: () => typedError<{
 	/**  The opaque token (ULID) to hand back to a consuming command. */
 	token: string,
@@ -524,6 +534,32 @@ export type FetchStatusDto =
 "not_modified" | 
 /**  Anything else (recorded, not raised). */
 "error";
+
+/**
+ *  Mirror of [`ImportOutcome`] — feeds and articles counted separately so
+ *  the UI can report "N feeds, M articles" without guessing.
+ */
+export type ImportOutcomeDto = {
+	/**  Feeds newly subscribed. */
+	feeds_added: number,
+	/**  Feeds skipped (already subscribed). */
+	feeds_skipped: number,
+	/**  Articles saved as feedless read-later items. */
+	articles_added: number,
+	/**  Articles skipped (already imported). */
+	articles_skipped: number,
+};
+
+/**  Mirror of [`ImportSource`] — the refugee-import format the user picked. */
+export type ImportSourceDto = 
+/**  OPML 2.0 subscription list. */
+"opml" | 
+/**  Pocket CSV export. */
+"pocket_csv" | 
+/**  Instapaper CSV export. */
+"instapaper_csv" | 
+/**  Readwise Reader CSV export. */
+"readwise_csv";
 
 /**
  *  Mirror of [`ListArticles`] — filters are backend-owned; the head never

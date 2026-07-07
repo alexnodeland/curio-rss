@@ -524,6 +524,30 @@ impl Storage {
         })
     }
 
+    /// The row id of the article stored under `dedupe_key` within
+    /// `feed_id`'s provenance scope (`f<id>:` for a feed, `m:` for manual /
+    /// imported saves), if one exists. The importer upserts a feedless
+    /// article and then uses this to look its id back up so it can apply
+    /// read-later and tags.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn article_id_by_dedupe_key(
+        &self,
+        feed_id: Option<FeedId>,
+        dedupe_key: &str,
+    ) -> Result<Option<ArticleId>, StorageError> {
+        let scoped = scoped_dedupe_key(feed_id, dedupe_key);
+        self.read(move |conn| {
+            Ok(conn
+                .prepare_cached("SELECT id FROM articles WHERE dedupe_key = ?1")?
+                .query_row([&scoped], |row| row.get::<_, i64>(0))
+                .optional()?
+                .map(ArticleId))
+        })
+    }
+
     /// Keyset-paginated listing, newest row id first. See [`ListArticles`]
     /// for the filter semantics; filters never change the order.
     ///

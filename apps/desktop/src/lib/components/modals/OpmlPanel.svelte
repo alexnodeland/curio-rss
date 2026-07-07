@@ -1,19 +1,33 @@
 <script lang="ts">
 /**
- * OPML import / export over the PathToken flow: the file is chosen by a
- * native Rust-side dialog (`pick_import_file` / `pick_export_path`), which
- * returns an opaque token; only that token crosses back to the IO command.
- * A raw path never leaves this process as a free string (ipc_policy / D13).
- * Import invalidation rides the Rust-emitted `FeedsChanged` event — no
- * client-side cache bookkeeping.
+ * Import (OPML + Pocket/Instapaper/Readwise CSV) and OPML export over the
+ * PathToken flow: the file is chosen by a native Rust-side dialog
+ * (`pick_import_file` / `pick_export_path`), which returns an opaque token;
+ * only that token crosses back to the IO command. A raw path never leaves
+ * this process as a free string (ipc_policy / D13). Invalidation rides the
+ * Rust-emitted `FeedsChanged` / `ArticlesChanged` events — no client-side
+ * cache bookkeeping. The chosen `source` tells Rust which parser to run.
  */
-import { commands } from '$lib/bindings';
-import { t } from '$lib/i18n';
+import { commands, type ImportSourceDto } from '$lib/bindings';
+import { type MessageKey, t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { uiStore } from '$lib/state/ui.svelte';
 
+const SOURCES: readonly ImportSourceDto[] = [
+    'opml',
+    'pocket_csv',
+    'instapaper_csv',
+    'readwise_csv',
+];
+
+let source = $state<ImportSourceDto>('opml');
 let importing = $state(false);
 let exporting = $state(false);
+
+/** The i18n key for a source's human label, typed so the catalog is checked. */
+function sourceLabel(value: ImportSourceDto): MessageKey {
+    return `import.source.${value}`;
+}
 
 async function runImport(): Promise<void> {
     importing = true;
@@ -27,13 +41,18 @@ async function runImport(): Promise<void> {
             uiStore.showToast(t('opml.cancelled'), 'info');
             return;
         }
-        const result = await commands.importOpml(picked.data.token);
+        const result = await commands.importFile(picked.data.token, source);
         if (result.status === 'error') {
             toastCommandError(result.error);
             return;
         }
+        const { feeds_added, articles_added, feeds_skipped, articles_skipped } = result.data;
         uiStore.showToast(
-            t('opml.imported', { added: result.data.added, skipped: result.data.skipped }),
+            t('import.done', {
+                feeds: feeds_added,
+                articles: articles_added,
+                skipped: feeds_skipped + articles_skipped,
+            }),
             'success',
         );
     } catch {
@@ -70,15 +89,23 @@ async function runExport(): Promise<void> {
 </script>
 
 <div class="opml">
+    <label class="opml-format">
+        <span class="opml-format-label">{t('import.format')}</span>
+        <select class="opml-select" bind:value={source} disabled={importing}>
+            {#each SOURCES as value (value)}
+                <option {value}>{t(sourceLabel(value))}</option>
+            {/each}
+        </select>
+    </label>
     <div class="opml-actions">
         <button class="opml-button" type="button" onclick={() => void runImport()} disabled={importing}>
-            {importing ? t('opml.importing') : t('opml.import')}
+            {importing ? t('import.running') : t('import.run')}
         </button>
         <button class="opml-button" type="button" onclick={() => void runExport()} disabled={exporting}>
             {exporting ? t('opml.exporting') : t('opml.export')}
         </button>
     </div>
-    <p class="opml-hint">{t('opml.hint')}</p>
+    <p class="opml-hint">{t('import.hint')}</p>
 </div>
 
 <style>
@@ -86,6 +113,27 @@ async function runExport(): Promise<void> {
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
+    }
+
+    .opml-format {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .opml-format-label {
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+    }
+
+    .opml-select {
+        flex: 1;
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-md);
+        background: var(--bg-inset, transparent);
+        color: var(--fg);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
     }
 
     .opml-actions {

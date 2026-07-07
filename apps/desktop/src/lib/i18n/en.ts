@@ -157,6 +157,18 @@ export const en = {
     'opml.hint':
         'Files are chosen through a native dialog — Curio never sees a path you did not pick.',
 
+    'import.title': 'Import subscriptions & saves',
+    'import.format': 'Format',
+    'import.source.opml': 'OPML — subscriptions',
+    'import.source.pocket_csv': 'Pocket — CSV',
+    'import.source.instapaper_csv': 'Instapaper — CSV',
+    'import.source.readwise_csv': 'Readwise Reader — CSV',
+    'import.run': 'Import…',
+    'import.running': 'Importing…',
+    'import.done': 'Imported {feeds} feeds and {articles} articles, skipped {skipped}',
+    'import.hint':
+        'OPML brings in feed subscriptions; Pocket, Instapaper and Readwise CSVs bring in saved articles as read-later items with their tags.',
+
     'doctor.title': 'Database doctor',
     'doctor.integrity': 'Check integrity',
     'doctor.ftsIntegrity': 'Check search index',

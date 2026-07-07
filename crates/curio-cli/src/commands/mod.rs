@@ -39,6 +39,7 @@ fn dispatch(app: &mut App, command: Command) -> anyhow::Result<ExitCode> {
         Command::Save { id, dest } => transfer::save(app, &id, dest),
         Command::Dest(command) => transfer::dest(app, command),
         Command::Opml(command) => transfer::opml(app, command),
+        Command::Import { file, from } => transfer::import(app, &file, from),
         Command::Events(command) => inspect::events(app, &command),
         Command::Doctor => inspect::doctor(app),
         Command::Search { query, limit } => articles::search(app, &query, limit),

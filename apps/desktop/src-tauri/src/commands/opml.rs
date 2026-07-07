@@ -1,17 +1,18 @@
-//! OPML import/export. Rust does the file IO; both paths arrive as
-//! [`crate::ipc_policy`] tokens from Rust-side dialog picks — never raw
-//! strings.
+//! OPML + refugee (Pocket / Instapaper / Readwise) import, and OPML
+//! export. Rust does the file IO; every path arrives as a
+//! [`crate::ipc_policy`] token from a Rust-side dialog pick — never a raw
+//! string.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use curio_core::CoreHandle;
+use curio_core::{CoreHandle, ImportSource};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
-use crate::dto::OpmlImportOutcomeDto;
+use crate::dto::{ImportOutcomeDto, ImportSourceDto, OpmlImportOutcomeDto};
 use crate::error::{CommandError, ErrorCode};
-use crate::events::{FeedsChanged, emit_or_log};
+use crate::events::{ArticlesChanged, FeedsChanged, emit_or_log};
 use crate::ipc_policy::{PathIntent, PathRegistry};
 
 /// Imports subscriptions from a dialog-picked OPML file. Already
@@ -29,6 +30,31 @@ pub async fn import_opml(
     let outcome = run_blocking(move || import_opml_impl(&core, &path)).await?;
     if outcome.added > 0 {
         emit_or_log(&app, &FeedsChanged);
+    }
+    Ok(outcome)
+}
+
+/// Imports a dialog-picked refugee export (OPML, or a Pocket / Instapaper
+/// / Readwise CSV). Feeds become subscriptions; saved articles become
+/// feedless read-later items carrying their source tags. Re-importing the
+/// same file is idempotent — already-known URLs are skipped.
+#[tauri::command]
+#[specta::specta]
+pub async fn import_file(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    registry: State<'_, PathRegistry>,
+    path_token: String,
+    source: ImportSourceDto,
+) -> Result<ImportOutcomeDto, CommandError> {
+    let path = registry.redeem(&path_token, PathIntent::ImportFile)?;
+    let core = Arc::clone(core.inner());
+    let outcome = run_blocking(move || import_file_impl(&core, &path, source.into())).await?;
+    if outcome.feeds_added > 0 {
+        emit_or_log(&app, &FeedsChanged);
+    }
+    if outcome.articles_added > 0 {
+        emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
     Ok(outcome)
 }
@@ -57,6 +83,21 @@ fn import_opml_impl(core: &CoreHandle, path: &Path) -> Result<OpmlImportOutcomeD
         )
     })?;
     Ok(core.import_opml(&xml)?.into())
+}
+
+fn import_file_impl(
+    core: &CoreHandle,
+    path: &Path,
+    source: ImportSource,
+) -> Result<ImportOutcomeDto, CommandError> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        CommandError::user(
+            ErrorCode::Io,
+            format!("could not read the import file: {error}"),
+            true,
+        )
+    })?;
+    Ok(core.import_file(source, &content)?.into())
 }
 
 fn export_opml_impl(core: &CoreHandle, path: &Path) -> Result<(), CommandError> {
@@ -130,6 +171,32 @@ mod tests {
     fn unreadable_paths_are_user_errors() {
         let (dir, core) = temp_core();
         let error = import_opml_impl(&core, &dir.path().join("missing.opml")).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::User);
+    }
+
+    #[test]
+    fn csv_import_goes_through_the_generic_file_path() {
+        let (dir, core) = temp_core();
+        let file = dir.path().join("pocket.csv");
+        std::fs::write(
+            &file,
+            "title,url,time_added,tags,status\nA,https://a.test/x,1700000000,rust,unread\n",
+        )
+        .unwrap();
+
+        let outcome = import_file_impl(&core, &file, ImportSource::PocketCsv).unwrap();
+        assert_eq!(outcome.articles_added, 1);
+        assert_eq!(outcome.feeds_added, 0);
+        assert_eq!(core.list_feeds().unwrap().len(), 0, "a CSV adds no feeds");
+    }
+
+    #[test]
+    fn a_missing_url_column_is_a_user_error() {
+        let (dir, core) = temp_core();
+        let file = dir.path().join("wrong.csv");
+        std::fs::write(&file, "a,b\n1,2\n").unwrap();
+        // The Pocket parser can't find a URL column — surfaced, not panicked.
+        let error = import_file_impl(&core, &file, ImportSource::PocketCsv).unwrap_err();
         assert_eq!(error.kind, ErrorKind::User);
     }
 }

@@ -330,6 +330,18 @@ fn opml_import_export_round_trips() {
     assert!(xml.contains("https://example.com/feed.xml"));
     assert!(xml.contains("https://atom.example.org/feed.atom"));
 
+    // `curio import --from opml` is the same subscribe path as `opml import`.
+    let via_generic = stdout_json(
+        &curio(profile.path())
+            .args(["import", "--from", "opml"])
+            .arg(&opml)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(via_generic["feeds_added"], 0, "already subscribed");
+    assert_eq!(via_generic["feeds_skipped"], 3);
+
     // Unsubscribe by unique substring; the negation lands in the stream.
     curio(profile.path())
         .args(["feed", "rm", "atom.example.org"])
@@ -348,6 +360,51 @@ fn opml_import_export_round_trips() {
     assert_eq!(
         last["payload"]["feed"],
         "https://atom.example.org/feed.atom"
+    );
+}
+
+#[test]
+fn pocket_csv_imports_articles_as_read_later_via_the_cli() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    let csv = repo_root().join("fixtures/import/pocket.csv");
+    let imported = stdout_json(
+        &curio(profile.path())
+            .args(["import", "--from", "pocket"])
+            .arg(&csv)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(imported["feeds_added"], 0, "a Pocket CSV carries no feeds");
+    assert_eq!(imported["articles_added"], 5);
+
+    // The saves land in the read-later queue, no feed attached.
+    let later = stdout_json(
+        &curio(profile.path())
+            .args(["list", "--read-later", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(later.as_array().unwrap().len(), 5);
+
+    // The multi-tag row applied its split tags — filterable by one of them.
+    let tagged = stdout_json(
+        &curio(profile.path())
+            .args(["list", "--tag", "distributed-systems", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(tagged.as_array().unwrap().len(), 1);
+
+    // Read-later flags are real events in the stream.
+    let events = events_lines(profile.path());
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "article.read_later.added"),
+        "importing a save stages a read-later event"
     );
 }
 

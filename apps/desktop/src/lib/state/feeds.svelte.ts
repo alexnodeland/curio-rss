@@ -14,6 +14,8 @@ import {
     type RefreshOutcomeDto,
     commands,
 } from '$lib/bindings';
+import { SvelteSet } from 'svelte/reactivity';
+import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
 
 export class FeedsStore {
@@ -22,6 +24,13 @@ export class FeedsStore {
 
     /** Per-feed outcomes of the current/last sweep, in refresh order. */
     refreshOutcomes: RefreshOutcomeDto[] = $state([]);
+
+    /**
+     * Folder paths the user has collapsed in the sidebar tree. In-memory and
+     * expanded-by-default (absence = open); a `SvelteSet` so the tree reacts
+     * to a toggle.
+     */
+    #collapsedFolders = new SvelteSet<string>();
 
     get #feedsQuery(): Query<FeedDto[]> {
         return ensureQuery(queryKeys.feeds, commands.listFeeds);
@@ -67,6 +76,41 @@ export class FeedsStore {
     unreadFor(feedId: number): number {
         const pair = this.#countsQuery.data?.by_feed.find(([id]) => id === feedId);
         return pair?.[1] ?? 0;
+    }
+
+    /** Whether a sidebar folder is collapsed (expanded by default). */
+    isFolderCollapsed(path: string): boolean {
+        return this.#collapsedFolders.has(path);
+    }
+
+    /** Toggles a sidebar folder open/closed. */
+    toggleFolder(path: string): void {
+        if (this.#collapsedFolders.has(path)) {
+            this.#collapsedFolders.delete(path);
+        } else {
+            this.#collapsedFolders.add(path);
+        }
+    }
+
+    /**
+     * Roll-up unread for a folder: the sum of the backend-owned per-feed
+     * counts across its subtree, deduped by feed id (a feed under two
+     * subfolders is counted once). Aggregation of authoritative counts, not
+     * client badge math.
+     */
+    folderUnread(folder: FeedFolder): number {
+        let total = 0;
+        for (const id of subtreeFeedIds(folder)) {
+            total += this.unreadFor(id);
+        }
+        return total;
+    }
+
+    /** Test isolation — drops collapse state and any in-flight refresh flags. */
+    reset(): void {
+        this.#collapsedFolders.clear();
+        this.refreshing = false;
+        this.refreshOutcomes = [];
     }
 
     /** Subscribes to a feed. Invalidation rides the Rust-emitted event. */

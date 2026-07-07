@@ -5,6 +5,7 @@
  */
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
@@ -46,6 +47,7 @@ describe('Sidebar', () => {
         articlesStore.reset();
         selectionStore.reset();
         uiStore.reset();
+        feedsStore.reset();
         harness?.teardown();
         harness = null;
     });
@@ -112,5 +114,79 @@ describe('Sidebar', () => {
         const { getByRole } = render(Sidebar);
         await flushIpc();
         expect(getByRole('alert').textContent).toContain('db locked');
+    });
+});
+
+describe('Sidebar — folder tree', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        cleanup();
+        resetQueryCache();
+        articlesStore.reset();
+        selectionStore.reset();
+        uiStore.reset();
+        feedsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    function taggedHarness(): IpcHarness {
+        return installIpcHarness({
+            list_feeds: [
+                feedFixture({ id: 1, title: 'Rust Blog', tags: ['Tech'] }),
+                feedFixture({
+                    id: 2,
+                    title: 'SQLite',
+                    url: 'https://sqlite.example/feed',
+                    tags: ['Tech/Databases'],
+                }),
+                feedFixture({ id: 3, title: 'Loose', url: 'https://loose.example/feed', tags: [] }),
+            ],
+            get_unread_counts: unreadCountsFixture({
+                total: 15,
+                by_feed: [
+                    [1, 4],
+                    [2, 6],
+                    [3, 0],
+                ],
+            }),
+        });
+    }
+
+    it('groups tagged feeds into a nested folder tree with roll-up counts', async () => {
+        harness = taggedHarness();
+        const { getByText } = render(Sidebar);
+        await flushIpc();
+
+        expect(getByText('Tech')).toBeTruthy();
+        expect(getByText('Databases')).toBeTruthy();
+        expect(getByText('Rust Blog')).toBeTruthy();
+        expect(getByText('SQLite')).toBeTruthy();
+        expect(getByText('Loose')).toBeTruthy();
+        // Tech's roll-up = Rust (4) + SQLite (6); All shows the backend total.
+        expect(getByText('10')).toBeTruthy();
+        expect(getByText('15')).toBeTruthy();
+    });
+
+    it('collapsing a folder hides its subtree but not ungrouped feeds', async () => {
+        harness = taggedHarness();
+        const { getByText, queryByText } = render(Sidebar);
+        await flushIpc();
+        expect(getByText('SQLite')).toBeTruthy();
+
+        const techHeader = getByText('Tech').closest('button');
+        expect(techHeader?.getAttribute('aria-expanded')).toBe('true');
+        await fireEvent.click(getByText('Tech'));
+
+        expect(queryByText('Databases')).toBeNull();
+        expect(queryByText('SQLite')).toBeNull();
+        expect(queryByText('Rust Blog')).toBeNull();
+        // The ungrouped feed and the folder header itself survive.
+        expect(getByText('Loose')).toBeTruthy();
+        expect(getByText('Tech').closest('button')?.getAttribute('aria-expanded')).toBe('false');
+
+        await fireEvent.click(getByText('Tech'));
+        expect(getByText('SQLite')).toBeTruthy();
     });
 });

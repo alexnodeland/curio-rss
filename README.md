@@ -1,7 +1,16 @@
 # Curio
 
+[![CI](https://img.shields.io/github/actions/workflow/status/alexnodeland/curio-rss/ci.yml?branch=main&label=CI)](https://github.com/alexnodeland/curio-rss/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/alexnodeland/curio-rss?include_prereleases&label=release)](https://github.com/alexnodeland/curio-rss/releases)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+![Platform](https://img.shields.io/badge/platform-macOS-informational)
+![Built with](https://img.shields.io/badge/Rust%20%C2%B7%20Tauri%20%C2%B7%20Svelte-555)
+
 > **v0.1.0** — the first public release: a complete local-first desktop
-> reader (macOS). Roadmap: [docs/design/roadmap.md](docs/design/roadmap.md).
+> reader (macOS). **Website:** <https://alexnodeland.github.io/curio-rss/> ·
+> Roadmap: [docs/design/roadmap.md](docs/design/roadmap.md).
+
+![The Curio reader](site/assets/reader-dark.png)
 
 Curio is a **local-first reader** — RSS/Atom feeds and read-later — that
 treats your notes as the destination, not a silo. It exports what you read
@@ -22,6 +31,42 @@ Spec: [docs/design/contracts-draft.md](docs/design/contracts-draft.md) ·
 Artifacts: [schemas/](schemas/) ·
 Privacy stance: [PRIVACY.md](PRIVACY.md) — no telemetry, no phone-home; the
 only thing that leaves your machine is fetching the feeds you subscribed to.
+
+> Curio is the reading surface of a personal knowledge plane: your vault and
+> your scripts are first-class consumers, via two small, versioned, published
+> contracts.
+
+## Features
+
+| | |
+|---|---|
+| 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh, health tracking + backoff |
+| 📖 **Read** | Three-pane reader, on-demand full-article readability, mark-on-open, opt-in mark-on-scroll, next-unread across feeds |
+| ⭐ **State** | Read · star · read-later · archive — event-sourced with negation events |
+| 🗂️ **Folders** | `/`-path tags as a nested tree, folder filter, drag-to-reorder, move/rename |
+| 🔎 **Search** | Full-text search over everything (SQLite FTS5) |
+| ↔️ **Import / export** | OPML in/out + Pocket, Instapaper & Readwise CSV importers |
+| 📝 **Save to notes** | Named destinations → markdown notes with a byte-preserved managed region |
+| 🎨 **Appearance** | 9 themes + System, adjustable reading typography, RSS-native Reddit/YouTube layouts |
+| ♿ **Accessible** | Focus-trapped modals, listbox navigation, live-region toasts, WCAG-AA contrast (gated) |
+| 🌍 **8 languages** | English · Español · Français · Deutsch · Italiano · Polski · 简体中文 · 廣東話 |
+| 🔒 **Private** | No telemetry, no accounts; remote media & favicon fallback are opt-in |
+
+## How your data flows
+
+```mermaid
+flowchart LR
+    feeds["RSS / Atom feeds"] -->|policed fetch| core
+    subgraph curio["Curio"]
+        direction TB
+        core["curio-core<br/>headless engine"] --> head["Desktop app"]
+        core --> cli["curio CLI"]
+    end
+    core -->|curio.frontmatter.v1| notes["Your notes<br/>markdown + frontmatter"]
+    core -->|curio.events.v1| log[".curio/events/<br/>append-only JSONL"]
+    notes --> tools["Your vault & scripts"]
+    log --> tools
+```
 
 ## Install (macOS)
 
@@ -46,6 +91,29 @@ xattr -dr com.apple.quarantine "/Applications/Curio.app"
 
 Windows and Linux bundles are built nightly and downloadable as CI artifacts,
 but are not a shipped channel yet.
+
+## Keyboard shortcuts
+
+Curio is keyboard-first — press <kbd>?</kbd> in the app for the always-current list.
+
+| Key | Action | | Key | Action |
+|-----|--------|-|-----|--------|
+| <kbd>j</kbd> / <kbd>k</kbd> | Next / previous article | | <kbd>s</kbd> | Star |
+| <kbd>n</kbd> | Next unread (across feeds) | | <kbd>l</kbd> | Read-later |
+| <kbd>m</kbd> | Mark read / unread | | <kbd>a</kbd> | Archive |
+| <kbd>o</kbd> | Open in browser | | <kbd>p</kbd> | Save to notes |
+| <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
+
+## Importers
+
+Bring your library over in one step (**Settings → Data → Import**):
+
+| Source | Format | Imported as |
+|--------|--------|-------------|
+| OPML | `.opml` | Feed subscriptions (with folders) |
+| Pocket | `.csv` | Read-later articles + tags |
+| Instapaper | `.csv` | Read-later articles (folders → tags) |
+| Readwise Reader | `.csv` | Read-later articles + tags |
 
 ## Command-line interface
 
@@ -94,6 +162,15 @@ One Tauri-free engine crate, many thin heads:
 | `crates/curio-types` | shared DTOs + the published contract schemas |
 | `crates/curio-cli` | `curio`, the v1 head: agent/cron/scripting surface |
 | `apps/desktop` | Tauri 2 + Svelte 5 reader — `curio-desktop`, the Phase 4 head (in the workspace) |
+
+```mermaid
+flowchart TD
+    types["curio-types<br/>DTOs + contract schemas"] --> core
+    core["curio-core<br/>headless engine — no webview"]
+    core --> cli["curio-cli<br/>(curio)"]
+    core --> desktop["apps/desktop<br/>Tauri 2 + Svelte 5"]
+    webview(["webview / Tauri"]) -. only here .-> desktop
+```
 
 The boundary is mechanically enforced: `deny.toml` scopes the tauri bans so
 only the desktop head may pull the webview, and CI proves curio-core's own

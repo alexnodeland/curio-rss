@@ -12,7 +12,7 @@ use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
 use curio_core::model::{ArticleContent, FeedStatus, FetchStatus, NewArticle, NewFeed};
 use curio_core::storage::ListArticles;
-use curio_core::{CoreHandle, CoreOptions};
+use curio_core::{CoreHandle, CoreOptions, ImportSource};
 use curio_types::{Destination, DestinationName, EventPayload};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -426,6 +426,63 @@ async fn opml_round_trips_through_the_facade() {
     assert_eq!(
         folded.feeds["https://sqlite.example/news.xml"].tags,
         vec!["Tech/Databases".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn pocket_csv_imports_as_tagged_read_later_articles() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+
+    let csv = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/import/pocket.csv"
+    ))
+    .unwrap();
+
+    let outcome = core.import_file(ImportSource::PocketCsv, &csv).unwrap();
+    // Five rows carry a URL (the blank-URL and fully-empty rows drop out).
+    assert_eq!(outcome.articles_added, 5);
+    assert_eq!(outcome.feeds_added, 0);
+
+    // They are feedless read-later articles, findable through the queue.
+    let read_later = core
+        .list_articles(ListArticles {
+            read_later: Some(true),
+            ..ListArticles::default()
+        })
+        .unwrap();
+    assert_eq!(read_later.len(), 5);
+    assert!(
+        read_later.iter().all(|a| a.feed_id.is_none()),
+        "imported saves have no feed"
+    );
+
+    // The multi-tag row split its `|`-separated tags and applied both.
+    let ddia = read_later
+        .iter()
+        .find(|a| a.source_url == "https://example.com/ddia")
+        .unwrap();
+    assert_eq!(
+        ddia.title,
+        "Designing Data-Intensive Applications, a review"
+    );
+    let mut tags = core.article_tags(ddia.id).unwrap();
+    tags.sort();
+    assert_eq!(tags, vec!["databases", "distributed-systems"]);
+
+    // The read-later flag lives in the event log, folded back per article.
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert!(folded.read_later.contains(&ddia.curio_id));
+
+    // Re-importing the same export is idempotent — nothing added twice.
+    let again = core.import_file(ImportSource::PocketCsv, &csv).unwrap();
+    assert_eq!(again.articles_added, 0);
+    assert_eq!(again.articles_skipped, 5);
+    assert_eq!(
+        core.list_articles(ListArticles::default()).unwrap().len(),
+        5,
+        "no duplicate rows on re-import"
     );
 }
 

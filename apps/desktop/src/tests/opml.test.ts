@@ -11,8 +11,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     type IpcHarness,
     flushIpc,
+    importOutcomeFixture,
     installIpcHarness,
-    opmlImportOutcomeFixture,
     pathTokenFixture,
 } from './ipc-harness';
 
@@ -31,18 +31,49 @@ describe('OpmlPanel', () => {
     it('imports through the token, never a raw path', async () => {
         harness = installIpcHarness({
             pick_import_file: pathTokenFixture({ token: 'TOKEN-IN', path: PICKED_PATH }),
-            import_opml: opmlImportOutcomeFixture({ added: 2, skipped: 1 }),
+            import_file: importOutcomeFixture({
+                feeds_added: 2,
+                feeds_skipped: 1,
+                articles_added: 0,
+                articles_skipped: 0,
+            }),
         });
         const { getByText } = render(OpmlPanel);
 
-        await fireEvent.click(getByText('Import OPML…'));
+        // The default source is OPML; import routes through the generic
+        // import_file command carrying that source.
+        await fireEvent.click(getByText('Import…'));
         await flushIpc();
 
-        expect(harness.callsFor('import_opml')).toEqual([{ pathToken: 'TOKEN-IN' }]);
-        expect(uiStore.toasts.at(-1)?.message).toBe('Imported 2 feeds, skipped 1');
+        expect(harness.callsFor('import_file')).toEqual([
+            { pathToken: 'TOKEN-IN', source: 'opml' },
+        ]);
+        expect(uiStore.toasts.at(-1)?.message).toBe('Imported 2 feeds and 0 articles, skipped 1');
         for (const call of harness.calls) {
             expect(JSON.stringify(call.args)).not.toContain(PICKED_PATH);
         }
+    });
+
+    it('sends the selected source to the importer', async () => {
+        harness = installIpcHarness({
+            pick_import_file: pathTokenFixture({ token: 'TOKEN-CSV', path: PICKED_PATH }),
+            import_file: importOutcomeFixture({
+                feeds_added: 0,
+                feeds_skipped: 0,
+                articles_added: 7,
+                articles_skipped: 0,
+            }),
+        });
+        const { getByText, getByRole } = render(OpmlPanel);
+
+        await fireEvent.change(getByRole('combobox'), { target: { value: 'pocket_csv' } });
+        await fireEvent.click(getByText('Import…'));
+        await flushIpc();
+
+        expect(harness.callsFor('import_file')).toEqual([
+            { pathToken: 'TOKEN-CSV', source: 'pocket_csv' },
+        ]);
+        expect(uiStore.toasts.at(-1)?.message).toBe('Imported 0 feeds and 7 articles, skipped 0');
     });
 
     it('exports through the token', async () => {
@@ -63,10 +94,10 @@ describe('OpmlPanel', () => {
         harness = installIpcHarness({ pick_import_file: null });
         const { getByText } = render(OpmlPanel);
 
-        await fireEvent.click(getByText('Import OPML…'));
+        await fireEvent.click(getByText('Import…'));
         await flushIpc();
 
-        expect(harness.callsFor('import_opml')).toHaveLength(0);
+        expect(harness.callsFor('import_file')).toHaveLength(0);
         expect(uiStore.toasts.at(-1)?.message).toBe('Cancelled');
     });
 });

@@ -45,7 +45,8 @@ pub async fn copy_diagnostics_bundle(
     registry.mint(&bundle, PathIntent::Reveal)
 }
 
-/// Opens a native open-file dialog for OPML import; `None` = cancelled.
+/// Opens a native open-file dialog for a subscription/refugee import
+/// (OPML or a Pocket/Instapaper/Readwise CSV); `None` = cancelled.
 #[tauri::command]
 #[specta::specta]
 pub async fn pick_import_file(
@@ -56,7 +57,9 @@ pub async fn pick_import_file(
         Ok(app
             .dialog()
             .file()
+            .add_filter("Subscriptions & saves", &["opml", "xml", "csv"])
             .add_filter("OPML", &["opml", "xml"])
+            .add_filter("CSV", &["csv"])
             .blocking_pick_file())
     })
     .await?;

@@ -1,6 +1,7 @@
 //! Moving things across the boundary: save-to-destination, destination
 //! registry, OPML import/export.
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Context as _, anyhow};
@@ -9,7 +10,7 @@ use curio_types::DestinationName;
 use serde::Serialize;
 
 use crate::app::App;
-use crate::cli::{DestCommand, OpmlCommand};
+use crate::cli::{DestCommand, ImportFormat, OpmlCommand};
 use crate::output::emit_json;
 use crate::resolve;
 
@@ -115,6 +116,36 @@ pub(crate) fn dest(app: &mut App, command: DestCommand) -> anyhow::Result<ExitCo
 struct OpmlImportView {
     added: usize,
     skipped: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportView {
+    feeds_added: usize,
+    feeds_skipped: usize,
+    articles_added: usize,
+    articles_skipped: usize,
+}
+
+pub(crate) fn import(app: &App, file: &Path, format: ImportFormat) -> anyhow::Result<ExitCode> {
+    let content =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let outcome = app.core.import_file(format.into(), &content)?;
+    if app.json {
+        emit_json(&ImportView {
+            feeds_added: outcome.feeds_added,
+            feeds_skipped: outcome.feeds_skipped,
+            articles_added: outcome.articles_added,
+            articles_skipped: outcome.articles_skipped,
+        })?;
+    } else {
+        println!(
+            "imported {} feed(s) and {} article(s); skipped {} already present",
+            outcome.feeds_added,
+            outcome.articles_added,
+            outcome.feeds_skipped + outcome.articles_skipped
+        );
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 pub(crate) fn opml(app: &App, command: OpmlCommand) -> anyhow::Result<ExitCode> {

@@ -224,6 +224,13 @@ export async function installDevMock(): Promise<void> {
                     return { token: 'dev-token', path: '/Users/alex/picked/path' };
                 case 'import_opml':
                     return { added: 4, skipped: 1 };
+                case 'import_file':
+                    return {
+                        feeds_added: 4,
+                        feeds_skipped: 1,
+                        articles_added: 12,
+                        articles_skipped: 0,
+                    };
                 case 'export_opml':
                     return null;
                 case 'discover_feeds':

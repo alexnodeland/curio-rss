@@ -21,6 +21,7 @@ import type {
     DiscoveryDto,
     FeedDto,
     FetchRecordDto,
+    ImportOutcomeDto,
     OpmlImportOutcomeDto,
     PathTokenDto,
     RefreshOutcomeDto,
@@ -245,6 +246,16 @@ export function opmlImportOutcomeFixture(
     return {
         added: 2,
         skipped: 1,
+        ...overrides,
+    };
+}
+
+export function importOutcomeFixture(overrides: Partial<ImportOutcomeDto> = {}): ImportOutcomeDto {
+    return {
+        feeds_added: 2,
+        feeds_skipped: 1,
+        articles_added: 0,
+        articles_skipped: 0,
         ...overrides,
     };
 }

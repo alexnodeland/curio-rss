@@ -21,6 +21,7 @@ import {
     discoveryFixture,
     feedFixture,
     fetchRecordFixture,
+    importOutcomeFixture,
     installIpcHarness,
     opmlImportOutcomeFixture,
     pathTokenFixture,
@@ -100,6 +101,10 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     removeDestination: { args: ['notes'], response: null },
     promoteArticle: { args: [100, 'notes'], response: saveOutcomeFixture() },
     importOpml: { args: ['01JZ0000000000000000000000'], response: opmlImportOutcomeFixture() },
+    importFile: {
+        args: ['01JZ0000000000000000000000', 'pocket_csv'],
+        response: importOutcomeFixture(),
+    },
     exportOpml: { args: ['01JZ0000000000000000000000'], response: null },
     getSetting: { args: ['ui.theme'], response: 'dark' },
     setSetting: { args: ['ui.theme', 'dark'], response: null },

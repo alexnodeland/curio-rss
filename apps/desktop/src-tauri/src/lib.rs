@@ -82,6 +82,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::destinations::promote_article,
             // opml
             commands::opml::import_opml,
+            commands::opml::import_file,
             commands::opml::export_opml,
             // settings / app
             commands::settings::get_setting,

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// curio — a local-first RSS reader + read-later engine.
 ///
@@ -88,6 +88,17 @@ pub(crate) enum Command {
     /// Import or export subscriptions as OPML 2.0.
     #[command(subcommand)]
     Opml(OpmlCommand),
+    /// Import subscriptions or saved articles from a third-party export
+    /// (OPML, or a Pocket / Instapaper / Readwise CSV). Feeds become
+    /// subscriptions; saved articles become read-later items with their
+    /// tags. Re-importing the same file is idempotent.
+    Import {
+        /// The export file to read.
+        file: PathBuf,
+        /// Which service the file came from.
+        #[arg(long = "from", value_enum, default_value_t = ImportFormat::Opml)]
+        from: ImportFormat,
+    },
     /// Inspect the curio.events.v1 log.
     #[command(subcommand)]
     Events(EventsCommand),
@@ -162,6 +173,30 @@ pub(crate) enum OpmlCommand {
     Import { file: PathBuf },
     /// Write every subscription as OPML 2.0 ("-" for stdout).
     Export { file: PathBuf },
+}
+
+/// The third-party export format `curio import` parses.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum ImportFormat {
+    /// OPML 2.0 subscription list.
+    Opml,
+    /// Pocket CSV export.
+    Pocket,
+    /// Instapaper CSV export.
+    Instapaper,
+    /// Readwise Reader CSV export.
+    Readwise,
+}
+
+impl From<ImportFormat> for curio_core::ImportSource {
+    fn from(format: ImportFormat) -> Self {
+        match format {
+            ImportFormat::Opml => Self::Opml,
+            ImportFormat::Pocket => Self::PocketCsv,
+            ImportFormat::Instapaper => Self::InstapaperCsv,
+            ImportFormat::Readwise => Self::ReadwiseCsv,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]

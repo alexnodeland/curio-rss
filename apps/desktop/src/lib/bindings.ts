@@ -80,6 +80,11 @@ export const commands = {
 	 */
 	setFeedTitle: (feedId: number, title: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_title", { feedId, title })),
 	/**
+	 *  Rewrites the sidebar feed order (drag-to-reorder): `feed_ids` is the
+	 *  complete new sequence. DB-local, no event.
+	 */
+	reorderFeeds: (feedIds: number[]) => typedError<null, CommandError>(__TAURI_INVOKE("reorder_feeds", { feedIds })),
+	/**
 	 *  Refreshes one feed. Fetch/parse failures are *outcomes*, not errors;
 	 *  same-feed refreshes are serialized core-side (validator-race fix).
 	 */

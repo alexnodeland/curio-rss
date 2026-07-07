@@ -60,6 +60,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     updateFeedMetadata: { args: [1, 'New title', null, null], response: null },
     setFeedTags: { args: [1, ['Tech/Databases']], response: null },
     setFeedTitle: { args: [1, 'New name'], response: null },
+    reorderFeeds: { args: [[3, 1, 2]], response: null },
     refreshFeed: { args: [1], response: refreshOutcomeFixture() },
     refreshAll: { args: [], response: [refreshOutcomeFixture()] },
     recentFetches: { args: [1, 10], response: [fetchRecordFixture()] },

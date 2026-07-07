@@ -315,6 +315,18 @@ impl CoreHandle {
         Ok(self.storage.set_feed_title(id, title)?)
     }
 
+    /// Rewrites the sidebar feed order to `ordered` (drag-to-reorder). The
+    /// caller passes the complete new sequence. DB-local, no event: feed
+    /// ordering is a local reading-organization preference, not part of the
+    /// published contract.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn reorder_feeds(&self, ordered: &[FeedId]) -> Result<(), CoreError> {
+        Ok(self.storage.reorder_feeds(ordered)?)
+    }
+
     /// Refreshes one feed: policed conditional GET → parse → sanitize →
     /// upsert → fetch-log row. Fetch/parse failures are *outcomes*
     /// (recorded, validators preserved), not errors; only storage-level

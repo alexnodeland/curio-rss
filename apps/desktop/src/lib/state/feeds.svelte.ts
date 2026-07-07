@@ -160,6 +160,14 @@ export class FeedsStore {
         return commands.setFeedTitle(feedId, title);
     }
 
+    /**
+     * Persists a new global feed order (drag-to-reorder); `orderedIds` is the
+     * complete sequence. The tree refreshes off the emitted `FeedsChanged`.
+     */
+    reorderFeeds(orderedIds: number[]): Promise<CommandResult<null>> {
+        return commands.reorderFeeds(orderedIds);
+    }
+
     /** Refreshes one feed; fetch/parse failures are outcomes, not errors. */
     refreshFeed(feedId: number): Promise<CommandResult<RefreshOutcomeDto>> {
         return commands.refreshFeed(feedId);

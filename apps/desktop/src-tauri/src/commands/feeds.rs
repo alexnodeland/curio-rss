@@ -153,6 +153,21 @@ pub async fn set_feed_title(
     Ok(())
 }
 
+/// Rewrites the sidebar feed order (drag-to-reorder): `feed_ids` is the
+/// complete new sequence. DB-local, no event.
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_feeds(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    feed_ids: Vec<i64>,
+) -> Result<(), CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || reorder_feeds_impl(&core, &feed_ids)).await?;
+    emit_or_log(&app, &FeedsChanged);
+    Ok(())
+}
+
 /// Refreshes one feed. Fetch/parse failures are *outcomes*, not errors;
 /// same-feed refreshes are serialized core-side (validator-race fix).
 #[tauri::command]
@@ -276,6 +291,11 @@ fn set_feed_title_impl(
     title: Option<String>,
 ) -> Result<(), CommandError> {
     Ok(core.set_feed_title(FeedId(feed_id), title)?)
+}
+
+fn reorder_feeds_impl(core: &CoreHandle, feed_ids: &[i64]) -> Result<(), CommandError> {
+    let ordered: Vec<FeedId> = feed_ids.iter().map(|&id| FeedId(id)).collect();
+    Ok(core.reorder_feeds(&ordered)?)
 }
 
 async fn refresh_feed_impl(
@@ -462,6 +482,38 @@ mod tests {
         let error = set_feed_title_impl(&core, 9999, Some("x".into())).unwrap_err();
         assert_eq!(error.kind, ErrorKind::User);
         assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn reorder_feeds_rewrites_the_listed_order() {
+        let (_dir, core) = temp_core();
+        let mk = |url: &str| {
+            add_feed_impl(
+                &core,
+                NewFeedDto {
+                    url: url.into(),
+                    title: None,
+                    tags: vec![],
+                },
+            )
+            .unwrap()
+            .id
+        };
+        let a = mk("https://a.test/feed.xml");
+        let b = mk("https://b.test/feed.xml");
+        let c = mk("https://c.test/feed.xml");
+
+        let ids = || {
+            list_feeds_impl(&core)
+                .unwrap()
+                .into_iter()
+                .map(|f| f.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(), vec![a, b, c], "subscription order by default");
+
+        reorder_feeds_impl(&core, &[c, b, a]).unwrap();
+        assert_eq!(ids(), vec![c, b, a]);
     }
 
     #[tokio::test]

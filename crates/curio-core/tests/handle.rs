@@ -430,6 +430,58 @@ async fn opml_round_trips_through_the_facade() {
 }
 
 #[tokio::test]
+async fn feeds_keep_their_subscription_order_until_reordered() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+
+    let a = core
+        .add_feed(NewFeed {
+            url: "https://a.example/feed".into(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let b = core
+        .add_feed(NewFeed {
+            url: "https://b.example/feed".into(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let c = core
+        .add_feed(NewFeed {
+            url: "https://c.example/feed".into(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+
+    // New feeds append in subscription order.
+    let order = |core: &CoreHandle| {
+        core.list_feeds()
+            .unwrap()
+            .into_iter()
+            .map(|f| f.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(order(&core), vec![a.id, b.id, c.id]);
+
+    // Reorder to c, a, b — the sidebar sends the whole new sequence.
+    core.reorder_feeds(&[c.id, a.id, b.id]).unwrap();
+    assert_eq!(order(&core), vec![c.id, a.id, b.id]);
+
+    // A newly added feed still appends after the reordered set.
+    let d = core
+        .add_feed(NewFeed {
+            url: "https://d.example/feed".into(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    assert_eq!(order(&core), vec![c.id, a.id, b.id, d.id]);
+}
+
+#[tokio::test]
 async fn pocket_csv_imports_as_tagged_read_later_articles() {
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());

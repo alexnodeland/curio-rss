@@ -114,8 +114,8 @@ impl Storage {
             let now = Timestamp::now();
             let tags = normalize_tags(new.tags);
             tx.prepare_cached(
-                "INSERT INTO feeds (url, title, tags, added_at, modified_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO feeds (url, title, tags, added_at, modified_at, sort_order) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM feeds))",
             )?
             .execute((
                 &new.url,
@@ -191,8 +191,9 @@ impl Storage {
     /// Database or stored-value corruption errors.
     pub fn list_feeds(&self) -> Result<Vec<Feed>, StorageError> {
         self.read(|conn| {
-            let mut stmt =
-                conn.prepare_cached(&format!("SELECT {FEED_COLS} FROM feeds ORDER BY id"))?;
+            let mut stmt = conn.prepare_cached(&format!(
+                "SELECT {FEED_COLS} FROM feeds ORDER BY sort_order, id"
+            ))?;
             let raws = stmt
                 .query_map([], raw_feed)?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -337,6 +338,31 @@ impl Storage {
             if n == 0 {
                 return Err(StorageError::NotFound { entity: "feed" });
             }
+            Ok(())
+        })
+    }
+
+    /// Rewrites feed ordering: assigns `sort_order = position` for each id in
+    /// `ordered`, in one transaction. Callers pass the complete new sequence
+    /// (the sidebar's flattened order); unknown ids are simply skipped.
+    /// DB-local — feed order is a local preference the events contract does
+    /// not model, so no envelope is staged.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn reorder_feeds(&self, ordered: &[FeedId]) -> Result<(), StorageError> {
+        let ids: Vec<i64> = ordered.iter().map(|feed| feed.0).collect();
+        self.write(move |conn| {
+            let tx = conn.transaction()?;
+            {
+                let mut stmt =
+                    tx.prepare_cached("UPDATE feeds SET sort_order = ?2 WHERE id = ?1")?;
+                for (position, id) in ids.iter().enumerate() {
+                    stmt.execute((id, i64::try_from(position).unwrap_or(i64::MAX)))?;
+                }
+            }
+            tx.commit()?;
             Ok(())
         })
     }

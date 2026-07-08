@@ -17,6 +17,10 @@ apps/desktop/src-tauri/gen/
 # Generated test fixtures — rebuilt via `just fixtures`, never committed
 /fixtures/generated/
 
+# Nightly cold-start bench artifacts — produced in CI, cached (not committed)
+/.bench-cache/
+/bench-output.txt
+
 # Coverage
 coverage/
 lcov.info

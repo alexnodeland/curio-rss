@@ -138,28 +138,51 @@ jobs:
     # curio-fixtures depends on curio-core only (no webview), so this job
     # needs no gtk/webkit system packages.
     runs-on: ubuntu-22.04
-    # `contents: write` so github-action-benchmark can post the alert commit
-    # comment (the job otherwise inherits the top-level read-only default).
+    # `contents: write` is for the alert path only: `comment-on-alert` posts a
+    # commit comment through the API. The benchmark HISTORY is NOT kept on a
+    # gh-pages branch — it lives in a cached JSON (`external-data-json-path`
+    # below), so this job never fetches or pushes a branch. (The old config
+    # stored on gh-pages and failed on *every* run — this repo's Pages builds
+    # from `main` via the Actions build type, so no gh-pages branch exists and
+    # `git fetch gh-pages` died with "couldn't find remote ref gh-pages".)
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The rolling benchmark baseline, persisted between nightly runs via the
+      # Actions cache instead of a gh-pages branch. A per-run key always writes
+      # a fresh cache; `restore-keys` pulls the most recent prior baseline to
+      # compare against. The first run finds none, seeds the file, and — with
+      # no previous point — cannot alert.
+      - name: Restore the rolling benchmark baseline
+        uses: actions/cache@v4
+        with:
+          path: ./.bench-cache
+          key: bench-cold-start-${{ github.run_id }}
+          restore-keys: |
+            bench-cold-start-
       - name: Run the criterion cold-start benchmark
         # bencher output format is what github-action-benchmark's `cargo`
         # parser consumes; the fixture is generated inside the bench harness.
+        # `mkdir -p` guarantees the external-data-json-path parent exists on the
+        # first run, before any cache entry has been created.
         run: |
+          mkdir -p ./.bench-cache
           cargo bench -p curio-fixtures --bench cold_start -- --output-format bencher \
             | tee bench-output.txt
-      - name: Track against the stored baseline (alert at 130%)
+      - name: Track against the trailing baseline (alert at 130%)
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: cold-start (open + first page @50k)
           tool: cargo
           output-file-path: bench-output.txt
+          # Store history in a cached JSON file, NOT on gh-pages: no git fetch,
+          # no branch, no push. Comparison + alert + commit-comment still work.
+          external-data-json-path: ./.bench-cache/benchmark-data.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: "130%"
           comment-on-alert: true
           fail-on-alert: true
-          auto-push: false
+          save-data-file: true

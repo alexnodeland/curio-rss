@@ -13,15 +13,18 @@ import {
     activeView,
     importFromFile,
     refreshAll,
+    selectFolder,
     selectView,
     type ViewId,
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
-import { buildFeedTree } from '$lib/state/feed-tree';
+import { buildFeedTree, flattenVisibleTree } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
+import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import { treeKeyAction } from '$lib/utils/tree-nav';
 import FeedItem from './FeedItem.svelte';
 import FolderNode from './FolderNode.svelte';
 
@@ -44,6 +47,69 @@ feedsStore.prime();
 // The folder tree derived from each feed's `/`-path tags; feeds with no tags
 // fall into `ungrouped` and render flat below the folders.
 const feedTree = $derived(buildFeedTree(feedsStore.feeds, feedsStore.pendingPaths));
+
+// The flattened, depth-annotated visible rows the arrow keys walk. Reads
+// collapse through feedsStore (a tracked SvelteSet) so it re-flattens on toggle
+// or startup load — never a snapshot (see the WP7 reloadSet note).
+const rows = $derived(flattenVisibleTree(feedTree, (path) => feedsStore.isFolderCollapsed(path)));
+const activeIndex = $derived(rows.findIndex((row) => row.key === sidebarTreeStore.activeKey));
+// Only point aria-activedescendant at a row that still exists.
+const activeDescendant = $derived(
+    activeIndex >= 0 ? (sidebarTreeStore.activeKey ?? undefined) : undefined,
+);
+
+let treeEl: HTMLUListElement | undefined = $state();
+
+// When `g f` (or a native-menu "Go to feeds") hands the keyboard to the
+// sidebar, move DOM focus to the tree and seat the cursor on the first row if
+// it has none (or a stale one).
+$effect(() => {
+    if (selectionStore.focus !== 'sidebar' || treeEl === undefined || rows.length === 0) {
+        return;
+    }
+    if (activeIndex < 0) {
+        sidebarTreeStore.activeKey = rows[0].key;
+    }
+    treeEl.focus();
+});
+
+/** Commits the row under the cursor (Enter/Space), then hands focus back. */
+function activateRow(index: number): void {
+    const row = rows[index];
+    if (row === undefined) {
+        return;
+    }
+    if (row.kind === 'folder') {
+        selectFolder(row.path);
+    } else {
+        selectionStore.selectFeed(row.id);
+    }
+    selectionStore.focus = 'list';
+    treeEl?.blur();
+}
+
+function onTreeKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        selectionStore.focus = 'list';
+        treeEl?.blur();
+        return;
+    }
+    const result = treeKeyAction(rows, activeIndex, event.key);
+    if (result.type === 'none') {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (result.type === 'move') {
+        sidebarTreeStore.activeKey = rows[result.index]?.key ?? null;
+    } else if (result.type === 'toggle') {
+        feedsStore.toggleFolder(result.path);
+    } else {
+        activateRow(result.index);
+    }
+}
 
 function currentView(): ViewId | null {
     if (selectionStore.selectedFeedId !== null) {
@@ -176,14 +242,25 @@ function newFolder(): void {
                     </div>
                 </div>
             {:else}
-                <ul class="sidebar-list">
+                <ul
+                    class="sidebar-list"
+                    role="tree"
+                    tabindex="0"
+                    aria-label={t('sidebar.feeds')}
+                    aria-activedescendant={activeDescendant}
+                    bind:this={treeEl}
+                    onkeydown={onTreeKeydown}
+                    onblur={() => sidebarTreeStore.reset()}
+                >
                     {#each feedTree.folders as folder (folder.path)}
                         <FolderNode {folder} depth={0} />
                     {/each}
                     {#each feedTree.ungrouped as feed (feed.id)}
-                        <li>
+                        <li role="none">
                             <FeedItem
                                 {feed}
+                                parentPath=""
+                                level={1}
                                 unread={feedsStore.unreadFor(feed.id)}
                                 selected={selectionStore.selectedFeedId === feed.id}
                                 siblings={feedTree.ungrouped.map((candidate) => candidate.id)}
@@ -321,6 +398,13 @@ function newFolder(): void {
         display: flex;
         flex-direction: column;
         gap: 1px;
+    }
+
+    /* The tree container itself is the tab stop; the cursor ring lives on the
+       active row (aria-activedescendant), so suppress the container outline. */
+    .sidebar-list[role='tree']:focus,
+    .sidebar-list[role='tree']:focus-visible {
+        outline: none;
     }
 
     .sidebar-status {

@@ -10,6 +10,7 @@ import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
     type IpcHarness,
@@ -208,5 +209,47 @@ describe('Sidebar — folder tree', () => {
         // The nested folder scopes narrower.
         await fireEvent.click(getByText('Databases'));
         expect(articlesStore.filters.feedTag).toBe('Tech/Databases');
+    });
+
+    it('g-f focuses the tree; arrows walk the visible rows and Enter selects', async () => {
+        harness = taggedHarness();
+        const { getByRole } = render(Sidebar);
+        await flushIpc();
+
+        // The `view.feeds` shortcut hands the keyboard to the sidebar.
+        selectionStore.focus = 'sidebar';
+        await tick();
+
+        const tree = getByRole('tree');
+        // Cursor seats on the first row (the Tech folder).
+        expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech');
+
+        // Down walks: Tech → Tech/Databases → SQLite → Rust (DFS render order).
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech/Databases');
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech:1');
+
+        // Enter selects the feed under the cursor and hands the keyboard back.
+        await fireEvent.keyDown(tree, { key: 'Enter' });
+        expect(selectionStore.selectedFeedId).toBe(1);
+        expect(selectionStore.focus).toBe('list');
+    });
+
+    it('Left collapses the folder under the cursor', async () => {
+        harness = taggedHarness();
+        const { getByRole, getByLabelText, queryByText } = render(Sidebar);
+        await flushIpc();
+
+        selectionStore.focus = 'sidebar';
+        await tick();
+        const tree = getByRole('tree');
+        expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech');
+
+        await fireEvent.keyDown(tree, { key: 'ArrowLeft' });
+        expect(getByLabelText('Toggle Tech').getAttribute('aria-expanded')).toBe('false');
+        expect(queryByText('SQLite')).toBeNull();
     });
 });

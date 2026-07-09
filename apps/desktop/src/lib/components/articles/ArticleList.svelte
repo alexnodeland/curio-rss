@@ -22,16 +22,19 @@ export const ROW_HEIGHT = ROW_HEIGHTS.comfortable;
  * owns the cursor; nearing the bottom of the window asks it for the next
  * page). Selection lives in `selectionStore`; the reader reacts to it.
  */
+import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { handleShortcut, markReadOnScroll } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { menuStore } from '$lib/state/menu.svelte';
+import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { untrack } from 'svelte';
-import ArticleRow, { articleOptionId } from './ArticleRow.svelte';
+import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
 import VirtualList from './VirtualList.svelte';
 
 /** How many placeholder rows the loading skeleton sketches. */
@@ -63,6 +66,27 @@ const activeDescendantId = $derived(
 
 function selectArticle(articleId: number): void {
     selectionStore.selectedArticleId = articleId;
+}
+
+/**
+ * Opens the context menu for the selected row when the keyboard menu key fires
+ * on the listbox (rows are `tabindex="-1"`, so their own menu-key never fires).
+ * Anchors to the selected row's element; a no-op if nothing is selected or the
+ * row has scrolled out of the virtualized window.
+ */
+function openSelectedMenu(): void {
+    const id = selectionStore.selectedArticleId;
+    if (id === null) {
+        return;
+    }
+    const article = list.items.find((item) => item.id === id);
+    const el = document.getElementById(articleOptionId(id));
+    if (article === undefined || el === null) {
+        return;
+    }
+    const state = ensureQuery(queryKeys.articleState(id), () => commands.getArticleState(id)).data;
+    const rect = el.getBoundingClientRect();
+    menuStore.openAt(buildArticleMenu(article, state), rect.left + 8, rect.bottom - 4, el, article.title);
 }
 
 /**
@@ -150,6 +174,7 @@ function onScrollPast(firstVisibleIndex: number): void {
             onnearend={() => void list.loadMore()}
             onscrollpast={onScrollPast}
             onmove={moveSelection}
+            onmenukey={openSelectedMenu}
         >
             {#snippet row(article, index)}
                 <ArticleRow

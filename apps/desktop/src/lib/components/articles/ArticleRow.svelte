@@ -1,4 +1,15 @@
 <script lang="ts" module>
+import type { ArticleStateDto, ArticleSummaryDto } from '$lib/bindings';
+import {
+    markAllRead,
+    openInBrowser,
+    toggleArchived,
+    toggleRead,
+    toggleReadLater,
+    toggleStar,
+} from '$lib/state/actions';
+import type { MenuItem } from '$lib/state/menu.svelte';
+
 /**
  * The DOM id of the row for one article — the listbox points at it through
  * `aria-activedescendant`, so the id scheme lives here next to the row it
@@ -6,6 +17,59 @@
  */
 export function articleOptionId(articleId: number): string {
     return `article-option-${articleId}`;
+}
+
+/**
+ * The context-menu items for one article row — star, read, read-later, archive,
+ * open-in-browser, and mark-all-read-in-feed. Labels flip on the live state
+ * (from the per-article state query). Shared by the row's own right-click and
+ * the list's keyboard menu key so both surfaces stay identical.
+ */
+export function buildArticleMenu(
+    article: ArticleSummaryDto,
+    state: ArticleStateDto | undefined,
+): MenuItem[] {
+    const items: MenuItem[] = [
+        {
+            id: 'star',
+            labelKey: state?.starred ? 'reader.action.unstar' : 'reader.action.star',
+            onSelect: () => void toggleStar(article.id),
+        },
+        {
+            id: 'read',
+            labelKey: state?.read ? 'reader.action.markUnread' : 'reader.action.markRead',
+            onSelect: () => void toggleRead(article.id),
+        },
+        {
+            id: 'readLater',
+            labelKey: state?.read_later
+                ? 'reader.action.readLaterRemove'
+                : 'reader.action.readLater',
+            onSelect: () => void toggleReadLater(article.id),
+        },
+        {
+            id: 'archive',
+            labelKey: state?.archived ? 'reader.action.unarchive' : 'reader.action.archive',
+            separatorBefore: true,
+            onSelect: () => void toggleArchived(article.id),
+        },
+        {
+            id: 'open',
+            labelKey: 'reader.action.openInBrowser',
+            separatorBefore: true,
+            onSelect: () => void openInBrowser(article.id, article.source_url),
+        },
+    ];
+    const feedId = article.feed_id;
+    if (feedId !== null) {
+        items.push({
+            id: 'markAllRead',
+            labelKey: 'feed.menu.markAllRead',
+            separatorBefore: true,
+            onSelect: () => void markAllRead(feedId),
+        });
+    }
+    return items;
 }
 </script>
 
@@ -18,8 +82,9 @@ export function articleOptionId(articleId: number): string {
  * height always equals the virtualizer's fixed row height (one source, no
  * drift). `compact` density drops the body preview and thumbnail.
  */
-import { type ArticleSummaryDto, commands } from '$lib/bindings';
+import { commands } from '$lib/bindings';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
+import { contextMenu } from '$lib/actions/context-menu';
 import { formatIntlDate, t } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
@@ -87,6 +152,7 @@ function onKeyDown(event: KeyboardEvent): void {
     tabindex="-1"
     onclick={() => onselect(article.id)}
     onkeydown={onKeyDown}
+    use:contextMenu={{ items: () => buildArticleMenu(article, flags()), ariaLabel: article.title }}
 >
     <span class="row-dot" aria-hidden="true"></span>
     {#if flags()?.read === false}

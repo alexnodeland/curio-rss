@@ -13,10 +13,11 @@ import { t } from '$lib/i18n';
 import { selectFolder } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedDnd } from '$lib/state/feed-dnd.svelte';
-import type { FeedFolder } from '$lib/state/feed-tree';
+import { type FeedFolder, folderRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
+import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import FeedItem from './FeedItem.svelte';
 import FolderNode from './FolderNode.svelte';
@@ -28,6 +29,10 @@ const unread = $derived(feedsStore.folderUnread(folder));
 const selected = $derived(
     selectionStore.selectedFeedId === null && articlesStore.filters.feedTag === folder.path,
 );
+/** This folder's tree id + `aria-level`, and whether the keyboard cursor is on it. */
+const rowId = $derived(folderRowKey(folder.path));
+const level = $derived(depth + 1);
+const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId);
 
 // ─── inline rename ───────────────────────────────────────────────────────────
 let renaming = $state(false);
@@ -137,21 +142,28 @@ function onFolderDrop(event: DragEvent): void {
 }
 </script>
 
-<li class="folder">
+<li class="folder" role="none">
     <div
+        id={rowId}
         class="folder-header"
         class:drop-active={dropActive}
+        class:tree-active={isTreeActive}
         style:--depth={depth}
         ondragover={onFolderDragOver}
         ondragleave={clearDrop}
         ondrop={onFolderDrop}
-        role="group"
+        role="treeitem"
+        tabindex="-1"
+        aria-level={level}
+        aria-expanded={!collapsed}
+        aria-selected={selected}
         aria-label={folder.name}
         use:contextMenu={{ items: folderMenu, ariaLabel: folder.name }}
     >
         <button
             class="folder-disclosure"
             type="button"
+            tabindex="-1"
             aria-expanded={!collapsed}
             aria-label={t('folder.toggle', { name: folder.name })}
             onclick={() => feedsStore.toggleFolder(folder.path)}
@@ -171,6 +183,7 @@ function onFolderDrop(event: DragEvent): void {
             <button
                 class="folder-select"
                 class:active={selected}
+                tabindex="-1"
                 aria-current={selected ? 'true' : undefined}
                 ondblclick={startRename}
                 onclick={() => selectFolder(folder.path)}
@@ -184,14 +197,16 @@ function onFolderDrop(event: DragEvent): void {
         {/if}
     </div>
     {#if !collapsed}
-        <ul class="folder-children">
+        <ul class="folder-children" role="group">
             {#each folder.subfolders as subfolder (subfolder.path)}
                 <FolderNode folder={subfolder} depth={depth + 1} />
             {/each}
             {#each folder.feeds as feed (feed.id)}
-                <li class="folder-feed" style:--depth={depth + 1}>
+                <li class="folder-feed" role="none" style:--depth={depth + 1}>
                     <FeedItem
                         {feed}
+                        parentPath={folder.path}
+                        level={depth + 2}
                         unread={feedsStore.unreadFor(feed.id)}
                         selected={selectionStore.selectedFeedId === feed.id}
                         siblings={folder.feeds.map((candidate) => candidate.id)}
@@ -222,6 +237,12 @@ function onFolderDrop(event: DragEvent): void {
     .folder-header.drop-active {
         background: var(--selected);
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 40%);
+    }
+
+    /* The keyboard-tree cursor ring (aria-activedescendant target). */
+    .folder-header.tree-active {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
     }
 
     .folder-disclosure {

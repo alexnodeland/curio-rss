@@ -89,6 +89,11 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': 'Interlinia',
     'typography.measure': 'Szerokość',
     'typography.reset': 'Resetuj',
+    'typography.preview': 'Podgląd',
+    'typography.preview.heading': 'Kształt lektury',
+    'typography.preview.body':
+        'Dobra typografia znika — niesie słowa, nie zwracając na siebie uwagi. Dostosuj rozmiar, odstępy i szerokość, aż długi artykuł będzie się czytać bez wysiłku.',
+    'typography.preview.quote': 'Krój pisma to piękna grupa liter, a nie grupa pięknych liter.',
     'tags.label': 'Tagi',
     'tags.placeholder': 'Dodaj tag…',
     'tags.add': 'Dodaj tag',

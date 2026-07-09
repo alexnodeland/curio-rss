@@ -14,6 +14,7 @@ import ThemePicker from '$components/common/ThemePicker.svelte';
 import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
+import ReaderPreview from '$components/reader/ReaderPreview.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
 import { LOCALES, type LocaleId, type MessageKey, localeStore, t } from '$lib/i18n';
 import { REFRESH_INTERVAL_OPTIONS, type ReadingDensity, uiStore } from '$lib/state/ui.svelte';
@@ -201,6 +202,7 @@ function onKeydown(event: KeyboardEvent): void {
                 hidden={activeIndex !== 2}
             >
                 <TypographyControls />
+                <ReaderPreview />
                 <div class="field-block">
                     <label class="field">
                         <span class="field-label">{t('settings.density')}</span>

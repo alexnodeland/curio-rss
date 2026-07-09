@@ -95,6 +95,12 @@ export const en = {
     'typography.lineHeight': 'Line height',
     'typography.measure': 'Width',
     'typography.reset': 'Reset',
+    'typography.preview': 'Preview',
+    'typography.preview.heading': 'The shape of a reading',
+    'typography.preview.body':
+        'Good typography disappears — it carries the words without calling attention to itself. Adjust the size, spacing, and width until a long article feels effortless to read.',
+    'typography.preview.quote':
+        'Type is a beautiful group of letters, not a group of beautiful letters.',
 
     'tags.label': 'Tags',
     'tags.placeholder': 'Add a tag…',

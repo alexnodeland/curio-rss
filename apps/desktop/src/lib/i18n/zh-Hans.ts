@@ -88,6 +88,11 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': '行高',
     'typography.measure': '宽度',
     'typography.reset': '重置',
+    'typography.preview': '预览',
+    'typography.preview.heading': '阅读的形态',
+    'typography.preview.body':
+        '好的排版会隐于无形——它承载文字，却不喧宾夺主。调整字号、行距和宽度，直到长文读起来毫不费力。',
+    'typography.preview.quote': '字体是一组美丽的字母，而非一组美丽字母的堆砌。',
     'tags.label': '标签',
     'tags.placeholder': '添加标签…',
     'tags.add': '添加标签',

@@ -87,6 +87,12 @@ export const it: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': 'Interlinea',
     'typography.measure': 'Larghezza',
     'typography.reset': 'Reimposta',
+    'typography.preview': 'Anteprima',
+    'typography.preview.heading': 'La forma di una lettura',
+    'typography.preview.body':
+        'Una buona tipografia scompare: porta le parole senza attirare l’attenzione su di sé. Regola dimensione, interlinea e larghezza finché un articolo lungo non si legge senza sforzo.',
+    'typography.preview.quote':
+        'La tipografia è un bel gruppo di lettere, non un gruppo di belle lettere.',
     'tags.label': 'Tag',
     'tags.placeholder': 'Aggiungi un tag…',
     'tags.add': 'Aggiungi tag',

@@ -57,7 +57,7 @@ describe('SettingsModal — tablist', () => {
         expect(tablist?.getAttribute('aria-label')).toBe('Settings sections');
 
         const tabEls = tabs();
-        expect(tabEls).toHaveLength(6);
+        expect(tabEls).toHaveLength(7);
         expect(tabEls[0].textContent?.trim()).toBe('General');
 
         // General active on open: aria-selected + the single roving tab stop.
@@ -107,15 +107,15 @@ describe('SettingsModal — tablist', () => {
         expect(document.activeElement).toBe(tabEls[0]);
         // …and once more wraps to the last.
         await fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
-        expect(tabEls[5].getAttribute('aria-selected')).toBe('true');
-        expect(document.activeElement).toBe(tabEls[5]);
+        expect(tabEls[6].getAttribute('aria-selected')).toBe('true');
+        expect(document.activeElement).toBe(tabEls[6]);
         // ArrowRight from the last wraps to the first.
         await fireEvent.keyDown(tablist, { key: 'ArrowRight' });
         expect(document.activeElement).toBe(tabEls[0]);
 
         // End jumps to the last, Home back to the first.
         await fireEvent.keyDown(tablist, { key: 'End' });
-        expect(document.activeElement).toBe(tabEls[5]);
+        expect(document.activeElement).toBe(tabEls[6]);
         await fireEvent.keyDown(tablist, { key: 'Home' });
         expect(document.activeElement).toBe(tabEls[0]);
 

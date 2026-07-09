@@ -166,6 +166,18 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'settings.tablist.label': 'Sekcje ustawień',
     'settings.section.general': 'Ogólne',
     'settings.section.mediaPrivacy': 'Multimedia i prywatność',
+    'settings.section.notifications': 'Powiadomienia',
+    'settings.notify.enabled': 'Włącz powiadomienia',
+    'settings.notify.enabled.hint':
+        'Pokazuje powiadomienie na pulpicie, gdy odświeżanie w tle znajdzie nowe artykuły lub kanał ma problem. Tylko gdy Curio działa w tle.',
+    'settings.notify.newArticles': 'Nowe artykuły',
+    'settings.notify.errors': 'Błędy odświeżania',
+    'settings.notify.feedDead': 'Kanał przestał działać',
+    'settings.notify.quietStart': 'Godziny ciszy od',
+    'settings.notify.quietEnd': 'Godziny ciszy do',
+    'settings.notify.quietHours.hint':
+        'Brak powiadomień w tym przedziale. Pozostaw puste, aby wyłączyć.',
+    'settings.notify.blocked': 'Powiadomienia są zablokowane w Ustawieniach systemu.',
     'settings.section.advanced': 'Zaawansowane',
     'settings.refreshInterval': 'Częstotliwość odświeżania',
     'settings.refreshInterval.hint': 'Jak często Curio sprawdza nowe artykuły w Twoich kanałach.',

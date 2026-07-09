@@ -28,6 +28,9 @@ publish = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Local time for the quiet-hours window (WP14 notifications); already in the
+# workspace graph via curio-core, so no new licenses to triage.
+chrono = { workspace = true }
 curio-core = { workspace = true }
 curio-types = { workspace = true }
 directories = { workspace = true }
@@ -41,6 +44,7 @@ specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 # protocol-asset serves the image cache through the scoped asset: protocol
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }

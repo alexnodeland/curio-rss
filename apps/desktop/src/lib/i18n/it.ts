@@ -164,6 +164,18 @@ export const it: Partial<Record<MessageKey, string>> = {
     'settings.tablist.label': 'Sezioni delle impostazioni',
     'settings.section.general': 'Generale',
     'settings.section.mediaPrivacy': 'Media e privacy',
+    'settings.section.notifications': 'Notifiche',
+    'settings.notify.enabled': 'Attiva le notifiche',
+    'settings.notify.enabled.hint':
+        'Mostra una notifica desktop quando un aggiornamento in background trova nuovi articoli o un feed ha problemi. Solo mentre Curio è in background.',
+    'settings.notify.newArticles': 'Nuovi articoli',
+    'settings.notify.errors': 'Errori di aggiornamento',
+    'settings.notify.feedDead': 'Un feed è morto',
+    'settings.notify.quietStart': 'Ore di silenzio da',
+    'settings.notify.quietEnd': 'Ore di silenzio a',
+    'settings.notify.quietHours.hint':
+        'Nessuna notifica durante questo intervallo. Lascia vuoto per disattivare.',
+    'settings.notify.blocked': 'Le notifiche sono bloccate nelle Impostazioni di sistema.',
     'settings.section.advanced': 'Avanzate',
     'settings.refreshInterval': 'Intervallo di aggiornamento',
     'settings.refreshInterval.hint':

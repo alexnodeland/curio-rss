@@ -137,8 +137,12 @@ async fn run_once(handle: &AppHandle, core: &SharedCore, scheduler: &RefreshSche
     if !scheduler.try_acquire() {
         return;
     }
-    if let Err(error) = refresh_all_and_emit(handle, core).await {
-        tracing::warn!(%error, "scheduled refresh failed");
+    match refresh_all_and_emit(handle, core).await {
+        // A background sweep is the moment to notify (foreground refreshes are
+        // reported in-app by the refresh status line); the notify layer decides
+        // whether the user's prefs + OS permission actually surface anything.
+        Ok(outcomes) => crate::notify::notify_refresh(handle, core, &outcomes),
+        Err(error) => tracing::warn!(%error, "scheduled refresh failed"),
     }
     scheduler.mark_refreshed();
     scheduler.release();

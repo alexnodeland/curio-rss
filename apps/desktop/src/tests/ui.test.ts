@@ -220,6 +220,78 @@ describe('ui store — reading density', () => {
     });
 });
 
+describe('ui store — notification prefs', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        settingsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('defaults to off, per-event on, no quiet window', () => {
+        const ui = new UiStore();
+        expect(ui.notifyEnabled).toBe(false);
+        expect(ui.notifyNewArticles).toBe(true);
+        expect(ui.notifyErrors).toBe(true);
+        expect(ui.notifyFeedDead).toBe(true);
+        expect(ui.notifyQuietStart).toBe('');
+        expect(ui.notifyQuietEnd).toBe('');
+    });
+
+    it('initNotifications adopts persisted values (per-event defaults on)', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => {
+                const key = args.key as string;
+                if (key === 'ui.notify.enabled') return 'true';
+                if (key === 'ui.notify.new-articles') return 'false';
+                if (key === 'ui.notify.quiet-start') return '22:00';
+                if (key === 'ui.notify.quiet-end') return '07:00';
+                return null;
+            },
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initNotifications();
+        expect(ui.notifyEnabled).toBe(true);
+        expect(ui.notifyNewArticles).toBe(false);
+        expect(ui.notifyErrors).toBe(true); // unset → default on
+        expect(ui.notifyQuietStart).toBe('22:00');
+        expect(ui.notifyQuietEnd).toBe('07:00');
+    });
+
+    it('enabling requests OS permission and reports the grant', async () => {
+        harness = installIpcHarness({ set_setting: null, request_notification_permission: true });
+        const ui = new UiStore();
+
+        const granted = await ui.setNotifyEnabled(true);
+        expect(granted).toBe(true);
+        expect(ui.notifyEnabled).toBe(true);
+        expect(harness.callsFor('request_notification_permission')).toHaveLength(1);
+    });
+
+    it('disabling persists without touching OS permission', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new UiStore();
+
+        expect(await ui.setNotifyEnabled(false)).toBe(true);
+        expect(harness.callsFor('request_notification_permission')).toHaveLength(0);
+    });
+
+    it('the quiet-hours setters persist the HH:MM strings', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new UiStore();
+
+        await ui.setNotifyQuietStart('23:30');
+        await ui.setNotifyQuietEnd('06:15');
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.notify.quiet-start', value: '23:30' },
+            { key: 'ui.notify.quiet-end', value: '06:15' },
+        ]);
+    });
+});
+
 describe('ui store — toasts', () => {
     beforeEach(() => {
         vi.useFakeTimers();

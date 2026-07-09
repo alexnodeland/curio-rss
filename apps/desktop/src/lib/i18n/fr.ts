@@ -167,6 +167,18 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'settings.tablist.label': 'Sections des paramètres',
     'settings.section.general': 'Général',
     'settings.section.mediaPrivacy': 'Médias et confidentialité',
+    'settings.section.notifications': 'Notifications',
+    'settings.notify.enabled': 'Activer les notifications',
+    'settings.notify.enabled.hint':
+        'Affiche une notification de bureau lorsqu’une actualisation en arrière-plan trouve de nouveaux articles ou qu’un flux rencontre un problème. Uniquement lorsque Curio est en arrière-plan.',
+    'settings.notify.newArticles': 'Nouveaux articles',
+    'settings.notify.errors': 'Erreurs d’actualisation',
+    'settings.notify.feedDead': 'Un flux est mort',
+    'settings.notify.quietStart': 'Heures silencieuses de',
+    'settings.notify.quietEnd': 'Heures silencieuses à',
+    'settings.notify.quietHours.hint':
+        'Aucune notification pendant cette plage. Laissez vide pour désactiver.',
+    'settings.notify.blocked': 'Les notifications sont bloquées dans les Réglages Système.',
     'settings.section.advanced': 'Avancé',
     'settings.refreshInterval': 'Intervalle d’actualisation',
     'settings.refreshInterval.hint':

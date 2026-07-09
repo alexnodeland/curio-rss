@@ -165,6 +165,8 @@ tokens:
                 case 'set_setting':
                     settings.set(args.key as string, args.value as string);
                     return null;
+                case 'request_notification_permission':
+                    return true;
                 case 'get_feed_by_url':
                     return structuredClone(feeds.find((f) => f.url === args.url) ?? null);
                 case 'set_feed_status': {

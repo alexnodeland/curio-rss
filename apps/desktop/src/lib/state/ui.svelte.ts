@@ -5,6 +5,7 @@
  * of truth, and localStorage (`curio-theme`) is a mirror the app.html
  * preload script reads before first paint to kill FOUC.
  */
+import { commands } from '$lib/bindings';
 import { type CustomTheme, buildThemeRule, validateStoredTheme } from '$lib/utils/theme-format';
 import { SvelteMap } from 'svelte/reactivity';
 import { SETTING_KEYS, settingsStore } from './settings.svelte';
@@ -223,6 +224,19 @@ export class UiStore {
     /** Whether to refresh once shortly after launch (default on). */
     refreshOnLaunch: boolean = $state(true);
 
+    /**
+     * OS-notification prefs, read Rust-side by the scheduler after a background
+     * refresh. Master `notifyEnabled` is opt-in (default off, so no OS prompt
+     * until asked); the three per-event flags default on; the quiet window is
+     * two `"HH:MM"` strings (empty = no window). See {@link setNotifyEnabled}.
+     */
+    notifyEnabled: boolean = $state(false);
+    notifyNewArticles: boolean = $state(true);
+    notifyErrors: boolean = $state(true);
+    notifyFeedDead: boolean = $state(true);
+    notifyQuietStart: string = $state('');
+    notifyQuietEnd: string = $state('');
+
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
     measure: number = $state(TYPOGRAPHY_LIMITS.measure.default);
@@ -412,6 +426,57 @@ export class UiStore {
         await settingsStore.set(SETTING_KEYS.refreshOnLaunch, String(value));
     }
 
+    /** Adopts persisted notification prefs at startup. */
+    initNotifications(): void {
+        this.notifyEnabled = settingsStore.get(SETTING_KEYS.notifyEnabled) === 'true';
+        this.notifyNewArticles = settingsStore.get(SETTING_KEYS.notifyNewArticles) !== 'false';
+        this.notifyErrors = settingsStore.get(SETTING_KEYS.notifyErrors) !== 'false';
+        this.notifyFeedDead = settingsStore.get(SETTING_KEYS.notifyFeedDead) !== 'false';
+        this.notifyQuietStart = settingsStore.get(SETTING_KEYS.notifyQuietStart) ?? '';
+        this.notifyQuietEnd = settingsStore.get(SETTING_KEYS.notifyQuietEnd) ?? '';
+    }
+
+    /**
+     * Turns notifications on/off. When turning on, requests OS permission now
+     * (so the prompt lands here, not at a later background refresh) and returns
+     * whether it was granted — the caller can nudge the user if the OS blocked
+     * it. The persisted pref is independent of the OS grant; the scheduler
+     * re-checks permission on every refresh.
+     */
+    async setNotifyEnabled(value: boolean): Promise<boolean> {
+        this.notifyEnabled = value;
+        await settingsStore.set(SETTING_KEYS.notifyEnabled, String(value));
+        if (!value) {
+            return true;
+        }
+        const result = await commands.requestNotificationPermission();
+        return result.status === 'ok' ? result.data : false;
+    }
+
+    /** Sets (and persists) a per-event notification toggle. */
+    async setNotifyNewArticles(value: boolean): Promise<void> {
+        this.notifyNewArticles = value;
+        await settingsStore.set(SETTING_KEYS.notifyNewArticles, String(value));
+    }
+    async setNotifyErrors(value: boolean): Promise<void> {
+        this.notifyErrors = value;
+        await settingsStore.set(SETTING_KEYS.notifyErrors, String(value));
+    }
+    async setNotifyFeedDead(value: boolean): Promise<void> {
+        this.notifyFeedDead = value;
+        await settingsStore.set(SETTING_KEYS.notifyFeedDead, String(value));
+    }
+
+    /** Sets (and persists) a quiet-hours bound (`""` clears it). */
+    async setNotifyQuietStart(value: string): Promise<void> {
+        this.notifyQuietStart = value;
+        await settingsStore.set(SETTING_KEYS.notifyQuietStart, value);
+    }
+    async setNotifyQuietEnd(value: string): Promise<void> {
+        this.notifyQuietEnd = value;
+        await settingsStore.set(SETTING_KEYS.notifyQuietEnd, value);
+    }
+
     /** Sets the reader font size (px), clamped, and persists it. */
     async setFontSize(px: number): Promise<void> {
         const { min, max } = TYPOGRAPHY_LIMITS.fontSize;
@@ -570,6 +635,12 @@ export class UiStore {
         this.readingDensity = READING_DENSITY_DEFAULT;
         this.refreshIntervalMinutes = REFRESH_INTERVAL_DEFAULT;
         this.refreshOnLaunch = true;
+        this.notifyEnabled = false;
+        this.notifyNewArticles = true;
+        this.notifyErrors = true;
+        this.notifyFeedDead = true;
+        this.notifyQuietStart = '';
+        this.notifyQuietEnd = '';
         this.themePreference = 'system';
         this.customThemes = [];
         this.sidebarCollapsed = false;

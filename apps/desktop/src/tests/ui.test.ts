@@ -240,15 +240,14 @@ describe('ui store — notification prefs', () => {
     });
 
     it('initNotifications adopts persisted values (per-event defaults on)', async () => {
+        const persisted: Record<string, string> = {
+            'ui.notify.enabled': 'true',
+            'ui.notify.new-articles': 'false',
+            'ui.notify.quiet-start': '22:00',
+            'ui.notify.quiet-end': '07:00',
+        };
         harness = installIpcHarness({
-            get_setting: (args) => {
-                const key = args.key as string;
-                if (key === 'ui.notify.enabled') return 'true';
-                if (key === 'ui.notify.new-articles') return 'false';
-                if (key === 'ui.notify.quiet-start') return '22:00';
-                if (key === 'ui.notify.quiet-end') return '07:00';
-                return null;
-            },
+            get_setting: (args) => persisted[args.key as string] ?? null,
         });
         await settingsStore.load();
 

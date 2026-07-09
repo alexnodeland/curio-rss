@@ -6,6 +6,7 @@
  * backend-owned filters; the article list reacts through the stores.
  */
 import Icon, { type IconName } from '$components/common/Icon.svelte';
+import { tooltip } from '$lib/actions/tooltip';
 import { type MessageKey, t } from '$lib/i18n';
 import { activeView, refreshAll, selectView, type ViewId } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
@@ -58,14 +59,14 @@ function feedsError(): string {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.addFeed')}
-                title={t('toolbar.addFeed')}
+                use:tooltip={{ text: t('toolbar.addFeed'), kbd: 'A' }}
                 onclick={() => uiStore.openModal('add-feed')}><Icon name="plus" /></button
             >
             <button
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.refreshAll')}
-                title={t('toolbar.refreshAll')}
+                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: 'R' }}
                 aria-busy={feedsStore.refreshing}
                 disabled={feedsStore.refreshing}
                 onclick={() => refreshAll()}><Icon name="refresh" /></button
@@ -74,7 +75,7 @@ function feedsError(): string {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.settings')}
-                title={t('toolbar.settings')}
+                use:tooltip={{ text: t('toolbar.settings'), kbd: ',' }}
                 onclick={() => uiStore.openModal('settings')}><Icon name="settings" /></button
             >
         </div>

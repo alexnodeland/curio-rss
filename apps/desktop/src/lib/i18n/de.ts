@@ -191,6 +191,10 @@ export const de: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.ok': 'OK',
     'feedHealth.fetch.not_modified': 'Nicht geändert',
     'feedHealth.fetch.error': 'Fehler',
+    'feedHealth.hint.forbidden':
+        'Die Website hat die Anfrage abgelehnt (403). Manche Seiten blockieren Feed-Reader – versuche es später erneut oder prüfe die Feed-URL.',
+    'feedHealth.hint.rateLimited':
+        'Die Website drosselt Anfragen (429). Curio verteilt die Wiederholungen zeitlich – versuche es in Kürze erneut.',
     'feedHealth.unsubscribe': 'Abbestellen',
     'feedHealth.unsubscribe.confirm':
         'Dieses Abonnement entfernen? Gespeicherte Artikel bleiben erhalten.',

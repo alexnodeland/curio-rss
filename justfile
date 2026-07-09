@@ -27,6 +27,12 @@ build:
 test:
     cargo test --workspace
 
+# Opt-in LIVE-NETWORK tests: actually fetch Reddit/YouTube/HN/Mastodon and
+# parse the feeds, proving the fetch policy works end-to-end. NOT part of
+# `just ci` (which stays hermetic); run on demand. Networked -> may be flaky.
+test-live:
+    cargo test -p curio-core --test live_network -- --ignored --nocapture
+
 # Format all Rust code
 fmt:
     cargo fmt --all

@@ -192,6 +192,10 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.ok': 'OK',
     'feedHealth.fetch.not_modified': 'Bez zmian',
     'feedHealth.fetch.error': 'Błąd',
+    'feedHealth.hint.forbidden':
+        'Witryna odrzuciła żądanie (403). Niektóre witryny blokują czytniki kanałów — spróbuj ponownie później lub sprawdź adres URL kanału.',
+    'feedHealth.hint.rateLimited':
+        'Witryna ogranicza liczbę żądań (429). Curio rozkłada ponowne próby w czasie — spróbuj ponownie za chwilę.',
     'feedHealth.unsubscribe': 'Anuluj subskrypcję',
     'feedHealth.unsubscribe.confirm': 'Usunąć tę subskrypcję? Zapisane artykuły zostaną zachowane.',
     'feedHealth.unsubscribe.remove': 'Usuń',

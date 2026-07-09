@@ -191,6 +191,10 @@ export const es: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.ok': 'OK',
     'feedHealth.fetch.not_modified': 'Sin cambios',
     'feedHealth.fetch.error': 'Error',
+    'feedHealth.hint.forbidden':
+        'El sitio rechazó la solicitud (403). Algunos sitios bloquean los lectores de feeds: inténtalo más tarde o revisa la URL del feed.',
+    'feedHealth.hint.rateLimited':
+        'El sitio está limitando las solicitudes (429). Curio espacia sus reintentos: inténtalo de nuevo dentro de un rato.',
     'feedHealth.unsubscribe': 'Cancelar suscripción',
     'feedHealth.unsubscribe.confirm':
         '¿Eliminar esta suscripción? Los artículos guardados se conservan.',

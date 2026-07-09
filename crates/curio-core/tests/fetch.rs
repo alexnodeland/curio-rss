@@ -12,7 +12,9 @@
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
-use curio_core::fetch::{FetchConfig, FetchError, FetchRequest, PolicedClient};
+use curio_core::fetch::{
+    DEFAULT_ACCEPT, FetchConfig, FetchError, FetchRequest, HostOverride, PolicedClient,
+};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -335,6 +337,94 @@ async fn honest_user_agent_rides_every_request() {
         .await
         .unwrap();
     assert!(response.is_success());
+}
+
+#[tokio::test]
+async fn default_accept_header_rides_every_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    let client = PolicedClient::new(fast_config());
+    client
+        .fetch(&allowed(format!("{}/feed.xml", server.uri())))
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let accept = requests[0]
+        .headers
+        .get("accept")
+        .and_then(|v| v.to_str().ok());
+    assert_eq!(
+        accept,
+        Some(DEFAULT_ACCEPT),
+        "the spec-correct Accept header must ride every request"
+    );
+}
+
+#[tokio::test]
+async fn host_override_applies_ua_headers_by_suffix() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(header("user-agent", "OverrideUA/1.0"))
+        .and(header("x-curio-test", "yes"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    // The fixture host is 127.0.0.1; override on that suffix so it matches.
+    let mut config = fast_config();
+    config.trusted_addrs.insert(server.address().ip());
+    config.host_overrides = vec![HostOverride {
+        host_suffix: "127.0.0.1".to_owned(),
+        user_agent: Some("OverrideUA/1.0".to_owned()),
+        extra_headers: vec![("x-curio-test".to_owned(), "yes".to_owned())],
+        politeness_delay: Some(Duration::ZERO),
+    }];
+    let client = PolicedClient::new(config);
+    let response = client
+        .fetch(&FetchRequest::new(format!("{}/feed.xml", server.uri())))
+        .await
+        .unwrap();
+    assert!(
+        response.is_success(),
+        "override UA + extra header must ride a matching-host request"
+    );
+}
+
+#[tokio::test]
+async fn host_override_does_not_leak_to_other_hosts() {
+    // An override scoped to reddit.com must not touch a 127.0.0.1 request:
+    // the honest default UA still rides. The mock only answers the honest UA,
+    // so a leaked override UA would 404 the request and fail this test.
+    let server = MockServer::start().await;
+    let honest = FetchConfig::default().user_agent;
+    Mock::given(method("GET"))
+        .and(header("user-agent", honest.as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    let mut config = fast_config();
+    config.trusted_addrs.insert(server.address().ip());
+    config.host_overrides = vec![HostOverride {
+        host_suffix: "reddit.com".to_owned(),
+        user_agent: Some("ShouldNotAppear/9".to_owned()),
+        extra_headers: vec![("x-should-not-appear".to_owned(), "1".to_owned())],
+        politeness_delay: None,
+    }];
+    let client = PolicedClient::new(config);
+    let response = client
+        .fetch(&FetchRequest::new(format!("{}/feed.xml", server.uri())))
+        .await
+        .unwrap();
+    assert!(
+        response.is_success(),
+        "reddit.com override must not leak onto a 127.0.0.1 request"
+    );
 }
 
 #[tokio::test]

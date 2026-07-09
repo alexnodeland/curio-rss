@@ -26,6 +26,7 @@ onMount(() => {
         uiStore.initLayout();
         uiStore.initTypography();
         uiStore.initReading();
+        uiStore.initRefresh();
         feedsStore.initSidebarState();
 
         // Event-driven invalidation: the query cache and the refresh

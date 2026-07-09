@@ -156,6 +156,11 @@ export const es: Partial<Record<MessageKey, string>> = {
     'settings.refreshInterval': 'Intervalo de actualización',
     'settings.refreshInterval.hint':
         'Con qué frecuencia Curio busca artículos nuevos en tus fuentes.',
+    'settings.refreshInterval.off': 'Desactivado',
+    'settings.refreshInterval.m15': 'Cada 15 minutos',
+    'settings.refreshInterval.m30': 'Cada 30 minutos',
+    'settings.refreshInterval.h1': 'Cada hora',
+    'settings.refreshInterval.h3': 'Cada 3 horas',
     'settings.refreshOnLaunch': 'Actualizar al iniciar',
     'settings.refreshOnLaunch.hint': 'Busca en todas las fuentes una vez cuando se abre Curio.',
     'settings.comingSoon': 'Disponible en una próxima actualización.',

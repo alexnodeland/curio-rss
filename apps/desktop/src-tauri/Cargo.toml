@@ -45,6 +45,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 thiserror = { workspace = true }
+# Only `time` — the background refresh scheduler's timers; the runtime is
+# Tauri's (`tauri::async_runtime`). `macros`/`rt` stay dev-only (tokio::test).
+tokio = { workspace = true, features = ["time"] }
 tracing = { workspace = true }
 # Panic hook + rotating platform-dir logs feeding the diagnostics bundle.
 tracing-appender = { workspace = true }

@@ -100,6 +100,7 @@ export const commands = {
 	 *  Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
 	 *  (core's own `refresh_all` is sequential and silent — the head loops
 	 *  `refresh_feed` so the UI can watch; orchestration, not business logic).
+	 *  A manual refresh resets the background scheduler's interval clock.
 	 */
 	refreshAll: () => typedError<RefreshOutcomeDto[], CommandError>(__TAURI_INVOKE("refresh_all")),
 	/**

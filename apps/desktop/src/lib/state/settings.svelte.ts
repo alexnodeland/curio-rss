@@ -31,6 +31,12 @@ export const SETTING_KEYS = {
     pendingFolders: 'ui.sidebar.pending-folders',
     refreshIntervalMinutes: 'ui.refresh.interval-minutes',
     refreshOnLaunch: 'ui.refresh.on-launch',
+    notifyEnabled: 'ui.notify.enabled',
+    notifyNewArticles: 'ui.notify.new-articles',
+    notifyErrors: 'ui.notify.errors',
+    notifyFeedDead: 'ui.notify.feed-dead',
+    notifyQuietStart: 'ui.notify.quiet-start',
+    notifyQuietEnd: 'ui.notify.quiet-end',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

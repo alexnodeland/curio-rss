@@ -236,6 +236,17 @@ export const commands = {
 	setSetting: (key: string, value: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_setting", { key, value })),
 	/**  Version / profile / schema facts for the about box and doctor panel. */
 	getAppInfo: () => typedError<AppInfoDto, CommandError>(__TAURI_INVOKE("get_app_info")),
+	/**
+	 *  Requests OS notification permission (the OS shows its prompt on first ask)
+	 *  and returns whether it is granted. The Settings notification toggle calls
+	 *  this when the user turns notifications on, so the prompt lands at that moment
+	 *  rather than at some later background refresh.
+	 * 
+	 *  # Errors
+	 * 
+	 *  Returns an internal error if the permission request itself fails.
+	 */
+	requestNotificationPermission: () => typedError<boolean, CommandError>(__TAURI_INVOKE("request_notification_permission")),
 	/**  `PRAGMA integrity_check` — `Ok(())` or an internal error with detail. */
 	integrityCheck: () => typedError<null, CommandError>(__TAURI_INVOKE("integrity_check")),
 	/**  FTS index ↔ content-table consistency check. */

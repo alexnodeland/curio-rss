@@ -46,6 +46,11 @@ const TABS = [
     },
     { id: 'reading', panelId: 'settings-panel-reading', label: 'settings.section.reading' },
     { id: 'media', panelId: 'settings-panel-media', label: 'settings.section.mediaPrivacy' },
+    {
+        id: 'notifications',
+        panelId: 'settings-panel-notifications',
+        label: 'settings.section.notifications',
+    },
     { id: 'data', panelId: 'settings-panel-data', label: 'settings.section.data' },
     { id: 'advanced', panelId: 'settings-panel-advanced', label: 'settings.section.advanced' },
 ] as const;
@@ -292,10 +297,96 @@ function onKeydown(event: KeyboardEvent): void {
 
             <div
                 role="tabpanel"
+                id="settings-panel-notifications"
+                aria-labelledby="settings-tab-notifications"
+                tabindex="0"
+                hidden={activeIndex !== 4}
+            >
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.notifyEnabled}
+                        onchange={async (event) => {
+                            const on = event.currentTarget.checked;
+                            const granted = await uiStore.setNotifyEnabled(on);
+                            if (on && !granted) {
+                                uiStore.showToast(t('settings.notify.blocked'), 'warning');
+                            }
+                        }}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.notify.enabled')}</span>
+                        <span class="toggle-hint">{t('settings.notify.enabled.hint')}</span>
+                    </span>
+                </label>
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.notifyNewArticles}
+                        disabled={!uiStore.notifyEnabled}
+                        onchange={(event) =>
+                            void uiStore.setNotifyNewArticles(event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.notify.newArticles')}</span>
+                    </span>
+                </label>
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.notifyErrors}
+                        disabled={!uiStore.notifyEnabled}
+                        onchange={(event) => void uiStore.setNotifyErrors(event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.notify.errors')}</span>
+                    </span>
+                </label>
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.notifyFeedDead}
+                        disabled={!uiStore.notifyEnabled}
+                        onchange={(event) =>
+                            void uiStore.setNotifyFeedDead(event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.notify.feedDead')}</span>
+                    </span>
+                </label>
+                <div class="field-block">
+                    <label class="field">
+                        <span class="field-label">{t('settings.notify.quietStart')}</span>
+                        <input
+                            type="time"
+                            class="field-select"
+                            value={uiStore.notifyQuietStart}
+                            disabled={!uiStore.notifyEnabled}
+                            onchange={(event) =>
+                                void uiStore.setNotifyQuietStart(event.currentTarget.value)}
+                        />
+                    </label>
+                    <label class="field">
+                        <span class="field-label">{t('settings.notify.quietEnd')}</span>
+                        <input
+                            type="time"
+                            class="field-select"
+                            value={uiStore.notifyQuietEnd}
+                            disabled={!uiStore.notifyEnabled}
+                            onchange={(event) =>
+                                void uiStore.setNotifyQuietEnd(event.currentTarget.value)}
+                        />
+                    </label>
+                    <span class="toggle-hint">{t('settings.notify.quietHours.hint')}</span>
+                </div>
+            </div>
+
+            <div
+                role="tabpanel"
                 id="settings-panel-data"
                 aria-labelledby="settings-tab-data"
                 tabindex="0"
-                hidden={activeIndex !== 4}
+                hidden={activeIndex !== 5}
             >
                 <DestinationsManager />
                 <OpmlPanel />
@@ -306,7 +397,7 @@ function onKeydown(event: KeyboardEvent): void {
                 id="settings-panel-advanced"
                 aria-labelledby="settings-tab-advanced"
                 tabindex="0"
-                hidden={activeIndex !== 5}
+                hidden={activeIndex !== 6}
             >
                 <DoctorPanel />
             </div>

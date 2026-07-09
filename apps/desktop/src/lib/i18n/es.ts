@@ -166,6 +166,18 @@ export const es: Partial<Record<MessageKey, string>> = {
     'settings.tablist.label': 'Secciones de ajustes',
     'settings.section.general': 'General',
     'settings.section.mediaPrivacy': 'Multimedia y privacidad',
+    'settings.section.notifications': 'Notificaciones',
+    'settings.notify.enabled': 'Activar notificaciones',
+    'settings.notify.enabled.hint':
+        'Muestra una notificación de escritorio cuando una actualización en segundo plano encuentra artículos nuevos o un feed tiene problemas. Solo cuando Curio está en segundo plano.',
+    'settings.notify.newArticles': 'Artículos nuevos',
+    'settings.notify.errors': 'Errores de actualización',
+    'settings.notify.feedDead': 'Un feed dejó de funcionar',
+    'settings.notify.quietStart': 'Horas de silencio desde',
+    'settings.notify.quietEnd': 'Horas de silencio hasta',
+    'settings.notify.quietHours.hint':
+        'Sin notificaciones durante este intervalo. Déjalo vacío para desactivarlo.',
+    'settings.notify.blocked': 'Las notificaciones están bloqueadas en Ajustes del sistema.',
     'settings.section.advanced': 'Avanzado',
     'settings.refreshInterval': 'Intervalo de actualización',
     'settings.refreshInterval.hint':

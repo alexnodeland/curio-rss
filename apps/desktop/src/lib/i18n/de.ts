@@ -166,6 +166,18 @@ export const de: Partial<Record<MessageKey, string>> = {
     'settings.tablist.label': 'Einstellungsbereiche',
     'settings.section.general': 'Allgemein',
     'settings.section.mediaPrivacy': 'Medien & Datenschutz',
+    'settings.section.notifications': 'Benachrichtigungen',
+    'settings.notify.enabled': 'Benachrichtigungen aktivieren',
+    'settings.notify.enabled.hint':
+        'Zeigt eine Desktop-Benachrichtigung, wenn eine Hintergrund-Aktualisierung neue Artikel findet oder ein Feed Probleme hat. Nur wenn Curio im Hintergrund ist.',
+    'settings.notify.newArticles': 'Neue Artikel',
+    'settings.notify.errors': 'Aktualisierungsfehler',
+    'settings.notify.feedDead': 'Ein Feed ist gestorben',
+    'settings.notify.quietStart': 'Ruhezeiten von',
+    'settings.notify.quietEnd': 'Ruhezeiten bis',
+    'settings.notify.quietHours.hint':
+        'Keine Benachrichtigungen in diesem Zeitraum. Leer lassen zum Deaktivieren.',
+    'settings.notify.blocked': 'Benachrichtigungen sind in den Systemeinstellungen blockiert.',
     'settings.section.advanced': 'Erweitert',
     'settings.refreshInterval': 'Aktualisierungsintervall',
     'settings.refreshInterval.hint': 'Wie oft Curio deine Feeds auf neue Artikel prüft.',

@@ -119,6 +119,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     getSetting: { args: ['ui.theme'], response: 'dark' },
     setSetting: { args: ['ui.theme', 'dark'], response: null },
     getAppInfo: { args: [], response: appInfoFixture() },
+    requestNotificationPermission: { args: [], response: true },
     integrityCheck: { args: [], response: null },
     ftsIntegrityCheck: { args: [], response: null },
     vacuumDb: { args: [], response: null },

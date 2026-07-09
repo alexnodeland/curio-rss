@@ -311,6 +311,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'editFeed.title': 'Modifica feed',
     'editFeed.section.details': 'Dettagli',
     'editFeed.section.health': 'Salute',
+    'editFeed.notify': 'Notificami su questo feed',
     'editFeed.url.label': 'URL del feed',
     'editFeed.url.copy': 'Copia',
     'editFeed.url.copied': 'URL del feed copiato',

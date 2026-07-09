@@ -300,6 +300,16 @@ function whenDate(iso: string): string {
                 >
             </div>
 
+            <label class="notify-mute">
+                <input
+                    type="checkbox"
+                    checked={!feedsStore.isNotifyMuted(feedId)}
+                    onchange={(event) =>
+                        feedsStore.setNotifyMuted(feedId, !event.currentTarget.checked)}
+                />
+                <span>{t('editFeed.notify')}</span>
+            </label>
+
             <div class="recent" aria-label={t('feedHealth.recent')}>
                 <h4>{t('feedHealth.recent')}</h4>
                 {#if loadingFetches}
@@ -518,6 +528,16 @@ function whenDate(iso: string): string {
     .controls {
         display: flex;
         gap: var(--space-2);
+    }
+
+    .notify-mute {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+        font-size: var(--text-md);
+        color: var(--fg-muted);
+        cursor: pointer;
     }
 
     .controls button {

@@ -85,6 +85,27 @@ describe('feeds store', () => {
         expect(store.lastErrored(99)).toBe(false); // no outcome yet
     });
 
+    it('mutes and unmutes a feed for notifications, persisting the id set', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const store = new FeedsStore();
+
+        expect(store.isNotifyMuted(5)).toBe(false);
+        store.setNotifyMuted(5, true);
+        expect(store.isNotifyMuted(5)).toBe(true);
+        await flushIpc();
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.notify.muted-feeds', value: '["5"]' },
+        ]);
+
+        store.setNotifyMuted(5, false);
+        expect(store.isNotifyMuted(5)).toBe(false);
+        await flushIpc();
+        expect(harness.callsFor('set_setting')[1]).toEqual({
+            key: 'ui.notify.muted-feeds',
+            value: '[]',
+        });
+    });
+
     it('clears the refreshing flag when refresh_all itself errors', async () => {
         harness = installIpcHarness({
             refresh_all: () =>

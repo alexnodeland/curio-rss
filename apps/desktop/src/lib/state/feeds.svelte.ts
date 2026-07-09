@@ -66,6 +66,13 @@ export class FeedsStore {
      */
     #pendingFolders = new SvelteSet<string>();
 
+    /**
+     * Feed ids (as strings) the user has muted for notifications. The Rust
+     * scheduler reads the same `ui.notify.muted-feeds` JSON array to skip these
+     * feeds when deciding what to notify. Persisted.
+     */
+    #mutedNotifyFeeds = new SvelteSet<string>();
+
     get #feedsQuery(): Query<FeedDto[]> {
         return ensureQuery(queryKeys.feeds, commands.listFeeds);
     }
@@ -162,6 +169,24 @@ export class FeedsStore {
         return [...this.#pendingFolders];
     }
 
+    /** Whether notifications are muted for this feed. */
+    isNotifyMuted(feedId: number): boolean {
+        return this.#mutedNotifyFeeds.has(String(feedId));
+    }
+
+    /** Mutes/unmutes a feed's notifications, persisting the set. */
+    setNotifyMuted(feedId: number, muted: boolean): void {
+        if (muted) {
+            this.#mutedNotifyFeeds.add(String(feedId));
+        } else {
+            this.#mutedNotifyFeeds.delete(String(feedId));
+        }
+        void settingsStore.set(
+            SETTING_KEYS.notifyMutedFeeds,
+            JSON.stringify([...this.#mutedNotifyFeeds]),
+        );
+    }
+
     /**
      * Adopts persisted collapse + pending-folder state at startup. Mutates the
      * existing sets in place (never reassigns them) so derivations that already
@@ -175,6 +200,10 @@ export class FeedsStore {
         reloadSet(
             this.#pendingFolders,
             readStringArray(settingsStore.get(SETTING_KEYS.pendingFolders)),
+        );
+        reloadSet(
+            this.#mutedNotifyFeeds,
+            readStringArray(settingsStore.get(SETTING_KEYS.notifyMutedFeeds)),
         );
     }
 
@@ -287,6 +316,7 @@ export class FeedsStore {
     reset(): void {
         this.#collapsedFolders.clear();
         this.#pendingFolders.clear();
+        this.#mutedNotifyFeeds.clear();
         this.refreshing = false;
         this.refreshOutcomes = [];
     }

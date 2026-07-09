@@ -314,6 +314,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'editFeed.title': 'Modifier le flux',
     'editFeed.section.details': 'Détails',
     'editFeed.section.health': 'État',
+    'editFeed.notify': 'Me notifier pour ce flux',
     'editFeed.url.label': 'URL du flux',
     'editFeed.url.copy': 'Copier',
     'editFeed.url.copied': 'URL du flux copiée',

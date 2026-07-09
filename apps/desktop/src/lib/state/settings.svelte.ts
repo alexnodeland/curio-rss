@@ -37,6 +37,7 @@ export const SETTING_KEYS = {
     notifyFeedDead: 'ui.notify.feed-dead',
     notifyQuietStart: 'ui.notify.quiet-start',
     notifyQuietEnd: 'ui.notify.quiet-end',
+    notifyMutedFeeds: 'ui.notify.muted-feeds',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

@@ -326,6 +326,7 @@ export const en = {
     'editFeed.title': 'Edit feed',
     'editFeed.section.details': 'Details',
     'editFeed.section.health': 'Health',
+    'editFeed.notify': 'Notify me about this feed',
     'editFeed.url.label': 'Feed URL',
     'editFeed.url.copy': 'Copy',
     'editFeed.url.copied': 'Feed URL copied',

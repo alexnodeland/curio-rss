@@ -383,6 +383,7 @@ async fn host_override_applies_ua_headers_by_suffix() {
         user_agent: Some("OverrideUA/1.0".to_owned()),
         extra_headers: vec![("x-curio-test".to_owned(), "yes".to_owned())],
         politeness_delay: Some(Duration::ZERO),
+        use_native_tls: false,
     }];
     let client = PolicedClient::new(config);
     let response = client
@@ -393,6 +394,34 @@ async fn host_override_applies_ua_headers_by_suffix() {
         response.is_success(),
         "override UA + extra header must ride a matching-host request"
     );
+}
+
+#[tokio::test]
+async fn host_override_native_tls_builds_and_fetches() {
+    // Exercises the `use_native_tls` build branch. The fixture speaks plain
+    // HTTP so no TLS handshake happens, but the native-TLS client must still
+    // build and complete the request (guards the reddit.com code path).
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    let mut config = fast_config();
+    config.trusted_addrs.insert(server.address().ip());
+    config.host_overrides = vec![HostOverride {
+        host_suffix: "127.0.0.1".to_owned(),
+        user_agent: None,
+        extra_headers: Vec::new(),
+        politeness_delay: Some(Duration::ZERO),
+        use_native_tls: true,
+    }];
+    let client = PolicedClient::new(config);
+    let response = client
+        .fetch(&FetchRequest::new(format!("{}/feed.xml", server.uri())))
+        .await
+        .unwrap();
+    assert!(response.is_success());
 }
 
 #[tokio::test]
@@ -415,6 +444,7 @@ async fn host_override_does_not_leak_to_other_hosts() {
         user_agent: Some("ShouldNotAppear/9".to_owned()),
         extra_headers: vec![("x-should-not-appear".to_owned(), "1".to_owned())],
         politeness_delay: None,
+        use_native_tls: false,
     }];
     let client = PolicedClient::new(config);
     let response = client

@@ -17,14 +17,14 @@ classes of request the app can make; there are no others:
    request carries a spec-correct `Accept` header (it just says "I want a
    feed").
 
-   **One disclosed exception — reddit.com.** Reddit's CDN blocks the honest
-   curio User-Agent outright, so requests to `reddit.com` (and its
-   subdomains) send a browser-class User-Agent and an `Accept-Language`
-   header, spaced by a 2-second politeness delay. This is the *only* host that
-   sees anything but the honest curio UA; no cookies, credentials, or
-   identifiers are sent, and no other host is affected. (Reddit additionally
-   fingerprints the TLS client, so even this may not always succeed — a
-   fuller fix is tracked separately.)
+   **One disclosed exception — reddit.com.** Reddit's CDN blocks curio at two
+   layers: the default (rustls) TLS fingerprint *and* the honest curio
+   User-Agent. So requests to `reddit.com` (and its subdomains) — and only
+   those — use the platform-native TLS stack and send a browser-class
+   User-Agent plus an `Accept-Language` header, spaced by a 2-second
+   politeness delay. This is the *only* host that sees anything but the honest
+   curio UA and the default TLS stack; no cookies, credentials, or identifiers
+   are ever sent, and no other host is affected.
 
 2. **Favicons.** *Add feed* fetches the page you typed to discover its feeds
    and reads its declared icon (or the site's own `/favicon.ico`) —

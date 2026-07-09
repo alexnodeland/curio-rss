@@ -1,5 +1,7 @@
-//! [`PolicedClient`] — the reqwest(rustls) client factory with the SSRF
-//! policy, manual redirect handling, size caps and politeness built in.
+//! [`PolicedClient`] — the reqwest client factory with the SSRF policy,
+//! manual redirect handling, size caps and politeness built in. rustls is the
+//! default TLS stack; a per-host override may opt into the platform-native
+//! stack (reddit.com, whose CDN fingerprint-blocks rustls).
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
@@ -23,12 +25,12 @@ pub const DEFAULT_MAX_REDIRECTS: u32 = 5;
 pub const DEFAULT_ACCEPT: &str =
     "application/rss+xml, application/atom+xml;q=0.9, text/xml;q=0.8, */*;q=0.5";
 
-/// The browser-class User-Agent sent to reddit.com. A live diagnosis with the
-/// real client is unambiguous: Reddit blocks the honest curio UA with a hard
-/// **403**, and only a browser UA gets past it (to a normal 429 rate-limit at
-/// worst, which the politeness delay + normal usage keep clear of). This is
-/// disclosed in PRIVACY.md — it is the only host that sees anything but the
-/// honest curio UA, and the alternative is no Reddit support at all.
+/// The browser-class User-Agent sent to reddit.com. Paired with the native
+/// TLS stack (see [`HostOverride::use_native_tls`]): a live diagnosis showed
+/// Reddit blocks curio at *both* the rustls TLS fingerprint (a hard 403) and
+/// the honest UA, and that native-TLS + this UA together get a clean 200.
+/// Disclosed in PRIVACY.md — reddit.com is the only host that sees anything
+/// but the honest curio UA.
 pub const REDDIT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
      AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -48,6 +50,12 @@ pub struct HostOverride {
     pub extra_headers: Vec<(String, String)>,
     /// Overrides the politeness delay for matching hosts, if set.
     pub politeness_delay: Option<Duration>,
+    /// Use the platform-native TLS stack (`SecureTransport` / `SChannel` /
+    /// `OpenSSL`) for matching hosts instead of the default rustls. Some CDNs
+    /// (reddit.com) fingerprint the rustls `ClientHello` and 403 it; the native
+    /// stack presents a browser-like fingerprint they accept. Off by default —
+    /// rustls stays the deliberate choice for every other host.
+    pub use_native_tls: bool,
 }
 
 /// Configuration of a [`PolicedClient`].
@@ -85,16 +93,20 @@ impl Default for FetchConfig {
                 env!("CARGO_PKG_VERSION")
             ),
             accept: DEFAULT_ACCEPT.to_owned(),
-            // reddit.com blocks the honest curio UA outright (403), so it —
-            // and only it — gets a browser-class UA (see REDDIT_USER_AGENT)
-            // plus a browser-ish Accept-Language and a longer 2s politeness
-            // delay to stay clear of the unauthenticated rate limit. Disclosed
-            // in PRIVACY.md; every other host still sees the honest curio UA.
+            // reddit.com blocks curio at two layers: the rustls TLS
+            // fingerprint (a hard 403) and the honest curio UA. So it — and
+            // only it — gets the platform-native TLS stack (whose ClientHello
+            // Reddit accepts, verified live: native-TLS + browser UA -> 200)
+            // plus a browser-class UA, a browser-ish Accept-Language, and a 2s
+            // politeness delay to stay clear of the unauthenticated rate limit.
+            // Disclosed in PRIVACY.md; every other host keeps rustls + the
+            // honest curio UA.
             host_overrides: vec![HostOverride {
                 host_suffix: "reddit.com".to_owned(),
                 user_agent: Some(REDDIT_USER_AGENT.to_owned()),
                 extra_headers: vec![("accept-language".to_owned(), "en-US,en;q=0.9".to_owned())],
                 politeness_delay: Some(Duration::from_secs(2)),
+                use_native_tls: true,
             }],
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
@@ -177,7 +189,8 @@ impl PolicedClient {
             let user_agent = host_override
                 .and_then(|entry| entry.user_agent.as_deref())
                 .unwrap_or(self.config.user_agent.as_str());
-            let client = self.build_hop_client(&url, pinned, user_agent)?;
+            let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
+            let client = self.build_hop_client(&url, pinned, user_agent, native_tls)?;
             let mut req = client
                 .get(url.clone())
                 .header(ACCEPT, self.config.accept.as_str());
@@ -309,8 +322,17 @@ impl PolicedClient {
         url: &Url,
         pinned: Option<SocketAddr>,
         user_agent: &str,
+        native_tls: bool,
     ) -> Result<reqwest::Client, FetchError> {
-        let mut builder = reqwest::Client::builder()
+        // rustls is the deliberate default for every host; a per-host override
+        // (reddit.com) opts into the platform-native stack to dodge a
+        // ClientHello-fingerprint block. Both backends are compiled in.
+        let tls = if native_tls {
+            reqwest::Client::builder().use_native_tls()
+        } else {
+            reqwest::Client::builder().use_rustls_tls()
+        };
+        let mut builder = tls
             .user_agent(user_agent)
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(self.config.connect_timeout)
@@ -485,6 +507,10 @@ mod tests {
         assert_eq!(reddit.host_suffix, "reddit.com");
         assert_eq!(reddit.politeness_delay, Some(Duration::from_secs(2)));
         assert_eq!(reddit.user_agent.as_deref(), Some(REDDIT_USER_AGENT));
+        assert!(
+            reddit.use_native_tls,
+            "reddit.com must use the native TLS stack"
+        );
     }
 
     #[test]

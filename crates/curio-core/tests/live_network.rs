@@ -39,30 +39,28 @@ async fn fetch_and_parse(url: &str) -> (u16, usize) {
 #[tokio::test]
 #[ignore = "hits the real network; run via `just test-live`"]
 async fn reddit_rss_fetches_with_the_reddit_override() {
-    // Reddit is the hard case. A live diagnosis with the real client showed
-    // Reddit's CDN blocks curio at the **TLS-fingerprint** layer (rustls),
-    // not just by User-Agent: the honest UA draws a 403 and even a browser UA
-    // draws a 403/429, while curl (OpenSSL) on the same UA gets 200. The
-    // browser-UA + Accept-Language + 2s-politeness override (see FetchConfig
-    // default) is the best-effort mitigation and readies us for a real TLS
-    // story; a guaranteed fix needs the Reddit JSON API or a TLS-impersonating
-    // client, both out of this round's scope (tracked as NEXT).
+    // Reddit blocks curio at two layers: the rustls TLS fingerprint (a hard
+    // 403) and the honest curio UA. The default reddit.com override fixes both
+    // — it uses the platform-native TLS stack plus a browser UA (verified
+    // live: native-TLS + browser UA -> 200). The only residual failure is a
+    // 429 rate-limit under heavy repeated fetching, which normal usage + the
+    // 2s politeness delay keep clear of.
     //
-    // So this test PROVES the path reaches Reddit and handles its response —
-    // it does not force a 200 the current stack cannot guarantee. When Reddit
-    // does answer 200, the body must parse into entries.
+    // So a 403 here is a regression (the fix broke); 429 is an acceptable
+    // rate-limit; 200 must parse into entries.
     let (status, entries) = fetch_and_parse("https://www.reddit.com/r/rust/.rss").await;
+    assert_ne!(
+        status, 403,
+        "the native-TLS + browser-UA override must defeat Reddit's 403"
+    );
     assert!(
-        matches!(status, 200 | 403 | 429),
-        "expected a real HTTP response from Reddit, got {status}"
+        matches!(status, 200 | 429),
+        "expected 200 (or a 429 rate-limit) from Reddit, got {status}"
     );
     if status == 200 {
         assert!(entries > 0, "a 200 from Reddit must parse into >=1 entry");
     } else {
-        eprintln!(
-            "NOTE: Reddit returned {status} — its CDN is TLS-fingerprint \
-             blocking the rustls client (known limitation; see the test doc)."
-        );
+        eprintln!("NOTE: Reddit returned 429 (rate-limited) — retry with more spacing.");
     }
 }
 

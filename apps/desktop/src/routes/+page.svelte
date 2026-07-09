@@ -33,6 +33,39 @@ const matcher = createMatcher();
 // modal's focus trap has nothing to leak to.
 const backgroundInert = $derived(uiStore.activeModal !== null);
 
+// A modal owns the keyboard; Escape (and `?` over help) dismisses it. Returns
+// true when the event belonged to the modal layer (handled or swallowed).
+function handleModalKey(event: KeyboardEvent): boolean {
+    if (uiStore.activeModal === null) {
+        return false;
+    }
+    const dismissesHelp = uiStore.activeModal === 'help' && event.key === '?';
+    if (event.key === 'Escape' || dismissesHelp) {
+        event.preventDefault();
+        uiStore.closeModal();
+    }
+    matcher.reset();
+    return true;
+}
+
+// Menu + modal Escape are handled earlier; here Escape steps back through the
+// shell so it is never a no-op — clear an active search, else deselect the open
+// article. Returns true when the event was an Escape (handled).
+function handleEscapeStepback(event: KeyboardEvent): boolean {
+    if (event.key !== 'Escape') {
+        return false;
+    }
+    if (searchStore.active) {
+        event.preventDefault();
+        searchStore.clear();
+    } else if (selectionStore.selectedArticleId !== null) {
+        event.preventDefault();
+        selectionStore.selectedArticleId = null;
+    }
+    matcher.reset();
+    return true;
+}
+
 function onKeydown(event: KeyboardEvent): void {
     // An open menu owns the keyboard entirely (its own level handles Escape,
     // arrows, activation); never let app shortcuts fire underneath it.
@@ -42,14 +75,7 @@ function onKeydown(event: KeyboardEvent): void {
     if (shouldIgnoreKeyEvent(event)) {
         return;
     }
-    if (uiStore.activeModal !== null) {
-        // A modal owns the keyboard; Escape (and `?` for help) dismisses.
-        const dismissesHelp = uiStore.activeModal === 'help' && event.key === '?';
-        if (event.key === 'Escape' || dismissesHelp) {
-            event.preventDefault();
-            uiStore.closeModal();
-        }
-        matcher.reset();
+    if (handleModalKey(event)) {
         return;
     }
     if (selectionStore.focus === 'sidebar') {
@@ -59,18 +85,7 @@ function onKeydown(event: KeyboardEvent): void {
         matcher.reset();
         return;
     }
-    if (event.key === 'Escape') {
-        // Menu + modal Escape are handled above; here Escape steps back through
-        // the shell so it is never a no-op — clear an active search, else
-        // deselect the open article.
-        if (searchStore.active) {
-            event.preventDefault();
-            searchStore.clear();
-        } else if (selectionStore.selectedArticleId !== null) {
-            event.preventDefault();
-            selectionStore.selectedArticleId = null;
-        }
-        matcher.reset();
+    if (handleEscapeStepback(event)) {
         return;
     }
     const result = matcher.handle(event.key);

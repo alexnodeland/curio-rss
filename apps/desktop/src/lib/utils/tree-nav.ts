@@ -28,6 +28,37 @@ function parentIndex(rows: readonly VisibleRow[], index: number): number {
     return -1;
 }
 
+/** Right: expand a collapsed folder, else step into its first child (if any). */
+function expandOrDescend(
+    rows: readonly VisibleRow[],
+    activeIndex: number,
+    current: VisibleRow,
+): TreeKeyResult {
+    if (current.kind !== 'folder') {
+        return NONE;
+    }
+    if (!current.expanded) {
+        return { type: 'toggle', path: current.path };
+    }
+    const child = rows[activeIndex + 1];
+    return child !== undefined && child.depth > current.depth
+        ? { type: 'move', index: activeIndex + 1 }
+        : NONE;
+}
+
+/** Left: collapse an expanded folder, else step out to the parent row (if any). */
+function collapseOrAscend(
+    rows: readonly VisibleRow[],
+    activeIndex: number,
+    current: VisibleRow,
+): TreeKeyResult {
+    if (current.kind === 'folder' && current.expanded) {
+        return { type: 'toggle', path: current.path };
+    }
+    const parent = parentIndex(rows, activeIndex);
+    return parent >= 0 ? { type: 'move', index: parent } : NONE;
+}
+
 /**
  * Resolves a keydown against the visible tree. `activeIndex < 0` means nothing
  * is active yet, so any navigation key lands on the first row.
@@ -60,25 +91,10 @@ export function treeKeyAction(
         case 'Enter':
         case ' ':
             return { type: 'activate', index: activeIndex };
-        case 'ArrowRight': {
-            if (current.kind !== 'folder') {
-                return NONE;
-            }
-            if (!current.expanded) {
-                return { type: 'toggle', path: current.path };
-            }
-            const child = rows[activeIndex + 1];
-            return child !== undefined && child.depth > current.depth
-                ? { type: 'move', index: activeIndex + 1 }
-                : NONE;
-        }
-        case 'ArrowLeft': {
-            if (current.kind === 'folder' && current.expanded) {
-                return { type: 'toggle', path: current.path };
-            }
-            const parent = parentIndex(rows, activeIndex);
-            return parent >= 0 ? { type: 'move', index: parent } : NONE;
-        }
+        case 'ArrowRight':
+            return expandOrDescend(rows, activeIndex, current);
+        case 'ArrowLeft':
+            return collapseOrAscend(rows, activeIndex, current);
         default:
             return NONE;
     }

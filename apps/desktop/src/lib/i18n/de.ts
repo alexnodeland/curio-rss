@@ -117,6 +117,27 @@ export const de: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemoteHint':
         'Standardmäßig aus — beim Aktivieren erfährt Google, welche Seiten du in der Vorschau ansiehst.',
     'settings.title': 'Einstellungen',
+    'settings.tablist.label': 'Einstellungsbereiche',
+    'settings.section.general': 'Allgemein',
+    'settings.section.mediaPrivacy': 'Medien & Datenschutz',
+    'settings.section.advanced': 'Erweitert',
+    'settings.refreshInterval': 'Aktualisierungsintervall',
+    'settings.refreshInterval.hint': 'Wie oft Curio deine Feeds auf neue Artikel prüft.',
+    'settings.refreshOnLaunch': 'Beim Start aktualisieren',
+    'settings.refreshOnLaunch.hint': 'Alle Feeds einmal beim Start von Curio prüfen.',
+    'settings.comingSoon': 'Kommt in einem zukünftigen Update.',
+    'settings.customThemes': 'Eigene Themes',
+    'settings.customThemes.hint':
+        'Das Bearbeiten eigener Themes kommt in einem zukünftigen Update.',
+    'settings.homeYoutube': 'YouTube-Startlayout',
+    'settings.homeYoutube.hint':
+        'YouTube-Feeds als Videoraster statt als kompakte Zeilen anzeigen.',
+    'settings.homeReddit': 'Reddit-Startlayout',
+    'settings.homeReddit.hint':
+        'Reddit-Feeds als Beitragsstrom statt als kompakte Zeilen anzeigen.',
+    'settings.allowRemoteFavicon': 'Entfernte Favicons zulassen',
+    'settings.allowRemoteFavicon.hint':
+        'Wenn eine Website kein Favicon angibt, auf Googles Favicon-Dienst zurückgreifen. Standardmäßig aus – es verrät Google, welche Seiten du ansiehst (siehe PRIVACY.md).',
     'settings.section.appearance': 'Darstellung',
     'settings.language': 'Sprache',
     'settings.language.hint':

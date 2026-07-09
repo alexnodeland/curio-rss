@@ -1,10 +1,13 @@
 <script lang="ts">
 /**
- * The settings modal: appearance (the 9-theme picker at last wired in),
- * reading typography, destinations management, OPML import/export, and the
- * database doctor — each a self-contained section over the generated
- * commands. Keyboard dismissal is the shell's; sections are landmark
- * regions for screen readers.
+ * The settings modal: a WAI-ARIA tablist (a left rail on wide viewports, a
+ * top row on narrow) over six panels — General, Appearance, Reading,
+ * Media & Privacy, Data, and Advanced. Each panel is a landmark region for
+ * screen readers; keyboard dismissal (Escape) stays the shell's. The active
+ * tab is remembered for the session (a module-scope value, not persisted).
+ * All six panels render at once and inactive ones carry `hidden`, so the
+ * panels that prime commands on mount (destinations, doctor) keep firing on
+ * open exactly as before the tabs.
  */
 import Modal from '$components/common/Modal.svelte';
 import ThemePicker from '$components/common/ThemePicker.svelte';
@@ -12,91 +15,341 @@ import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
+import { tooltip } from '$lib/actions/tooltip';
 import { LOCALES, type LocaleId, localeStore, t } from '$lib/i18n';
 import { uiStore } from '$lib/state/ui.svelte';
 
 let { onclose }: { onclose: () => void } = $props();
+
+const TABS = [
+    { id: 'general', panelId: 'settings-panel-general', label: 'settings.section.general' },
+    {
+        id: 'appearance',
+        panelId: 'settings-panel-appearance',
+        label: 'settings.section.appearance',
+    },
+    { id: 'reading', panelId: 'settings-panel-reading', label: 'settings.section.reading' },
+    { id: 'media', panelId: 'settings-panel-media', label: 'settings.section.mediaPrivacy' },
+    { id: 'data', panelId: 'settings-panel-data', label: 'settings.section.data' },
+    { id: 'advanced', panelId: 'settings-panel-advanced', label: 'settings.section.advanced' },
+] as const;
+
+// Remembered across opens within a session (not persisted): a plain module var.
+let lastOpenTab = 0;
+
+let activeIndex = $state(lastOpenTab);
+const tabEls: (HTMLButtonElement | undefined)[] = $state([]);
+
+// Focus follows the active tab — but only once focus is already inside the
+// tablist, so opening the modal doesn't yank focus off the dialog's trap.
+$effect(() => {
+    const active = tabEls[activeIndex];
+    if (active === undefined) return;
+    const focused = document.activeElement;
+    if (focused !== null && tabEls.includes(focused as HTMLButtonElement)) {
+        active.focus();
+    }
+});
+
+function select(index: number): void {
+    activeIndex = index;
+    lastOpenTab = index;
+}
+
+function move(delta: 1 | -1): void {
+    const n = TABS.length;
+    select((activeIndex + delta + n) % n);
+}
+
+function onKeydown(event: KeyboardEvent): void {
+    switch (event.key) {
+        case 'ArrowRight':
+        case 'ArrowDown':
+            event.preventDefault();
+            move(1);
+            break;
+        case 'ArrowLeft':
+        case 'ArrowUp':
+            event.preventDefault();
+            move(-1);
+            break;
+        case 'Home':
+            event.preventDefault();
+            select(0);
+            break;
+        case 'End':
+            event.preventDefault();
+            select(TABS.length - 1);
+            break;
+        default:
+            break;
+    }
+}
 </script>
 
 <Modal title={t('settings.title')} {onclose} size="large">
-    <section class="section" aria-labelledby="settings-appearance">
-        <h3 id="settings-appearance">{t('settings.section.appearance')}</h3>
-        <ThemePicker />
-        <label class="field">
-            <span class="field-label">{t('settings.language')}</span>
-            <select
-                class="field-select"
-                value={localeStore.active}
-                onchange={(event) =>
-                    void localeStore.set(event.currentTarget.value as LocaleId)}
+    <div class="settings-layout">
+        <div
+            class="tablist"
+            role="tablist"
+            aria-label={t('settings.tablist.label')}
+            aria-orientation="vertical"
+            tabindex="-1"
+            onkeydown={onKeydown}
+        >
+            {#each TABS as tab, index (tab.id)}
+                <button
+                    bind:this={tabEls[index]}
+                    type="button"
+                    role="tab"
+                    id={`settings-tab-${tab.id}`}
+                    aria-selected={index === activeIndex}
+                    aria-controls={tab.panelId}
+                    tabindex={index === activeIndex ? 0 : -1}
+                    onclick={() => select(index)}
+                >
+                    {t(tab.label)}
+                </button>
+            {/each}
+        </div>
+
+        <div class="panels">
+            <div
+                role="tabpanel"
+                id="settings-panel-general"
+                aria-labelledby="settings-tab-general"
+                tabindex="0"
+                hidden={activeIndex !== 0}
             >
-                {#each LOCALES as option (option.id)}
-                    <option value={option.id}>{option.name}</option>
-                {/each}
-            </select>
-        </label>
-    </section>
+                <label class="field">
+                    <span class="field-label">{t('settings.language')}</span>
+                    <select
+                        class="field-select"
+                        value={localeStore.active}
+                        onchange={(event) =>
+                            void localeStore.set(event.currentTarget.value as LocaleId)}
+                    >
+                        {#each LOCALES as option (option.id)}
+                            <option value={option.id}>{option.name}</option>
+                        {/each}
+                    </select>
+                </label>
 
-    <section class="section" aria-labelledby="settings-reading">
-        <h3 id="settings-reading">{t('settings.section.reading')}</h3>
-        <TypographyControls />
-        <label class="toggle">
-            <input
-                type="checkbox"
-                checked={uiStore.markOnScroll}
-                onchange={(event) => void uiStore.setMarkOnScroll(event.currentTarget.checked)}
-            />
-            <span class="toggle-text">
-                <span class="toggle-label">{t('settings.markOnScroll')}</span>
-                <span class="toggle-hint">{t('settings.markOnScroll.hint')}</span>
-            </span>
-        </label>
-    </section>
+                <div class="field-block is-disabled" use:tooltip={t('settings.comingSoon')}>
+                    <div class="field">
+                        <span class="field-label">{t('settings.refreshInterval')}</span>
+                        <select class="field-select" disabled aria-disabled="true">
+                            <option>—</option>
+                        </select>
+                    </div>
+                    <span class="toggle-hint">{t('settings.refreshInterval.hint')}</span>
+                </div>
 
-    <section class="section" aria-labelledby="settings-media">
-        <h3 id="settings-media">{t('settings.section.media')}</h3>
-        <label class="toggle">
-            <input
-                type="checkbox"
-                checked={uiStore.mediaPrefetch}
-                onchange={(event) => void uiStore.setMediaPrefetch(event.currentTarget.checked)}
-            />
-            <span class="toggle-text">
-                <span class="toggle-label">{t('settings.media.prefetch')}</span>
-                <span class="toggle-hint">{t('settings.media.prefetch.hint')}</span>
-            </span>
-        </label>
-    </section>
+                <div class="toggle is-disabled" use:tooltip={t('settings.comingSoon')}>
+                    <input type="checkbox" disabled aria-disabled="true" />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.refreshOnLaunch')}</span>
+                        <span class="toggle-hint">{t('settings.refreshOnLaunch.hint')}</span>
+                    </span>
+                </div>
+            </div>
 
-    <section class="section" aria-labelledby="settings-destinations">
-        <h3 id="settings-destinations">{t('settings.section.destinations')}</h3>
-        <DestinationsManager />
-    </section>
+            <div
+                role="tabpanel"
+                id="settings-panel-appearance"
+                aria-labelledby="settings-tab-appearance"
+                tabindex="0"
+                hidden={activeIndex !== 1}
+            >
+                <ThemePicker />
+                <p class="placeholder">
+                    <strong>{t('settings.customThemes')}</strong> — {t('settings.customThemes.hint')}
+                </p>
+            </div>
 
-    <section class="section" aria-labelledby="settings-data">
-        <h3 id="settings-data">{t('settings.section.data')}</h3>
-        <OpmlPanel />
-    </section>
+            <div
+                role="tabpanel"
+                id="settings-panel-reading"
+                aria-labelledby="settings-tab-reading"
+                tabindex="0"
+                hidden={activeIndex !== 2}
+            >
+                <TypographyControls />
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.markOnScroll}
+                        onchange={(event) => void uiStore.setMarkOnScroll(event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.markOnScroll')}</span>
+                        <span class="toggle-hint">{t('settings.markOnScroll.hint')}</span>
+                    </span>
+                </label>
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.isHomeLayout('youtube')}
+                        onchange={(event) =>
+                            void uiStore.setHomeLayout('youtube', event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.homeYoutube')}</span>
+                        <span class="toggle-hint">{t('settings.homeYoutube.hint')}</span>
+                    </span>
+                </label>
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.isHomeLayout('reddit')}
+                        onchange={(event) =>
+                            void uiStore.setHomeLayout('reddit', event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.homeReddit')}</span>
+                        <span class="toggle-hint">{t('settings.homeReddit.hint')}</span>
+                    </span>
+                </label>
+            </div>
 
-    <section class="section" aria-labelledby="settings-diagnostics">
-        <h3 id="settings-diagnostics">{t('settings.section.diagnostics')}</h3>
-        <DoctorPanel />
-    </section>
+            <div
+                role="tabpanel"
+                id="settings-panel-media"
+                aria-labelledby="settings-tab-media"
+                tabindex="0"
+                hidden={activeIndex !== 3}
+            >
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.mediaPrefetch}
+                        onchange={(event) => void uiStore.setMediaPrefetch(event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.media.prefetch')}</span>
+                        <span class="toggle-hint">{t('settings.media.prefetch.hint')}</span>
+                    </span>
+                </label>
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.allowRemoteFavicon}
+                        onchange={(event) =>
+                            void uiStore.setAllowRemoteFavicon(event.currentTarget.checked)}
+                    />
+                    <span class="toggle-text">
+                        <span class="toggle-label">{t('settings.allowRemoteFavicon')}</span>
+                        <span class="toggle-hint">{t('settings.allowRemoteFavicon.hint')}</span>
+                    </span>
+                </label>
+            </div>
+
+            <div
+                role="tabpanel"
+                id="settings-panel-data"
+                aria-labelledby="settings-tab-data"
+                tabindex="0"
+                hidden={activeIndex !== 4}
+            >
+                <DestinationsManager />
+                <OpmlPanel />
+            </div>
+
+            <div
+                role="tabpanel"
+                id="settings-panel-advanced"
+                aria-labelledby="settings-tab-advanced"
+                tabindex="0"
+                hidden={activeIndex !== 5}
+            >
+                <DoctorPanel />
+            </div>
+        </div>
+    </div>
 </Modal>
 
 <style>
-    .section {
+    .settings-layout {
         display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-5);
     }
 
-    .section h3 {
-        font-size: 0.6875rem;
-        font-weight: 650;
-        letter-spacing: var(--tracking-caps);
-        text-transform: uppercase;
+    .tablist {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        flex: 0 0 auto;
+        min-width: 9rem;
+    }
+
+    .tablist button[role='tab'] {
+        text-align: left;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .tablist button[role='tab']:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .tablist button[role='tab'][aria-selected='true'] {
+        background: var(--selected);
+        color: var(--accent);
+        font-weight: 560;
+    }
+
+    .tablist button[role='tab']:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 40%);
+    }
+
+    .panels {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    [role='tabpanel'] {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+
+    /* The author `display: flex` above outranks the UA `[hidden]` rule, so the
+       hidden panels need an explicit, higher-specificity hide. */
+    [role='tabpanel'][hidden] {
+        display: none;
+    }
+
+    [role='tabpanel']:focus-visible {
+        outline: none;
+    }
+
+    .placeholder {
+        font-size: var(--text-xs);
         color: var(--fg-subtle);
+    }
+
+    @media (max-width: 600px) {
+        .settings-layout {
+            flex-direction: column;
+        }
+
+        .tablist {
+            flex-direction: row;
+            flex-wrap: wrap;
+        }
+    }
+
+    .field-block {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
     }
 
     .field {
@@ -149,5 +402,10 @@ let { onclose }: { onclose: () => void } = $props();
     .toggle-hint {
         font-size: var(--text-xs);
         color: var(--fg-subtle);
+    }
+
+    .is-disabled {
+        opacity: 0.5;
+        cursor: default;
     }
 </style>

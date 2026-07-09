@@ -118,6 +118,26 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemoteHint':
         'Domyślnie wyłączone — włączenie tej opcji informuje Google, które witryny przeglądasz.',
     'settings.title': 'Ustawienia',
+    'settings.tablist.label': 'Sekcje ustawień',
+    'settings.section.general': 'Ogólne',
+    'settings.section.mediaPrivacy': 'Multimedia i prywatność',
+    'settings.section.advanced': 'Zaawansowane',
+    'settings.refreshInterval': 'Częstotliwość odświeżania',
+    'settings.refreshInterval.hint': 'Jak często Curio sprawdza nowe artykuły w Twoich kanałach.',
+    'settings.refreshOnLaunch': 'Odświeżaj przy uruchomieniu',
+    'settings.refreshOnLaunch.hint': 'Sprawdź wszystkie kanały raz przy uruchomieniu Curio.',
+    'settings.comingSoon': 'Wkrótce w kolejnej aktualizacji.',
+    'settings.customThemes': 'Motywy niestandardowe',
+    'settings.customThemes.hint': 'Edycja własnych motywów pojawi się w kolejnej aktualizacji.',
+    'settings.homeYoutube': 'Układ główny YouTube',
+    'settings.homeYoutube.hint':
+        'Pokazuj kanały YouTube jako siatkę filmów zamiast kompaktowych wierszy.',
+    'settings.homeReddit': 'Układ główny Reddit',
+    'settings.homeReddit.hint':
+        'Pokazuj kanały Reddit jako strumień wpisów zamiast kompaktowych wierszy.',
+    'settings.allowRemoteFavicon': 'Zezwól na zdalne favicony',
+    'settings.allowRemoteFavicon.hint':
+        'Gdy witryna nie deklaruje favicony, użyj usługi favicon Google. Domyślnie wyłączone — ujawnia to Google, które witryny przeglądasz (zobacz PRIVACY.md).',
     'settings.section.appearance': 'Wygląd',
     'settings.language': 'Język',
     'settings.language.hint':

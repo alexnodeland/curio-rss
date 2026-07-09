@@ -117,6 +117,28 @@ export const es: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemoteHint':
         'Desactivado por defecto: activarlo le indica a Google qué sitios previsualizas.',
     'settings.title': 'Ajustes',
+    'settings.tablist.label': 'Secciones de ajustes',
+    'settings.section.general': 'General',
+    'settings.section.mediaPrivacy': 'Multimedia y privacidad',
+    'settings.section.advanced': 'Avanzado',
+    'settings.refreshInterval': 'Intervalo de actualización',
+    'settings.refreshInterval.hint':
+        'Con qué frecuencia Curio busca artículos nuevos en tus fuentes.',
+    'settings.refreshOnLaunch': 'Actualizar al iniciar',
+    'settings.refreshOnLaunch.hint': 'Busca en todas las fuentes una vez cuando se abre Curio.',
+    'settings.comingSoon': 'Disponible en una próxima actualización.',
+    'settings.customThemes': 'Temas personalizados',
+    'settings.customThemes.hint':
+        'La edición de temas propios llegará en una próxima actualización.',
+    'settings.homeYoutube': 'Diseño de inicio de YouTube',
+    'settings.homeYoutube.hint':
+        'Muestra las fuentes de YouTube como una cuadrícula de vídeos en lugar de filas compactas.',
+    'settings.homeReddit': 'Diseño de inicio de Reddit',
+    'settings.homeReddit.hint':
+        'Muestra las fuentes de Reddit como un muro de publicaciones en lugar de filas compactas.',
+    'settings.allowRemoteFavicon': 'Permitir favicons remotos',
+    'settings.allowRemoteFavicon.hint':
+        'Cuando un sitio no declara favicon, recurre al servicio de favicons de Google. Desactivado por defecto: revela a Google qué sitios previsualizas (consulta PRIVACY.md).',
     'settings.section.appearance': 'Apariencia',
     'settings.language': 'Idioma',
     'settings.language.hint':

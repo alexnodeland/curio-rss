@@ -55,16 +55,24 @@ async function add(): Promise<void> {
 }
 
 async function remove(name: string): Promise<void> {
-    const result = await destinationsStore.remove(name);
-    if (result.status === 'error') {
-        toastCommandError(result.error);
+    try {
+        const result = await destinationsStore.remove(name);
+        if (result.status === 'error') {
+            toastCommandError(result.error);
+        }
+    } catch {
+        uiStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
 async function makeDefault(name: string): Promise<void> {
-    const result = await destinationsStore.setSelected(name);
-    if (result.status === 'error') {
-        toastCommandError(result.error);
+    try {
+        const result = await destinationsStore.setSelected(name);
+        if (result.status === 'error') {
+            toastCommandError(result.error);
+        }
+    } catch {
+        uiStore.showToast(t('app.error.internal'), 'error');
     }
 }
 </script>

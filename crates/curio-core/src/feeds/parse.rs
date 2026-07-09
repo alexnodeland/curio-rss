@@ -114,10 +114,16 @@ fn normalize_entry(entry: Entry) -> ParsedEntry {
     let published = entry.published.map(Timestamp::new);
     let updated = entry.updated.map(Timestamp::new);
     let lead_image = feed_image(&entry.media, &entry.links);
+    // content → summary → media:description. YouTube (and other media feeds)
+    // carry the human text only in `media:description`, leaving content and
+    // summary empty, so without the last fallback the reader body is blank.
     let content_html = entry
         .content
         .and_then(|content| content.body)
-        .or(entry.summary.map(|summary| summary.content))
+        .filter(|body| !body.trim().is_empty())
+        .or_else(|| entry.summary.map(|summary| summary.content))
+        .filter(|body| !body.trim().is_empty())
+        .or_else(|| media_description_html(&entry.media))
         .unwrap_or_default();
     let dedupe_key = dedupe_key(guid.as_deref(), link.as_deref(), &title, published);
     ParsedEntry {
@@ -184,6 +190,33 @@ fn feed_image(media: &[MediaObject], links: &[Link]) -> Option<String> {
 /// image cache can fetch.
 fn is_http_url(uri: &str) -> bool {
     uri.starts_with("http://") || uri.starts_with("https://")
+}
+
+/// The first non-empty `media:description` across the entry's media objects,
+/// HTML-escaped and wrapped in a `<p>`. It's plain text (PCDATA), so it is
+/// escaped rather than trusted as markup — and it still passes the ingest
+/// sanitizer (D6) unchanged, since escaped text carries no live HTML.
+fn media_description_html(media: &[MediaObject]) -> Option<String> {
+    media
+        .iter()
+        .filter_map(|object| object.description.as_ref())
+        .map(|text| text.content.trim())
+        .find(|content| !content.is_empty())
+        .map(|content| format!("<p>{}</p>", escape_html_text(content)))
+}
+
+/// Escapes plain text for safe inclusion as HTML element content.
+fn escape_html_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// The entry/site link: prefer an explicit `alternate` (or rel-less)
@@ -263,6 +296,53 @@ mod tests {
         assert!(one.published.is_some());
         let two = &feed.entries[1];
         assert_eq!(two.content_html, "Only a summary here.");
+    }
+
+    #[test]
+    fn youtube_atom_falls_back_to_media_description() {
+        let feed = parse_feed(&fixture("youtube-atom.xml"), None).unwrap();
+        assert_eq!(feed.entries.len(), 2);
+
+        // Entry 1: no content/summary, so media:description fills the body —
+        // wrapped in <p>, HTML-escaped (the & and <tag> survive as entities).
+        let with_desc = &feed.entries[0];
+        assert!(
+            !with_desc.content_html.is_empty(),
+            "media:description must fill an otherwise-empty YouTube body"
+        );
+        assert!(with_desc.content_html.starts_with("<p>"));
+        assert!(
+            with_desc
+                .content_html
+                .contains("human-written video description")
+        );
+        assert!(
+            with_desc.content_html.contains("&amp; ampersand")
+                && with_desc.content_html.contains("&lt;tag-like&gt;"),
+            "plain-text description must be HTML-escaped, not trusted as markup"
+        );
+        // The lead image still comes from media:thumbnail.
+        assert_eq!(
+            with_desc.lead_image.as_deref(),
+            Some("https://i4.ytimg.com/vi/VIDEO0000001/hqdefault.jpg")
+        );
+
+        // Entry 2: no description anywhere → body stays empty (no phantom <p>).
+        let no_desc = &feed.entries[1];
+        assert_eq!(no_desc.content_html, "");
+    }
+
+    #[test]
+    fn media_description_survives_the_ingest_sanitizer() {
+        // The escaped fallback must pass ammonia unchanged — escaped entities
+        // are inert text, so the description text survives to the reader (D6).
+        let feed = parse_feed(&fixture("youtube-atom.xml"), None).unwrap();
+        let raw = &feed.entries[0].content_html;
+        let clean = crate::content::sanitize(raw, None);
+        assert!(
+            clean.contains("human-written video description"),
+            "the description text must survive sanitization"
+        );
     }
 
     #[test]

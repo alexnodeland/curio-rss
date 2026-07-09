@@ -113,6 +113,18 @@ export class FeedsStore {
     }
 
     /**
+     * Whether the most recent refresh of this feed errored — the signal behind
+     * the sidebar's warning dot. Drawn from the last sweep's outcomes (in
+     * memory, refreshed each sweep), so it clears as soon as a feed recovers and
+     * is empty until the first refresh of the session completes.
+     */
+    lastErrored(feedId: number): boolean {
+        return this.refreshOutcomes.some(
+            (outcome) => outcome.feed_id === feedId && outcome.status === 'error',
+        );
+    }
+
+    /**
      * The next feed (in sidebar order, wrapping) after `afterFeedId` that has
      * unread articles — the cross-feed hop for next-unread triage. Never
      * returns `afterFeedId` itself; `null` if no other feed has unread.

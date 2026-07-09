@@ -73,6 +73,18 @@ describe('feeds store', () => {
         unwire();
     });
 
+    it('lastErrored flags only feeds whose last refresh errored', () => {
+        harness = installIpcHarness({});
+        const store = new FeedsStore();
+        store.refreshOutcomes = [
+            refreshOutcomeFixture({ feed_id: 1, status: 'error' }),
+            refreshOutcomeFixture({ feed_id: 2, status: 'ok' }),
+        ];
+        expect(store.lastErrored(1)).toBe(true);
+        expect(store.lastErrored(2)).toBe(false);
+        expect(store.lastErrored(99)).toBe(false); // no outcome yet
+    });
+
     it('clears the refreshing flag when refresh_all itself errors', async () => {
         harness = installIpcHarness({
             refresh_all: () =>

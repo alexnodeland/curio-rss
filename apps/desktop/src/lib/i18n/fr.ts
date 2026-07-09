@@ -157,6 +157,11 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'settings.refreshInterval': 'Intervalle d’actualisation',
     'settings.refreshInterval.hint':
         'Fréquence à laquelle Curio vérifie les nouveaux articles de vos flux.',
+    'settings.refreshInterval.off': 'Désactivé',
+    'settings.refreshInterval.m15': 'Toutes les 15 minutes',
+    'settings.refreshInterval.m30': 'Toutes les 30 minutes',
+    'settings.refreshInterval.h1': 'Toutes les heures',
+    'settings.refreshInterval.h3': 'Toutes les 3 heures',
     'settings.refreshOnLaunch': 'Actualiser au démarrage',
     'settings.refreshOnLaunch.hint': 'Vérifier tous les flux une fois au démarrage de Curio.',
     'settings.comingSoon': 'Bientôt disponible dans une prochaine mise à jour.',

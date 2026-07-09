@@ -119,6 +119,53 @@ describe('ui store — chrome', () => {
     });
 });
 
+describe('ui store — background refresh', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        settingsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('defaults to a 30-minute interval and on-launch on', () => {
+        const ui = new UiStore();
+        expect(ui.refreshIntervalMinutes).toBe(30);
+        expect(ui.refreshOnLaunch).toBe(true);
+    });
+
+    it('initRefresh adopts persisted values (including 0 = off and on-launch off)', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => {
+                if (args.key === 'ui.refresh.interval-minutes') return '0';
+                if (args.key === 'ui.refresh.on-launch') return 'false';
+                return null;
+            },
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initRefresh();
+        expect(ui.refreshIntervalMinutes).toBe(0);
+        expect(ui.refreshOnLaunch).toBe(false);
+    });
+
+    it('the setters persist to the settings table', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new UiStore();
+
+        await ui.setRefreshIntervalMinutes(60);
+        await ui.setRefreshOnLaunch(false);
+
+        expect(ui.refreshIntervalMinutes).toBe(60);
+        expect(ui.refreshOnLaunch).toBe(false);
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.refresh.interval-minutes', value: '60' },
+            { key: 'ui.refresh.on-launch', value: 'false' },
+        ]);
+    });
+});
+
 describe('ui store — toasts', () => {
     beforeEach(() => {
         vi.useFakeTimers();

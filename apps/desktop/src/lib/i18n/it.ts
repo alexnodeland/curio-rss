@@ -154,6 +154,11 @@ export const it: Partial<Record<MessageKey, string>> = {
     'settings.refreshInterval': 'Intervallo di aggiornamento',
     'settings.refreshInterval.hint':
         'Con quale frequenza Curio controlla nuovi articoli nei tuoi feed.',
+    'settings.refreshInterval.off': 'Disattivato',
+    'settings.refreshInterval.m15': 'Ogni 15 minuti',
+    'settings.refreshInterval.m30': 'Ogni 30 minuti',
+    'settings.refreshInterval.h1': 'Ogni ora',
+    'settings.refreshInterval.h3': 'Ogni 3 ore',
     'settings.refreshOnLaunch': 'Aggiorna all’avvio',
     'settings.refreshOnLaunch.hint': 'Controlla tutti i feed una volta all’avvio di Curio.',
     'settings.comingSoon': 'Disponibile in un prossimo aggiornamento.',

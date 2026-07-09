@@ -21,6 +21,7 @@ pub mod image_cache;
 pub mod ipc_policy;
 pub mod logging;
 pub mod paths;
+pub mod refresh_scheduler;
 
 use std::sync::Arc;
 
@@ -139,7 +140,8 @@ pub fn run() {
             // Rotating logs + panic hook first, so anything below is captured.
             logging::init(&profile.join("logs"));
             let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
-            app.manage(Arc::new(core) as commands::SharedCore);
+            let core: commands::SharedCore = Arc::new(core);
+            app.manage(Arc::clone(&core));
             app.manage(ipc_policy::PathRegistry::new());
             app.manage(image_cache::ImageCache::new(
                 paths::image_cache_dir()?,
@@ -149,6 +151,12 @@ pub fn run() {
             app.manage(discovery::Discovery::new(PolicedClient::new(
                 FetchConfig::default(),
             )));
+
+            // Background refresh: keep the reader current without a click. The
+            // scheduler is shared so a manual `refresh_all` resets its timer.
+            let scheduler = Arc::new(refresh_scheduler::RefreshScheduler::new());
+            app.manage(Arc::clone(&scheduler));
+            refresh_scheduler::spawn(app.handle().clone(), core, scheduler);
             Ok(())
         });
 

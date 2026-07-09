@@ -12,6 +12,7 @@ use crate::discovery::{Discovery, DiscoveryDto};
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
+use crate::refresh_scheduler::RefreshScheduler;
 
 /// Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
 /// the page once through the policed client and scans it. Head-local
@@ -211,16 +212,30 @@ pub async fn refresh_feed(
 /// Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
 /// (core's own `refresh_all` is sequential and silent — the head loops
 /// `refresh_feed` so the UI can watch; orchestration, not business logic).
+/// A manual refresh resets the background scheduler's interval clock.
 #[tauri::command]
 #[specta::specta]
 pub async fn refresh_all(
     app: AppHandle,
     core: State<'_, SharedCore>,
+    scheduler: State<'_, Arc<RefreshScheduler>>,
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    let outcomes = refresh_all_impl(&core, |feed_id, outcome| {
+    let outcomes = refresh_all_and_emit(&app, &core).await?;
+    scheduler.mark_refreshed();
+    Ok(outcomes)
+}
+
+/// Refreshes every active feed and emits the progress/finished/data-changed
+/// events — the shared body of the manual `refresh_all` command and the
+/// background scheduler, so both drive the exact same UI updates.
+pub(crate) async fn refresh_all_and_emit(
+    app: &AppHandle,
+    core: &Arc<CoreHandle>,
+) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
+    let outcomes = refresh_all_impl(core, |feed_id, outcome| {
         emit_or_log(
-            &app,
+            app,
             &RefreshProgress {
                 feed_id,
                 outcome: outcome.clone(),
@@ -229,13 +244,13 @@ pub async fn refresh_all(
     })
     .await?;
     emit_or_log(
-        &app,
+        app,
         &RefreshFinished {
             outcomes: outcomes.clone(),
         },
     );
-    emit_or_log(&app, &FeedsChanged);
-    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    emit_or_log(app, &FeedsChanged);
+    emit_or_log(app, &ArticlesChanged { feed_id: None });
     Ok(outcomes)
 }
 

@@ -15,11 +15,19 @@ import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
-import { tooltip } from '$lib/actions/tooltip';
-import { LOCALES, type LocaleId, localeStore, t } from '$lib/i18n';
-import { uiStore } from '$lib/state/ui.svelte';
+import { LOCALES, type LocaleId, type MessageKey, localeStore, t } from '$lib/i18n';
+import { REFRESH_INTERVAL_OPTIONS, uiStore } from '$lib/state/ui.svelte';
 
 let { onclose }: { onclose: () => void } = $props();
+
+/** Human labels for each background-refresh cadence (minutes; 0 = off). */
+const INTERVAL_LABELS: Record<number, MessageKey> = {
+    0: 'settings.refreshInterval.off',
+    15: 'settings.refreshInterval.m15',
+    30: 'settings.refreshInterval.m30',
+    60: 'settings.refreshInterval.h1',
+    180: 'settings.refreshInterval.h3',
+};
 
 const TABS = [
     { id: 'general', panelId: 'settings-panel-general', label: 'settings.section.general' },
@@ -135,23 +143,37 @@ function onKeydown(event: KeyboardEvent): void {
                     </select>
                 </label>
 
-                <div class="field-block is-disabled" use:tooltip={t('settings.comingSoon')}>
-                    <div class="field">
+                <div class="field-block">
+                    <label class="field">
                         <span class="field-label">{t('settings.refreshInterval')}</span>
-                        <select class="field-select" disabled aria-disabled="true">
-                            <option>—</option>
+                        <select
+                            class="field-select"
+                            value={String(uiStore.refreshIntervalMinutes)}
+                            onchange={(event) =>
+                                void uiStore.setRefreshIntervalMinutes(
+                                    Number(event.currentTarget.value),
+                                )}
+                        >
+                            {#each REFRESH_INTERVAL_OPTIONS as minutes (minutes)}
+                                <option value={String(minutes)}>{t(INTERVAL_LABELS[minutes])}</option>
+                            {/each}
                         </select>
-                    </div>
+                    </label>
                     <span class="toggle-hint">{t('settings.refreshInterval.hint')}</span>
                 </div>
 
-                <div class="toggle is-disabled" use:tooltip={t('settings.comingSoon')}>
-                    <input type="checkbox" disabled aria-disabled="true" />
+                <label class="toggle">
+                    <input
+                        type="checkbox"
+                        checked={uiStore.refreshOnLaunch}
+                        onchange={(event) =>
+                            void uiStore.setRefreshOnLaunch(event.currentTarget.checked)}
+                    />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.refreshOnLaunch')}</span>
                         <span class="toggle-hint">{t('settings.refreshOnLaunch.hint')}</span>
                     </span>
-                </div>
+                </label>
             </div>
 
             <div
@@ -394,10 +416,5 @@ function onKeydown(event: KeyboardEvent): void {
     .toggle-hint {
         font-size: var(--text-xs);
         color: var(--fg-subtle);
-    }
-
-    .is-disabled {
-        opacity: 0.5;
-        cursor: default;
     }
 </style>

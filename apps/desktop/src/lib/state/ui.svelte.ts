@@ -78,6 +78,11 @@ export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'edi
 /** Which section the edit-feed modal opens focused on. */
 export type EditFeedSection = 'details' | 'health';
 
+/** Default background-refresh cadence (minutes) when the setting is unset. */
+export const REFRESH_INTERVAL_DEFAULT = 30;
+/** The cadences offered in Settings → General (minutes; `0` = off). */
+export const REFRESH_INTERVAL_OPTIONS: readonly number[] = [0, 15, 30, 60, 180];
+
 /** Reader body font — an id mapped to a concrete CSS font stack. */
 export type ReaderFontId = 'sans' | 'serif' | 'mono';
 
@@ -187,6 +192,15 @@ export class UiStore {
      * melts away as you skim past, the way a river reader expects.
      */
     markOnScroll: boolean = $state(false);
+
+    /**
+     * Background-refresh cadence in minutes (`0` = off); the Rust scheduler
+     * reads this from settings each tick. Default 30 — this state mirrors it
+     * for the Settings UI. See {@link setRefreshIntervalMinutes}.
+     */
+    refreshIntervalMinutes: number = $state(REFRESH_INTERVAL_DEFAULT);
+    /** Whether to refresh once shortly after launch (default on). */
+    refreshOnLaunch: boolean = $state(true);
 
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
@@ -336,6 +350,30 @@ export class UiStore {
     async setMarkOnScroll(value: boolean): Promise<void> {
         this.markOnScroll = value;
         await settingsStore.set(SETTING_KEYS.markOnScroll, String(value));
+    }
+
+    /** Adopts persisted background-refresh prefs at startup. */
+    initRefresh(): void {
+        const raw = settingsStore.get(SETTING_KEYS.refreshIntervalMinutes);
+        const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+        this.refreshIntervalMinutes = Number.isFinite(parsed) ? parsed : REFRESH_INTERVAL_DEFAULT;
+        this.refreshOnLaunch = settingsStore.get(SETTING_KEYS.refreshOnLaunch) !== 'false';
+    }
+
+    /**
+     * Sets (and persists) the background-refresh cadence in minutes (`0` = off).
+     * The Rust scheduler re-reads the setting each tick, so this takes effect
+     * within a minute without a restart.
+     */
+    async setRefreshIntervalMinutes(minutes: number): Promise<void> {
+        this.refreshIntervalMinutes = minutes;
+        await settingsStore.set(SETTING_KEYS.refreshIntervalMinutes, String(minutes));
+    }
+
+    /** Sets (and persists) whether to refresh once shortly after launch. */
+    async setRefreshOnLaunch(value: boolean): Promise<void> {
+        this.refreshOnLaunch = value;
+        await settingsStore.set(SETTING_KEYS.refreshOnLaunch, String(value));
     }
 
     /** Sets the reader font size (px), clamped, and persists it. */
@@ -492,6 +530,8 @@ export class UiStore {
         this.allowRemoteFavicon = false;
         this.mediaPrefetch = false;
         this.markOnScroll = false;
+        this.refreshIntervalMinutes = REFRESH_INTERVAL_DEFAULT;
+        this.refreshOnLaunch = true;
         this.themePreference = 'system';
         this.customThemes = [];
         this.sidebarCollapsed = false;

@@ -28,6 +28,8 @@ export const SETTING_KEYS = {
     customThemes: 'ui.themes.custom',
     collapsedFolders: 'ui.sidebar.collapsed-folders',
     pendingFolders: 'ui.sidebar.pending-folders',
+    refreshIntervalMinutes: 'ui.refresh.interval-minutes',
+    refreshOnLaunch: 'ui.refresh.on-launch',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

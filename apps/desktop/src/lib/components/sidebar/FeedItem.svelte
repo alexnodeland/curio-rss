@@ -1,9 +1,10 @@
 <script lang="ts">
 /**
  * One subscription row: a select button (monogram, title) carrying the
- * backend-owned unread count, plus a health control that opens the
- * feed-health panel. Right-click (or the context-menu key) opens the feed
- * actions menu; the row supports inline rename and drag-to-reorder.
+ * backend-owned unread count, plus a health dot that opens the edit-feed
+ * modal at its Health section. Right-click (or the context-menu key) opens
+ * the feed actions menu (including Edit feed…); the row supports inline
+ * rename and drag-to-reorder.
  */
 import type { FeedDto } from '$lib/bindings';
 import { contextMenu } from '$lib/actions/context-menu';
@@ -14,6 +15,7 @@ import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dn
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { allFolderPaths } from '$lib/state/folder-ops';
 import type { MenuItem } from '$lib/state/menu.svelte';
+import type { EditFeedSection } from '$lib/state/ui.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { copyText } from '$lib/utils/clipboard';
 import { openExternal } from '$lib/utils/external';
@@ -24,7 +26,7 @@ let {
     selected,
     siblings,
     onselect,
-    onhealth,
+    onedit,
 }: {
     feed: FeedDto;
     unread: number;
@@ -32,7 +34,7 @@ let {
     /** The ordered ids of this feed's drag group; enables reordering when set. */
     siblings?: number[];
     onselect: (feedId: number) => void;
-    onhealth: (feedId: number) => void;
+    onedit: (feedId: number, section?: EditFeedSection) => void;
 } = $props();
 
 const label = $derived(feed.title ?? feed.url);
@@ -115,6 +117,12 @@ function feedMenu(): MenuItem[] {
             onSelect: () => void markAllRead(feed.id),
         },
         { id: 'move', labelKey: 'feed.menu.moveToFolder', children: moveTo },
+        {
+            id: 'edit',
+            labelKey: 'feed.menu.edit',
+            separatorBefore: true,
+            onSelect: () => onedit(feed.id),
+        },
         { id: 'copy', labelKey: 'feed.menu.copyUrl', onSelect: () => void copyUrl() },
         {
             id: 'status',
@@ -222,7 +230,7 @@ function hue(text: string): number {
             class="feed-health"
             type="button"
             aria-label={t('feedHealth.open', { name: label })}
-            onclick={() => onhealth(feed.id)}
+            onclick={() => onedit(feed.id, 'health')}
         >
             <span class="health-dot health-{feed.status}" aria-hidden="true"></span>
         </button>

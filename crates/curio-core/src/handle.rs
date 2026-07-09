@@ -315,6 +315,27 @@ impl CoreHandle {
         Ok(self.storage.set_feed_title(id, title)?)
     }
 
+    /// Overwrites a feed's site URL and description — the edit-feed modal's
+    /// user-edit path. DB-local, no contract event (the head's command layer
+    /// emits the UI `FeedsChanged`): site URL / description are not part of
+    /// the published contract, and consumers key feeds by URL. This is the
+    /// user-overwrite counterpart to the fetch-fill `update_feed_metadata`,
+    /// which only fills a NULL field so a refresh never clobbers a human edit.
+    /// An empty value clears the field. The display title stays on
+    /// [`Self::set_feed_title`].
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::NotFound`] for an unknown feed; storage errors.
+    pub fn set_feed_metadata(
+        &self,
+        id: FeedId,
+        site_url: Option<String>,
+        description: Option<String>,
+    ) -> Result<(), CoreError> {
+        Ok(self.storage.set_feed_metadata(id, site_url, description)?)
+    }
+
     /// Rewrites the sidebar feed order to `ordered` (drag-to-reorder). The
     /// caller passes the complete new sequence. DB-local, no event: feed
     /// ordering is a local reading-organization preference, not part of the

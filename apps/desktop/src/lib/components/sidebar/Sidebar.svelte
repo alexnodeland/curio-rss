@@ -151,7 +151,7 @@ function newFolder(): void {
                                 selected={selectionStore.selectedFeedId === feed.id}
                                 siblings={feedTree.ungrouped.map((candidate) => candidate.id)}
                                 onselect={(feedId) => selectionStore.selectFeed(feedId)}
-                                onhealth={(feedId) => uiStore.openHealth(feedId)}
+                                onedit={(feedId, section) => uiStore.openEditFeed(feedId, section)}
                             />
                         </li>
                     {/each}

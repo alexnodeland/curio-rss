@@ -41,6 +41,7 @@ export const en = {
     'feed.menu.markAllRead': 'Mark all read',
     'feed.menu.moveToFolder': 'Move to folder',
     'feed.menu.ungroup': 'Remove from folder',
+    'feed.menu.edit': 'Edit feed…',
     'feed.menu.copyUrl': 'Copy feed URL',
     'feed.menu.pause': 'Pause',
     'feed.menu.resume': 'Resume',
@@ -271,8 +272,23 @@ export const en = {
 
     'feedTags.label': 'Folders & tags',
     'feedTags.placeholder': 'Tech/Databases, favorites',
-    'feedTags.hint': 'Comma-separated. Use / to nest into folders, e.g. Tech/Databases.',
+    'feedTags.hint': 'Press Enter to add a tag. Use / to nest into folders, e.g. Tech/Databases.',
     'feedTags.save': 'Save',
+
+    'editFeed.title': 'Edit feed',
+    'editFeed.section.details': 'Details',
+    'editFeed.section.health': 'Health',
+    'editFeed.url.label': 'Feed URL',
+    'editFeed.url.copy': 'Copy',
+    'editFeed.url.copied': 'Feed URL copied',
+    'editFeed.url.open': 'Open',
+    'editFeed.site.label': 'Site URL',
+    'editFeed.site.placeholder': 'https://example.com',
+    'editFeed.description.label': 'Description',
+    'editFeed.details.save': 'Save',
+
+    'tagEditor.placeholder': 'Add a tag…',
+    'tagEditor.remove': 'Remove {tag}',
 
     'refresh.announce.start': 'Refreshing feeds',
     'refresh.announce.done': 'Refresh complete: {count} new articles across {feeds} feeds',

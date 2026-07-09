@@ -73,7 +73,10 @@ export function isThemePreference(value: string): value is ThemePreference {
     return value === 'system' || isThemeId(value) || isCustomThemeId(value);
 }
 
-export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'feed-health';
+export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'edit-feed';
+
+/** Which section the edit-feed modal opens focused on. */
+export type EditFeedSection = 'details' | 'health';
 
 /** Reader body font — an id mapped to a concrete CSS font stack. */
 export type ReaderFontId = 'sans' | 'serif' | 'mono';
@@ -158,8 +161,10 @@ export class UiStore {
 
     activeModal: ModalKind | null = $state(null);
 
-    /** The feed the feed-health panel is bound to while it is open. */
-    healthFeedId: number | null = $state(null);
+    /** The feed the edit-feed modal is bound to while it is open. */
+    editFeedId: number | null = $state(null);
+    /** Which section the edit-feed modal scrolls to on open. */
+    editFeedSection: EditFeedSection = $state('details');
 
     /**
      * Opt-in: when a site declares no favicon, may Curio fall back to
@@ -436,15 +441,17 @@ export class UiStore {
         this.activeModal = modal;
     }
 
-    /** Opens the feed-health panel bound to one feed. */
-    openHealth(feedId: number): void {
-        this.healthFeedId = feedId;
-        this.activeModal = 'feed-health';
+    /** Opens the edit-feed modal bound to one feed, optionally scrolled to a section. */
+    openEditFeed(feedId: number, section: EditFeedSection = 'details'): void {
+        this.editFeedId = feedId;
+        this.editFeedSection = section;
+        this.activeModal = 'edit-feed';
     }
 
     closeModal(): void {
         this.activeModal = null;
-        this.healthFeedId = null;
+        this.editFeedId = null;
+        this.editFeedSection = 'details';
     }
 
     /** Queues a toast; duration 0 keeps it until dismissed. */
@@ -480,7 +487,8 @@ export class UiStore {
         this.#toastTimers.clear();
         this.toasts = [];
         this.activeModal = null;
-        this.healthFeedId = null;
+        this.editFeedId = null;
+        this.editFeedSection = 'details';
         this.allowRemoteFavicon = false;
         this.mediaPrefetch = false;
         this.markOnScroll = false;

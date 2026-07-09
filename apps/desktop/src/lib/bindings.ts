@@ -80,6 +80,13 @@ export const commands = {
 	 */
 	setFeedTitle: (feedId: number, title: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_title", { feedId, title })),
 	/**
+	 *  Overwrites a feed's site URL and description (edit-feed modal). Unlike
+	 *  `update_feed_metadata` — the fetch-fill path, which COALESCE-fills a NULL
+	 *  so a refresh never clobbers a human edit — this is an unconditional user
+	 *  overwrite; an empty value clears the field.
+	 */
+	setFeedMetadata: (feedId: number, siteUrl: string | null, description: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_metadata", { feedId, siteUrl, description })),
+	/**
 	 *  Rewrites the sidebar feed order (drag-to-reorder): `feed_ids` is the
 	 *  complete new sequence. DB-local, no event.
 	 */

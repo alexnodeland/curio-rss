@@ -13,7 +13,7 @@ import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
 import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
-import FeedHealthPanel from '$components/modals/FeedHealthPanel.svelte';
+import EditFeedModal from '$components/modals/EditFeedModal.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
 import SettingsModal from '$components/modals/SettingsModal.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
@@ -95,8 +95,12 @@ function onKeydown(event: KeyboardEvent): void {
     <SettingsModal onclose={() => uiStore.closeModal()} />
 {/if}
 
-{#if uiStore.activeModal === 'feed-health' && uiStore.healthFeedId !== null}
-    <FeedHealthPanel feedId={uiStore.healthFeedId} onclose={() => uiStore.closeModal()} />
+{#if uiStore.activeModal === 'edit-feed' && uiStore.editFeedId !== null}
+    <EditFeedModal
+        feedId={uiStore.editFeedId}
+        section={uiStore.editFeedSection}
+        onclose={() => uiStore.closeModal()}
+    />
 {/if}
 
 <RefreshStatus />

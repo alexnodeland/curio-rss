@@ -4,7 +4,12 @@
  * sort by name; feeds preserve their incoming `sort_order` (so drag-reorder is
  * visible). Empty `pendingPaths` folders overlay onto the tree.
  */
-import { buildFeedTree, subtreeFeedIds, tagSegments } from '$lib/state/feed-tree';
+import {
+    buildFeedTree,
+    flattenVisibleTree,
+    subtreeFeedIds,
+    tagSegments,
+} from '$lib/state/feed-tree';
 import { describe, expect, it } from 'vitest';
 import { feedFixture } from './ipc-harness';
 
@@ -87,5 +92,39 @@ describe('subtreeFeedIds', () => {
 
         const ids = [...subtreeFeedIds(tree.folders[0])].sort((a, b) => a - b);
         expect(ids).toEqual([9, 10]);
+    });
+});
+
+describe('flattenVisibleTree', () => {
+    const rust = feedFixture({ id: 1, title: 'Rust', tags: ['Tech'] });
+    const sqlite = feedFixture({ id: 2, title: 'SQLite', tags: ['Tech/Databases'] });
+    const plain = feedFixture({ id: 4, title: 'Plain', tags: [] });
+    const tree = buildFeedTree([sqlite, rust, plain]);
+    const openAll = () => false;
+
+    it('walks DFS in render order with depth annotations, ungrouped feeds last', () => {
+        const rows = flattenVisibleTree(tree, openAll);
+        expect(rows.map((row) => [row.kind, row.key, row.depth])).toEqual([
+            ['folder', 'folder:Tech', 0],
+            ['folder', 'folder:Tech/Databases', 1],
+            ['feed', 'feed:Tech/Databases:2', 2],
+            ['feed', 'feed:Tech:1', 1],
+            ['feed', 'feed::4', 0],
+        ]);
+    });
+
+    it('omits the children of a collapsed folder and marks it not-expanded', () => {
+        const rows = flattenVisibleTree(tree, (path) => path === 'Tech');
+        expect(rows.map((row) => row.key)).toEqual(['folder:Tech', 'feed::4']);
+        const techRow = rows[0];
+        expect(techRow.kind === 'folder' && techRow.expanded).toBe(false);
+    });
+
+    it('keys a multi-tag feed positionally so each copy is distinct', () => {
+        const shared = feedFixture({ id: 7, title: 'Cross', tags: ['A', 'B'] });
+        const rows = flattenVisibleTree(buildFeedTree([shared]), openAll);
+        const feedKeys = rows.filter((row) => row.kind === 'feed').map((row) => row.key);
+        expect(feedKeys).toEqual(['feed:A:7', 'feed:B:7']);
+        expect(new Set(feedKeys).size).toBe(2);
     });
 });

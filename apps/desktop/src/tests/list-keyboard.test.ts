@@ -6,6 +6,7 @@
 import ArticleList from '$components/articles/ArticleList.svelte';
 import { articleOptionId } from '$components/articles/ArticleRow.svelte';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
@@ -48,6 +49,7 @@ describe('list keyboard navigation', () => {
         articlesStore.reset();
         selectionStore.reset();
         uiStore.reset();
+        menuStore.reset();
         installed?.teardown();
         installed = null;
     });
@@ -77,5 +79,32 @@ describe('list keyboard navigation', () => {
         // ArrowUp from the first row clamps — selection stays at the top.
         await fireEvent.keyDown(listbox, { key: 'ArrowUp' });
         expect(selectionStore.selectedArticleId).toBe(2000);
+    });
+
+    it('right-clicking a row opens its context menu with the article actions', async () => {
+        installed = harness();
+        const listbox = await renderList();
+        const row = listbox.querySelector('.article-row') as HTMLElement;
+
+        await fireEvent.contextMenu(row, { clientX: 30, clientY: 40 });
+        expect(menuStore.isOpen).toBe(true);
+        expect(menuStore.current?.items.map((item) => item.id)).toEqual([
+            'star',
+            'read',
+            'readLater',
+            'archive',
+            'open',
+            'markAllRead',
+        ]);
+    });
+
+    it('the keyboard menu key opens the menu for the selected row', async () => {
+        installed = harness();
+        selectionStore.selectedArticleId = 2000;
+        const listbox = await renderList();
+
+        await fireEvent.keyDown(listbox, { key: 'ContextMenu' });
+        expect(menuStore.isOpen).toBe(true);
+        expect(menuStore.current?.invoker?.id).toBe(articleOptionId(2000));
     });
 });

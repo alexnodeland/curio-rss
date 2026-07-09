@@ -12,9 +12,11 @@ import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
 import { markAllRead, toastCommandError } from '$lib/state/actions';
 import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { feedRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { allFolderPaths } from '$lib/state/folder-ops';
 import type { MenuItem } from '$lib/state/menu.svelte';
+import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import type { EditFeedSection } from '$lib/state/ui.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { copyText } from '$lib/utils/clipboard';
@@ -24,6 +26,8 @@ let {
     feed,
     unread,
     selected,
+    parentPath,
+    level,
     siblings,
     onselect,
     onedit,
@@ -31,6 +35,10 @@ let {
     feed: FeedDto;
     unread: number;
     selected: boolean;
+    /** Enclosing folder path (`''` when ungrouped) — part of the tree row id. */
+    parentPath: string;
+    /** 1-based tree depth for `aria-level`. */
+    level: number;
     /** The ordered ids of this feed's drag group; enables reordering when set. */
     siblings?: number[];
     onselect: (feedId: number) => void;
@@ -38,6 +46,9 @@ let {
 } = $props();
 
 const label = $derived(feed.title ?? feed.url);
+/** This row's stable tree id (matches the flattened `VisibleRow.key`). */
+const rowId = $derived(feedRowKey(parentPath, feed.id));
+const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId);
 
 let dropTarget = $state(false);
 
@@ -184,8 +195,10 @@ function hue(text: string): number {
 </script>
 
 <div
+    id={rowId}
     class="feed-item"
     class:active={selected}
+    class:tree-active={isTreeActive}
     class:unhealthy={feed.status !== 'active'}
     class:drop-target={dropTarget}
     class:dragging={feedDnd.draggingId === feed.id}
@@ -197,7 +210,10 @@ function hue(text: string): number {
     }}
     ondrop={onDrop}
     ondragend={() => feedDnd.clear()}
-    role="group"
+    role="treeitem"
+    tabindex="-1"
+    aria-level={level}
+    aria-selected={selected}
     aria-label={label}
     use:contextMenu={{ items: feedMenu, ariaLabel: label }}
 >
@@ -213,6 +229,7 @@ function hue(text: string): number {
     {:else}
         <button
             class="feed-select"
+            tabindex="-1"
             aria-current={selected ? 'true' : undefined}
             ondblclick={startRename}
             onclick={() => onselect(feed.id)}
@@ -229,6 +246,7 @@ function hue(text: string): number {
         <button
             class="feed-health"
             type="button"
+            tabindex="-1"
             aria-label={t('feedHealth.open', { name: label })}
             onclick={() => onedit(feed.id, 'health')}
         >
@@ -254,6 +272,12 @@ function hue(text: string): number {
 
     .feed-item.active {
         background: var(--selected);
+    }
+
+    /* The keyboard-tree cursor ring (aria-activedescendant target). */
+    .feed-item.tree-active {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
     }
 
     .feed-item[draggable='true'] {

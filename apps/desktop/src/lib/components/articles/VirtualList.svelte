@@ -26,6 +26,7 @@ let {
     onnearend,
     onscrollpast,
     onmove,
+    onmenukey,
     row,
 }: {
     items: readonly T[];
@@ -53,6 +54,12 @@ let {
      * stays selection-agnostic.
      */
     onmove?: (to: 'next' | 'previous' | 'first' | 'last') => void;
+    /**
+     * The keyboard context-menu key (ContextMenu / Shift+F10) was pressed while
+     * the list held focus. Rows are `tabindex="-1"` so their own menu-key
+     * handler never fires; the owner opens the menu for the selected row.
+     */
+    onmenukey?: () => void;
     row: Snippet<[T, number]>;
 } = $props();
 
@@ -65,6 +72,14 @@ const MOVE_KEYS: Record<string, 'next' | 'previous' | 'first' | 'last'> = {
 };
 
 function onKeydown(event: KeyboardEvent): void {
+    if (
+        onmenukey !== undefined &&
+        (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))
+    ) {
+        event.preventDefault();
+        onmenukey();
+        return;
+    }
     const move = MOVE_KEYS[event.key];
     if (move === undefined || onmove === undefined) {
         return;

@@ -52,6 +52,13 @@ function onKeydown(event: KeyboardEvent): void {
         matcher.reset();
         return;
     }
+    if (selectionStore.focus === 'sidebar') {
+        // The sidebar tree owns the keyboard: it handles its own navigation
+        // keys (which stopPropagation), so anything reaching here is a stray
+        // that must not fire an article-pane shortcut underneath the tree.
+        matcher.reset();
+        return;
+    }
     if (event.key === 'Escape') {
         // Menu + modal Escape are handled above; here Escape steps back through
         // the shell so it is never a no-op — clear an active search, else

@@ -112,10 +112,81 @@ fn extract(body: &[u8], final_url: &str) -> DiscoveryDto {
     }
 
     let document = Html::parse_document(&text);
+    let mut feeds = feed_links(&document, base.as_ref());
+    // A YouTube channel/handle page usually carries no `<link rel="alternate">`
+    // feed — synthesize the videos feed from its canonical channel id so a
+    // pasted `youtube.com/@handle` still subscribes. Only when nothing else
+    // matched, to avoid a duplicate when the alternate link *is* present.
+    if feeds.is_empty()
+        && let Some(candidate) = youtube_channel_feed(&document, base.as_ref())
+    {
+        feeds.push(candidate);
+    }
     DiscoveryDto {
-        feeds: feed_links(&document, base.as_ref()),
+        feeds,
         favicon: favicon(&document, base.as_ref()),
     }
+}
+
+/// If the page is a `YouTube` channel/handle page, builds its
+/// `feeds/videos.xml?channel_id=UC…` feed from the canonical `/channel/UC…`
+/// URL the page declares (`<link rel="canonical">` or `<meta og:url>`). No new
+/// fetch: the page was already retrieved through the policed client.
+fn youtube_channel_feed(document: &Html, base: Option<&Url>) -> Option<DiscoveredFeedDto> {
+    let host = base?.host_str()?.to_ascii_lowercase();
+    if host != "youtube.com" && !host.ends_with(".youtube.com") {
+        return None;
+    }
+    let channel_id = canonical_youtube_channel_id(document)?;
+    Some(DiscoveredFeedDto {
+        url: format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"),
+        title: og_title(document),
+    })
+}
+
+/// The `UC…` channel id from the page's canonical URL / `og:url`, if either
+/// points at `/channel/UC…`.
+fn canonical_youtube_channel_id(document: &Html) -> Option<String> {
+    let sources = [
+        ("link[rel~=canonical][href]", "href"),
+        (r#"meta[property="og:url"][content]"#, "content"),
+    ];
+    for (selector, attr) in sources {
+        let Ok(parsed) = Selector::parse(selector) else {
+            continue;
+        };
+        for element in document.select(&parsed) {
+            if let Some(href) = element.value().attr(attr)
+                && let Some(id) = channel_id_from_url(href)
+            {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// Extracts a `UC…` id from a `.../channel/UC…` URL (24 chars, `UC` + 22).
+fn channel_id_from_url(url: &str) -> Option<String> {
+    let start = url.find("/channel/")? + "/channel/".len();
+    let id: String = url[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    (id.len() == 24 && id.starts_with("UC")).then_some(id)
+}
+
+/// The page's `og:title`, trimmed — a friendlier preview name than the raw
+/// page `<title>`. The feed fills in its real title on the first fetch.
+fn og_title(document: &Html) -> Option<String> {
+    let selector = Selector::parse(r#"meta[property="og:title"][content]"#).ok()?;
+    document
+        .select(&selector)
+        .next()
+        .and_then(|element| element.value().attr("content"))
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(str::to_owned)
 }
 
 /// A quick structural sniff: does the head of the body look like a feed
@@ -283,6 +354,45 @@ mod tests {
                       <link rel="alternate" type="application/rss+xml" href="feed://blog.test/x">"#;
         let out = extract(html.as_bytes(), "https://blog.test/");
         assert!(out.feeds.is_empty(), "only http(s) feed URLs survive");
+    }
+
+    #[test]
+    fn a_youtube_channel_page_synthesizes_the_videos_feed_from_its_canonical_id() {
+        // A channel/handle page carries no <link rel="alternate"> feed, only a
+        // canonical /channel/UC… URL — we build the videos feed from it.
+        let html = r#"<html><head>
+            <link rel="canonical" href="https://www.youtube.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">
+            <meta property="og:title" content="Linus Tech Tips">
+        </head><body></body></html>"#;
+        let out = extract(html.as_bytes(), "https://www.youtube.com/@linustechtips");
+        assert_eq!(
+            out.feeds,
+            vec![DiscoveredFeedDto {
+                url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCXuqSBlHAE6Xw-yeJA0Tunw"
+                    .into(),
+                title: Some("Linus Tech Tips".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_youtube_page_with_a_real_alternate_link_does_not_duplicate() {
+        // When YouTube *does* declare the feed, use it — no synthesized twin.
+        let html = r#"<html><head>
+            <link rel="alternate" type="application/rss+xml" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCXuqSBlHAE6Xw-yeJA0Tunw">
+            <link rel="canonical" href="https://www.youtube.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">
+        </head><body></body></html>"#;
+        let out = extract(html.as_bytes(), "https://www.youtube.com/@linustechtips");
+        assert_eq!(out.feeds.len(), 1, "the declared feed is not duplicated");
+    }
+
+    #[test]
+    fn a_non_youtube_canonical_channel_url_is_ignored() {
+        // The /channel/ synthesis is YouTube-host-scoped.
+        let html =
+            r#"<link rel="canonical" href="https://example.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">"#;
+        let out = extract(html.as_bytes(), "https://example.com/some/page");
+        assert!(out.feeds.is_empty());
     }
 
     #[test]

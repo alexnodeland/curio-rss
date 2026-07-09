@@ -136,6 +136,18 @@ export const es: Partial<Record<MessageKey, string>> = {
         'Usar el servicio de favicons de Google cuando un sitio no tenga uno',
     'addFeed.favicon.allowRemoteHint':
         'Desactivado por defecto: activarlo le indica a Google qué sitios previsualizas.',
+    'presets.title': 'Fuentes populares',
+    'presets.detected': 'Fuente detectada:',
+    'presets.reddit': 'Reddit',
+    'presets.youtube': 'YouTube',
+    'presets.mastodon': 'Mastodon',
+    'presets.hn': 'Hacker News',
+    'presets.hn.frontpage': 'Portada',
+    'presets.hn.newest': 'Más recientes',
+    'presets.hn.ask': 'Ask HN',
+    'presets.hn.show': 'Show HN',
+    'presets.hn.best': 'Mejores comentarios',
+
     'settings.title': 'Ajustes',
     'settings.tablist.label': 'Secciones de ajustes',
     'settings.section.general': 'General',

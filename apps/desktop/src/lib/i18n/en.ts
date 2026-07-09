@@ -150,6 +150,18 @@ export const en = {
     'addFeed.favicon.allowRemoteHint':
         'Off by default — turning it on tells Google which sites you preview.',
 
+    'presets.title': 'Popular sources',
+    'presets.detected': 'Detected feed:',
+    'presets.reddit': 'Reddit',
+    'presets.youtube': 'YouTube',
+    'presets.mastodon': 'Mastodon',
+    'presets.hn': 'Hacker News',
+    'presets.hn.frontpage': 'Front page',
+    'presets.hn.newest': 'Newest',
+    'presets.hn.ask': 'Ask HN',
+    'presets.hn.show': 'Show HN',
+    'presets.hn.best': 'Best comments',
+
     'settings.title': 'Settings',
     'settings.tablist.label': 'Settings sections',
     'settings.section.general': 'General',

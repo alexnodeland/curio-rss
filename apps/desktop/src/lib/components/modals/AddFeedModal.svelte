@@ -15,6 +15,7 @@ import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
+import { HN_PRESETS, detectSource } from '$lib/utils/source-presets';
 
 let { onclose }: { onclose: () => void } = $props();
 
@@ -27,10 +28,36 @@ let triedRemoteFavicon = $state(false);
 let finding = $state(false);
 let adding = $state(false);
 let searched = $state(false);
+let urlInput = $state<HTMLInputElement>();
+let showHnPresets = $state(false);
 
-/** The URL a subscribe will use: a chosen candidate, else the typed URL. */
+// What the typed string resolves to, if it's a recognized source (a
+// subreddit, Mastodon handle, YouTube channel, HN URL). A YouTube @handle
+// isn't recognized here — it needs discovery to find its channel id.
+const detected = $derived(detectSource(url));
+
+/**
+ * The URL a subscribe will use: a recognized source's constructed feed URL
+ * wins, then a chosen discovery candidate, else the typed URL.
+ */
 function targetUrl(): string {
-    return (selectedUrl ?? url).trim();
+    return (detected?.feedUrl ?? selectedUrl ?? url).trim();
+}
+
+/** Fills the URL input with a starter pattern and focuses it (presets row). */
+function useTemplate(template: string): void {
+    url = template;
+    showHnPresets = false;
+    urlInput?.focus();
+}
+
+/** Picks a Hacker News feed: sets the URL and suggests the HN folder. */
+function pickHnPreset(feedUrl: string): void {
+    url = feedUrl;
+    showHnPresets = false;
+    if (tagsInput.trim() === '') {
+        tagsInput = 'Community/Hacker News';
+    }
 }
 
 function parsedTags(): string[] {
@@ -102,7 +129,12 @@ async function add(): Promise<void> {
             uiStore.showToast(t('addFeed.already'), 'warning');
             return;
         }
-        const result = await feedsStore.addFeed({ url: target, title: null, tags: parsedTags() });
+        // A recognized source suggests its folder when the user left tags empty.
+        const tags = parsedTags();
+        if (tags.length === 0 && detected !== null) {
+            tags.push(detected.suggestedTag);
+        }
+        const result = await feedsStore.addFeed({ url: target, title: null, tags });
         if (result.status === 'error') {
             toastCommandError(result.error);
             return;
@@ -136,19 +168,66 @@ async function add(): Promise<void> {
                 {/if}
                 <input
                     class="url-input"
-                    type="url"
+                    type="text"
+                    bind:this={urlInput}
                     bind:value={url}
                     placeholder={t('addFeed.urlPlaceholder')}
                     autocomplete="off"
                     spellcheck="false"
                 />
-                <button class="find-button" type="button" onclick={() => void find()} disabled={finding}>
+                <button
+                    class="find-button"
+                    type="button"
+                    onclick={() => void find()}
+                    disabled={finding || detected !== null}
+                >
                     {finding ? t('addFeed.finding') : t('addFeed.find')}
                 </button>
             </div>
+            {#if detected !== null}
+                <p class="detected" role="note">
+                    <span class="detected-label">{t('presets.detected')}</span>
+                    <span class="detected-url truncate">{detected.feedUrl}</span>
+                </p>
+            {/if}
         </label>
 
-        {#if searched}
+        <div class="presets">
+            <span class="field-label">{t('presets.title')}</span>
+            <div class="preset-row">
+                <button type="button" class="preset" onclick={() => useTemplate('r/')}
+                    >{t('presets.reddit')}</button
+                >
+                <button
+                    type="button"
+                    class="preset"
+                    onclick={() => useTemplate('https://www.youtube.com/@')}
+                    >{t('presets.youtube')}</button
+                >
+                <button type="button" class="preset" onclick={() => useTemplate('@')}
+                    >{t('presets.mastodon')}</button
+                >
+                <button
+                    type="button"
+                    class="preset"
+                    aria-expanded={showHnPresets}
+                    onclick={() => (showHnPresets = !showHnPresets)}>{t('presets.hn')}</button
+                >
+            </div>
+            {#if showHnPresets}
+                <div class="preset-row hn-row">
+                    {#each HN_PRESETS as preset (preset.id)}
+                        <button
+                            type="button"
+                            class="preset preset-sm"
+                            onclick={() => pickHnPreset(preset.feedUrl)}>{t(preset.labelKey)}</button
+                        >
+                    {/each}
+                </div>
+            {/if}
+        </div>
+
+        {#if searched && detected === null}
             {#if candidates.length > 0}
                 <fieldset class="candidates">
                     <legend>{t('addFeed.candidates')}</legend>
@@ -354,5 +433,63 @@ async function add(): Promise<void> {
     .actions {
         display: flex;
         justify-content: flex-end;
+    }
+
+    .detected {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        margin-top: var(--space-1);
+        min-width: 0;
+    }
+
+    .detected-label {
+        flex: 0 0 auto;
+        font-size: var(--text-xs);
+        color: var(--fg-subtle);
+    }
+
+    .detected-url {
+        min-width: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--accent);
+    }
+
+    .presets {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .preset-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .hn-row {
+        padding-left: var(--space-2);
+    }
+
+    .preset {
+        padding: var(--space-1) var(--space-3);
+        border-radius: var(--radius-pill);
+        background: var(--surface-inset);
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline);
+        font-size: var(--text-sm);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .preset:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .preset-sm {
+        font-size: var(--text-xs);
     }
 </style>

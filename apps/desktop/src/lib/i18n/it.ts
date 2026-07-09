@@ -134,6 +134,18 @@ export const it: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemote': 'Usa il servizio favicon di Google quando un sito non ne ha una',
     'addFeed.favicon.allowRemoteHint':
         'Disattivato per impostazione predefinita — attivandolo comunichi a Google quali siti visualizzi in anteprima.',
+    'presets.title': 'Fonti popolari',
+    'presets.detected': 'Feed rilevato:',
+    'presets.reddit': 'Reddit',
+    'presets.youtube': 'YouTube',
+    'presets.mastodon': 'Mastodon',
+    'presets.hn': 'Hacker News',
+    'presets.hn.frontpage': 'Prima pagina',
+    'presets.hn.newest': 'Più recenti',
+    'presets.hn.ask': 'Ask HN',
+    'presets.hn.show': 'Show HN',
+    'presets.hn.best': 'Migliori commenti',
+
     'settings.title': 'Impostazioni',
     'settings.tablist.label': 'Sezioni delle impostazioni',
     'settings.section.general': 'Generale',

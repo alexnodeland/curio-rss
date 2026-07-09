@@ -342,6 +342,42 @@ impl Storage {
         })
     }
 
+    /// Overwrites a feed's site URL and description with the user's edits —
+    /// the edit-feed counterpart to the fetch-fill
+    /// [`Self::update_feed_metadata`], which only COALESCE-*fills* a NULL so a
+    /// refresh never clobbers a human edit. This is an unconditional overwrite:
+    /// editing the field in the modal means *exactly* this value. An
+    /// empty/whitespace value clears the field to NULL (a later fetch may then
+    /// re-fill it via `update_feed_metadata`). The display title stays on
+    /// [`Self::set_feed_title`].
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist.
+    pub fn set_feed_metadata(
+        &self,
+        id: FeedId,
+        site_url: Option<String>,
+        description: Option<String>,
+    ) -> Result<(), StorageError> {
+        let clean =
+            |value: Option<String>| value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
+        let site_url = clean(site_url);
+        let description = clean(description);
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached(
+                    "UPDATE feeds SET site_url = ?2, description = ?3, \
+                     modified_at = ?4 WHERE id = ?1",
+                )?
+                .execute((id.0, site_url, description, Timestamp::now().to_string()))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
     /// Rewrites feed ordering: assigns `sort_order = position` for each id in
     /// `ordered`, in one transaction. Callers pass the complete new sequence
     /// (the sidebar's flattened order); unknown ids are simply skipped.

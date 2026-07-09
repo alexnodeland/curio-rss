@@ -201,6 +201,73 @@ fn feed_lifecycle_round_trips_and_stages_events() {
     ));
 }
 
+/// `set_feed_metadata` is the edit-feed modal's user-overwrite path — it
+/// unconditionally replaces site URL / description (empty clears to NULL),
+/// unlike the fetch-fill `update_feed_metadata`, which only COALESCE-fills a
+/// NULL so a refresh never clobbers a human edit.
+#[test]
+fn set_feed_metadata_overwrites_where_update_only_fills() {
+    let (_dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: Some("Example".to_owned()),
+            tags: vec![],
+        })
+        .unwrap();
+
+    // A fresh subscription has no site URL / description.
+    let reread = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(reread.site_url, None);
+    assert_eq!(reread.description, None);
+
+    // The user sets both through the edit-feed path.
+    storage
+        .set_feed_metadata(
+            feed.id,
+            Some("https://example.com".to_owned()),
+            Some("A hand-written note".to_owned()),
+        )
+        .unwrap();
+    let reread = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(reread.site_url.as_deref(), Some("https://example.com"));
+    assert_eq!(reread.description.as_deref(), Some("A hand-written note"));
+
+    // A later fetch fills (COALESCE) — it must NOT clobber the human edits.
+    storage
+        .update_feed_metadata(
+            feed.id,
+            None,
+            Some("https://feed-provided.example".to_owned()),
+            Some("Feed-provided blurb".to_owned()),
+        )
+        .unwrap();
+    let reread = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(
+        reread.site_url.as_deref(),
+        Some("https://example.com"),
+        "fetch-fill must not overwrite a user-set site URL"
+    );
+    assert_eq!(reread.description.as_deref(), Some("A hand-written note"));
+
+    // But the user CAN overwrite again — and clear with an empty value.
+    storage
+        .set_feed_metadata(
+            feed.id,
+            Some("https://moved.example".to_owned()),
+            Some(String::new()),
+        )
+        .unwrap();
+    let reread = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(reread.site_url.as_deref(), Some("https://moved.example"));
+    assert_eq!(reread.description, None, "an empty value clears the field");
+
+    assert!(matches!(
+        storage.set_feed_metadata(FeedId(9999), None, None),
+        Err(StorageError::NotFound { entity: "feed" })
+    ));
+}
+
 /// The feed URL is the identity key of feed.added/feed.removed: adopting
 /// a permanent redirect must stage the negation pair, or a consumer's
 /// fold keeps a phantom subscription under the original URL forever

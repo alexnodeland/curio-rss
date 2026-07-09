@@ -172,6 +172,24 @@ tokens:
                     if (f) f.status = args.status as typeof f.status;
                     return null;
                 }
+                case 'set_feed_title': {
+                    const f = feeds.find((x) => x.id === args.feedId);
+                    if (f) f.title = (args.title as string | null) ?? null;
+                    return null;
+                }
+                case 'set_feed_tags': {
+                    const f = feeds.find((x) => x.id === args.feedId);
+                    if (f) f.tags = (args.tags as string[] | undefined) ?? [];
+                    return null;
+                }
+                case 'set_feed_metadata': {
+                    const f = feeds.find((x) => x.id === args.feedId);
+                    if (f) {
+                        f.site_url = (args.siteUrl as string | null) ?? null;
+                        f.description = (args.description as string | null) ?? null;
+                    }
+                    return null;
+                }
                 case 'recent_fetches':
                     return [
                         {

@@ -153,6 +153,25 @@ pub async fn set_feed_title(
     Ok(())
 }
 
+/// Overwrites a feed's site URL and description (edit-feed modal). Unlike
+/// `update_feed_metadata` — the fetch-fill path, which COALESCE-fills a NULL
+/// so a refresh never clobbers a human edit — this is an unconditional user
+/// overwrite; an empty value clears the field.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_feed_metadata(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    feed_id: i64,
+    site_url: Option<String>,
+    description: Option<String>,
+) -> Result<(), CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || set_feed_metadata_impl(&core, feed_id, site_url, description)).await?;
+    emit_or_log(&app, &FeedsChanged);
+    Ok(())
+}
+
 /// Rewrites the sidebar feed order (drag-to-reorder): `feed_ids` is the
 /// complete new sequence. DB-local, no event.
 #[tauri::command]
@@ -283,6 +302,15 @@ fn set_feed_tags_impl(
     tags: Vec<String>,
 ) -> Result<(), CommandError> {
     Ok(core.set_feed_tags(FeedId(feed_id), tags)?)
+}
+
+fn set_feed_metadata_impl(
+    core: &CoreHandle,
+    feed_id: i64,
+    site_url: Option<String>,
+    description: Option<String>,
+) -> Result<(), CommandError> {
+    Ok(core.set_feed_metadata(FeedId(feed_id), site_url, description)?)
 }
 
 fn set_feed_title_impl(
@@ -480,6 +508,55 @@ mod tests {
         assert_eq!(get_feed_impl(&core, feed.id).unwrap().unwrap().title, None);
 
         let error = set_feed_title_impl(&core, 9999, Some("x".into())).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn set_feed_metadata_overwrites_where_update_only_fills() {
+        let (_dir, core) = temp_core();
+        let feed = add_feed_impl(
+            &core,
+            NewFeedDto {
+                url: "https://example.test/feed.xml".into(),
+                title: None,
+                tags: vec![],
+            },
+        )
+        .unwrap();
+
+        // The user overwrites site URL + description (unlike
+        // update_feed_metadata's COALESCE fill, this is unconditional).
+        set_feed_metadata_impl(
+            &core,
+            feed.id,
+            Some("https://example.test".into()),
+            Some("Edited note".into()),
+        )
+        .unwrap();
+        let reloaded = get_feed_impl(&core, feed.id).unwrap().unwrap();
+        assert_eq!(reloaded.site_url.as_deref(), Some("https://example.test"));
+        assert_eq!(reloaded.description.as_deref(), Some("Edited note"));
+
+        // A later fetch-fill must not clobber the human edit.
+        update_feed_metadata_impl(
+            &core,
+            feed.id,
+            None,
+            Some("https://feed-said.test".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            get_feed_impl(&core, feed.id)
+                .unwrap()
+                .unwrap()
+                .site_url
+                .as_deref(),
+            Some("https://example.test")
+        );
+
+        let error = set_feed_metadata_impl(&core, 9999, None, None).unwrap_err();
         assert_eq!(error.kind, ErrorKind::User);
         assert_eq!(error.code, ErrorCode::NotFound);
     }

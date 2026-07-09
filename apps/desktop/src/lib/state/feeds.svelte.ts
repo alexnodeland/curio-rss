@@ -309,6 +309,19 @@ export class FeedsStore {
     }
 
     /**
+     * Overwrites a feed's site URL and description (edit-feed modal). Unlike
+     * the fetch-fill path these are unconditional edits; an empty value clears
+     * the field. The tree refreshes off the command's `FeedsChanged`.
+     */
+    setFeedMetadata(
+        feedId: number,
+        siteUrl: string | null,
+        description: string | null,
+    ): Promise<CommandResult<null>> {
+        return commands.setFeedMetadata(feedId, siteUrl, description);
+    }
+
+    /**
      * Persists a new global feed order (drag-to-reorder); `orderedIds` is the
      * complete sequence. The tree refreshes off the emitted `FeedsChanged`.
      */

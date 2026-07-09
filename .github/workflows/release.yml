@@ -41,24 +41,53 @@ jobs:
       - name: Install frontend deps
         working-directory: apps/desktop
         run: npm ci
-      - name: Build the unsigned universal bundle
+      - name: Build the universal bundle (Apple-unsigned; updater-signed)
         working-directory: apps/desktop
-        # No signing env — unsigned by decision (see nightly.yml / decisions.md).
-        # Universal lipo of arm64 + x64 on the arm64 runner.
+        # Apple notarization is intentionally skipped (unsigned distribution,
+        # see nightly.yml / decisions.md). The signing env below is the *Tauri
+        # updater* minisign key — orthogonal to Apple codesign — so
+        # `createUpdaterArtifacts` emits Curio.app.tar.gz(.sig). Universal lipo
+        # of arm64 + x64 on the arm64 runner.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target universal-apple-darwin
-      - name: Rename the DMG to the cask's stable name
-        # tauri emits Curio_<version>_universal.dmg under the target-specific
-        # bundle dir; the cask URL resolves Curio-universal.dmg.
+      - name: Stage the DMG + updater artifacts and the manifest
+        # The DMG keeps the cask's stable name (Curio-universal.dmg). The updater
+        # consumes the .app.tar.gz (not the DMG) verified against the .sig; the
+        # manifest lists BOTH darwin arch keys pointing at the one universal tar
+        # with the one signature (the client looks up darwin-aarch64/x86_64 —
+        # there is no darwin-universal key). `version` is plain semver (no `v`).
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          src=$(ls target/universal-apple-darwin/release/bundle/dmg/Curio_*_universal.dmg)
-          cp "$src" "Curio-universal.dmg"
-          shasum -a 256 "Curio-universal.dmg"
-      - name: Upload the DMG artifact
+          bundle=target/universal-apple-darwin/release/bundle
+          version="${TAG#v}"
+          mkdir -p dist
+          cp "$(ls "$bundle"/dmg/Curio_*_universal.dmg)" dist/Curio-universal.dmg
+          cp "$bundle"/macos/Curio.app.tar.gz dist/Curio.app.tar.gz
+          shasum -a 256 dist/Curio-universal.dmg dist/Curio.app.tar.gz
+          SIG="$(cat "$bundle"/macos/Curio.app.tar.gz.sig)" \
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Curio.app.tar.gz" \
+          VERSION="$version" \
+          node -e '
+            const fs = require("fs");
+            const { SIG, URL, VERSION } = process.env;
+            const entry = { signature: SIG, url: URL };
+            fs.writeFileSync("dist/latest.json", JSON.stringify({
+              version: VERSION,
+              notes: `Curio ${VERSION}`,
+              pub_date: new Date().toISOString(),
+              platforms: { "darwin-aarch64": entry, "darwin-x86_64": entry },
+            }, null, 2));
+          '
+          cat dist/latest.json
+      - name: Upload the release assets
         uses: actions/upload-artifact@v4
         with:
-          name: dmg-universal
-          path: Curio-universal.dmg
+          name: release-assets
+          path: dist/
           if-no-files-found: error
 
   release:
@@ -67,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Collect the DMG
+      - name: Collect the release assets
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -91,6 +120,10 @@ jobs:
           } > NOTES.md
           cat NOTES.md
       - name: Draft the release
+        # Still a DRAFT on purpose (human review before public). The updater
+        # endpoint `releases/latest/download/latest.json` resolves only once a
+        # human clicks Publish — which is exactly the review gate we want: no
+        # auto-update reaches users until the release is published.
         uses: softprops/action-gh-release@v2
         with:
           draft: true
@@ -98,4 +131,7 @@ jobs:
           name: Curio ${{ github.ref_name }}
           body_path: NOTES.md
           fail_on_unmatched_files: true
-          files: dist/Curio-universal.dmg
+          files: |
+            dist/Curio-universal.dmg
+            dist/Curio.app.tar.gz
+            dist/latest.json

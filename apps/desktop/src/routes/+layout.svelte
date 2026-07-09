@@ -1,12 +1,13 @@
 <script lang="ts">
 import '../app.css';
 import { onMount } from 'svelte';
-import { localeStore } from '$lib/i18n';
+import { localeStore, t } from '$lib/i18n';
 import { wireMenuActions } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { wireInvalidation } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
+import { runStartupUpdateCheck } from '$lib/utils/updates';
 import type { Snippet } from 'svelte';
 
 let { children }: { children: Snippet } = $props();
@@ -29,6 +30,7 @@ onMount(() => {
         uiStore.initReading();
         uiStore.initRefresh();
         uiStore.initNotifications();
+        uiStore.initUpdates();
         feedsStore.initSidebarState();
 
         // Event-driven invalidation: the query cache and the refresh
@@ -45,6 +47,15 @@ onMount(() => {
             return;
         }
         teardowns.push(...unsubscribers);
+
+        // Auto-update: check the release feed once (best-effort, off in the dev
+        // browser). Auto-install relaunches; otherwise a toast points at Settings.
+        void runStartupUpdateCheck({
+            autoCheck: uiStore.updatesAutoCheck,
+            autoInstall: uiStore.updatesAutoInstall,
+            onAvailable: (version) =>
+                uiStore.showToast(t('updates.available', { version }), 'info'),
+        });
     })();
 
     return () => {

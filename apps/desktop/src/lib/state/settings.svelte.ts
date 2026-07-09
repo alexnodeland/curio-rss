@@ -38,6 +38,8 @@ export const SETTING_KEYS = {
     notifyQuietStart: 'ui.notify.quiet-start',
     notifyQuietEnd: 'ui.notify.quiet-end',
     notifyMutedFeeds: 'ui.notify.muted-feeds',
+    updatesAutoCheck: 'ui.updates.auto-check',
+    updatesAutoInstall: 'ui.updates.auto-install',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

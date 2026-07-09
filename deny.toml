@@ -95,14 +95,14 @@ wildcards = "deny"
 # vanishes. Wrapper lists are tuned against `cargo deny check` output
 # (cargo-deny matches the DIRECT parent).
 deny = [
-    { crate = "tauri", wrappers = ["curio-desktop", "tauri-plugin-dialog", "tauri-plugin-fs", "tauri-plugin-notification", "tauri-plugin-opener", "tauri-plugin-single-instance", "tauri-specta"], reason = "webview boundary: only the desktop head (and tauri's own family) may pull the webview" },
+    { crate = "tauri", wrappers = ["curio-desktop", "tauri-plugin-dialog", "tauri-plugin-fs", "tauri-plugin-notification", "tauri-plugin-opener", "tauri-plugin-process", "tauri-plugin-single-instance", "tauri-plugin-updater", "tauri-specta"], reason = "webview boundary: only the desktop head (and tauri's own family) may pull the webview" },
     { crate = "tauri-build", wrappers = ["curio-desktop", "tauri"], reason = "webview boundary: only the desktop head builds against tauri" },
     { crate = "tauri-runtime", wrappers = ["tauri", "tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
     { crate = "tauri-runtime-wry", wrappers = ["tauri"], reason = "webview boundary (tauri internals)" },
     { crate = "tauri-codegen", wrappers = ["tauri-macros"], reason = "webview boundary (tauri internals)" },
     { crate = "tauri-macros", wrappers = ["tauri"], reason = "webview boundary (tauri internals)" },
     { crate = "tauri-utils", wrappers = ["tauri", "tauri-build", "tauri-codegen", "tauri-macros", "tauri-plugin", "tauri-plugin-fs", "tauri-runtime", "tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
-    { crate = "tauri-plugin", wrappers = ["tauri-plugin-dialog", "tauri-plugin-fs", "tauri-plugin-notification", "tauri-plugin-opener"], reason = "webview boundary (tauri internals)" },
+    { crate = "tauri-plugin", wrappers = ["tauri-plugin-dialog", "tauri-plugin-fs", "tauri-plugin-notification", "tauri-plugin-opener", "tauri-plugin-process", "tauri-plugin-updater"], reason = "webview boundary (tauri internals)" },
     { crate = "wry", wrappers = ["tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
     { crate = "tao", wrappers = ["tauri-runtime-wry"], reason = "webview boundary (tauri internals)" },
     { crate = "webkit2gtk", wrappers = ["wry", "tauri", "tauri-runtime", "tauri-runtime-wry"], reason = "webview boundary (Linux transitive of wry)" },

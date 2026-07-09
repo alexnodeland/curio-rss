@@ -23,15 +23,27 @@
                     'solarized-light',
                 ];
                 let theme = null;
+                let customCss = null;
                 try {
                     theme = window.localStorage.getItem('curio-theme');
+                    customCss = window.localStorage.getItem('curio-theme-custom-css');
                 } catch {
                     // localStorage unavailable — fall through to the system preference.
                 }
-                if (theme === null || theme === 'system' || !THEMES.includes(theme)) {
+                const isCustom = typeof theme === 'string' && /^custom-[a-z0-9-]+$/.test(theme);
+                if (theme === null || theme === 'system' || (!THEMES.includes(theme) && !isCustom)) {
                     theme = window.matchMedia('(prefers-color-scheme: light)').matches
                         ? 'light'
                         : 'dark';
+                }
+                // A custom theme has no rule in app.css — inject the mirrored
+                // rule (retired by the app once its own <style> is in place) so
+                // the attribute below paints correctly, with no flash.
+                if (isCustom && customCss) {
+                    const style = document.createElement('style');
+                    style.id = 'curio-custom-preload';
+                    style.textContent = customCss;
+                    document.head.appendChild(style);
                 }
                 document.documentElement.setAttribute('data-theme', theme);
             })();

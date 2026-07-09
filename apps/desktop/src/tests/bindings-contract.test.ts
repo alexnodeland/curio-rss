@@ -107,6 +107,14 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
         response: importOutcomeFixture(),
     },
     exportOpml: { args: ['01JZ0000000000000000000000'], response: null },
+    exportTextFile: {
+        args: ['01JZ0000000000000000000000', 'schema: curio.theme/v1\n'],
+        response: null,
+    },
+    readTextFile: {
+        args: ['01JZ0000000000000000000000'],
+        response: 'schema: curio.theme/v1\n',
+    },
     getSetting: { args: ['ui.theme'], response: 'dark' },
     setSetting: { args: ['ui.theme', 'dark'], response: null },
     getAppInfo: { args: [], response: appInfoFixture() },
@@ -122,6 +130,8 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     copyDiagnosticsBundle: { args: [], response: pathTokenFixture() },
     pickImportFile: { args: [], response: pathTokenFixture() },
     pickExportPath: { args: [], response: pathTokenFixture() },
+    pickThemeExportPath: { args: [], response: pathTokenFixture() },
+    pickThemeImportFile: { args: [], response: pathTokenFixture() },
     pickDestinationRoot: { args: [], response: pathTokenFixture() },
 };
 

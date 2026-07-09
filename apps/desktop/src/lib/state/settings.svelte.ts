@@ -25,6 +25,7 @@ export const SETTING_KEYS = {
     mediaPrefetch: 'ui.media.prefetch',
     markOnScroll: 'ui.reading.mark-on-scroll',
     locale: 'ui.locale',
+    customThemes: 'ui.themes.custom',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

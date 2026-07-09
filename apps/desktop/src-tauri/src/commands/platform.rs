@@ -91,6 +91,50 @@ pub async fn pick_export_path(
     registry.mint(&path, PathIntent::ExportFile).map(Some)
 }
 
+/// Opens a native save dialog for a theme YAML export; `None` = cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn pick_theme_export_path(
+    app: AppHandle,
+    registry: State<'_, PathRegistry>,
+) -> Result<Option<PathTokenDto>, CommandError> {
+    let picked = run_blocking(move || {
+        Ok(app
+            .dialog()
+            .file()
+            .add_filter("Theme", &["yaml", "yml"])
+            .set_file_name("curio-theme.yaml")
+            .blocking_save_file())
+    })
+    .await?;
+    let Some(path) = picked.map(file_path_to_path).transpose()? else {
+        return Ok(None);
+    };
+    registry.mint(&path, PathIntent::ExportFile).map(Some)
+}
+
+/// Opens a native open-file dialog for a theme YAML import; `None` =
+/// cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn pick_theme_import_file(
+    app: AppHandle,
+    registry: State<'_, PathRegistry>,
+) -> Result<Option<PathTokenDto>, CommandError> {
+    let picked = run_blocking(move || {
+        Ok(app
+            .dialog()
+            .file()
+            .add_filter("Theme", &["yaml", "yml"])
+            .blocking_pick_file())
+    })
+    .await?;
+    let Some(path) = picked.map(file_path_to_path).transpose()? else {
+        return Ok(None);
+    };
+    registry.mint(&path, PathIntent::ImportFile).map(Some)
+}
+
 /// Opens a native folder picker for a new destination root; `None` =
 /// cancelled.
 #[tauri::command]

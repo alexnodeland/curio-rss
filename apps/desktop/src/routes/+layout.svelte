@@ -19,6 +19,9 @@ onMount(() => {
         // localStorage mirror once the backend answers.
         await settingsStore.load();
         localeStore.init();
+        // Custom themes before initTheme: a custom preference must resolve
+        // against a populated list and have its rule injected pre-paint.
+        uiStore.initCustomThemes();
         uiStore.initTheme();
         uiStore.initLayout();
         uiStore.initTypography();

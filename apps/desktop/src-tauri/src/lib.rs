@@ -85,6 +85,9 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::opml::import_opml,
             commands::opml::import_file,
             commands::opml::export_opml,
+            // theme yaml io
+            commands::theme::export_text_file,
+            commands::theme::read_text_file,
             // settings / app
             commands::settings::get_setting,
             commands::settings::set_setting,
@@ -100,6 +103,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::platform::copy_diagnostics_bundle,
             commands::platform::pick_import_file,
             commands::platform::pick_export_path,
+            commands::platform::pick_theme_export_path,
+            commands::platform::pick_theme_import_file,
             commands::platform::pick_destination_root,
         ])
         .events(tauri_specta::collect_events![

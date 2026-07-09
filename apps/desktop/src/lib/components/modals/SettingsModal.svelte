@@ -162,9 +162,6 @@ function onKeydown(event: KeyboardEvent): void {
                 hidden={activeIndex !== 1}
             >
                 <ThemePicker />
-                <p class="placeholder">
-                    <strong>{t('settings.customThemes')}</strong> — {t('settings.customThemes.hint')}
-                </p>
             </div>
 
             <div
@@ -328,11 +325,6 @@ function onKeydown(event: KeyboardEvent): void {
 
     [role='tabpanel']:focus-visible {
         outline: none;
-    }
-
-    .placeholder {
-        font-size: var(--text-xs);
-        color: var(--fg-subtle);
     }
 
     @media (max-width: 600px) {

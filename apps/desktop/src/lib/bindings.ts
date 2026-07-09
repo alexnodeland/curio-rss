@@ -215,6 +215,13 @@ export const commands = {
 	importFile: (pathToken: string, source: ImportSourceDto) => typedError<ImportOutcomeDto, CommandError>(__TAURI_INVOKE("import_file", { pathToken, source })),
 	/**  Exports every subscription as OPML 2.0 to a dialog-picked path. */
 	exportOpml: (pathToken: string) => typedError<null, CommandError>(__TAURI_INVOKE("export_opml", { pathToken })),
+	/**  Writes `contents` verbatim to a dialog-picked path (theme YAML export). */
+	exportTextFile: (pathToken: string, contents: string) => typedError<null, CommandError>(__TAURI_INVOKE("export_text_file", { pathToken, contents })),
+	/**
+	 *  Reads a dialog-picked text file (theme YAML import) and returns its
+	 *  contents for the frontend to parse and validate.
+	 */
+	readTextFile: (pathToken: string) => typedError<string, CommandError>(__TAURI_INVOKE("read_text_file", { pathToken })),
 	/**  Reads a setting. */
 	getSetting: (key: string) => typedError<string | null, CommandError>(__TAURI_INVOKE("get_setting", { key })),
 	/**  Writes a setting. */
@@ -263,6 +270,23 @@ export const commands = {
 	/**  Absolute path, for display only — never accepted back as input. */
 	path: string,
 } | null, CommandError>(__TAURI_INVOKE("pick_export_path")),
+	/**  Opens a native save dialog for a theme YAML export; `None` = cancelled. */
+	pickThemeExportPath: () => typedError<{
+	/**  The opaque token (ULID) to hand back to a consuming command. */
+	token: string,
+	/**  Absolute path, for display only — never accepted back as input. */
+	path: string,
+} | null, CommandError>(__TAURI_INVOKE("pick_theme_export_path")),
+	/**
+	 *  Opens a native open-file dialog for a theme YAML import; `None` =
+	 *  cancelled.
+	 */
+	pickThemeImportFile: () => typedError<{
+	/**  The opaque token (ULID) to hand back to a consuming command. */
+	token: string,
+	/**  Absolute path, for display only — never accepted back as input. */
+	path: string,
+} | null, CommandError>(__TAURI_INVOKE("pick_theme_import_file")),
 	/**
 	 *  Opens a native folder picker for a new destination root; `None` =
 	 *  cancelled.

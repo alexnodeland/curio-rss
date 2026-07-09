@@ -33,6 +33,8 @@ pub mod settings;
 pub mod state;
 #[allow(clippy::missing_errors_doc)]
 pub mod tags;
+#[allow(clippy::missing_errors_doc)]
+pub mod theme;
 
 use std::sync::Arc;
 

@@ -30,6 +30,36 @@ export async function installDevMock(): Promise<void> {
         ['ui.theme.mode', 'dark'],
     ]);
 
+    // A canned custom theme the dev mock "reads" on import, so the theme
+    // import flow can be exercised in the plain-browser visual loop.
+    const DEV_THEME_YAML = `schema: curio.theme/v1
+id: ocean
+name: Ocean
+appearance: dark
+tokens:
+  bg: "#0b1622"
+  bg-secondary: "#0f1d2e"
+  bg-tertiary: "#13243a"
+  bg-hover: "#1b3350"
+  fg: "#cfe3f2"
+  fg-muted: "#7fa9c9"
+  fg-subtle: "#5a7f9c"
+  accent: "#38bdf8"
+  accent-hover: "#0ea5e9"
+  accent-fg: "#001018"
+  accent-muted: "rgba(56, 189, 248, 0.15)"
+  border: "#1b3350"
+  border-subtle: "#13243a"
+  error: "#fb7185"
+  error-bg: "rgba(251, 113, 133, 0.15)"
+  warning: "#fbbf24"
+  success: "#34d399"
+  unread: "#38bdf8"
+  read: "#7fa9c9"
+  link: "#7dd3fc"
+  link-visited: "#c4b5fd"
+`;
+
     const byId = (id: number) => articles.find((a) => a.summary.id === id);
     const unreadCounts = () => {
         const by = new Map<number, number>();
@@ -220,8 +250,14 @@ export async function installDevMock(): Promise<void> {
                 }
                 case 'pick_import_file':
                 case 'pick_export_path':
+                case 'pick_theme_export_path':
+                case 'pick_theme_import_file':
                 case 'pick_destination_root':
                     return { token: 'dev-token', path: '/Users/alex/picked/path' };
+                case 'read_text_file':
+                    return DEV_THEME_YAML;
+                case 'export_text_file':
+                    return null;
                 case 'import_opml':
                     return { added: 4, skipped: 1 };
                 case 'import_file':

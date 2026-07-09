@@ -10,7 +10,9 @@
  */
 import Icon from '$components/common/Icon.svelte';
 import VideoPoster from '$components/common/VideoPoster.svelte';
+import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
+import { openExternal } from '$lib/utils/external';
 
 let {
     videoId,
@@ -21,11 +23,19 @@ let {
 let loaded = $state(false);
 
 // nocookie + no related-video leakage on end; autoplay so the click that
-// loaded the frame also starts playback (one gesture, not two).
+// loaded the frame also starts playback (one gesture, not two). If the
+// webview blocks autoplay or rejects the embedding origin, the persistent
+// "Open on YouTube" affordance below guarantees the click is never dead.
 const embedSrc = $derived(`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`);
+const watchUrl = $derived(`https://www.youtube.com/watch?v=${videoId}`);
 
 function load(): void {
     loaded = true;
+}
+
+function openOnYouTube(event: MouseEvent): void {
+    event.stopPropagation();
+    void openExternal(watchUrl);
 }
 </script>
 
@@ -35,7 +45,7 @@ function load(): void {
             class="player"
             src={embedSrc}
             {title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture"
             referrerpolicy="strict-origin-when-cross-origin"
             allowfullscreen
         ></iframe>
@@ -66,6 +76,15 @@ function load(): void {
             </span>
         </button>
     {/if}
+    <button
+        class="open-external"
+        type="button"
+        aria-label={t('reader.youtube.watch')}
+        onclick={openOnYouTube}
+        use:tooltip={t('reader.youtube.watch')}
+    >
+        <Icon name="external" size={15} />
+    </button>
 </div>
 
 <style>
@@ -86,6 +105,38 @@ function load(): void {
         height: 100%;
         border: 0;
         display: block;
+    }
+
+    /* Always-present escape hatch: open the video on youtube.com in the OS
+       browser. Guarantees the facade is never a dead click even if the webview
+       blocks the embed (autoplay policy / embedding-origin rejection). */
+    .open-external {
+        position: absolute;
+        top: var(--space-3);
+        right: var(--space-3);
+        z-index: 2;
+        display: inline-grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: var(--radius-md);
+        color: #fff;
+        background: rgb(0 0 0 / 55%);
+        backdrop-filter: blur(4px);
+        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 16%);
+        transition:
+            background var(--dur-fast) var(--ease),
+            transform var(--dur-fast) var(--ease);
+    }
+
+    .open-external:hover {
+        background: rgb(0 0 0 / 72%);
+        transform: scale(1.06);
+    }
+
+    .open-external:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 35%);
     }
 
     .poster {

@@ -287,11 +287,26 @@ tokens:
                     };
                 case 'export_opml':
                     return null;
-                case 'discover_feeds':
+                case 'discover_feeds': {
+                    const query = String(args.url);
+                    // Mirror discovery.rs: a YouTube @handle resolves to its
+                    // channel videos feed.
+                    if (/youtube\.com\/@/.test(query)) {
+                        return {
+                            feeds: [
+                                {
+                                    url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCXuqSBlHAE6Xw-yeJA0Tunw',
+                                    title: 'YouTube Channel',
+                                },
+                            ],
+                            favicon: null,
+                        };
+                    }
                     return {
-                        feeds: [{ url: String(args.url), title: 'Discovered Feed', kind: 'rss' }],
+                        feeds: [{ url: query, title: 'Discovered Feed' }],
                         favicon: null,
                     };
+                }
                 case 'get_cached_image':
                     return String(args.url ?? '');
                 case 'copy_diagnostics_bundle':

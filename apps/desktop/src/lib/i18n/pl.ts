@@ -137,6 +137,18 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemote': 'Użyj usługi favicon Google, gdy witryna nie ma własnej',
     'addFeed.favicon.allowRemoteHint':
         'Domyślnie wyłączone — włączenie tej opcji informuje Google, które witryny przeglądasz.',
+    'presets.title': 'Popularne źródła',
+    'presets.detected': 'Wykryty kanał:',
+    'presets.reddit': 'Reddit',
+    'presets.youtube': 'YouTube',
+    'presets.mastodon': 'Mastodon',
+    'presets.hn': 'Hacker News',
+    'presets.hn.frontpage': 'Strona główna',
+    'presets.hn.newest': 'Najnowsze',
+    'presets.hn.ask': 'Ask HN',
+    'presets.hn.show': 'Show HN',
+    'presets.hn.best': 'Najlepsze komentarze',
+
     'settings.title': 'Ustawienia',
     'settings.tablist.label': 'Sekcje ustawień',
     'settings.section.general': 'Ogólne',

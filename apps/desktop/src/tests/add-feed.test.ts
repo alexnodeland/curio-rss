@@ -145,4 +145,58 @@ describe('AddFeedModal', () => {
             { key: 'ui.favicon.allow-remote', value: 'true' },
         ]);
     });
+
+    it('recognizes an r/ shorthand and subscribes to the built feed with a suggested folder', async () => {
+        harness = installIpcHarness(base());
+        const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose: vi.fn() });
+
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'r/rust' },
+        });
+        // The detection chip shows the constructed feed URL — no discovery needed.
+        expect(getByText('https://www.reddit.com/r/rust/.rss')).toBeTruthy();
+
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+
+        expect(harness.callsFor('discover_feeds')).toHaveLength(0);
+        expect(harness.callsFor('add_feed')).toEqual([
+            {
+                newFeed: {
+                    url: 'https://www.reddit.com/r/rust/.rss',
+                    title: null,
+                    tags: ['Community/Reddit'],
+                },
+            },
+        ]);
+    });
+
+    it('offers Hacker News presets that fill a working feed URL', async () => {
+        harness = installIpcHarness(base());
+        const { getByText, queryByText, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+
+        // The sub-presets are hidden until the HN button is pressed.
+        expect(queryByText('Front page')).toBeNull();
+        await fireEvent.click(getByText('Hacker News'));
+        await fireEvent.click(getByText('Front page'));
+
+        // The preset fills the URL input with the hnrss feed URL directly.
+        expect((getByPlaceholderText('https://example.com') as HTMLInputElement).value).toBe(
+            'https://hnrss.org/frontpage',
+        );
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+
+        expect(harness.callsFor('add_feed')).toEqual([
+            {
+                newFeed: {
+                    url: 'https://hnrss.org/frontpage',
+                    title: null,
+                    tags: ['Community/Hacker News'],
+                },
+            },
+        ]);
+    });
 });

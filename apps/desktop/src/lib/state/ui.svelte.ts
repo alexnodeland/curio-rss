@@ -237,6 +237,16 @@ export class UiStore {
     notifyQuietStart: string = $state('');
     notifyQuietEnd: string = $state('');
 
+    /**
+     * App auto-update prefs. `updatesAutoCheck` (default on) checks the release
+     * feed on launch and surfaces an available update; `updatesAutoInstall`
+     * (default off — the aggressive one) downloads, installs, and relaunches
+     * without asking. Read by the frontend updater flow (see
+     * `lib/utils/updates.ts`). See {@link setUpdatesAutoCheck}.
+     */
+    updatesAutoCheck: boolean = $state(true);
+    updatesAutoInstall: boolean = $state(false);
+
     fontSize: number = $state(TYPOGRAPHY_LIMITS.fontSize.default);
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
     measure: number = $state(TYPOGRAPHY_LIMITS.measure.default);
@@ -477,6 +487,24 @@ export class UiStore {
         await settingsStore.set(SETTING_KEYS.notifyQuietEnd, value);
     }
 
+    /** Adopts persisted app-update prefs at startup. */
+    initUpdates(): void {
+        this.updatesAutoCheck = settingsStore.get(SETTING_KEYS.updatesAutoCheck) !== 'false';
+        this.updatesAutoInstall = settingsStore.get(SETTING_KEYS.updatesAutoInstall) === 'true';
+    }
+
+    /** Sets (and persists) whether to check for updates on launch. */
+    async setUpdatesAutoCheck(value: boolean): Promise<void> {
+        this.updatesAutoCheck = value;
+        await settingsStore.set(SETTING_KEYS.updatesAutoCheck, String(value));
+    }
+
+    /** Sets (and persists) whether to install updates automatically. */
+    async setUpdatesAutoInstall(value: boolean): Promise<void> {
+        this.updatesAutoInstall = value;
+        await settingsStore.set(SETTING_KEYS.updatesAutoInstall, String(value));
+    }
+
     /** Sets the reader font size (px), clamped, and persists it. */
     async setFontSize(px: number): Promise<void> {
         const { min, max } = TYPOGRAPHY_LIMITS.fontSize;
@@ -641,6 +669,8 @@ export class UiStore {
         this.notifyFeedDead = true;
         this.notifyQuietStart = '';
         this.notifyQuietEnd = '';
+        this.updatesAutoCheck = true;
+        this.updatesAutoInstall = false;
         this.themePreference = 'system';
         this.customThemes = [];
         this.sidebarCollapsed = false;

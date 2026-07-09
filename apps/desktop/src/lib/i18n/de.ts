@@ -188,6 +188,20 @@ export const de: Partial<Record<MessageKey, string>> = {
     'settings.refreshInterval.h3': 'Alle 3 Stunden',
     'settings.refreshOnLaunch': 'Beim Start aktualisieren',
     'settings.refreshOnLaunch.hint': 'Alle Feeds einmal beim Start von Curio prüfen.',
+    'settings.updates.version': 'Version {version}',
+    'settings.updates.check': 'Nach Updates suchen',
+    'settings.updates.checking': 'Suche…',
+    'settings.updates.upToDate': 'Curio ist aktuell.',
+    'settings.updates.available': 'Update verfügbar: {version}',
+    'settings.updates.install': 'Installieren und neu starten',
+    'settings.updates.installing': 'Wird heruntergeladen… {percent}%',
+    'settings.updates.error': 'Suche nach Updates fehlgeschlagen.',
+    'settings.updates.autoCheck': 'Automatisch nach Updates suchen',
+    'settings.updates.autoInstall': 'Updates automatisch installieren',
+    'settings.updates.autoInstall.hint':
+        'Lädt Updates im Hintergrund herunter, installiert sie und startet dann neu.',
+    'updates.available':
+        'Curio {version} ist verfügbar — zum Installieren die Einstellungen öffnen.',
     'settings.comingSoon': 'Kommt in einem zukünftigen Update.',
     'settings.customThemes': 'Eigene Themes',
     'settings.customThemes.hint':

@@ -14,6 +14,7 @@ import ThemePicker from '$components/common/ThemePicker.svelte';
 import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
+import UpdatesPanel from '$components/modals/UpdatesPanel.svelte';
 import ReaderPreview from '$components/reader/ReaderPreview.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
 import { LOCALES, type LocaleId, type MessageKey, localeStore, t } from '$lib/i18n';
@@ -187,6 +188,7 @@ function onKeydown(event: KeyboardEvent): void {
                         <span class="toggle-hint">{t('settings.refreshOnLaunch.hint')}</span>
                     </span>
                 </label>
+                <UpdatesPanel />
             </div>
 
             <div

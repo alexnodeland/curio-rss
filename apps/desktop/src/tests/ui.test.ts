@@ -292,6 +292,52 @@ describe('ui store — notification prefs', () => {
     });
 });
 
+describe('ui store — update prefs', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        settingsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('defaults to auto-check on, auto-install off', () => {
+        const ui = new UiStore();
+        expect(ui.updatesAutoCheck).toBe(true);
+        expect(ui.updatesAutoInstall).toBe(false);
+    });
+
+    it('initUpdates adopts persisted values', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => {
+                if (args.key === 'ui.updates.auto-check') return 'false';
+                if (args.key === 'ui.updates.auto-install') return 'true';
+                return null;
+            },
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initUpdates();
+        expect(ui.updatesAutoCheck).toBe(false);
+        expect(ui.updatesAutoInstall).toBe(true);
+    });
+
+    it('the setters persist to the settings table', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new UiStore();
+
+        await ui.setUpdatesAutoCheck(false);
+        await ui.setUpdatesAutoInstall(true);
+        expect(ui.updatesAutoCheck).toBe(false);
+        expect(ui.updatesAutoInstall).toBe(true);
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.updates.auto-check', value: 'false' },
+            { key: 'ui.updates.auto-install', value: 'true' },
+        ]);
+    });
+});
+
 describe('ui store — toasts', () => {
     beforeEach(() => {
         vi.useFakeTimers();

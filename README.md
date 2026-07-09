@@ -6,8 +6,12 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-informational)
 ![Built with](https://img.shields.io/badge/Rust%20%C2%B7%20Tauri%20%C2%B7%20Svelte-555)
 
-> **v0.1.0** — the first public release: a complete local-first desktop
-> reader (macOS). **Website:** <https://alexnodeland.github.io/curio-rss/> ·
+> **v0.2.0** — a big polish-and-power release: right-click menus, folders you
+> create & reorder, tabbed settings, source presets (Reddit / Mastodon /
+> YouTube / Hacker News), background refresh with notifications, native menus &
+> hotkeys, custom themes, and an in-app auto-updater.
+> **Website:** <https://alexnodeland.github.io/curio-rss/> ·
+> Changelog: [CHANGELOG.md](CHANGELOG.md) ·
 > Roadmap: [docs/design/roadmap.md](docs/design/roadmap.md).
 
 ![The Curio reader](site/assets/reader-dark.png)
@@ -40,17 +44,21 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 
 | | |
 |---|---|
-| 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh, health tracking + backoff |
-| 📖 **Read** | Three-pane reader, on-demand full-article readability, mark-on-open, opt-in mark-on-scroll, next-unread across feeds |
+| 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh, **background refresh on launch + a configurable interval**, health tracking + backoff |
+| ➕ **Add anything** | Smart-input add — paste a URL, `r/subreddit`, `@user@instance` (Mastodon), a YouTube channel, or Hacker News; plus a Popular-sources quick-add row |
+| 🗂️ **Organize** | Create / rename / delete folders, drag feeds into folders, drag-reorder, inline rename, keyboard tree navigation, right-click menus, an edit-feed panel (URL visible + health), and a warning dot on any feed whose refresh errored |
+| 📖 **Read** | Three-pane reader, on-demand full-article readability, comfortable/compact list density, inline snippets, mark-on-open, opt-in mark-on-scroll, next-unread across feeds |
 | ⭐ **State** | Read · star · read-later · archive — event-sourced with negation events |
-| 🗂️ **Folders** | `/`-path tags as a nested tree, folder filter, drag-to-reorder, move/rename |
 | 🔎 **Search** | Full-text search over everything (SQLite FTS5) |
 | ↔️ **Import / export** | OPML in/out + Pocket, Instapaper & Readwise CSV importers |
 | 📝 **Save to notes** | Named destinations → markdown notes with a byte-preserved managed region |
-| 🎨 **Appearance** | 9 themes + System, adjustable reading typography, RSS-native Reddit/YouTube layouts |
+| 🎨 **Appearance** | 9 built-in themes + System, **custom themes you export & import as YAML**, live typography preview, RSS-native Reddit layout + **click-to-play YouTube** |
+| 🔔 **Notifications** | Optional desktop notifications on new articles — per-event toggles, quiet hours, per-feed opt-out |
+| 🔄 **Auto-updates** | Built-in "Check for updates" that installs & relaunches; auto-check / auto-install toggles; signed GitHub-release artifacts |
+| ⌨️ **Keyboard & menus** | Native macOS menu bar, ⌘-chord hotkeys, vim-style keys, tooltips, and a help overlay |
 | ♿ **Accessible** | Focus-trapped modals, listbox navigation, live-region toasts, WCAG-AA contrast (gated) |
 | 🌍 **8 languages** | English · Español · Français · Deutsch · Italiano · Polski · 简体中文 · 廣東話 |
-| 🔒 **Private** | No telemetry, no accounts; remote media & favicon fallback are opt-in |
+| 🔒 **Private** | No telemetry, no accounts; a per-host fetch policy (e.g. Reddit) is disclosed in [PRIVACY.md](PRIVACY.md); remote media & favicon fallback are opt-in |
 
 ## How your data flows
 
@@ -89,12 +97,18 @@ Open** (macOS 12–14) or **System Settings → Privacy & Security → Open Anyw
 xattr -dr com.apple.quarantine "/Applications/Curio.app"
 ```
 
+After first launch Curio keeps itself current — **Settings → General → Check
+for updates**, or let it auto-check. Updates are downloaded, signature-verified,
+and installed in place from the GitHub release feed, then relaunch on a click.
+
 Windows and Linux bundles are built nightly and downloadable as CI artifacts,
 but are not a shipped channel yet.
 
 ## Keyboard shortcuts
 
-Curio is keyboard-first — press <kbd>?</kbd> in the app for the always-current list.
+Curio is keyboard-first — press <kbd>?</kbd> in the app for the always-current
+list. A native macOS **menu bar** exposes the same actions (and their
+command-key chords).
 
 | Key | Action | | Key | Action |
 |-----|--------|-|-----|--------|
@@ -103,6 +117,10 @@ Curio is keyboard-first — press <kbd>?</kbd> in the app for the always-current
 | <kbd>m</kbd> | Mark read / unread | | <kbd>a</kbd> | Archive |
 | <kbd>o</kbd> | Open in browser | | <kbd>p</kbd> | Save to notes |
 | <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
+
+macOS command chords (also in the menu bar):
+<kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·
+<kbd>⌘1</kbd>–<kbd>⌘4</kbd> All / Starred / Read-later / Archived.
 
 ## Importers
 

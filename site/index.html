@@ -69,24 +69,36 @@
                         <p>Save any article to your own directories as markdown with typed YAML frontmatter — a byte-preserved managed region means your edits are never clobbered on re-export.</p>
                     </div>
                     <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg></span>Add anything</h3>
+                        <p>Paste a URL, an <code>r/subreddit</code>, an <code>@user@instance</code> Mastodon handle, a YouTube channel or Hacker News — Curio detects the feed. A Popular-sources row gets you started in one click.</p>
+                    </div>
+                    <div class="card">
                         <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 8l9-5 9 5"/></svg></span>Folders &amp; a real reading flow</h3>
-                        <p>Nested folders, drag-to-reorder, full-text search, star / read-later / archive, on-demand full-article readability, and next-unread navigation across feeds.</p>
+                        <p>Create, rename and reorder folders and drag feeds into them; right-click menus and keyboard tree navigation everywhere; comfortable/compact density, inline snippets, on-demand readability, and next-unread across feeds.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 11-2.6-6.4M21 4v5h-5"/></svg></span>Always fresh</h3>
+                        <p>Curio refreshes your feeds on launch and on a schedule you set (off, 15, 30, 60 or 180 min), and can post a native desktop notification when new items land — with per-event toggles, quiet hours and per-feed opt-out.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span>Updates itself</h3>
+                        <p>A built-in updater checks for new releases, downloads and verifies them, installs in place and relaunches on a click — with auto-check / auto-install toggles. Updates are signed GitHub-release artifacts.</p>
                     </div>
                     <div class="card">
                         <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"/></svg></span>Bring your library</h3>
                         <p>Import from OPML, plus Pocket, Instapaper and Readwise CSV exports — saved articles arrive as read-later items with their tags intact.</p>
                     </div>
                     <div class="card">
-                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20"/></svg></span>Private by default</h3>
-                        <p>No telemetry, no accounts, no phone-home. Remote media and favicon fallbacks are opt-in. An append-only event log stays under <code>.curio/</code>, never committed to git.</p>
-                    </div>
-                    <div class="card">
-                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>Nine themes, eight languages</h3>
-                        <p>System / Light / Dark plus six editorial palettes, adjustable reading typography, and a fully translated UI in eight locales — with WCAG-AA contrast on every theme.</p>
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>Themes, made yours</h3>
+                        <p>System / Light / Dark plus six editorial palettes — or craft your own theme and share it as YAML. Tabbed settings, a live typography preview, and a fully translated UI in eight locales, all at WCAG-AA contrast.</p>
                     </div>
                     <div class="card">
                         <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3H5a2 2 0 00-2 2v4M15 3h4a2 2 0 012 2v4M9 21H5a2 2 0 01-2-2v-4M15 21h4a2 2 0 002-2v-4"/></svg></span>Keyboard-first &amp; accessible</h3>
-                        <p>Full keyboard control, a focus-trapped modal system, a listbox article list with roving selection, live-region toasts, and a labelled reader toolbar.</p>
+                        <p>A native macOS menu bar with ⌘-chord hotkeys, full vim-style keyboard control, right-click context menus and tooltips, a focus-trapped modal system, live-region toasts and WCAG-AA contrast.</p>
+                    </div>
+                    <div class="card">
+                        <h3><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20"/></svg></span>Private by default</h3>
+                        <p>No telemetry, no accounts, no phone-home. Remote media and favicon fallbacks are opt-in, notifications are local, and an append-only event log stays under <code>.curio/</code>, never committed to git.</p>
                     </div>
                 </div>
             </div>
@@ -137,8 +149,10 @@ flowchart LR
                         <h2>Make it yours</h2>
                         <p>
                             Nine themes from clean Light/Dark to Nord, Catppuccin, Dracula, Gruvbox,
-                            Tokyo Night and Solarized. Tune the reading column — font, size, line
-                            height and measure — and pick your interface language.
+                            Tokyo Night and Solarized — or craft your own and share it as YAML. Tune
+                            the reading column with a live preview, and pick your interface language.
+                            Settings are organized into tabs — General, Appearance, Reading,
+                            Notifications, Media &amp; Privacy, Data and Advanced.
                         </p>
                         <div class="chips">
                             <span class="chip">English</span>
@@ -151,7 +165,7 @@ flowchart LR
                             <span class="chip">廣東話</span>
                         </div>
                     </div>
-                    <img src="assets/settings-themes.png" alt="Curio settings showing the nine-theme picker, language selector and reading-typography controls." />
+                    <img src="assets/settings-themes.png" alt="Curio's tabbed Settings on the Appearance tab — a left rail of tabs (General, Appearance, Reading, Notifications, Media & Privacy, Data, Advanced) beside the theme picker and language selector." />
                 </div>
             </div>
         </section>
@@ -168,6 +182,24 @@ flowchart LR
                         </p>
                     </div>
                     <img src="assets/reader-light.png" alt="The Curio reader in the Solarized Light theme." />
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="wrap">
+                <div class="split">
+                    <div class="copy">
+                        <h2>Set it and forget it</h2>
+                        <p>
+                            Curio refreshes on launch and on the schedule you set, and keeps
+                            itself up to date — a built-in updater checks the GitHub release
+                            feed and installs new versions in place, signature-verified, then
+                            relaunches on a click. Auto-check and auto-install are yours to
+                            toggle.
+                        </p>
+                    </div>
+                    <img src="assets/settings-general.png" alt="Curio's General settings — language, a refresh interval, refresh-on-launch, the running version with a Check for updates button, and auto-check / auto-install toggles." />
                 </div>
             </div>
         </section>
@@ -190,6 +222,7 @@ flowchart LR
                     (macOS 15+), or clear quarantine:
                 </p>
                 <div class="codeblock">xattr -dr com.apple.quarantine "/Applications/Curio.app"</div>
+                <p style="margin-top:22px"><strong>Auto-updates</strong> — after first launch Curio keeps itself current. It checks the GitHub release feed and can download, verify and install a new version in place, then relaunch on a click; auto-check and auto-install are toggles in <strong>Settings → General</strong>. (The updater verifies signed release artifacts; the initial download is still unsigned — see above.)</p>
                 <p class="note" style="margin-top:16px">Windows and Linux bundles are built nightly and downloadable as CI artifacts, but are not a shipped channel yet.</p>
             </div>
         </section>
@@ -213,8 +246,11 @@ flowchart LR
                             <tr><td><span class="kbd">p</span></td><td>Save to a notes destination</td></tr>
                             <tr><td><span class="kbd">g</span> then <span class="kbd">a/s/l/e</span></td><td>Go to All / Starred / Read-later / Archived</td></tr>
                             <tr><td><span class="kbd">?</span></td><td>Keyboard reference</td></tr>
+                            <tr><td><span class="kbd">⌘N</span> · <span class="kbd">⌘R</span></td><td>Add feed · Refresh all</td></tr>
+                            <tr><td><span class="kbd">⌘,</span> · <span class="kbd">⌘1</span>–<span class="kbd">⌘4</span></td><td>Settings · All / Starred / Read-later / Archived</td></tr>
                         </tbody>
                     </table>
+                    <p class="note" style="margin-top:12px">A native macOS menu bar exposes the same actions and their command-key chords.</p>
                 </div>
 
                 <div class="section-head" style="margin-top:56px">

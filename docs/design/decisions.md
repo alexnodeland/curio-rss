@@ -88,6 +88,13 @@ client (one hung feed wedged the app) and clobbered `etag`/`last_modified` on an
 streaming size caps, timeouts, conditional-GET state preserved on error). The per-feed
 `allow_private_network` allowlist (contract W1) is the only exemption, config-edit only.
 
+**v0.2 extension — per-host fetch policy.** Some hosts fingerprint-block the honest
+`curio` UA + rustls TLS. The `PolicedClient` gained a built-in per-host override (matched
+by host suffix): `reddit.com` gets a browser-class UA, the platform-native TLS stack, and
+a 2s politeness delay, so subreddit `.rss` feeds fetch. This stays RSS-native (not the
+ruled-out Reddit-JSON enrichment of D8), is hard-coded in the engine (not a `curio.toml`
+knob), and every UA/delay class is disclosed in PRIVACY.md.
+
 ## D8. yt-dlp: never bundled — and enrichment out of v1
 
 The sketch committed an unverified 33MB single-platform yt-dlp binary to git, downloaded
@@ -152,6 +159,13 @@ Curio); reverse-DNS identifier replacing the malformed near-immutable
 history purged of >1MB blobs while private (done); updater minisign keypair generated
 offline with a written custody/rotation plan; zero telemetry with PRIVACY.md enumerating
 every network-call class; Google favicon fallback strictly opt-in.
+
+**Shipped in v0.2.0 — the in-app updater.** That minisign keypair now backs a live
+Tauri-updater flow: the release workflow signs `Curio.app.tar.gz` and publishes a
+`latest.json` (both darwin arch keys → one universal tar), and the app checks / installs /
+relaunches from the signed GitHub-release feed, with auto-check / auto-install toggles in
+Settings. App distribution itself stays Apple-unsigned by design (Gatekeeper
+right-click-open); the minisign updater key is orthogonal to Apple notarization.
 
 ## D13. Grafts adopted from the losing designs
 

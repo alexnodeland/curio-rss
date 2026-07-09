@@ -111,6 +111,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'help.title': 'Scorciatoie da tastiera',
     'help.close': 'Chiudi',
     'help.chord.then': 'poi',
+    'help.footer':
+        'Fai clic destro su feed e articoli per altre azioni. I comandi di menu come ⌘N e ⌘R sono nella barra dei menu.',
     'modal.close': 'Chiudi',
     'toolbar.addFeed': 'Aggiungi feed',
     'toolbar.refreshAll': 'Aggiorna tutti i feed',

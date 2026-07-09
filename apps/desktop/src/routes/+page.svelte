@@ -22,6 +22,8 @@ import { t } from '$lib/i18n';
 import { createMatcher, shouldIgnoreKeyEvent } from '$lib/keyboard/registry';
 import { handleShortcut } from '$lib/state/actions';
 import { menuStore } from '$lib/state/menu.svelte';
+import { searchStore } from '$lib/state/search.svelte';
+import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 
 const matcher = createMatcher();
@@ -46,6 +48,20 @@ function onKeydown(event: KeyboardEvent): void {
         if (event.key === 'Escape' || dismissesHelp) {
             event.preventDefault();
             uiStore.closeModal();
+        }
+        matcher.reset();
+        return;
+    }
+    if (event.key === 'Escape') {
+        // Menu + modal Escape are handled above; here Escape steps back through
+        // the shell so it is never a no-op — clear an active search, else
+        // deselect the open article.
+        if (searchStore.active) {
+            event.preventDefault();
+            searchStore.clear();
+        } else if (selectionStore.selectedArticleId !== null) {
+            event.preventDefault();
+            selectionStore.selectedArticleId = null;
         }
         matcher.reset();
         return;

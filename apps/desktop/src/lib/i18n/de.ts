@@ -112,6 +112,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'help.title': 'Tastenkürzel',
     'help.close': 'Schließen',
     'help.chord.then': 'dann',
+    'help.footer':
+        'Rechtsklick auf Feeds und Artikel für weitere Aktionen. Menübefehle wie ⌘N und ⌘R sind in der Menüleiste.',
     'modal.close': 'Schließen',
     'toolbar.addFeed': 'Feed hinzufügen',
     'toolbar.refreshAll': 'Alle Feeds aktualisieren',

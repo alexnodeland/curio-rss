@@ -123,6 +123,8 @@ export const en = {
     'help.title': 'Keyboard shortcuts',
     'help.close': 'Close',
     'help.chord.then': 'then',
+    'help.footer':
+        'Right-click feeds and articles for more actions. Menu commands like ⌘N and ⌘R are in the menu bar.',
 
     'modal.close': 'Close',
 

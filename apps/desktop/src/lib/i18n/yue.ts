@@ -113,6 +113,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'help.title': '鍵盤快捷鍵',
     'help.close': '閂',
     'help.chord.then': '跟住',
+    'help.footer': '右擊訂閱源同文章有更多操作。⌘N、⌘R 等選單指令喺選單列度。',
     'modal.close': '閂',
     'toolbar.addFeed': '加訂閱源',
     'toolbar.refreshAll': '更新全部訂閱源',

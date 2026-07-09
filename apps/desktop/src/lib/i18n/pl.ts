@@ -113,6 +113,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'help.title': 'Skróty klawiszowe',
     'help.close': 'Zamknij',
     'help.chord.then': 'następnie',
+    'help.footer':
+        'Kliknij prawym przyciskiem kanały i artykuły, aby uzyskać więcej akcji. Polecenia menu, takie jak ⌘N i ⌘R, znajdują się na pasku menu.',
     'modal.close': 'Zamknij',
     'toolbar.addFeed': 'Dodaj kanał',
     'toolbar.refreshAll': 'Odśwież wszystkie kanały',

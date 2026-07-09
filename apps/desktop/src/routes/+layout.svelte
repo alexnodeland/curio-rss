@@ -2,6 +2,7 @@
 import '../app.css';
 import { onMount } from 'svelte';
 import { localeStore } from '$lib/i18n';
+import { wireMenuActions } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { wireInvalidation } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
@@ -34,6 +35,7 @@ onMount(() => {
         const unsubscribers = await Promise.all([
             wireInvalidation(),
             feedsStore.wireRefreshEvents(),
+            wireMenuActions(),
         ]);
         if (unmounted) {
             for (const unsubscribe of unsubscribers) {

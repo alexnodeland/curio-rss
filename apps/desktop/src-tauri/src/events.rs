@@ -43,6 +43,17 @@ pub struct RefreshFinished {
     pub outcomes: Vec<RefreshOutcomeDto>,
 }
 
+/// A native menu item was chosen — the head emits its id and the frontend
+/// routes it through the same action layer as a keyboard shortcut (so the
+/// menu, shortcuts, and toolbars stay one source of behavior). `id` is a
+/// [`crate::menu`] item id: a `ShortcutId` (e.g. `app.addFeed`) or a
+/// menu-only id (`menu.docs`, `menu.reportIssue`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+pub struct MenuAction {
+    /// The chosen item's id.
+    pub id: String,
+}
+
 /// Emits an event, logging (never failing the command) on error — a
 /// missed invalidation degrades freshness, not correctness.
 pub(crate) fn emit_or_log<E>(app: &tauri::AppHandle, event: &E)

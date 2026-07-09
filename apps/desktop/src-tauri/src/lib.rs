@@ -20,6 +20,7 @@ pub mod events;
 pub mod image_cache;
 pub mod ipc_policy;
 pub mod logging;
+pub mod menu;
 pub mod paths;
 pub mod refresh_scheduler;
 
@@ -114,6 +115,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::ArticlesChanged,
             events::RefreshProgress,
             events::RefreshFinished,
+            events::MenuAction,
         ])
 }
 
@@ -133,6 +135,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(builder.invoke_handler())
+        .menu(menu::build)
+        .on_menu_event(menu::on_event)
         .setup(move |app| {
             builder.mount_events(app);
 

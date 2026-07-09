@@ -111,6 +111,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'help.title': 'Atajos de teclado',
     'help.close': 'Cerrar',
     'help.chord.then': 'luego',
+    'help.footer':
+        'Haz clic derecho en fuentes y artículos para más acciones. Los comandos de menú como ⌘N y ⌘R están en la barra de menú.',
     'modal.close': 'Cerrar',
     'toolbar.addFeed': 'Añadir feed',
     'toolbar.refreshAll': 'Actualizar todos los feeds',

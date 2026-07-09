@@ -47,6 +47,7 @@ function shortcutsIn(category: ShortcutCategory) {
             </ul>
         </section>
     {/each}
+    <p class="help-footer">{t('help.footer')}</p>
 </Modal>
 
 <style>
@@ -98,5 +99,14 @@ function shortcutsIn(category: ShortcutCategory) {
     .description {
         font-size: var(--text-md);
         color: var(--fg);
+    }
+
+    .help-footer {
+        margin-top: var(--space-4);
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--hairline);
+        font-size: var(--text-sm);
+        color: var(--fg-subtle);
+        line-height: 1.5;
     }
 </style>

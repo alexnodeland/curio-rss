@@ -6,9 +6,9 @@
  * Toggles read the authoritative flag first (`get_article_state`), then
  * write the flip; core's idempotency `bool` makes double-fires harmless.
  */
-import { type CommandError, commands } from '$lib/bindings';
+import { events, type CommandError, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
-import type { ShortcutId } from '$lib/keyboard/registry';
+import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { isOpenableUrl, openExternal } from '$lib/utils/external';
 import {
@@ -360,4 +360,33 @@ export function handleShortcut(id: ShortcutId): void {
         default:
             break;
     }
+}
+
+/** The public docs site + issue tracker, opened from the Help menu. */
+const DOCS_URL = 'https://alexnodeland.github.io/curio-rss/';
+const ISSUES_URL = 'https://github.com/alexnodeland/curio-rss/issues/new';
+const SHORTCUT_IDS: ReadonlySet<string> = new Set(SHORTCUTS.map((shortcut) => shortcut.id));
+
+/**
+ * Runs a native-menu item id through the same action layer as a keyboard
+ * shortcut: a `ShortcutId` runs `handleShortcut`; the two menu-only ids open
+ * the docs / issue tracker; anything else (predefined native items like
+ * copy/paste) is ignored.
+ */
+export function routeMenuAction(id: string): void {
+    if (id === 'menu.docs') {
+        void openExternal(DOCS_URL);
+    } else if (id === 'menu.reportIssue') {
+        void openExternal(ISSUES_URL);
+    } else if (SHORTCUT_IDS.has(id)) {
+        handleShortcut(id as ShortcutId);
+    }
+}
+
+/**
+ * Subscribes to the Rust `MenuAction` event and routes each click through
+ * {@link routeMenuAction}. Returns an unsubscribe for teardown.
+ */
+export async function wireMenuActions(): Promise<() => void> {
+    return events.menuAction.listen((event) => routeMenuAction(event.payload.id));
 }

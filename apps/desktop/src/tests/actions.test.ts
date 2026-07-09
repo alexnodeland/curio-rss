@@ -9,6 +9,7 @@ import {
     activeView,
     goToNextUnread,
     handleShortcut,
+    importFromFile,
     openInBrowser,
     routeMenuAction,
     selectFolder,
@@ -262,5 +263,53 @@ describe('actions — views and shortcut routing', () => {
         routeMenuAction('quit');
         expect(uiStore.activeModal).toBeNull();
         expect(harness.calls).toHaveLength(0);
+    });
+});
+
+describe('actions — importFromFile', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        uiStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('imports the picked file and toasts the outcome', async () => {
+        harness = installIpcHarness({
+            pick_import_file: { token: 'tok-1' },
+            import_file: {
+                feeds_added: 3,
+                articles_added: 10,
+                feeds_skipped: 1,
+                articles_skipped: 0,
+            },
+        });
+        await importFromFile('opml');
+
+        expect(harness.callsFor('import_file')).toEqual([{ pathToken: 'tok-1', source: 'opml' }]);
+        expect(uiStore.toasts).toHaveLength(1);
+        expect(uiStore.toasts[0]?.tone).toBe('success');
+    });
+
+    it('a cancelled picker toasts politely and never imports', async () => {
+        harness = installIpcHarness({ pick_import_file: null, import_file: null });
+        await importFromFile('opml');
+
+        expect(harness.callsFor('import_file')).toHaveLength(0);
+        expect(uiStore.toasts).toHaveLength(1);
+        expect(uiStore.toasts[0]?.tone).toBe('info');
+    });
+
+    it('a picker failure surfaces an error toast and never imports', async () => {
+        harness = installIpcHarness({
+            pick_import_file: rejectWith(commandErrorFixture({ kind: 'user', message: 'denied' })),
+            import_file: null,
+        });
+        await importFromFile('opml');
+
+        expect(harness.callsFor('import_file')).toHaveLength(0);
+        expect(uiStore.toasts).toHaveLength(1);
+        expect(uiStore.toasts[0]?.tone).toBe('error');
     });
 });

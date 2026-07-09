@@ -151,6 +151,7 @@ export function articleSummaryFixture(
         word_count: 250,
         lang: 'en',
         image: null,
+        snippet: 'A short preview of the article body.',
         ...overrides,
     };
 }

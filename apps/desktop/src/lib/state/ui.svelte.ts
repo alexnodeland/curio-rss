@@ -78,6 +78,12 @@ export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'edi
 /** Which section the edit-feed modal opens focused on. */
 export type EditFeedSection = 'details' | 'health';
 
+/** List row density: `comfortable` shows a body preview + thumbnail; `compact` is a tighter, text-only row. */
+export type ReadingDensity = 'comfortable' | 'compact';
+
+/** The default list density. */
+export const READING_DENSITY_DEFAULT: ReadingDensity = 'comfortable';
+
 /** Default background-refresh cadence (minutes) when the setting is unset. */
 export const REFRESH_INTERVAL_DEFAULT = 30;
 /** The cadences offered in Settings → General (minutes; `0` = off). */
@@ -187,11 +193,26 @@ export class UiStore {
     mediaPrefetch: boolean = $state(false);
 
     /**
+     * Session flag (not persisted): the reader's "images are off in this
+     * article" hint has been dismissed. Reappears next launch, so a user who
+     * keeps media off isn't permanently nagged but is reminded occasionally.
+     */
+    mediaHintDismissed: boolean = $state(false);
+
+    /**
      * Mark articles read as they scroll up out of the list viewport. Off by
      * default — reading is deliberate, not incidental; on, the unread count
      * melts away as you skim past, the way a river reader expects.
      */
     markOnScroll: boolean = $state(false);
+
+    /**
+     * List row density. `comfortable` (default) gives each row a body-text
+     * preview and thumbnail; `compact` drops both for a tighter, text-only
+     * row. Drives the virtualizer's fixed row height, so the whole list
+     * switches heights together. See {@link setReadingDensity}.
+     */
+    readingDensity: ReadingDensity = $state(READING_DENSITY_DEFAULT);
 
     /**
      * Background-refresh cadence in minutes (`0` = off); the Rust scheduler
@@ -332,6 +353,10 @@ export class UiStore {
         this.allowRemoteFavicon = settingsStore.get(SETTING_KEYS.faviconAllowRemote) === 'true';
         this.mediaPrefetch = settingsStore.get(SETTING_KEYS.mediaPrefetch) === 'true';
         this.markOnScroll = settingsStore.get(SETTING_KEYS.markOnScroll) === 'true';
+        this.readingDensity =
+            settingsStore.get(SETTING_KEYS.readingDensity) === 'compact'
+                ? 'compact'
+                : 'comfortable';
     }
 
     /** Sets (and persists) the Google-favicon-fallback opt-in. */
@@ -346,10 +371,21 @@ export class UiStore {
         await settingsStore.set(SETTING_KEYS.mediaPrefetch, String(value));
     }
 
+    /** Hides the reader's "images are off" hint for the rest of the session. */
+    dismissMediaHint(): void {
+        this.mediaHintDismissed = true;
+    }
+
     /** Sets (and persists) the mark-as-read-on-scroll opt-in. */
     async setMarkOnScroll(value: boolean): Promise<void> {
         this.markOnScroll = value;
         await settingsStore.set(SETTING_KEYS.markOnScroll, String(value));
+    }
+
+    /** Sets (and persists) the list row density. */
+    async setReadingDensity(value: ReadingDensity): Promise<void> {
+        this.readingDensity = value;
+        await settingsStore.set(SETTING_KEYS.readingDensity, value);
     }
 
     /** Adopts persisted background-refresh prefs at startup. */
@@ -529,7 +565,9 @@ export class UiStore {
         this.editFeedSection = 'details';
         this.allowRemoteFavicon = false;
         this.mediaPrefetch = false;
+        this.mediaHintDismissed = false;
         this.markOnScroll = false;
+        this.readingDensity = READING_DENSITY_DEFAULT;
         this.refreshIntervalMinutes = REFRESH_INTERVAL_DEFAULT;
         this.refreshOnLaunch = true;
         this.themePreference = 'system';

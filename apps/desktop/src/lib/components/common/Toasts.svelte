@@ -8,6 +8,25 @@
 import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { uiStore } from '$lib/state/ui.svelte';
+import { fly } from 'svelte/transition';
+
+/**
+ * True when motion should be suppressed: the OS asks for reduced motion, or
+ * the `prefers-reduced-motion` query is unavailable (e.g. jsdom in tests) —
+ * in which case the leave is instant. The packaged webview always has the
+ * query, so real users only lose the animation when they ask to.
+ */
+function reducedMotion(): boolean {
+    return (
+        typeof window === 'undefined' ||
+        typeof window.matchMedia !== 'function' ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+}
+
+// The leave transition (the entry stays a CSS keyframe, already collapsed by
+// the global reduced-motion rule). Read once at mount, like the theme probe.
+const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
 </script>
 
 <div class="toasts">
@@ -15,6 +34,7 @@ import { uiStore } from '$lib/state/ui.svelte';
         <div
             class="toast toast-{toast.tone}"
             role={toast.tone === 'error' ? 'alert' : 'status'}
+            out:fly={leave}
         >
             <span class="toast-message">{toast.message}</span>
             <button

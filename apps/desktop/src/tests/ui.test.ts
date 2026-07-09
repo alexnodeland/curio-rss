@@ -166,6 +166,60 @@ describe('ui store — background refresh', () => {
     });
 });
 
+describe('ui store — reading density', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        settingsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('defaults to comfortable', () => {
+        expect(new UiStore().readingDensity).toBe('comfortable');
+    });
+
+    it('initReading adopts a persisted compact preference', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => (args.key === 'ui.reading.density' ? 'compact' : null),
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initReading();
+        expect(ui.readingDensity).toBe('compact');
+    });
+
+    it('initReading falls back to comfortable for an unknown value', async () => {
+        harness = installIpcHarness({
+            get_setting: (args) => (args.key === 'ui.reading.density' ? 'weird' : null),
+        });
+        await settingsStore.load();
+
+        const ui = new UiStore();
+        ui.initReading();
+        expect(ui.readingDensity).toBe('comfortable');
+    });
+
+    it('setReadingDensity persists the chosen density', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new UiStore();
+
+        await ui.setReadingDensity('compact');
+        expect(ui.readingDensity).toBe('compact');
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.reading.density', value: 'compact' },
+        ]);
+    });
+
+    it('the media-hint dismissal is a one-shot session flag', () => {
+        const ui = new UiStore();
+        expect(ui.mediaHintDismissed).toBe(false);
+        ui.dismissMediaHint();
+        expect(ui.mediaHintDismissed).toBe(true);
+    });
+});
+
 describe('ui store — toasts', () => {
     beforeEach(() => {
         vi.useFakeTimers();

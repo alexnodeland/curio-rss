@@ -6,7 +6,7 @@
  * Toggles read the authoritative flag first (`get_article_state`), then
  * write the flip; core's idempotency `bool` makes double-fires harmless.
  */
-import { events, type CommandError, commands } from '$lib/bindings';
+import { events, type CommandError, type ImportSourceDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
@@ -143,6 +143,43 @@ export async function openInBrowser(articleId: number, url: string): Promise<voi
         return;
     }
     await run(() => commands.recordOpened(articleId, null));
+}
+
+/**
+ * Runs the native import flow (OPML by default): a Rust-side file picker
+ * returns an opaque PathToken, the chosen source's parser ingests it, and
+ * the outcome is toasted. Invalidation rides the Rust-emitted events, so the
+ * list and sidebar refresh on their own. Shared by the Settings import panel
+ * and the new-user empty state.
+ */
+export async function importFromFile(source: ImportSourceDto = 'opml'): Promise<void> {
+    try {
+        const picked = await commands.pickImportFile();
+        if (picked.status === 'error') {
+            toastCommandError(picked.error);
+            return;
+        }
+        if (picked.data === null) {
+            uiStore.showToast(t('opml.cancelled'), 'info');
+            return;
+        }
+        const result = await commands.importFile(picked.data.token, source);
+        if (result.status === 'error') {
+            toastCommandError(result.error);
+            return;
+        }
+        const { feeds_added, articles_added, feeds_skipped, articles_skipped } = result.data;
+        uiStore.showToast(
+            t('import.done', {
+                feeds: feeds_added,
+                articles: articles_added,
+                skipped: feeds_skipped + articles_skipped,
+            }),
+            'success',
+        );
+    } catch {
+        uiStore.showToast(t('app.error.internal'), 'error');
+    }
 }
 
 /** The sidebar's built-in views over the backend-owned filters. */

@@ -43,6 +43,7 @@ function articleSummary(id: number): ArticleSummaryDto {
         word_count: 100,
         lang: 'en',
         image: null,
+        snippet: null,
     };
 }
 

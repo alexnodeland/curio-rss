@@ -24,6 +24,7 @@ export const SETTING_KEYS = {
     homeReddit: 'ui.home.reddit',
     mediaPrefetch: 'ui.media.prefetch',
     markOnScroll: 'ui.reading.mark-on-scroll',
+    readingDensity: 'ui.reading.density',
     locale: 'ui.locale',
     customThemes: 'ui.themes.custom',
     collapsedFolders: 'ui.sidebar.collapsed-folders',

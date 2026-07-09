@@ -41,6 +41,8 @@ function selectArticle(articleId: number): void {
                 <ArticleRow
                     {article}
                     {index}
+                    rowHeight={ROW_HEIGHT}
+                    compact={false}
                     setsize={searchStore.results.length}
                     selected={article.id === selectionStore.selectedArticleId}
                     onselect={selectArticle}

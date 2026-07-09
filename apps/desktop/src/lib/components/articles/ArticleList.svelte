@@ -1,6 +1,18 @@
 <script lang="ts" module>
-/** Fixed virtualizer row height in px — ArticleRow's CSS height matches. */
-export const ROW_HEIGHT = 84;
+import type { ReadingDensity } from '$lib/state/ui.svelte';
+
+/**
+ * Fixed virtualizer row height in px per density. The row applies the same
+ * number as an inline height, so the CSS and the windowing math share one
+ * source and cannot drift.
+ */
+export const ROW_HEIGHTS: Record<ReadingDensity, number> = {
+    comfortable: 84,
+    compact: 56,
+};
+
+/** The comfortable height — the fixed row height where density isn't varied (e.g. search). */
+export const ROW_HEIGHT = ROW_HEIGHTS.comfortable;
 </script>
 
 <script lang="ts">
@@ -17,9 +29,13 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import Skeleton from '$components/common/Skeleton.svelte';
 import { untrack } from 'svelte';
 import ArticleRow, { articleOptionId } from './ArticleRow.svelte';
 import VirtualList from './VirtualList.svelte';
+
+/** How many placeholder rows the loading skeleton sketches. */
+const SKELETON_ROWS = Array.from({ length: 8 }, (_, index) => index);
 
 // Rows resolve feed titles — prime the feed queries outside the template.
 untrack(() => feedsStore.prime());
@@ -33,6 +49,10 @@ untrack(() => feedsStore.prime());
 const list = $derived(articlesStore.current);
 
 const listError = $derived(list.error === null ? '' : commandErrorMessage(list.error));
+
+/** Row density → the fixed row height and the compact-layout flag. */
+const rowHeight = $derived(ROW_HEIGHTS[uiStore.readingDensity]);
+const compact = $derived(uiStore.readingDensity === 'compact');
 
 /** The listbox's active option: the selected row, when one is selected. */
 const activeDescendantId = $derived(
@@ -100,13 +120,29 @@ function onScrollPast(firstVisibleIndex: number): void {
     {#if list.error !== null}
         <p class="list-status error" role="alert">{listError}</p>
     {:else if !list.loaded}
-        <p class="list-status">{t('list.loading')}</p>
+        <div class="list-skeleton" aria-hidden="true">
+            {#each SKELETON_ROWS as index (index)}
+                <div class="skeleton-row" style="height: {rowHeight}px">
+                    <div class="skeleton-row-main">
+                        <Skeleton width="65%" height="0.9rem" />
+                        {#if !compact}
+                            <Skeleton width="92%" height="0.75rem" />
+                        {/if}
+                        <Skeleton width="35%" height="0.7rem" />
+                    </div>
+                    {#if !compact}
+                        <Skeleton width="52px" height="52px" radius="var(--radius-md)" />
+                    {/if}
+                </div>
+            {/each}
+        </div>
+        <span class="sr-only">{t('list.loading')}</span>
     {:else if list.items.length === 0}
         <p class="list-status">{t('list.empty')}</p>
     {:else}
         <VirtualList
             items={list.items}
-            rowHeight={ROW_HEIGHT}
+            {rowHeight}
             key={(article) => article.id}
             selectedIndex={selectionStore.selectedIndex}
             label={t('list.label')}
@@ -119,6 +155,8 @@ function onScrollPast(firstVisibleIndex: number): void {
                 <ArticleRow
                     {article}
                     {index}
+                    {rowHeight}
+                    {compact}
                     setsize={list.items.length}
                     selected={article.id === selectionStore.selectedArticleId}
                     onselect={selectArticle}
@@ -145,5 +183,26 @@ function onScrollPast(firstVisibleIndex: number): void {
 
     .list-status.error {
         color: var(--error);
+    }
+
+    .list-skeleton {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .skeleton-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 0 var(--space-4);
+        margin: 0 var(--space-2);
+    }
+
+    .skeleton-row-main {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
     }
 </style>

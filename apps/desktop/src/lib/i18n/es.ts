@@ -14,6 +14,10 @@ export const es: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Saltar al contenido',
     'shell.feeds.loading': 'Cargando suscripciones…',
     'shell.feeds.empty': 'Aún no hay suscripciones',
+    'emptyState.hint':
+        'Suscríbete a un feed para empezar a leer, o trae tus suscripciones desde otro lector.',
+    'emptyState.addFeed': 'Añade tu primer feed',
+    'emptyState.importOpml': 'Importar OPML…',
     'shell.feeds.count': '{count} feeds',
     'shell.unread.count': '{count} sin leer',
     'view.all': 'Todos los artículos',
@@ -55,6 +59,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'list.row.unread': 'Sin leer',
     'list.row.starred': 'Destacado',
     'reader.empty': 'Selecciona un artículo para leer',
+    'reader.imagesOff': 'Las imágenes están desactivadas en este artículo.',
+    'reader.imagesOff.enable': 'Activar',
     'reader.missing': 'Este artículo ya no existe',
     'reader.toolbar': 'Acciones del artículo',
     'reader.action.markRead': 'Marcar como leído',
@@ -186,6 +192,11 @@ export const es: Partial<Record<MessageKey, string>> = {
     'settings.markOnScroll': 'Marcar como leído al desplazar',
     'settings.markOnScroll.hint':
         'A medida que los artículos salen de la lista al desplazar, márcalos como leídos automáticamente. Desactivado por defecto: tu contador de no leídos solo cambia cuando tú lo decides.',
+    'settings.density': 'Densidad de la lista',
+    'settings.density.hint':
+        'Cómoda muestra una línea de vista previa y una miniatura en cada fila; compacta muestra más filas en pantalla.',
+    'settings.density.comfortable': 'Cómoda',
+    'settings.density.compact': 'Compacta',
     'settings.section.media': 'Multimedia',
     'settings.media.prefetch': 'Cargar multimedia remota',
     'settings.media.prefetch.hint':

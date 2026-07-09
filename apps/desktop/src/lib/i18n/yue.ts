@@ -298,6 +298,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'editFeed.title': '編輯訂閱源',
     'editFeed.section.details': '詳細資料',
     'editFeed.section.health': '狀況',
+    'editFeed.notify': '通知我呢個訂閱源',
     'editFeed.url.label': '訂閱源網址',
     'editFeed.url.copy': '複製',
     'editFeed.url.copied': '已複製訂閱源網址',

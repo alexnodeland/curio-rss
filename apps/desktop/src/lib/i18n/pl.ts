@@ -309,6 +309,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'editFeed.title': 'Edytuj kanał',
     'editFeed.section.details': 'Szczegóły',
     'editFeed.section.health': 'Kondycja',
+    'editFeed.notify': 'Powiadamiaj mnie o tym kanale',
     'editFeed.url.label': 'Adres URL kanału',
     'editFeed.url.copy': 'Kopiuj',
     'editFeed.url.copied': 'Skopiowano adres URL kanału',

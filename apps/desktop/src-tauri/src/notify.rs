@@ -14,6 +14,8 @@
 //! `"HH:MM"` window. The notification body is English — like the native menu, an
 //! OS surface outside the in-app i18n layer.
 
+use std::collections::HashSet;
+
 use chrono::{Local, NaiveTime};
 use curio_core::CoreHandle;
 use tauri::{AppHandle, Manager as _};
@@ -28,6 +30,7 @@ const ERRORS_KEY: &str = "ui.notify.errors";
 const FEED_DEAD_KEY: &str = "ui.notify.feed-dead";
 const QUIET_START_KEY: &str = "ui.notify.quiet-start";
 const QUIET_END_KEY: &str = "ui.notify.quiet-end";
+const MUTED_FEEDS_KEY: &str = "ui.notify.muted-feeds";
 
 /// The HTTP status a feed returns when it is gone for good (auto-paused dead).
 const GONE: u16 = 410;
@@ -42,6 +45,8 @@ struct NotifyPrefs {
     errors: bool,
     feed_dead: bool,
     quiet: Option<(NaiveTime, NaiveTime)>,
+    /// Feeds the user has opted out of notifications for (per-feed mute).
+    muted: HashSet<i64>,
 }
 
 impl NotifyPrefs {
@@ -55,8 +60,19 @@ impl NotifyPrefs {
             errors: flag(ERRORS_KEY),
             feed_dead: flag(FEED_DEAD_KEY),
             quiet: parse_quiet(get(QUIET_START_KEY), get(QUIET_END_KEY)),
+            muted: parse_muted(get(MUTED_FEEDS_KEY)),
         }
     }
+}
+
+/// Parses the persisted JSON array of muted feed ids (stored as strings, to
+/// match the frontend's `SvelteSet<string>`).
+fn parse_muted(raw: Option<String>) -> HashSet<i64> {
+    raw.and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|id| id.parse().ok())
+        .collect()
 }
 
 /// Parses the `"HH:MM"` quiet-hours window; `None` if either bound is unset or
@@ -90,6 +106,9 @@ fn plan(outcomes: &[RefreshOutcomeDto], prefs: &NotifyPrefs, now: NaiveTime) -> 
     let mut errored: usize = 0;
     let mut dead: usize = 0;
     for outcome in outcomes {
+        if prefs.muted.contains(&outcome.feed_id) {
+            continue;
+        }
         new_total += outcome.new_articles;
         if outcome.status == FetchStatusDto::Error {
             if outcome.http_status == Some(GONE) {
@@ -197,6 +216,7 @@ mod tests {
             errors: true,
             feed_dead: true,
             quiet: None,
+            muted: HashSet::new(),
         }
     }
 
@@ -269,6 +289,33 @@ mod tests {
             outcome(0, FetchStatusDto::Error, Some(GONE)),
         ];
         assert_eq!(plan(&out, &p, noon()), Some("1 feed went dead".to_owned()));
+    }
+
+    #[test]
+    fn muted_feeds_are_excluded_from_the_summary() {
+        let mut p = prefs(true);
+        p.muted.insert(1);
+        let muted = RefreshOutcomeDto {
+            feed_id: 1,
+            status: FetchStatusDto::Ok,
+            http_status: Some(200),
+            new_articles: 5,
+            updated_articles: 0,
+            error: None,
+        };
+        let heard = RefreshOutcomeDto {
+            feed_id: 2,
+            status: FetchStatusDto::Ok,
+            http_status: Some(200),
+            new_articles: 2,
+            updated_articles: 0,
+            error: None,
+        };
+        // Feed 1's 5 new articles are muted; only feed 2's 2 count.
+        assert_eq!(
+            plan(&[muted, heard], &p, noon()),
+            Some("2 new articles".to_owned())
+        );
     }
 
     #[test]

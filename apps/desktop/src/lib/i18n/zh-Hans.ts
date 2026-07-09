@@ -297,6 +297,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'editFeed.title': '编辑订阅源',
     'editFeed.section.details': '详细信息',
     'editFeed.section.health': '健康状况',
+    'editFeed.notify': '通知我此订阅源的更新',
     'editFeed.url.label': '订阅源网址',
     'editFeed.url.copy': '复制',
     'editFeed.url.copied': '已复制订阅源网址',

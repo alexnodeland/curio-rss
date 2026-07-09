@@ -1,7 +1,7 @@
 {
     "name": "curio-desktop-e2e",
     "private": true,
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "WebdriverIO + tauri-driver smoke suite for the Curio desktop head (Linux + Windows; there is no macOS tauri-driver). Self-contained: installed only by the nightly smoke job, never by the per-PR gates.",
     "type": "module",
     "scripts": {

@@ -18,6 +18,7 @@ ego-tree = { workspace = true }
 feed-rs = { workspace = true }
 htmd = { workspace = true }
 quick-xml = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 scraper = { workspace = true }

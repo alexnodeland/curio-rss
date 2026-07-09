@@ -14,6 +14,10 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Aller au contenu',
     'shell.feeds.loading': 'Chargement des abonnements…',
     'shell.feeds.empty': 'Aucun abonnement pour l’instant',
+    'emptyState.hint':
+        'Abonnez-vous à un flux pour commencer à lire, ou importez vos abonnements depuis un autre lecteur.',
+    'emptyState.addFeed': 'Ajouter votre premier flux',
+    'emptyState.importOpml': 'Importer OPML…',
     'shell.feeds.count': '{count} flux',
     'shell.unread.count': '{count} non lus',
     'view.all': 'Tous les articles',
@@ -55,6 +59,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'list.row.unread': 'Non lu',
     'list.row.starred': 'Favori',
     'reader.empty': 'Sélectionnez un article à lire',
+    'reader.imagesOff': 'Les images sont désactivées dans cet article.',
+    'reader.imagesOff.enable': 'Activer',
     'reader.missing': 'Cet article n’existe plus',
     'reader.toolbar': 'Actions sur l’article',
     'reader.action.markRead': 'Marquer comme lu',
@@ -187,6 +193,11 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'settings.markOnScroll': 'Marquer comme lu au défilement',
     'settings.markOnScroll.hint':
         'À mesure que les articles défilent hors de la liste, les marquer automatiquement comme lus. Désactivé par défaut — votre nombre de non lus ne change que si vous le décidez.',
+    'settings.density': 'Densité de la liste',
+    'settings.density.hint':
+        'Confortable affiche une ligne d’aperçu et une vignette sur chaque ligne ; compacte affiche plus de lignes à l’écran.',
+    'settings.density.comfortable': 'Confortable',
+    'settings.density.compact': 'Compacte',
     'settings.section.media': 'Médias',
     'settings.media.prefetch': 'Charger les médias distants',
     'settings.media.prefetch.hint':

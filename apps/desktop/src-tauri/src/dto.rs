@@ -162,7 +162,13 @@ impl From<NewFeedDto> for NewFeed {
     }
 }
 
-/// A list row: everything the article list renders, no content payload.
+/// The longest article-text excerpt the list DTO carries. The extracted
+/// text is already read per row (it backs FTS); the list keeps only this
+/// bounded preview, not the full body, so the "small payload" intent holds.
+const SNIPPET_MAX_CHARS: usize = 200;
+
+/// A list row: everything the article list renders, plus a short text
+/// preview — never the full content payload (that stays on [`ArticleDto`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ArticleSummaryDto {
     /// Row id (keyset cursor currency).
@@ -187,10 +193,28 @@ pub struct ArticleSummaryDto {
     /// An absolute `http(s)` URL the frontend loads through the policed
     /// image cache — never fetched directly.
     pub image: Option<String>,
+    /// A whitespace-normalized, length-bounded preview of the extracted
+    /// text (up to `SNIPPET_MAX_CHARS`, `…`-suffixed when truncated).
+    /// `None` when the article has no extracted text.
+    pub snippet: Option<String>,
+}
+
+/// Builds the bounded, whitespace-normalized preview for a list row.
+fn article_snippet(text: &str) -> Option<String> {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    let mut snippet: String = normalized.chars().take(SNIPPET_MAX_CHARS).collect();
+    if normalized.chars().count() > SNIPPET_MAX_CHARS {
+        snippet.push('…');
+    }
+    Some(snippet)
 }
 
 impl From<Article> for ArticleSummaryDto {
     fn from(article: Article) -> Self {
+        let snippet = article_snippet(&article.content.text);
         Self {
             id: article.id.0,
             feed_id: article.feed_id.map(|id| id.0),
@@ -202,6 +226,7 @@ impl From<Article> for ArticleSummaryDto {
             word_count: article.word_count,
             lang: article.lang,
             image: article.lead_image,
+            snippet,
         }
     }
 }
@@ -569,6 +594,20 @@ mod tests {
             let dto = FeedStatusDto::from(status);
             assert_eq!(FeedStatus::from(dto), status);
         }
+    }
+
+    #[test]
+    fn article_snippet_normalizes_and_bounds() {
+        assert_eq!(article_snippet(""), None);
+        assert_eq!(article_snippet("   \n\t  "), None);
+        assert_eq!(
+            article_snippet("  hello   world\n\nagain  "),
+            Some("hello world again".to_owned())
+        );
+        let long = "word ".repeat(100);
+        let snippet = article_snippet(&long).unwrap();
+        assert_eq!(snippet.chars().count(), SNIPPET_MAX_CHARS + 1);
+        assert!(snippet.ends_with('…'));
     }
 
     #[test]

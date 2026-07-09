@@ -49,6 +49,8 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 </script>
 
 <script lang="ts">
+import Icon from '$components/common/Icon.svelte';
+import { t } from '$lib/i18n';
 import { openExternal } from '$lib/utils/external';
 import { uiStore } from '$lib/state/ui.svelte';
 import { loadCachedImage } from '$lib/utils/images';
@@ -58,6 +60,14 @@ let { html }: { html: string } = $props();
 const clean = $derived(DOMPurify.sanitize(html, SANITIZE_CONFIG));
 
 let contentEl: HTMLElement | undefined = $state();
+
+/** How many remote body images this article is currently suppressing. */
+let offImageCount = $state(0);
+
+/** Show the "images are off" nudge only when this article actually hides some. */
+const showMediaHint = $derived(
+    !uiStore.mediaPrefetch && offImageCount > 0 && !uiStore.mediaHintDismissed,
+);
 
 /**
  * Remote body images (`http(s)`) never load unmediated — the CSP `img-src`
@@ -74,6 +84,7 @@ $effect(() => {
         return;
     }
     let cancelled = false;
+    let offCount = 0;
     for (const img of root.querySelectorAll('img')) {
         const original = img.dataset.origSrc ?? img.getAttribute('src') ?? '';
         img.dataset.origSrc = original;
@@ -89,8 +100,11 @@ $effect(() => {
                     img.removeAttribute('data-media-off');
                 }
             });
+        } else {
+            offCount += 1;
         }
     }
+    offImageCount = offCount;
     return () => {
         cancelled = true;
     };
@@ -122,6 +136,27 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
 }
 </script>
 
+{#if showMediaHint}
+    <div class="media-hint" role="note">
+        <span class="media-hint-text">{t('reader.imagesOff')}</span>
+        <button
+            class="media-hint-enable"
+            type="button"
+            onclick={() => void uiStore.setMediaPrefetch(true)}
+        >
+            {t('reader.imagesOff.enable')}
+        </button>
+        <button
+            class="media-hint-dismiss"
+            type="button"
+            aria-label={t('toast.dismiss')}
+            onclick={() => uiStore.dismissMediaHint()}
+        >
+            <Icon name="close" size={14} />
+        </button>
+    </div>
+{/if}
+
 <!-- eslint-disable-next-line svelte/no-at-html-tags -- the ONE sanctioned {@html} site: DOMPurify-wrapped, grep-gated (scripts/check-frontend-bans.sh) -->
 <div class="sanitized-content" bind:this={contentEl} use:interceptLinks>{@html clean}</div>
 
@@ -134,6 +169,62 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
         overflow-wrap: break-word;
         font-kerning: normal;
         font-variant-numeric: oldstyle-nums proportional-nums;
+    }
+
+    /* The one-time nudge when an article hides remote images. */
+    .media-hint {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--hairline);
+        background: var(--surface-raised);
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+    }
+
+    .media-hint-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .media-hint-enable {
+        flex: 0 0 auto;
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--accent);
+        border: none;
+        font-size: var(--text-sm);
+        font-weight: 500;
+        cursor: pointer;
+    }
+
+    .media-hint-enable:hover {
+        text-decoration: underline;
+    }
+
+    .media-hint-dismiss {
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        width: 1.25rem;
+        height: 1.25rem;
+        color: var(--fg-subtle);
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .media-hint-dismiss:hover {
+        color: var(--fg);
+        background: var(--hover);
     }
 
     .sanitized-content :global(p) {
@@ -187,6 +278,12 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
     /* Remote images with prefetch off never load — collapse them cleanly
        (no broken glyph) rather than leave a gap. */
     .sanitized-content :global(img[data-media-off]) {
+        display: none;
+    }
+
+    /* A figure whose only child is a collapsed remote image would otherwise
+       leave its margin (and an orphaned caption) behind — fold the wrapper. */
+    .sanitized-content :global(figure:has(> img[data-media-off]:only-child)) {
         display: none;
     }
 

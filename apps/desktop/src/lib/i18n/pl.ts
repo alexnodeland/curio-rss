@@ -15,6 +15,10 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Przejdź do treści',
     'shell.feeds.loading': 'Ładowanie subskrypcji…',
     'shell.feeds.empty': 'Brak subskrypcji',
+    'emptyState.hint':
+        'Zasubskrybuj kanał, aby zacząć czytać, lub przenieś subskrypcje z innego czytnika.',
+    'emptyState.addFeed': 'Dodaj pierwszy kanał',
+    'emptyState.importOpml': 'Importuj OPML…',
     'shell.feeds.count': '{count} kanałów',
     'shell.unread.count': '{count} nieprzeczytanych',
     'view.all': 'Wszystkie artykuły',
@@ -56,6 +60,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'list.row.unread': 'Nieprzeczytany',
     'list.row.starred': 'Oznaczony gwiazdką',
     'reader.empty': 'Wybierz artykuł do przeczytania',
+    'reader.imagesOff': 'Obrazy są wyłączone w tym artykule.',
+    'reader.imagesOff.enable': 'Włącz',
     'reader.missing': 'Ten artykuł już nie istnieje',
     'reader.toolbar': 'Działania na artykule',
     'reader.action.markRead': 'Oznacz jako przeczytany',
@@ -185,6 +191,11 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'settings.markOnScroll': 'Oznaczaj jako przeczytane podczas przewijania',
     'settings.markOnScroll.hint':
         'Gdy artykuły przewijają się w górę poza listę, oznaczaj je automatycznie jako przeczytane. Domyślnie wyłączone — liczba nieprzeczytanych zmienia się tylko na twoje polecenie.',
+    'settings.density': 'Gęstość listy',
+    'settings.density.hint':
+        'Komfortowa pokazuje wiersz podglądu i miniaturę w każdym wierszu; kompaktowa mieści więcej wierszy na ekranie.',
+    'settings.density.comfortable': 'Komfortowa',
+    'settings.density.compact': 'Kompaktowa',
     'settings.section.media': 'Multimedia',
     'settings.media.prefetch': 'Wczytuj zdalne multimedia',
     'settings.media.prefetch.hint':

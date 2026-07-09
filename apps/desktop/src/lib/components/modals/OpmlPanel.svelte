@@ -10,7 +10,7 @@
  */
 import { commands, type ImportSourceDto } from '$lib/bindings';
 import { type MessageKey, t } from '$lib/i18n';
-import { toastCommandError } from '$lib/state/actions';
+import { importFromFile, toastCommandError } from '$lib/state/actions';
 import { uiStore } from '$lib/state/ui.svelte';
 
 const SOURCES: readonly ImportSourceDto[] = [
@@ -32,31 +32,7 @@ function sourceLabel(value: ImportSourceDto): MessageKey {
 async function runImport(): Promise<void> {
     importing = true;
     try {
-        const picked = await commands.pickImportFile();
-        if (picked.status === 'error') {
-            toastCommandError(picked.error);
-            return;
-        }
-        if (picked.data === null) {
-            uiStore.showToast(t('opml.cancelled'), 'info');
-            return;
-        }
-        const result = await commands.importFile(picked.data.token, source);
-        if (result.status === 'error') {
-            toastCommandError(result.error);
-            return;
-        }
-        const { feeds_added, articles_added, feeds_skipped, articles_skipped } = result.data;
-        uiStore.showToast(
-            t('import.done', {
-                feeds: feeds_added,
-                articles: articles_added,
-                skipped: feeds_skipped + articles_skipped,
-            }),
-            'success',
-        );
-    } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        await importFromFile(source);
     } finally {
         importing = false;
     }

@@ -6,9 +6,16 @@
  * backend-owned filters; the article list reacts through the stores.
  */
 import Icon, { type IconName } from '$components/common/Icon.svelte';
+import Skeleton from '$components/common/Skeleton.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import { type MessageKey, t } from '$lib/i18n';
-import { activeView, refreshAll, selectView, type ViewId } from '$lib/state/actions';
+import {
+    activeView,
+    importFromFile,
+    refreshAll,
+    selectView,
+    type ViewId,
+} from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { buildFeedTree } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -24,6 +31,9 @@ const VIEWS: readonly { id: ViewId; label: MessageKey; icon: IconName }[] = [
     { id: 'readLater', label: 'view.readLater', icon: 'bookmark' },
     { id: 'archived', label: 'view.archived', icon: 'archive' },
 ];
+
+/** Bar widths for the subscription-list loading skeleton (percent). */
+const SIDEBAR_SKELETON_WIDTHS = ['82%', '64%', '90%', '71%', '58%'];
 
 // Prime the feed + unread-count queries during init, NOT from the template:
 // state created inside the render reaction is excluded from that reaction's
@@ -135,9 +145,36 @@ function newFolder(): void {
             {#if feedsStore.error !== null}
                 <p class="sidebar-status error" role="alert">{feedsError()}</p>
             {:else if !feedsStore.loaded}
-                <p class="sidebar-status">{t('shell.feeds.loading')}</p>
+                <div class="sidebar-skeleton" aria-hidden="true">
+                    {#each SIDEBAR_SKELETON_WIDTHS as width (width)}
+                        <Skeleton {width} height="0.85rem" />
+                    {/each}
+                </div>
+                <span class="sr-only">{t('shell.feeds.loading')}</span>
             {:else if feedsStore.feeds.length === 0}
-                <p class="sidebar-status">{t('shell.feeds.empty')}</p>
+                <div class="sidebar-empty">
+                    <div class="sidebar-empty-mark" aria-hidden="true">
+                        <Icon name="rss" size={22} strokeWidth={1.5} />
+                    </div>
+                    <p class="sidebar-empty-title">{t('shell.feeds.empty')}</p>
+                    <p class="sidebar-empty-hint">{t('emptyState.hint')}</p>
+                    <div class="sidebar-empty-actions">
+                        <button
+                            class="empty-action empty-action-primary"
+                            type="button"
+                            onclick={() => uiStore.openModal('add-feed')}
+                        >
+                            {t('emptyState.addFeed')}
+                        </button>
+                        <button
+                            class="empty-action"
+                            type="button"
+                            onclick={() => void importFromFile('opml')}
+                        >
+                            {t('emptyState.importOpml')}
+                        </button>
+                    </div>
+                </div>
             {:else}
                 <ul class="sidebar-list">
                     {#each feedTree.folders as folder (folder.path)}
@@ -294,6 +331,84 @@ function newFolder(): void {
 
     .sidebar-status.error {
         color: var(--error);
+    }
+
+    .sidebar-skeleton {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-3);
+    }
+
+    .sidebar-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-6) var(--space-4);
+        text-align: center;
+    }
+
+    .sidebar-empty-mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius-xl);
+        color: var(--accent);
+        background: var(--selected);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 82%);
+    }
+
+    .sidebar-empty-title {
+        font-size: var(--text-md);
+        font-weight: 560;
+        color: var(--fg);
+    }
+
+    .sidebar-empty-hint {
+        font-size: var(--text-sm);
+        color: var(--fg-subtle);
+        line-height: 1.45;
+    }
+
+    .sidebar-empty-actions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        width: 100%;
+        margin-top: var(--space-2);
+    }
+
+    .empty-action {
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .empty-action:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .empty-action-primary {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: transparent;
+    }
+
+    .empty-action-primary:hover {
+        background: var(--accent-hover);
+        color: var(--accent-fg);
     }
 
     .view-item {

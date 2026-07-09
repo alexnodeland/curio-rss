@@ -15,6 +15,10 @@ export const en = {
 
     'shell.feeds.loading': 'Loading subscriptions…',
     'shell.feeds.empty': 'No subscriptions yet',
+    'emptyState.hint':
+        'Subscribe to a feed to start reading, or bring your subscriptions over from another reader.',
+    'emptyState.addFeed': 'Add your first feed',
+    'emptyState.importOpml': 'Import OPML…',
     'shell.feeds.count': '{count} feeds',
     'shell.unread.count': '{count} unread',
 
@@ -60,6 +64,8 @@ export const en = {
     'list.row.starred': 'Starred',
 
     'reader.empty': 'Select an article to read',
+    'reader.imagesOff': 'Images are off in this article.',
+    'reader.imagesOff.enable': 'Turn on',
     'reader.missing': 'This article no longer exists',
     'reader.toolbar': 'Article actions',
     'reader.action.markRead': 'Mark read',
@@ -195,6 +201,11 @@ export const en = {
     'settings.markOnScroll': 'Mark read while scrolling',
     'settings.markOnScroll.hint':
         'As articles scroll up out of the list, mark them read automatically. Off by default — your unread count only changes when you say so.',
+    'settings.density': 'List density',
+    'settings.density.hint':
+        'Comfortable shows a preview line and thumbnail on each row; compact fits more rows on screen.',
+    'settings.density.comfortable': 'Comfortable',
+    'settings.density.compact': 'Compact',
     'settings.section.media': 'Media',
     'settings.media.prefetch': 'Load remote media',
     'settings.media.prefetch.hint':

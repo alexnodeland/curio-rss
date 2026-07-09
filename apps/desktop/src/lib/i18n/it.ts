@@ -13,6 +13,10 @@ export const it: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Vai al contenuto',
     'shell.feeds.loading': 'Caricamento iscrizioni…',
     'shell.feeds.empty': 'Nessuna iscrizione',
+    'emptyState.hint':
+        'Iscriviti a un feed per iniziare a leggere, oppure importa le tue iscrizioni da un altro lettore.',
+    'emptyState.addFeed': 'Aggiungi il tuo primo feed',
+    'emptyState.importOpml': 'Importa OPML…',
     'shell.feeds.count': '{count} feed',
     'shell.unread.count': '{count} non letti',
     'view.all': 'Tutti gli articoli',
@@ -54,6 +58,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'list.row.unread': 'Non letto',
     'list.row.starred': 'Preferito',
     'reader.empty': 'Seleziona un articolo da leggere',
+    'reader.imagesOff': 'Le immagini sono disattivate in questo articolo.',
+    'reader.imagesOff.enable': 'Attiva',
     'reader.missing': 'Questo articolo non esiste più',
     'reader.toolbar': 'Azioni articolo',
     'reader.action.markRead': 'Segna come letto',
@@ -184,6 +190,11 @@ export const it: Partial<Record<MessageKey, string>> = {
     'settings.markOnScroll': 'Segna come letto durante lo scorrimento',
     'settings.markOnScroll.hint':
         'Man mano che gli articoli scorrono via dall’elenco, vengono segnati come letti automaticamente. Disattivato per impostazione predefinita — il conteggio dei non letti cambia solo quando lo decidi tu.',
+    'settings.density': 'Densità dell’elenco',
+    'settings.density.hint':
+        'Comoda mostra una riga di anteprima e una miniatura su ogni riga; compatta mostra più righe sullo schermo.',
+    'settings.density.comfortable': 'Comoda',
+    'settings.density.compact': 'Compatta',
     'settings.section.media': 'Media',
     'settings.media.prefetch': 'Carica media remoti',
     'settings.media.prefetch.hint':

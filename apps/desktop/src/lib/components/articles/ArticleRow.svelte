@@ -14,8 +14,9 @@ export function articleOptionId(articleId: number): string {
  * One virtualized list row. Summaries carry no state flags by design (list
  * payloads stay small), so the unread dot / star come from the per-article
  * state query — cached, and refreshed by the Rust-emitted invalidation
- * events like every other read. Height must match `ROW_HEIGHT` in
- * ArticleList (the virtualizer's fixed row height).
+ * events like every other read. The row applies `rowHeight` inline so its
+ * height always equals the virtualizer's fixed row height (one source, no
+ * drift). `compact` density drops the body preview and thumbnail.
  */
 import { type ArticleSummaryDto, commands } from '$lib/bindings';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
@@ -26,12 +27,16 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 let {
     article,
     index,
+    rowHeight,
+    compact,
     setsize,
     selected,
     onselect,
 }: {
     article: ArticleSummaryDto;
     index: number;
+    rowHeight: number;
+    compact: boolean;
     setsize: number;
     selected: boolean;
     onselect: (articleId: number) => void;
@@ -72,7 +77,9 @@ function onKeyDown(event: KeyboardEvent): void {
     id={articleOptionId(article.id)}
     class="article-row"
     class:selected
+    class:compact
     class:unread={flags()?.read === false}
+    style="height: {rowHeight}px"
     role="option"
     aria-selected={selected}
     aria-posinset={index + 1}
@@ -87,6 +94,9 @@ function onKeyDown(event: KeyboardEvent): void {
     {/if}
     <div class="row-main">
         <span class="row-title truncate">{article.title}</span>
+        {#if !compact && article.snippet !== null}
+            <span class="row-snippet truncate">{article.snippet}</span>
+        {/if}
         <span class="row-meta truncate">
             {#if feedTitle() !== null}
                 <span class="row-feed">{feedTitle()}</span>
@@ -100,16 +110,19 @@ function onKeyDown(event: KeyboardEvent): void {
         <span class="row-star" aria-hidden="true">★</span>
         <span class="sr-only">{t('list.row.starred')}</span>
     {/if}
-    <ArticleThumb variant="row" image={article.image} alt="" />
+    {#if !compact}
+        <ArticleThumb variant="row" image={article.image} alt="" />
+    {/if}
 </div>
 
 <style>
     .article-row {
+        /* height is applied inline from `rowHeight` (= the virtualizer's
+           fixed row height for the current density) so the two can't drift. */
         position: relative;
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        height: 84px; /* = ROW_HEIGHT in ArticleList */
         padding: 0 var(--space-4);
         margin: 0 var(--space-2);
         border-radius: var(--radius-lg);
@@ -186,6 +199,17 @@ function onKeyDown(event: KeyboardEvent): void {
     .article-row.unread .row-title {
         font-weight: 600;
         color: var(--fg);
+    }
+
+    /* Compact rows tighten the title to a single visual line. */
+    .article-row.compact .row-title {
+        line-height: 1.25;
+    }
+
+    .row-snippet {
+        font-size: var(--text-xs);
+        line-height: 1.4;
+        color: var(--fg-subtle);
     }
 
     .row-meta {

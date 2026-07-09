@@ -14,6 +14,10 @@ export const de: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Zum Inhalt springen',
     'shell.feeds.loading': 'Abonnements werden geladen…',
     'shell.feeds.empty': 'Noch keine Abonnements',
+    'emptyState.hint':
+        'Abonniere einen Feed, um zu lesen, oder übernimm deine Abos aus einem anderen Reader.',
+    'emptyState.addFeed': 'Ersten Feed hinzufügen',
+    'emptyState.importOpml': 'OPML importieren…',
     'shell.feeds.count': '{count} Feeds',
     'shell.unread.count': '{count} ungelesen',
     'view.all': 'Alle Artikel',
@@ -55,6 +59,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'list.row.unread': 'Ungelesen',
     'list.row.starred': 'Favorit',
     'reader.empty': 'Artikel zum Lesen auswählen',
+    'reader.imagesOff': 'Bilder sind in diesem Artikel deaktiviert.',
+    'reader.imagesOff.enable': 'Aktivieren',
     'reader.missing': 'Dieser Artikel existiert nicht mehr',
     'reader.toolbar': 'Artikelaktionen',
     'reader.action.markRead': 'Als gelesen markieren',
@@ -185,6 +191,11 @@ export const de: Partial<Record<MessageKey, string>> = {
     'settings.markOnScroll': 'Beim Scrollen als gelesen markieren',
     'settings.markOnScroll.hint':
         'Wenn Artikel beim Scrollen aus der Liste verschwinden, werden sie automatisch als gelesen markiert. Standardmäßig aus — dein Ungelesen-Zähler ändert sich nur, wenn du es möchtest.',
+    'settings.density': 'Listendichte',
+    'settings.density.hint':
+        'Komfortabel zeigt eine Vorschauzeile und ein Vorschaubild pro Zeile; kompakt zeigt mehr Zeilen auf dem Bildschirm.',
+    'settings.density.comfortable': 'Komfortabel',
+    'settings.density.compact': 'Kompakt',
     'settings.section.media': 'Medien',
     'settings.media.prefetch': 'Remote-Medien laden',
     'settings.media.prefetch.hint':

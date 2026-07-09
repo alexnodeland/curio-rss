@@ -40,6 +40,7 @@ ego-tree = "0.11"
 feed-rs = "2"
 htmd = "0.5"
 quick-xml = "0.41"
+regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 scraper = "0.27"

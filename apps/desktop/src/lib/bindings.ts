@@ -374,7 +374,10 @@ export type ArticleStateDto = {
 	archived: boolean,
 };
 
-/**  A list row: everything the article list renders, no content payload. */
+/**
+ *  A list row: everything the article list renders, plus a short text
+ *  preview — never the full content payload (that stays on [`ArticleDto`]).
+ */
 export type ArticleSummaryDto = {
 	/**  Row id (keyset cursor currency). */
 	id: number,
@@ -400,6 +403,12 @@ export type ArticleSummaryDto = {
 	 *  image cache — never fetched directly.
 	 */
 	image: string | null,
+	/**
+	 *  A whitespace-normalized, length-bounded preview of the extracted
+	 *  text (up to `SNIPPET_MAX_CHARS`, `…`-suffixed when truncated).
+	 *  `None` when the article has no extracted text.
+	 */
+	snippet: string | null,
 };
 
 /**

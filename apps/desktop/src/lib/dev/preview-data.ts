@@ -117,6 +117,12 @@ function mk(
     sourceUrl = 'https://example.com/post',
     image: string | null = null,
 ): PreviewArticle {
+    const snippetText =
+        html
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 160) || null;
     const summary: ArticleSummaryDto = {
         id,
         feed_id: feedId,
@@ -128,6 +134,7 @@ function mk(
         word_count: words,
         lang: 'en',
         image,
+        snippet: snippetText,
     };
     return {
         summary,

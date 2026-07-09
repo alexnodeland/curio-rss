@@ -16,7 +16,7 @@ import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
 import { LOCALES, type LocaleId, type MessageKey, localeStore, t } from '$lib/i18n';
-import { REFRESH_INTERVAL_OPTIONS, uiStore } from '$lib/state/ui.svelte';
+import { REFRESH_INTERVAL_OPTIONS, type ReadingDensity, uiStore } from '$lib/state/ui.svelte';
 
 let { onclose }: { onclose: () => void } = $props();
 
@@ -27,6 +27,13 @@ const INTERVAL_LABELS: Record<number, MessageKey> = {
     30: 'settings.refreshInterval.m30',
     60: 'settings.refreshInterval.h1',
     180: 'settings.refreshInterval.h3',
+};
+
+/** The list-density options and their labels. */
+const DENSITY_OPTIONS: readonly ReadingDensity[] = ['comfortable', 'compact'];
+const DENSITY_LABELS: Record<ReadingDensity, MessageKey> = {
+    comfortable: 'settings.density.comfortable',
+    compact: 'settings.density.compact',
 };
 
 const TABS = [
@@ -194,6 +201,24 @@ function onKeydown(event: KeyboardEvent): void {
                 hidden={activeIndex !== 2}
             >
                 <TypographyControls />
+                <div class="field-block">
+                    <label class="field">
+                        <span class="field-label">{t('settings.density')}</span>
+                        <select
+                            class="field-select"
+                            value={uiStore.readingDensity}
+                            onchange={(event) =>
+                                void uiStore.setReadingDensity(
+                                    event.currentTarget.value as ReadingDensity,
+                                )}
+                        >
+                            {#each DENSITY_OPTIONS as density (density)}
+                                <option value={density}>{t(DENSITY_LABELS[density])}</option>
+                            {/each}
+                        </select>
+                    </label>
+                    <span class="toggle-hint">{t('settings.density.hint')}</span>
+                </div>
                 <label class="toggle">
                     <input
                         type="checkbox"

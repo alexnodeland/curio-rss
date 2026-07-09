@@ -89,6 +89,12 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': 'Interligne',
     'typography.measure': 'Largeur',
     'typography.reset': 'Réinitialiser',
+    'typography.preview': 'Aperçu',
+    'typography.preview.heading': 'La forme d’une lecture',
+    'typography.preview.body':
+        'Une bonne typographie s’efface : elle porte les mots sans attirer l’attention sur elle-même. Ajustez la taille, l’interligne et la largeur jusqu’à ce qu’un long article se lise sans effort.',
+    'typography.preview.quote':
+        'La typographie est un bel ensemble de lettres, non un ensemble de belles lettres.',
     'tags.label': 'Étiquettes',
     'tags.placeholder': 'Ajouter une étiquette…',
     'tags.add': 'Ajouter une étiquette',

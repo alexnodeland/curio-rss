@@ -88,6 +88,12 @@ export const es: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': 'Interlineado',
     'typography.measure': 'Ancho',
     'typography.reset': 'Restablecer',
+    'typography.preview': 'Vista previa',
+    'typography.preview.heading': 'La forma de una lectura',
+    'typography.preview.body':
+        'La buena tipografía desaparece: transmite las palabras sin llamar la atención sobre sí misma. Ajusta el tamaño, el interlineado y el ancho hasta que un artículo largo se lea sin esfuerzo.',
+    'typography.preview.quote':
+        'La tipografía es un hermoso grupo de letras, no un grupo de letras hermosas.',
     'tags.label': 'Etiquetas',
     'tags.placeholder': 'Añadir una etiqueta…',
     'tags.add': 'Añadir etiqueta',

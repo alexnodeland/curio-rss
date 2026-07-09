@@ -89,6 +89,11 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': '行高',
     'typography.measure': '闊度',
     'typography.reset': '重設',
+    'typography.preview': '預覽',
+    'typography.preview.heading': '閱讀嘅形態',
+    'typography.preview.body':
+        '好嘅排版會隱於無形——佢承載文字，但唔會喧賓奪主。調整字號、行距同闊度，直到一篇長文讀起上嚟毫不費力。',
+    'typography.preview.quote': '字體係一組優美嘅字母，而唔係一堆各自漂亮嘅字母。',
     'tags.label': '標籤',
     'tags.placeholder': '加個標籤…',
     'tags.add': '加標籤',

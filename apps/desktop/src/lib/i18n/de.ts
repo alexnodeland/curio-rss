@@ -88,6 +88,12 @@ export const de: Partial<Record<MessageKey, string>> = {
     'typography.lineHeight': 'Zeilenhöhe',
     'typography.measure': 'Breite',
     'typography.reset': 'Zurücksetzen',
+    'typography.preview': 'Vorschau',
+    'typography.preview.heading': 'Die Form einer Lektüre',
+    'typography.preview.body':
+        'Gute Typografie tritt zurück — sie trägt die Wörter, ohne sich in den Vordergrund zu drängen. Passe Größe, Zeilenabstand und Breite an, bis sich ein langer Artikel mühelos liest.',
+    'typography.preview.quote':
+        'Schrift ist eine schöne Gruppe von Buchstaben, nicht eine Gruppe schöner Buchstaben.',
     'tags.label': 'Tags',
     'tags.placeholder': 'Tag hinzufügen…',
     'tags.add': 'Tag hinzufügen',

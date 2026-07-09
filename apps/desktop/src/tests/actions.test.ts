@@ -10,6 +10,7 @@ import {
     goToNextUnread,
     handleShortcut,
     openInBrowser,
+    routeMenuAction,
     selectFolder,
     selectView,
     toggleArchived,
@@ -236,6 +237,30 @@ describe('actions — views and shortcut routing', () => {
         handleShortcut('article.toggleStar');
         handleShortcut('article.toggleRead');
         handleShortcut('article.toggleReadLater');
+        expect(harness.calls).toHaveLength(0);
+    });
+
+    it('routeMenuAction runs a shortcut id through the action layer', () => {
+        harness = installIpcHarness({});
+        routeMenuAction('app.settings');
+        expect(uiStore.activeModal).toBe('settings');
+        routeMenuAction('view.starred');
+        expect(activeView(articlesStore.filters)).toBe('starred');
+    });
+
+    it('routeMenuAction opens the docs / issue tracker for the menu-only ids', async () => {
+        harness = installIpcHarness({ 'plugin:opener|open_url': null });
+        routeMenuAction('menu.docs');
+        routeMenuAction('menu.reportIssue');
+        await flushIpc();
+        expect(harness.callsFor('plugin:opener|open_url')).toHaveLength(2);
+    });
+
+    it('routeMenuAction ignores predefined / unknown menu ids', () => {
+        harness = installIpcHarness({});
+        routeMenuAction('copy');
+        routeMenuAction('quit');
+        expect(uiStore.activeModal).toBeNull();
         expect(harness.calls).toHaveLength(0);
     });
 });

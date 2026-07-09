@@ -112,6 +112,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'help.title': '键盘快捷键',
     'help.close': '关闭',
     'help.chord.then': '然后',
+    'help.footer': '右键点击订阅源和文章以获取更多操作。⌘N、⌘R 等菜单命令位于菜单栏中。',
     'modal.close': '关闭',
     'toolbar.addFeed': '添加订阅源',
     'toolbar.refreshAll': '刷新所有订阅源',

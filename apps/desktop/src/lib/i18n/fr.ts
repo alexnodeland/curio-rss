@@ -113,6 +113,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'help.title': 'Raccourcis clavier',
     'help.close': 'Fermer',
     'help.chord.then': 'puis',
+    'help.footer':
+        'Clic droit sur les flux et articles pour plus d’actions. Les commandes comme ⌘N et ⌘R sont dans la barre de menus.',
     'modal.close': 'Fermer',
     'toolbar.addFeed': 'Ajouter un flux',
     'toolbar.refreshAll': 'Actualiser tous les flux',

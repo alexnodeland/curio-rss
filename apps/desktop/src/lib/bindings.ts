@@ -311,6 +311,7 @@ export const commands = {
 export const events = {
 	articlesChanged: makeEvent<ArticlesChanged>("articles-changed"),
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
+	menuAction: makeEvent<MenuAction>("menu-action"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
 	refreshProgress: makeEvent<RefreshProgress>("refresh-progress"),
 };
@@ -624,6 +625,18 @@ export type ListArticlesDto = {
 	 *  to this or nested beneath it) — the folder-tree filter.
 	 */
 	feed_tag: string | null,
+};
+
+/**
+ *  A native menu item was chosen — the head emits its id and the frontend
+ *  routes it through the same action layer as a keyboard shortcut (so the
+ *  menu, shortcuts, and toolbars stay one source of behavior). `id` is a
+ *  [`crate::menu`] item id: a `ShortcutId` (e.g. `app.addFeed`) or a
+ *  menu-only id (`menu.docs`, `menu.reportIssue`).
+ */
+export type MenuAction = {
+	/**  The chosen item's id. */
+	id: string,
 };
 
 /**  Args for adding a subscription. */

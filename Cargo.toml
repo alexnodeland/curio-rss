@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -26,8 +26,8 @@ repository = "https://github.com/alexnodeland/curio-rss"
 authors = ["Alex Nodeland <nodeland.alex@gmail.com>"]
 
 [workspace.dependencies]
-curio-core = { path = "crates/curio-core", version = "0.1.0" }
-curio-types = { path = "crates/curio-types", version = "0.1.0" }
+curio-core = { path = "crates/curio-core", version = "0.2.0" }
+curio-types = { path = "crates/curio-types", version = "0.2.0" }
 
 ammonia = "4"
 anyhow = "1"

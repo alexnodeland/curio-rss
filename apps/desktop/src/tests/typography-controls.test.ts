@@ -44,7 +44,7 @@ describe('reader typography', () => {
         harness = installIpcHarness({ get_setting: () => 'comic-sans' });
         await settingsStore.load();
         uiStore.initTypography();
-        expect(uiStore.fontFamily).toBe('sans');
+        expect(uiStore.fontFamily).toBe('serif');
     });
 
     it('controls write through and persist each preference', async () => {
@@ -74,13 +74,13 @@ describe('reader typography', () => {
     it('reset restores the defaults', async () => {
         harness = installIpcHarness({ get_setting: null, set_setting: null });
         await uiStore.setFontSize(22);
-        await uiStore.setFontFamily('serif');
+        await uiStore.setFontFamily('mono');
         const { getByRole } = render(TypographyControls);
 
         await fireEvent.click(getByRole('button', { name: 'Reset' }));
         await flushIpc();
 
         expect(uiStore.fontSize).toBe(TYPOGRAPHY_LIMITS.fontSize.default);
-        expect(uiStore.fontFamily).toBe('sans');
+        expect(uiStore.fontFamily).toBe('serif');
     });
 });

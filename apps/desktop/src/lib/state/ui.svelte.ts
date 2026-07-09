@@ -383,7 +383,7 @@ export class UiStore {
         this.fontSize = TYPOGRAPHY_LIMITS.fontSize.default;
         this.lineHeight = TYPOGRAPHY_LIMITS.lineHeight.default;
         this.measure = TYPOGRAPHY_LIMITS.measure.default;
-        this.fontFamily = 'sans';
+        this.fontFamily = 'serif';
     }
 }
 

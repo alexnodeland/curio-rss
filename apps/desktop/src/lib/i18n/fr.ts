@@ -118,6 +118,28 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemoteHint':
         'Désactivé par défaut — l’activer indique à Google quels sites vous prévisualisez.',
     'settings.title': 'Paramètres',
+    'settings.tablist.label': 'Sections des paramètres',
+    'settings.section.general': 'Général',
+    'settings.section.mediaPrivacy': 'Médias et confidentialité',
+    'settings.section.advanced': 'Avancé',
+    'settings.refreshInterval': 'Intervalle d’actualisation',
+    'settings.refreshInterval.hint':
+        'Fréquence à laquelle Curio vérifie les nouveaux articles de vos flux.',
+    'settings.refreshOnLaunch': 'Actualiser au démarrage',
+    'settings.refreshOnLaunch.hint': 'Vérifier tous les flux une fois au démarrage de Curio.',
+    'settings.comingSoon': 'Bientôt disponible dans une prochaine mise à jour.',
+    'settings.customThemes': 'Thèmes personnalisés',
+    'settings.customThemes.hint':
+        'L’édition de vos propres thèmes arrivera dans une prochaine mise à jour.',
+    'settings.homeYoutube': 'Disposition d’accueil YouTube',
+    'settings.homeYoutube.hint':
+        'Afficher les flux YouTube sous forme de grille de vidéos plutôt qu’en lignes compactes.',
+    'settings.homeReddit': 'Disposition d’accueil Reddit',
+    'settings.homeReddit.hint':
+        'Afficher les flux Reddit sous forme de fil de publications plutôt qu’en lignes compactes.',
+    'settings.allowRemoteFavicon': 'Autoriser les favicons distants',
+    'settings.allowRemoteFavicon.hint':
+        'Lorsqu’un site ne déclare aucun favicon, utiliser le service de favicons de Google. Désactivé par défaut : cela indique à Google quels sites vous prévisualisez (voir PRIVACY.md).',
     'settings.section.appearance': 'Apparence',
     'settings.language': 'Langue',
     'settings.language.hint':

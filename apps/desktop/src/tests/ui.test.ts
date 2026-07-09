@@ -163,6 +163,32 @@ describe('ui store — toasts', () => {
     });
 });
 
+describe('ui store — reset', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        settingsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('reset restores the reader font to the state default (serif, not sans)', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new UiStore();
+
+        // The constructed default is the invariant reset must land back on.
+        const defaultFont = ui.fontFamily;
+        expect(defaultFont).toBe('serif');
+
+        await ui.setFontFamily('mono');
+        expect(ui.fontFamily).toBe('mono');
+
+        ui.reset();
+        expect(ui.fontFamily).toBe(defaultFont);
+        expect(ui.fontFamily).toBe('serif');
+    });
+});
+
 describe('ui store — pane layout', () => {
     let harness: IpcHarness | null = null;
 

@@ -115,6 +115,28 @@ export const it: Partial<Record<MessageKey, string>> = {
     'addFeed.favicon.allowRemoteHint':
         'Disattivato per impostazione predefinita — attivandolo comunichi a Google quali siti visualizzi in anteprima.',
     'settings.title': 'Impostazioni',
+    'settings.tablist.label': 'Sezioni delle impostazioni',
+    'settings.section.general': 'Generale',
+    'settings.section.mediaPrivacy': 'Media e privacy',
+    'settings.section.advanced': 'Avanzate',
+    'settings.refreshInterval': 'Intervallo di aggiornamento',
+    'settings.refreshInterval.hint':
+        'Con quale frequenza Curio controlla nuovi articoli nei tuoi feed.',
+    'settings.refreshOnLaunch': 'Aggiorna all’avvio',
+    'settings.refreshOnLaunch.hint': 'Controlla tutti i feed una volta all’avvio di Curio.',
+    'settings.comingSoon': 'Disponibile in un prossimo aggiornamento.',
+    'settings.customThemes': 'Temi personalizzati',
+    'settings.customThemes.hint':
+        'La modifica dei temi personalizzati arriverà in un prossimo aggiornamento.',
+    'settings.homeYoutube': 'Layout home di YouTube',
+    'settings.homeYoutube.hint':
+        'Mostra i feed di YouTube come una griglia di video invece che righe compatte.',
+    'settings.homeReddit': 'Layout home di Reddit',
+    'settings.homeReddit.hint':
+        'Mostra i feed di Reddit come un flusso di post invece che righe compatte.',
+    'settings.allowRemoteFavicon': 'Consenti favicon remote',
+    'settings.allowRemoteFavicon.hint':
+        'Quando un sito non dichiara una favicon, ripiega sul servizio favicon di Google. Disattivato per impostazione predefinita: rivela a Google quali siti visualizzi in anteprima (vedi PRIVACY.md).',
     'settings.section.appearance': 'Aspetto',
     'settings.language': 'Lingua',
     'settings.language.hint':

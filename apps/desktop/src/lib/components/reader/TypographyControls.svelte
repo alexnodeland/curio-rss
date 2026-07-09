@@ -28,7 +28,7 @@ function onMeasure(event: Event & { currentTarget: HTMLInputElement }): void {
 }
 
 function reset(): void {
-    void uiStore.setFontFamily('sans');
+    void uiStore.setFontFamily('serif');
     void uiStore.setFontSize(TYPOGRAPHY_LIMITS.fontSize.default);
     void uiStore.setLineHeight(TYPOGRAPHY_LIMITS.lineHeight.default);
     void uiStore.setMeasure(TYPOGRAPHY_LIMITS.measure.default);

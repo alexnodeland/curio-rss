@@ -46,6 +46,10 @@ let {
 } = $props();
 
 const label = $derived(feed.title ?? feed.url);
+// An active feed whose last refresh errored gets a warning dot; paused/dead
+// already carry their own lifecycle dot.
+const errored = $derived(feed.status === 'active' && feedsStore.lastErrored(feed.id));
+const healthClass = $derived(errored ? 'errored' : feed.status);
 /** This row's stable tree id (matches the flattened `VisibleRow.key`). */
 const rowId = $derived(feedRowKey(parentPath, feed.id));
 const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId);
@@ -199,7 +203,7 @@ function hue(text: string): number {
     class="feed-item"
     class:active={selected}
     class:tree-active={isTreeActive}
-    class:unhealthy={feed.status !== 'active'}
+    class:unhealthy={feed.status !== 'active' || errored}
     class:drop-target={dropTarget}
     class:dragging={feedDnd.draggingId === feed.id}
     draggable={siblings !== undefined && !renaming}
@@ -250,7 +254,7 @@ function hue(text: string): number {
             aria-label={t('feedHealth.open', { name: label })}
             onclick={() => onedit(feed.id, 'health')}
         >
-            <span class="health-dot health-{feed.status}" aria-hidden="true"></span>
+            <span class="health-dot health-{healthClass}" aria-hidden="true"></span>
         </button>
     {/if}
 </div>
@@ -414,6 +418,11 @@ function hue(text: string): number {
     }
 
     .health-paused {
+        background: var(--warning);
+    }
+
+    /* Active, but its last refresh errored — a warning, not a lifecycle state. */
+    .health-errored {
         background: var(--warning);
     }
 

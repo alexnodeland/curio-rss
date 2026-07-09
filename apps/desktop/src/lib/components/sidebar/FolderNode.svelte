@@ -1,18 +1,21 @@
 <script lang="ts">
 /**
  * One node of the sidebar folder tree. The header has two targets: a
- * disclosure chevron that expands/collapses, and the folder name itself,
- * which **scopes the article list to the folder** (every article whose feed
- * carries this `/`-path tag or one nested beneath it — backend-owned via the
- * `feed_tag` filter). Below the header sit the subfolders (recursive) and the
- * feeds that live directly in this folder.
+ * disclosure chevron that expands/collapses, and the folder name, which
+ * scopes the article list to the folder. Right-click opens the folder actions
+ * menu (new subfolder / rename / mark read / delete). The header is a drop
+ * target: dropping a dragged feed moves it into this folder (retag).
  */
 import Icon from '$components/common/Icon.svelte';
+import { contextMenu } from '$lib/actions/context-menu';
+import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
 import { selectFolder } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { feedDnd } from '$lib/state/feed-dnd.svelte';
 import type { FeedFolder } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import type { MenuItem } from '$lib/state/menu.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import FeedItem from './FeedItem.svelte';
@@ -25,10 +28,127 @@ const unread = $derived(feedsStore.folderUnread(folder));
 const selected = $derived(
     selectionStore.selectedFeedId === null && articlesStore.filters.feedTag === folder.path,
 );
+
+// ─── inline rename ───────────────────────────────────────────────────────────
+let renaming = $state(false);
+let draft = $state('');
+let inputEl = $state<HTMLInputElement>();
+
+$effect(() => {
+    if (renaming && inputEl !== undefined) {
+        inputEl.focus();
+        inputEl.select();
+    }
+});
+
+function startRename(): void {
+    draft = folder.name;
+    renaming = true;
+}
+
+function commitRename(): void {
+    if (!renaming) return;
+    renaming = false;
+    const name = draft.trim();
+    if (name.length === 0 || name === folder.name) return;
+    const parent = folder.path.split('/').slice(0, -1).join('/');
+    const newPath = parent === '' ? name : `${parent}/${name}`;
+    void feedsStore.renameFolder(folder.path, newPath);
+}
+
+function onRenameKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        commitRename();
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        renaming = false;
+    }
+}
+
+// ─── context menu ────────────────────────────────────────────────────────────
+function uniqueChildName(): string {
+    const existing = folder.subfolders.map((sub) => sub.name);
+    const base = t('folder.defaultName');
+    if (!existing.includes(base)) return base;
+    let n = 2;
+    while (existing.includes(`${base} ${n}`)) n += 1;
+    return `${base} ${n}`;
+}
+
+async function deleteFolder(): Promise<void> {
+    await feedsStore.deleteFolder(folder.path);
+    uiStore.showToast(t('folder.deleted', { name: folder.name }), 'info');
+}
+
+function folderMenu(): MenuItem[] {
+    return [
+        {
+            id: 'newsub',
+            labelKey: 'folder.menu.newSubfolder',
+            onSelect: () => feedsStore.createFolder(`${folder.path}/${uniqueChildName()}`),
+        },
+        { id: 'rename', labelKey: 'folder.menu.rename', onSelect: startRename },
+        {
+            id: 'markread',
+            labelKey: 'folder.menu.markRead',
+            onSelect: () => void feedsStore.markFolderRead(folder),
+        },
+        {
+            id: 'delete',
+            labelKey: 'folder.menu.delete',
+            danger: true,
+            separatorBefore: true,
+            onSelect: () => void deleteFolder(),
+        },
+    ];
+}
+
+// ─── folder as a move-into drop target ───────────────────────────────────────
+let dropActive = $state(false);
+let expandTimer: ReturnType<typeof setTimeout> | undefined;
+
+function onFolderDragOver(event: DragEvent): void {
+    if (feedDnd.draggingId === null) return;
+    event.preventDefault();
+    dropActive = true;
+    // Hover over a collapsed folder briefly to auto-expand it.
+    if (feedsStore.isFolderCollapsed(folder.path) && expandTimer === undefined) {
+        expandTimer = setTimeout(() => {
+            if (feedsStore.isFolderCollapsed(folder.path)) feedsStore.toggleFolder(folder.path);
+            expandTimer = undefined;
+        }, 600);
+    }
+}
+
+function clearDrop(): void {
+    dropActive = false;
+    clearTimeout(expandTimer);
+    expandTimer = undefined;
+}
+
+function onFolderDrop(event: DragEvent): void {
+    const dragged = feedDnd.draggingId;
+    clearDrop();
+    if (dragged === null) return;
+    event.preventDefault();
+    void feedsStore.moveFeedToFolder(dragged, folder.path);
+    feedDnd.clear();
+}
 </script>
 
 <li class="folder">
-    <div class="folder-header" style:--depth={depth}>
+    <div
+        class="folder-header"
+        class:drop-active={dropActive}
+        style:--depth={depth}
+        ondragover={onFolderDragOver}
+        ondragleave={clearDrop}
+        ondrop={onFolderDrop}
+        role="group"
+        aria-label={folder.name}
+        use:contextMenu={{ items: folderMenu, ariaLabel: folder.name }}
+    >
         <button
             class="folder-disclosure"
             type="button"
@@ -38,18 +158,30 @@ const selected = $derived(
         >
             <span class="chevron" class:open={!collapsed}><Icon name="chevron" size={14} /></span>
         </button>
-        <button
-            class="folder-select"
-            class:active={selected}
-            aria-current={selected ? 'true' : undefined}
-            onclick={() => selectFolder(folder.path)}
-        >
-            <span class="folder-name truncate">{folder.name}</span>
-            {#if unread > 0}
-                <span class="folder-count" aria-hidden="true">{unread}</span>
-                <span class="sr-only">{t('shell.unread.count', { count: unread })}</span>
-            {/if}
-        </button>
+        {#if renaming}
+            <input
+                class="rename-input"
+                bind:this={inputEl}
+                bind:value={draft}
+                onkeydown={onRenameKeydown}
+                onblur={commitRename}
+                aria-label={t('folder.menu.rename')}
+            />
+        {:else}
+            <button
+                class="folder-select"
+                class:active={selected}
+                aria-current={selected ? 'true' : undefined}
+                ondblclick={startRename}
+                onclick={() => selectFolder(folder.path)}
+            >
+                <span class="folder-name truncate" use:tooltip={folder.name}>{folder.name}</span>
+                {#if unread > 0}
+                    <span class="folder-count" aria-hidden="true">{unread}</span>
+                    <span class="sr-only">{t('shell.unread.count', { count: unread })}</span>
+                {/if}
+            </button>
+        {/if}
     </div>
     {#if !collapsed}
         <ul class="folder-children">
@@ -83,6 +215,13 @@ const selected = $derived(
         align-items: center;
         gap: 2px;
         padding-left: calc(var(--depth) * var(--space-4));
+        border-radius: var(--radius-md);
+    }
+
+    /* A feed is being dragged over this folder — highlight it as a move target. */
+    .folder-header.drop-active {
+        background: var(--selected);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 40%);
     }
 
     .folder-disclosure {
@@ -146,6 +285,23 @@ const selected = $derived(
         width: 3px;
         border-radius: var(--radius-pill);
         background: var(--accent);
+    }
+
+    .rename-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: var(--space-1) var(--space-2);
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        background: var(--surface-inset);
+        color: var(--fg);
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 40%);
+        font-size: var(--text-md);
+    }
+
+    .rename-input:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 
     .folder-name {

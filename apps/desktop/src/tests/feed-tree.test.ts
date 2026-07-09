@@ -1,7 +1,8 @@
 /**
  * Feed-tree derivation: `/`-path tags become a folder hierarchy, feeds sit
- * under every tag they carry, tagless feeds fall out as `ungrouped`, and the
- * whole thing sorts deterministically.
+ * under every tag they carry, tagless feeds fall out as `ungrouped`. Folders
+ * sort by name; feeds preserve their incoming `sort_order` (so drag-reorder is
+ * visible). Empty `pendingPaths` folders overlay onto the tree.
  */
 import { buildFeedTree, subtreeFeedIds, tagSegments } from '$lib/state/feed-tree';
 import { describe, expect, it } from 'vitest';
@@ -45,12 +46,36 @@ describe('buildFeedTree', () => {
         expect(tree.folders[1].subfolders[0].feeds.map((entry) => entry.id)).toEqual([7]);
     });
 
-    it('sorts feeds within a folder by label', () => {
+    it('preserves feed sort_order within a folder (does not re-sort by label)', () => {
+        // Input array order IS sort_order (list_feeds ORDER BY sort_order, id).
         const zebra = feedFixture({ id: 1, title: 'Zebra', tags: ['X'] });
         const apple = feedFixture({ id: 2, title: 'Apple', tags: ['X'] });
-        const tree = buildFeedTree([zebra, apple]);
+        const mango = feedFixture({ id: 3, title: 'Mango', tags: ['X'] });
+        const tree = buildFeedTree([zebra, apple, mango]);
 
-        expect(tree.folders[0].feeds.map((feed) => feed.title)).toEqual(['Apple', 'Zebra']);
+        expect(tree.folders[0].feeds.map((feed) => feed.title)).toEqual([
+            'Zebra',
+            'Apple',
+            'Mango',
+        ]);
+    });
+
+    it('keeps ungrouped feeds in sort_order too', () => {
+        const c = feedFixture({ id: 1, title: 'C', tags: [] });
+        const a = feedFixture({ id: 2, title: 'A', tags: [] });
+        const tree = buildFeedTree([c, a]);
+        expect(tree.ungrouped.map((feed) => feed.title)).toEqual(['C', 'A']);
+    });
+
+    it('overlays empty pending folders that hold no feed', () => {
+        const feed = feedFixture({ id: 1, title: 'Solo', tags: ['Tech'] });
+        const tree = buildFeedTree([feed], ['Ideas', 'Tech/Empty']);
+
+        expect(tree.folders.map((folder) => folder.name)).toEqual(['Ideas', 'Tech']);
+        const tech = tree.folders.find((folder) => folder.path === 'Tech');
+        expect(tech?.subfolders.map((sub) => sub.name)).toEqual(['Empty']);
+        // The pending folder exists but carries no feed.
+        expect(tech?.subfolders[0].feeds).toEqual([]);
     });
 });
 

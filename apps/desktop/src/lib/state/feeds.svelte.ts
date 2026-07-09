@@ -16,7 +16,34 @@ import {
 } from '$lib/bindings';
 import { SvelteSet } from 'svelte/reactivity';
 import { type FeedFolder, subtreeFeedIds } from './feed-tree';
+import {
+    feedInFolder,
+    tagsForDelete,
+    tagsForMove,
+    tagsForRename,
+    tagsForUngroup,
+} from './folder-ops';
 import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
+import { SETTING_KEYS, settingsStore } from './settings.svelte';
+
+/** Replaces a reactive set's contents in place (keeps the reference stable). */
+function reloadSet(set: SvelteSet<string>, values: string[]): void {
+    set.clear();
+    for (const value of values) set.add(value);
+}
+
+/** Guarded parse of a persisted JSON string array (WP6 pattern). */
+function readStringArray(raw: string | undefined): string[] {
+    if (raw === undefined) return [];
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        return Array.isArray(parsed)
+            ? parsed.filter((item): item is string => typeof item === 'string')
+            : [];
+    } catch {
+        return [];
+    }
+}
 
 export class FeedsStore {
     /** True while a `refresh_all` sweep is in flight. */
@@ -31,6 +58,13 @@ export class FeedsStore {
      * to a toggle.
      */
     #collapsedFolders = new SvelteSet<string>();
+
+    /**
+     * User-created folder paths not yet holding any feed. Folders are a tag
+     * projection, so an empty folder can't exist in the feed data — this
+     * overlay keeps it visible until a feed is dropped in. Persisted.
+     */
+    #pendingFolders = new SvelteSet<string>();
 
     get #feedsQuery(): Query<FeedDto[]> {
         return ensureQuery(queryKeys.feeds, commands.listFeeds);
@@ -101,13 +135,126 @@ export class FeedsStore {
         return this.#collapsedFolders.has(path);
     }
 
-    /** Toggles a sidebar folder open/closed. */
+    /** Toggles a sidebar folder open/closed, persisting the collapse set. */
     toggleFolder(path: string): void {
         if (this.#collapsedFolders.has(path)) {
             this.#collapsedFolders.delete(path);
         } else {
             this.#collapsedFolders.add(path);
         }
+        this.#persistCollapsed();
+    }
+
+    /** The empty user-created folders to overlay onto the derived tree. */
+    get pendingPaths(): string[] {
+        return [...this.#pendingFolders];
+    }
+
+    /**
+     * Adopts persisted collapse + pending-folder state at startup. Mutates the
+     * existing sets in place (never reassigns them) so derivations that already
+     * track these `SvelteSet`s keep reacting.
+     */
+    initSidebarState(): void {
+        reloadSet(
+            this.#collapsedFolders,
+            readStringArray(settingsStore.get(SETTING_KEYS.collapsedFolders)),
+        );
+        reloadSet(
+            this.#pendingFolders,
+            readStringArray(settingsStore.get(SETTING_KEYS.pendingFolders)),
+        );
+    }
+
+    #persistCollapsed(): void {
+        void settingsStore.set(
+            SETTING_KEYS.collapsedFolders,
+            JSON.stringify([...this.#collapsedFolders]),
+        );
+    }
+
+    #persistPending(): void {
+        void settingsStore.set(
+            SETTING_KEYS.pendingFolders,
+            JSON.stringify([...this.#pendingFolders]),
+        );
+    }
+
+    /** Creates an empty folder (persisted until a feed is dropped in). */
+    createFolder(path: string): void {
+        this.#pendingFolders.add(path);
+        this.#persistPending();
+    }
+
+    /** Moves a feed into `folderPath` (retag), clearing the pending scaffold. */
+    async moveFeedToFolder(feedId: number, folderPath: string): Promise<CommandResult<null>> {
+        const feed = this.feeds.find((candidate) => candidate.id === feedId);
+        if (feed === undefined) return { status: 'ok', data: null };
+        if (this.#pendingFolders.delete(folderPath)) this.#persistPending();
+        return this.setFeedTags(feedId, tagsForMove(feed.tags, folderPath));
+    }
+
+    /** Removes a feed from its folders (drop on "ungrouped"). */
+    async ungroupFeed(feedId: number): Promise<CommandResult<null>> {
+        const feed = this.feeds.find((candidate) => candidate.id === feedId);
+        if (feed === undefined) return { status: 'ok', data: null };
+        return this.setFeedTags(feedId, tagsForUngroup(feed.tags));
+    }
+
+    /** Renames folder `oldPath` → `newPath` across every feed in its subtree. */
+    async renameFolder(oldPath: string, newPath: string): Promise<void> {
+        for (const feed of this.feeds.filter((candidate) => feedInFolder(candidate, oldPath))) {
+            await this.setFeedTags(feed.id, tagsForRename(feed.tags, oldPath, newPath));
+        }
+        this.#rewritePrefixedState(oldPath, newPath);
+    }
+
+    /** Deletes folder `path`, moving its feeds to the parent (never unsubscribes). */
+    async deleteFolder(path: string): Promise<void> {
+        for (const feed of this.feeds.filter((candidate) => feedInFolder(candidate, path))) {
+            await this.setFeedTags(feed.id, tagsForDelete(feed.tags, path));
+        }
+        this.#dropPrefixedState(path);
+    }
+
+    /** Marks every feed in a folder subtree read. */
+    async markFolderRead(folder: FeedFolder): Promise<void> {
+        for (const id of subtreeFeedIds(folder)) {
+            await commands.markAllRead(id);
+        }
+    }
+
+    /** Rewrites collapse/pending paths under `oldPath` to `newPath` (folder rename). */
+    #rewritePrefixedState(oldPath: string, newPath: string): void {
+        const rewrite = (set: SvelteSet<string>): boolean => {
+            let changed = false;
+            for (const value of [...set]) {
+                if (value === oldPath || value.startsWith(`${oldPath}/`)) {
+                    set.delete(value);
+                    set.add(`${newPath}${value.slice(oldPath.length)}`);
+                    changed = true;
+                }
+            }
+            return changed;
+        };
+        if (rewrite(this.#collapsedFolders)) this.#persistCollapsed();
+        if (rewrite(this.#pendingFolders)) this.#persistPending();
+    }
+
+    /** Drops collapse/pending paths at or under `path` (folder delete). */
+    #dropPrefixedState(path: string): void {
+        const drop = (set: SvelteSet<string>): boolean => {
+            let changed = false;
+            for (const value of [...set]) {
+                if (value === path || value.startsWith(`${path}/`)) {
+                    set.delete(value);
+                    changed = true;
+                }
+            }
+            return changed;
+        };
+        if (drop(this.#collapsedFolders)) this.#persistCollapsed();
+        if (drop(this.#pendingFolders)) this.#persistPending();
     }
 
     /**
@@ -124,9 +271,10 @@ export class FeedsStore {
         return total;
     }
 
-    /** Test isolation — drops collapse state and any in-flight refresh flags. */
+    /** Test isolation — drops sidebar state and any in-flight refresh flags. */
     reset(): void {
         this.#collapsedFolders.clear();
+        this.#pendingFolders.clear();
         this.refreshing = false;
         this.refreshOutcomes = [];
     }

@@ -1,12 +1,14 @@
-//! [`PolicedClient`] — the reqwest(rustls) client factory with the SSRF
-//! policy, manual redirect handling, size caps and politeness built in.
+//! [`PolicedClient`] — the reqwest client factory with the SSRF policy,
+//! manual redirect handling, size caps and politeness built in. rustls is the
+//! default TLS stack; a per-host override may opt into the platform-native
+//! stack (reddit.com, whose CDN fingerprint-blocks rustls).
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use reqwest::header::{ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION};
+use reqwest::header::{ACCEPT, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION};
 use url::{Host, Url};
 
 use super::{FetchError, FetchRequest, FetchResponse, policy};
@@ -17,11 +19,54 @@ pub const DEFAULT_MAX_BODY_BYTES: u64 = 10 * 1024 * 1024;
 /// Contract W1 / D7: redirect hop cap.
 pub const DEFAULT_MAX_REDIRECTS: u32 = 5;
 
+/// The default `Accept` header sent on every request. Harmless and
+/// spec-correct — it just tells picky feed hosts we want a feed, improving
+/// the odds a content-negotiating server hands back XML rather than HTML.
+pub const DEFAULT_ACCEPT: &str =
+    "application/rss+xml, application/atom+xml;q=0.9, text/xml;q=0.8, */*;q=0.5";
+
+/// The browser-class User-Agent sent to reddit.com. Paired with the native
+/// TLS stack (see [`HostOverride::use_native_tls`]): a live diagnosis showed
+/// Reddit blocks curio at *both* the rustls TLS fingerprint (a hard 403) and
+/// the honest UA, and that native-TLS + this UA together get a clean 200.
+/// Disclosed in PRIVACY.md — reddit.com is the only host that sees anything
+/// but the honest curio UA.
+pub const REDDIT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+/// A per-host policy override, matched by case-insensitive host **suffix**:
+/// `reddit.com` matches `www.reddit.com` and `old.reddit.com`, but not
+/// `notreddit.com` or `reddit.com.evil.example`. Lets one picky host get a
+/// longer politeness delay, extra request headers, or a different
+/// User-Agent — without disturbing the honest defaults every other host sees.
+#[derive(Debug, Clone)]
+pub struct HostOverride {
+    /// Host suffix to match (no leading dot), e.g. `"reddit.com"`.
+    pub host_suffix: String,
+    /// Replaces the default User-Agent for matching hosts, if set (e.g.
+    /// reddit.com, which hard-blocks the honest curio UA with a 403).
+    pub user_agent: Option<String>,
+    /// Extra request headers sent to matching hosts (name, value).
+    pub extra_headers: Vec<(String, String)>,
+    /// Overrides the politeness delay for matching hosts, if set.
+    pub politeness_delay: Option<Duration>,
+    /// Use the platform-native TLS stack (`SecureTransport` / `SChannel` /
+    /// `OpenSSL`) for matching hosts instead of the default rustls. Some CDNs
+    /// (reddit.com) fingerprint the rustls `ClientHello` and 403 it; the native
+    /// stack presents a browser-like fingerprint they accept. Off by default —
+    /// rustls stays the deliberate choice for every other host.
+    pub use_native_tls: bool,
+}
+
 /// Configuration of a [`PolicedClient`].
 #[derive(Debug, Clone)]
 pub struct FetchConfig {
     /// The honest User-Agent every request carries.
     pub user_agent: String,
+    /// The `Accept` header sent on every request. See [`DEFAULT_ACCEPT`].
+    pub accept: String,
+    /// Per-host policy overrides, matched by host suffix (first match wins).
+    pub host_overrides: Vec<HostOverride>,
     /// TCP connect timeout.
     pub connect_timeout: Duration,
     /// Total per-request timeout (covers reading the body).
@@ -47,6 +92,22 @@ impl Default for FetchConfig {
                 "curio/{} (+https://github.com/alexnodeland/curio-rss)",
                 env!("CARGO_PKG_VERSION")
             ),
+            accept: DEFAULT_ACCEPT.to_owned(),
+            // reddit.com blocks curio at two layers: the rustls TLS
+            // fingerprint (a hard 403) and the honest curio UA. So it — and
+            // only it — gets the platform-native TLS stack (whose ClientHello
+            // Reddit accepts, verified live: native-TLS + browser UA -> 200)
+            // plus a browser-class UA, a browser-ish Accept-Language, and a 2s
+            // politeness delay to stay clear of the unauthenticated rate limit.
+            // Disclosed in PRIVACY.md; every other host keeps rustls + the
+            // honest curio UA.
+            host_overrides: vec![HostOverride {
+                host_suffix: "reddit.com".to_owned(),
+                user_agent: Some(REDDIT_USER_AGENT.to_owned()),
+                extra_headers: vec![("accept-language".to_owned(), "en-US,en;q=0.9".to_owned())],
+                politeness_delay: Some(Duration::from_secs(2)),
+                use_native_tls: true,
+            }],
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
@@ -88,6 +149,17 @@ impl PolicedClient {
         &self.config
     }
 
+    /// The first host override whose suffix matches `url`'s host, if any.
+    /// Suffix match is case-insensitive and boundary-aware: `reddit.com`
+    /// matches `reddit.com` and `*.reddit.com`, never `notreddit.com`.
+    fn override_for(&self, url: &Url) -> Option<&HostOverride> {
+        let host = url.host_str()?.to_ascii_lowercase();
+        self.config.host_overrides.iter().find(|entry| {
+            let suffix = entry.host_suffix.to_ascii_lowercase();
+            host == suffix || host.ends_with(&format!(".{suffix}"))
+        })
+    }
+
     /// Performs one policed GET: validate → resolve → check policy →
     /// politeness → request → (re-validated) redirects → capped body read.
     ///
@@ -111,10 +183,22 @@ impl PolicedClient {
             let pinned = self
                 .resolve_and_check(&url, request.allow_private_network)
                 .await?;
-            self.be_polite(&url).await;
+            let host_override = self.override_for(&url);
+            self.be_polite(&url, host_override).await;
 
-            let client = self.build_hop_client(&url, pinned)?;
-            let mut req = client.get(url.clone());
+            let user_agent = host_override
+                .and_then(|entry| entry.user_agent.as_deref())
+                .unwrap_or(self.config.user_agent.as_str());
+            let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
+            let client = self.build_hop_client(&url, pinned, user_agent, native_tls)?;
+            let mut req = client
+                .get(url.clone())
+                .header(ACCEPT, self.config.accept.as_str());
+            if let Some(host_override) = host_override {
+                for (name, value) in &host_override.extra_headers {
+                    req = req.header(name.as_str(), value.as_str());
+                }
+            }
             if let Some(etag) = &request.etag {
                 req = req.header(IF_NONE_MATCH, etag);
             }
@@ -237,9 +321,19 @@ impl PolicedClient {
         &self,
         url: &Url,
         pinned: Option<SocketAddr>,
+        user_agent: &str,
+        native_tls: bool,
     ) -> Result<reqwest::Client, FetchError> {
-        let mut builder = reqwest::Client::builder()
-            .user_agent(&self.config.user_agent)
+        // rustls is the deliberate default for every host; a per-host override
+        // (reddit.com) opts into the platform-native stack to dodge a
+        // ClientHello-fingerprint block. Both backends are compiled in.
+        let tls = if native_tls {
+            reqwest::Client::builder().use_native_tls()
+        } else {
+            reqwest::Client::builder().use_rustls_tls()
+        };
+        let mut builder = tls
+            .user_agent(user_agent)
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(self.config.connect_timeout)
             .timeout(self.config.request_timeout);
@@ -281,8 +375,10 @@ impl PolicedClient {
     /// Per-host politeness: reserves the next allowed slot under the lock
     /// (so concurrent fetches to one host queue up honestly), then sleeps
     /// out its own wait without holding the lock.
-    async fn be_polite(&self, url: &Url) {
-        let delay = self.config.politeness_delay;
+    async fn be_polite(&self, url: &Url, host_override: Option<&HostOverride>) {
+        let delay = host_override
+            .and_then(|entry| entry.politeness_delay)
+            .unwrap_or(self.config.politeness_delay);
         if delay.is_zero() {
             return;
         }
@@ -353,6 +449,7 @@ fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]
@@ -403,5 +500,43 @@ mod tests {
         assert_eq!(config.max_body_bytes, 10 * 1024 * 1024);
         assert!(config.user_agent.starts_with("curio/"));
         assert!(config.trusted_addrs.is_empty());
+        assert!(config.accept.contains("application/rss+xml"));
+        // Exactly one default override: reddit.com's browser UA + politeness.
+        assert_eq!(config.host_overrides.len(), 1);
+        let reddit = &config.host_overrides[0];
+        assert_eq!(reddit.host_suffix, "reddit.com");
+        assert_eq!(reddit.politeness_delay, Some(Duration::from_secs(2)));
+        assert_eq!(reddit.user_agent.as_deref(), Some(REDDIT_USER_AGENT));
+        assert!(
+            reddit.use_native_tls,
+            "reddit.com must use the native TLS stack"
+        );
+    }
+
+    #[test]
+    fn host_override_matches_by_suffix_only() {
+        let client = PolicedClient::default();
+        let suffix_of = |raw: &str| {
+            client
+                .override_for(&Url::parse(raw).unwrap())
+                .map(|entry| entry.host_suffix.clone())
+        };
+        // Exact and sub-domain matches hit the reddit.com override…
+        assert_eq!(
+            suffix_of("https://reddit.com/r/rust/.rss").as_deref(),
+            Some("reddit.com")
+        );
+        assert_eq!(
+            suffix_of("https://www.reddit.com/r/rust/.rss").as_deref(),
+            Some("reddit.com")
+        );
+        assert_eq!(
+            suffix_of("https://old.reddit.com/r/rust/.rss").as_deref(),
+            Some("reddit.com")
+        );
+        // …but a look-alike or unrelated host does not.
+        assert_eq!(suffix_of("https://notreddit.com/feed"), None);
+        assert_eq!(suffix_of("https://reddit.com.evil.example/feed"), None);
+        assert_eq!(suffix_of("https://example.com/feed"), None);
     }
 }

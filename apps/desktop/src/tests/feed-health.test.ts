@@ -181,4 +181,30 @@ describe('FeedHealthPanel', () => {
         // The changed count comes back as a success toast.
         expect(uiStore.toasts.some((toast) => toast.message === 'Marked 3 read')).toBe(true);
     });
+
+    it('surfaces a hint when the latest fetch was refused (403)', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Alpha' })],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+            recent_fetches: [
+                fetchRecordFixture({ status: 'error', http_status: 403, error: 'HTTP 403' }),
+            ],
+        });
+        const { getByText } = render(FeedHealthPanel, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(getByText(/refused the request \(403\)/)).toBeTruthy();
+    });
+
+    it('surfaces a hint when the latest fetch was rate-limited (429)', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Alpha' })],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+            recent_fetches: [
+                fetchRecordFixture({ status: 'error', http_status: 429, error: 'HTTP 429' }),
+            ],
+        });
+        const { getByText } = render(FeedHealthPanel, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(getByText(/rate-limiting requests \(429\)/)).toBeTruthy();
+    });
 });

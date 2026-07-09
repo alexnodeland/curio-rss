@@ -192,6 +192,10 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.ok': 'OK',
     'feedHealth.fetch.not_modified': 'Non modifié',
     'feedHealth.fetch.error': 'Erreur',
+    'feedHealth.hint.forbidden':
+        'Le site a refusé la requête (403). Certains sites bloquent les lecteurs de flux — réessayez plus tard ou vérifiez l’URL du flux.',
+    'feedHealth.hint.rateLimited':
+        'Le site limite le débit des requêtes (429). Curio espace ses tentatives — réessayez dans un moment.',
     'feedHealth.unsubscribe': 'Se désabonner',
     'feedHealth.unsubscribe.confirm':
         'Supprimer cet abonnement ? Les articles enregistrés sont conservés.',

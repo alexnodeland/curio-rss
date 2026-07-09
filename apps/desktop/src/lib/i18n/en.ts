@@ -209,6 +209,10 @@ export const en = {
     'feedHealth.fetch.ok': 'OK',
     'feedHealth.fetch.not_modified': 'Not modified',
     'feedHealth.fetch.error': 'Error',
+    'feedHealth.hint.forbidden':
+        'The site refused the request (403). Some sites block feed readers — try again later or double-check the feed URL.',
+    'feedHealth.hint.rateLimited':
+        'The site is rate-limiting requests (429). Curio spaces out its retries — try again in a little while.',
     'feedHealth.unsubscribe': 'Unsubscribe',
     'feedHealth.unsubscribe.confirm': 'Remove this subscription? Saved articles are kept.',
     'feedHealth.unsubscribe.remove': 'Remove',

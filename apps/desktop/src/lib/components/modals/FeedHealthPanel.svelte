@@ -40,6 +40,22 @@ feedsStore.prime();
 
 const feed = $derived(feedsStore.feeds.find((candidate) => candidate.id === feedId) ?? null);
 
+// Turn a silent 403/429 in the latest fetch into a plain-language hint, so a
+// blocked or rate-limited feed reads as an explanation, not a bare log row.
+const fetchHint = $derived.by((): string | null => {
+    const latest = fetches[0];
+    if (latest === undefined || latest.http_status === null) {
+        return null;
+    }
+    if (latest.http_status === 403) {
+        return t('feedHealth.hint.forbidden');
+    }
+    if (latest.http_status === 429) {
+        return t('feedHealth.hint.rateLimited');
+    }
+    return null;
+});
+
 $effect(() => {
     const id = feedId;
     loadingFetches = true;
@@ -218,6 +234,9 @@ function whenDate(iso: string): string {
                     {/each}
                 </ul>
             {/if}
+            {#if fetchHint !== null}
+                <p class="fetch-hint" role="note">{fetchHint}</p>
+            {/if}
         </section>
 
         <section class="danger-zone" aria-label={t('feedHealth.unsubscribe')}>
@@ -367,6 +386,17 @@ function whenDate(iso: string): string {
     .fetch-new {
         color: var(--accent);
         font-weight: 500;
+    }
+
+    .fetch-hint {
+        margin-top: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        color: var(--fg-muted);
+        font-size: var(--text-sm);
+        line-height: 1.4;
     }
 
     .danger-zone {

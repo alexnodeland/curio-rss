@@ -187,6 +187,10 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.ok': '正常',
     'feedHealth.fetch.not_modified': '未修改',
     'feedHealth.fetch.error': '错误',
+    'feedHealth.hint.forbidden':
+        '该网站拒绝了请求（403）。有些网站会屏蔽订阅阅读器——请稍后重试或核对订阅源网址。',
+    'feedHealth.hint.rateLimited':
+        '该网站正在限制请求频率（429）。Curio 会拉开重试间隔——请稍后再试。',
     'feedHealth.unsubscribe': '取消订阅',
     'feedHealth.unsubscribe.confirm': '移除此订阅？已保存的文章将保留。',
     'feedHealth.unsubscribe.remove': '移除',

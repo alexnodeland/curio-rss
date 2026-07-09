@@ -10,6 +10,7 @@ import SearchResults from '$components/articles/SearchResults.svelte';
 import YouTubeGrid from '$components/articles/YouTubeGrid.svelte';
 import Icon from '$components/common/Icon.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
+import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
 import { feedHomeType } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
@@ -42,7 +43,9 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
                 class="list-tool"
                 type="button"
                 aria-pressed={articlesStore.unreadOnly}
-                title={articlesStore.unreadOnly ? t('list.filter.all') : t('list.filter.unreadOnly')}
+                use:tooltip={{
+                    text: articlesStore.unreadOnly ? t('list.filter.all') : t('list.filter.unreadOnly'),
+                }}
                 aria-label={articlesStore.unreadOnly
                     ? t('list.filter.all')
                     : t('list.filter.unreadOnly')}
@@ -56,7 +59,7 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
                 class="list-tool"
                 type="button"
                 aria-pressed={homeOn}
-                title={homeOn ? t('list.view.rows') : t('list.view.home')}
+                use:tooltip={{ text: homeOn ? t('list.view.rows') : t('list.view.home') }}
                 aria-label={homeOn ? t('list.view.rows') : t('list.view.home')}
                 onclick={() => void uiStore.setHomeLayout(homeType, !homeOn)}
             >
@@ -66,7 +69,7 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
         <button
             class="list-tool"
             type="button"
-            title={t('destinations.open')}
+            use:tooltip={t('destinations.open')}
             aria-label={t('destinations.open')}
             onclick={() => uiStore.openModal('destinations')}
         >

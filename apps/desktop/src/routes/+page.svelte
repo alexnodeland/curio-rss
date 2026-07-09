@@ -5,8 +5,10 @@
  * outlet. Shortcuts are inert in typing contexts and while a modal owns
  * the keyboard (Escape / `?` dismiss the help overlay).
  */
+import MenuHost from '$components/common/MenuHost.svelte';
 import RefreshStatus from '$components/common/RefreshStatus.svelte';
 import Toasts from '$components/common/Toasts.svelte';
+import TooltipHost from '$components/common/TooltipHost.svelte';
 import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
@@ -19,6 +21,7 @@ import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { t } from '$lib/i18n';
 import { createMatcher, shouldIgnoreKeyEvent } from '$lib/keyboard/registry';
 import { handleShortcut } from '$lib/state/actions';
+import { menuStore } from '$lib/state/menu.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 
 const matcher = createMatcher();
@@ -29,6 +32,11 @@ const matcher = createMatcher();
 const backgroundInert = $derived(uiStore.activeModal !== null);
 
 function onKeydown(event: KeyboardEvent): void {
+    // An open menu owns the keyboard entirely (its own level handles Escape,
+    // arrows, activation); never let app shortcuts fire underneath it.
+    if (menuStore.isOpen) {
+        return;
+    }
     if (shouldIgnoreKeyEvent(event)) {
         return;
     }
@@ -94,3 +102,7 @@ function onKeydown(event: KeyboardEvent): void {
 <RefreshStatus />
 
 <Toasts />
+
+<MenuHost />
+
+<TooltipHost />

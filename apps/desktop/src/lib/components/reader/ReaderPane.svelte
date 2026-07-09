@@ -29,6 +29,7 @@ import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import Icon from '$components/common/Icon.svelte';
+import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
 import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
@@ -157,7 +158,10 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class:on={flags()?.read === true}
                     aria-pressed={flags()?.read === true}
                     aria-label={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
-                    title={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
+                    use:tooltip={{
+                        text: flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead'),
+                        kbd: 'M',
+                    }}
                     onclick={() => void toggleRead(current.id)}
                 >
                     <Icon name="check" />
@@ -167,7 +171,10 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class:on={flags()?.starred === true}
                     aria-pressed={flags()?.starred === true}
                     aria-label={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
-                    title={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
+                    use:tooltip={{
+                        text: flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star'),
+                        kbd: 'S',
+                    }}
                     onclick={() => void toggleStar(current.id)}
                 >
                     <Icon name={flags()?.starred === true ? 'star-filled' : 'star'} />
@@ -177,7 +184,10 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class:on={flags()?.read_later === true}
                     aria-pressed={flags()?.read_later === true}
                     aria-label={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
-                    title={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
+                    use:tooltip={{
+                        text: flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater'),
+                        kbd: 'L',
+                    }}
                     onclick={() => void toggleReadLater(current.id)}
                 >
                     <Icon name="bookmark" />
@@ -187,7 +197,9 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     class:on={flags()?.archived === true}
                     aria-pressed={flags()?.archived === true}
                     aria-label={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
-                    title={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
+                    use:tooltip={{
+                        text: flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive'),
+                    }}
                     onclick={() => void toggleArchived(current.id)}
                 >
                     <Icon name="archive" />
@@ -196,7 +208,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 <button
                     class="tool"
                     aria-label={t('reader.action.promote')}
-                    title={t('reader.action.promote')}
+                    use:tooltip={{ text: t('reader.action.promote'), kbd: 'P' }}
                     onclick={() => void promoteSelected()}
                 >
                     <Icon name="save" />
@@ -208,7 +220,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         aria-haspopup="dialog"
                         aria-expanded={showTypography}
                         aria-label={t('reader.action.typography')}
-                        title={t('reader.action.typography')}
+                        use:tooltip={t('reader.action.typography')}
                         onclick={() => {
                             showTypography = !showTypography;
                         }}
@@ -236,7 +248,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     disabled={hydrating}
                     aria-busy={hydrating}
                     aria-label={t('reader.action.loadFull')}
-                    title={t('reader.action.loadFull')}
+                    use:tooltip={t('reader.action.loadFull')}
                     onclick={() => void hydrate(current.id)}
                 >
                     <Icon name="article" />
@@ -244,7 +256,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 <button
                     class="tool"
                     aria-label={t('reader.action.openInBrowser')}
-                    title={t('reader.action.openInBrowser')}
+                    use:tooltip={t('reader.action.openInBrowser')}
                     onclick={() => void openInBrowser(current.id, current.source_url)}
                 >
                     <Icon name="external" />

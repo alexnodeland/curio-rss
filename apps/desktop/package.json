@@ -16,7 +16,8 @@
         "lint:eslint": "eslint --max-warnings 0 .",
         "lint:fix": "biome check --write .",
         "format": "biome format --write .",
-        "tauri": "tauri"
+        "tauri": "tauri",
+        "build:app": "tauri build --bundles app --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}'"
     },
     "devDependencies": {
         "@biomejs/biome": "^1.9.0",

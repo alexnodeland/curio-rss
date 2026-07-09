@@ -7,8 +7,9 @@ export machinery all live in the core and behave identically under any
 future head.
 
 - Install: `cargo install --path crates/curio-cli`
-- Every **read command takes `--json`** and then prints exactly one JSON
-  document on stdout — parse, don't scrape.
+- **`--json` is a global flag** — pass it before or after any subcommand to
+  get exactly one JSON document on stdout (read commands return their data;
+  write commands return the changed/unchanged result). Parse, don't scrape.
 - Diagnostics go to stderr, driven by `RUST_LOG` (e.g.
   `RUST_LOG=curio_core=debug curio fetch`).
 - Errors exit non-zero with a one-line `error: …` on stderr.
@@ -27,6 +28,7 @@ future head.
 | `curio search <query>` | Full-text search (FTS5) |
 | `curio dest add <name> <path>` | Register a save destination |
 | `curio save <id> --dest <name>` | Export a note per `curio.frontmatter.v1` |
+| `curio import <file> --from <service>` | Import subscriptions + saved articles from a third-party export (idempotent) |
 | `curio events tail [-n N]` | Watch the behavioral event stream |
 | `curio doctor` | DB integrity, FTS sync, events-log health |
 
@@ -69,7 +71,7 @@ curio --profile /tmp/p init  # or an explicit one (great for testing)
 [settings]
 default_destination = "vault"   # what `curio save` uses when --dest is omitted
 politeness_delay_ms = 500       # min spacing between requests to the same host
-user_agent = "curio/0.1"        # optional User-Agent override
+user_agent = "curio/0.2 (+https://github.com/alexnodeland/curio-rss)"  # optional; overrides the default curio/<version> UA
 
 [destinations]
 vault = "/home/you/notes/reading"
@@ -120,6 +122,24 @@ database.
 curio opml import subscriptions.opml   # folders become tags; known URLs skipped
 curio opml export backup.opml          # "-" writes to stdout
 ```
+
+Bring a whole library over from another reader with one idempotent command —
+feeds become subscriptions, saved articles become read-later items with their
+tags:
+
+```sh
+curio import subscriptions.opml --from opml         # --from defaults to opml
+curio import pocket-export.csv   --from pocket       # Pocket / Instapaper / Readwise CSV
+```
+
+**Per-host fetch policy.** A few hosts fingerprint-block the honest `curio`
+User-Agent + rustls TLS. `curio-core` carries a built-in per-host override
+(matched by host suffix): `reddit.com` (and `*.reddit.com`) automatically get
+a browser-class User-Agent, the platform-native TLS stack, and a longer 2 s
+politeness delay — so `curio fetch` of a subreddit `.rss` works out of the box.
+This override is hard-coded in the engine (not a `curio.toml` knob) and is
+disclosed in [PRIVACY.md](../PRIVACY.md); every other host keeps rustls + the
+honest `curio/<version>` UA and the default 500 ms delay.
 
 ## Reading
 

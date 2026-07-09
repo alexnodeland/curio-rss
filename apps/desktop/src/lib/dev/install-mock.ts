@@ -242,7 +242,7 @@ tokens:
                     }));
                 case 'get_app_info':
                     return {
-                        version: '0.1.0',
+                        version: '0.2.0',
                         profile_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
                         db_schema_version: 5,
                         schema_supported: true,

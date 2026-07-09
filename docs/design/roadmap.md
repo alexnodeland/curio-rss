@@ -11,8 +11,17 @@ Windows 10+, Linux; signed/notarized) and **`curio-cli`, which ships in v1** as 
 agent/cron/scripting surface and the CI proof the core is headless. Articles-only reading
 done excellently; the vault-export and events contracts as core modules with published,
 semver'd schemas; every quality claim CI-gated, not asserted. Explicitly **not** in v1:
-sync of any kind, Reddit/YouTube enrichment (layouts only), podcasts, profiles, theme
-editor, server head.
+sync of any kind, Reddit/YouTube enrichment (layouts only), podcasts, profiles, server
+head. (Custom user themes with YAML export/import landed early in v0.2.0.)
+
+> **Status (as of v0.2.0, 2026-07-09):** v0.1.0 and **v0.2.0** have shipped as
+> published macOS releases — Phases 0–4 are largely delivered (the desktop
+> reader plus a full v0.2 polish round: context menus, folders, tabbed
+> settings, source presets, background refresh, notifications, a native menu
+> bar, custom themes, and an in-app auto-updater), and several Phase-5 items
+> (the refugee importers, the docs site, an exercised updater channel) landed
+> early. See [CHANGELOG.md](../../CHANGELOG.md) for what actually shipped; the
+> phase plan below is the original route, kept as the record of intent.
 
 ## Phase 0 — Pre-public reset & workspace skeleton *(1.5 weeks — happening now)*
 

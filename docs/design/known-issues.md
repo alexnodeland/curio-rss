@@ -91,12 +91,12 @@ consumer implementation.
   `scoped_dedupe_key`'s doc. Trigger: a real collision, or migration to
   `AUTOINCREMENT` if it ever matters.
 
-## Publication status (tracked, not a code issue)
+## Publication status (RESOLVED at v0.2.0)
 
-CONTRIBUTING/README/CLAUDE.md now state that the GitHub remote and the
-CI workflows are pre-publication artifacts and that `just ci` (including
-the blob guard) is the gate until then. The remaining risk — nothing
-server-side prevents a collaborator from skipping `just ci` — is
-accepted while the repo is single-author and unpublished. Trigger:
-publication, which activates `.github/workflows/` as the backend for
-every enforcement sentence.
+The repo is **public** and both v0.1.0 and v0.2.0 are published GitHub
+releases. `.github/workflows/` is now the active server-side gate on every
+push — the same `just ci` suite (fmt, clippy `-D warnings`, hermetic tests,
+cargo-deny, boundary check, coverage floor, blob guard, frontend gates) runs
+in CI, so the earlier "nothing server-side enforces the gate" risk no longer
+applies. Any residual hardening (e.g. branch-protection required-check config)
+is repo settings, not a code issue.

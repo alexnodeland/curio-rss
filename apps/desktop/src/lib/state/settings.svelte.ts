@@ -26,6 +26,8 @@ export const SETTING_KEYS = {
     markOnScroll: 'ui.reading.mark-on-scroll',
     locale: 'ui.locale',
     customThemes: 'ui.themes.custom',
+    collapsedFolders: 'ui.sidebar.collapsed-folders',
+    pendingFolders: 'ui.sidebar.pending-folders',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

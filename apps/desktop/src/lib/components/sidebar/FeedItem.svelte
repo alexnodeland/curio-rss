@@ -2,13 +2,21 @@
 /**
  * One subscription row: a select button (monogram, title) carrying the
  * backend-owned unread count, plus a health control that opens the
- * feed-health panel. The row is a container, not a button, so the health
- * control can be its own focusable target.
+ * feed-health panel. Right-click (or the context-menu key) opens the feed
+ * actions menu; the row supports inline rename and drag-to-reorder.
  */
 import type { FeedDto } from '$lib/bindings';
+import { contextMenu } from '$lib/actions/context-menu';
+import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
+import { markAllRead, toastCommandError } from '$lib/state/actions';
 import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { allFolderPaths } from '$lib/state/folder-ops';
+import type { MenuItem } from '$lib/state/menu.svelte';
+import { uiStore } from '$lib/state/ui.svelte';
+import { copyText } from '$lib/utils/clipboard';
+import { openExternal } from '$lib/utils/external';
 
 let {
     feed,
@@ -31,7 +39,99 @@ const label = $derived(feed.title ?? feed.url);
 
 let dropTarget = $state(false);
 
-/** True while a same-group feed (not this one) is being dragged. */
+// ─── inline rename ───────────────────────────────────────────────────────────
+let renaming = $state(false);
+let draft = $state('');
+let inputEl = $state<HTMLInputElement>();
+
+$effect(() => {
+    if (renaming && inputEl !== undefined) {
+        inputEl.focus();
+        inputEl.select();
+    }
+});
+
+function startRename(): void {
+    draft = feed.title ?? '';
+    renaming = true;
+}
+
+function commitRename(): void {
+    if (!renaming) return;
+    renaming = false;
+    const title = draft.trim();
+    void feedsStore.setFeedTitle(feed.id, title.length > 0 ? title : null);
+}
+
+function onRenameKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        commitRename();
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        renaming = false;
+    }
+}
+
+// ─── context menu ────────────────────────────────────────────────────────────
+async function copyUrl(): Promise<void> {
+    const ok = await copyText(feed.url);
+    uiStore.showToast(t(ok ? 'sidebar.urlCopied' : 'app.error.internal'), ok ? 'success' : 'error');
+}
+
+async function unsubscribe(): Promise<void> {
+    const result = await feedsStore.removeFeed(feed.id);
+    if (result.status === 'error') {
+        toastCommandError(result.error);
+        return;
+    }
+    uiStore.showToast(t('feed.unsubscribed', { name: label }), 'info');
+}
+
+function feedMenu(): MenuItem[] {
+    const paused = feed.status === 'paused';
+    const moveTo: MenuItem[] = allFolderPaths(feedsStore.feeds).map((path) => ({
+        id: `move:${path}`,
+        label: path,
+        onSelect: () => void feedsStore.moveFeedToFolder(feed.id, path),
+    }));
+    moveTo.push({
+        id: 'ungroup',
+        labelKey: 'feed.menu.ungroup',
+        separatorBefore: moveTo.length > 0,
+        onSelect: () => void feedsStore.ungroupFeed(feed.id),
+    });
+    return [
+        { id: 'open', labelKey: 'feed.menu.openSite', onSelect: () => void openExternal(feed.url) },
+        {
+            id: 'refresh',
+            labelKey: 'feed.menu.refresh',
+            onSelect: () => void feedsStore.refreshFeed(feed.id),
+        },
+        { id: 'rename', labelKey: 'feed.menu.rename', onSelect: startRename },
+        {
+            id: 'markread',
+            labelKey: 'feed.menu.markAllRead',
+            onSelect: () => void markAllRead(feed.id),
+        },
+        { id: 'move', labelKey: 'feed.menu.moveToFolder', children: moveTo },
+        { id: 'copy', labelKey: 'feed.menu.copyUrl', onSelect: () => void copyUrl() },
+        {
+            id: 'status',
+            labelKey: paused ? 'feed.menu.resume' : 'feed.menu.pause',
+            onSelect: () => void feedsStore.setFeedStatus(feed.id, paused ? 'active' : 'paused'),
+        },
+        {
+            id: 'unsub',
+            labelKey: 'feed.menu.unsubscribe',
+            danger: true,
+            separatorBefore: true,
+            onSelect: () => void unsubscribe(),
+        },
+    ];
+}
+
+// ─── drag reorder ────────────────────────────────────────────────────────────
 function isValidDrag(): boolean {
     const dragging = feedDnd.draggingId;
     return (
@@ -81,7 +181,7 @@ function hue(text: string): number {
     class:unhealthy={feed.status !== 'active'}
     class:drop-target={dropTarget}
     class:dragging={feedDnd.draggingId === feed.id}
-    draggable={siblings !== undefined}
+    draggable={siblings !== undefined && !renaming}
     ondragstart={() => feedDnd.start(feed.id)}
     ondragover={onDragOver}
     ondragleave={() => {
@@ -91,29 +191,42 @@ function hue(text: string): number {
     ondragend={() => feedDnd.clear()}
     role="group"
     aria-label={label}
+    use:contextMenu={{ items: feedMenu, ariaLabel: label }}
 >
-    <button
-        class="feed-select"
-        aria-current={selected ? 'true' : undefined}
-        onclick={() => onselect(feed.id)}
-    >
-        <span class="feed-mono" style:--mono-hue={hue(label)} aria-hidden="true"
-            >{label.slice(0, 1).toUpperCase()}</span
+    {#if renaming}
+        <input
+            class="rename-input"
+            bind:this={inputEl}
+            bind:value={draft}
+            onkeydown={onRenameKeydown}
+            onblur={commitRename}
+            aria-label={t('feed.menu.rename')}
+        />
+    {:else}
+        <button
+            class="feed-select"
+            aria-current={selected ? 'true' : undefined}
+            ondblclick={startRename}
+            onclick={() => onselect(feed.id)}
         >
-        <span class="feed-title truncate">{label}</span>
-    </button>
-    {#if unread > 0}
-        <span class="unread-badge" aria-hidden="true">{unread}</span>
-        <span class="sr-only">{t('shell.unread.count', { count: unread })}</span>
+            <span class="feed-mono" style:--mono-hue={hue(label)} aria-hidden="true"
+                >{label.slice(0, 1).toUpperCase()}</span
+            >
+            <span class="feed-title truncate" use:tooltip={label}>{label}</span>
+        </button>
+        {#if unread > 0}
+            <span class="unread-badge" aria-hidden="true">{unread}</span>
+            <span class="sr-only">{t('shell.unread.count', { count: unread })}</span>
+        {/if}
+        <button
+            class="feed-health"
+            type="button"
+            aria-label={t('feedHealth.open', { name: label })}
+            onclick={() => onhealth(feed.id)}
+        >
+            <span class="health-dot health-{feed.status}" aria-hidden="true"></span>
+        </button>
     {/if}
-    <button
-        class="feed-health"
-        type="button"
-        aria-label={t('feedHealth.open', { name: label })}
-        onclick={() => onhealth(feed.id)}
-    >
-        <span class="health-dot health-{feed.status}" aria-hidden="true"></span>
-    </button>
 </div>
 
 <style>
@@ -174,6 +287,23 @@ function hue(text: string): number {
 
     .feed-item.active .feed-select {
         color: var(--fg);
+    }
+
+    .rename-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: var(--space-1) var(--space-2);
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        background: var(--surface-inset);
+        color: var(--fg);
+        border: 1px solid color-mix(in srgb, var(--accent), transparent 40%);
+        font-size: var(--text-md);
+    }
+
+    .rename-input:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 82%);
     }
 
     .feed-mono {

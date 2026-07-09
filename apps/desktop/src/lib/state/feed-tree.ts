@@ -16,7 +16,7 @@ export interface FeedFolder {
     path: string;
     /** Nested subfolders, sorted by name. */
     subfolders: FeedFolder[];
-    /** Feeds whose tag equals this folder's path exactly, sorted by label. */
+    /** Feeds whose tag equals this folder's path exactly, in `sort_order`. */
     feeds: FeedDto[];
 }
 
@@ -35,10 +35,6 @@ export function tagSegments(tag: string): string[] {
         .filter((segment) => segment.length > 0);
 }
 
-function feedLabel(feed: FeedDto): string {
-    return (feed.title ?? feed.url).toLocaleLowerCase();
-}
-
 interface MutableFolder {
     name: string;
     path: string;
@@ -53,12 +49,14 @@ function freeze(node: MutableFolder): FeedFolder {
         subfolders: [...node.subfolders.values()]
             .map(freeze)
             .sort((a, b) => a.name.localeCompare(b.name)),
-        feeds: [...node.feeds].sort((a, b) => feedLabel(a).localeCompare(feedLabel(b))),
+        // Feeds preserve their incoming order (which is `sort_order`), so a
+        // drag-reorder is visible; folders still sort by name above.
+        feeds: [...node.feeds],
     };
 }
 
-/** Walks (creating as needed) the folder chain for one path and files a feed at the leaf. */
-function insertFeed(roots: Map<string, MutableFolder>, segments: string[], feed: FeedDto): void {
+/** Walks (creating as needed) the folder chain for one path, returning the leaf. */
+function walkToLeaf(roots: Map<string, MutableFolder>, segments: string[]): MutableFolder | null {
     let level = roots;
     let prefix = '';
     let leaf: MutableFolder | null = null;
@@ -72,19 +70,25 @@ function insertFeed(roots: Map<string, MutableFolder>, segments: string[], feed:
         leaf = child;
         level = child.subfolders;
     }
-    if (leaf !== null) {
-        leaf.feeds.push(feed);
-    }
+    return leaf;
 }
 
 /**
  * Buckets feeds into a folder tree keyed on their `/`-path tags. Building is
- * order-independent: each feed walks (creating as needed) the folder chain
- * for each of its path tags and is appended to the leaf.
+ * order-independent per feed, but each folder's feeds preserve the incoming
+ * `feeds` array order (i.e. `sort_order`). `pendingPaths` overlays empty
+ * folders (user-created, not yet holding any feed) so they are visible.
  */
-export function buildFeedTree(feeds: FeedDto[]): FeedTree {
+export function buildFeedTree(feeds: FeedDto[], pendingPaths: string[] = []): FeedTree {
     const roots = new Map<string, MutableFolder>();
     const ungrouped: FeedDto[] = [];
+
+    for (const path of pendingPaths) {
+        const segments = tagSegments(path);
+        if (segments.length > 0) {
+            walkToLeaf(roots, segments);
+        }
+    }
 
     for (const feed of feeds) {
         const paths = feed.tags.map(tagSegments).filter((segments) => segments.length > 0);
@@ -93,13 +97,14 @@ export function buildFeedTree(feeds: FeedDto[]): FeedTree {
             continue;
         }
         for (const segments of paths) {
-            insertFeed(roots, segments, feed);
+            const leaf = walkToLeaf(roots, segments);
+            leaf?.feeds.push(feed);
         }
     }
 
     return {
         folders: [...roots.values()].map(freeze).sort((a, b) => a.name.localeCompare(b.name)),
-        ungrouped: ungrouped.sort((a, b) => feedLabel(a).localeCompare(feedLabel(b))),
+        ungrouped,
     };
 }
 

@@ -33,7 +33,7 @@ feedsStore.prime();
 
 // The folder tree derived from each feed's `/`-path tags; feeds with no tags
 // fall into `ungrouped` and render flat below the folders.
-const feedTree = $derived(buildFeedTree(feedsStore.feeds));
+const feedTree = $derived(buildFeedTree(feedsStore.feeds, feedsStore.pendingPaths));
 
 function currentView(): ViewId | null {
     if (selectionStore.selectedFeedId !== null) {
@@ -45,6 +45,19 @@ function currentView(): ViewId | null {
 function feedsError(): string {
     const failure = feedsStore.error;
     return failure === null ? '' : commandErrorMessage(failure);
+}
+
+/** Creates a new top-level folder with a unique default name (rename inline). */
+function newFolder(): void {
+    const existing = feedTree.folders.map((folder) => folder.name);
+    const base = t('folder.defaultName');
+    let name = base;
+    let n = 2;
+    while (existing.includes(name)) {
+        name = `${base} ${n}`;
+        n += 1;
+    }
+    feedsStore.createFolder(name);
 }
 </script>
 
@@ -109,7 +122,16 @@ function feedsError(): string {
         </section>
 
         <section class="sidebar-group sidebar-feeds">
-            <h2 class="sidebar-heading">{t('sidebar.feeds')}</h2>
+            <div class="sidebar-feeds-head">
+                <h2 class="sidebar-heading">{t('sidebar.feeds')}</h2>
+                <button
+                    class="chrome-button chrome-button-sm"
+                    type="button"
+                    aria-label={t('folder.menu.newFolder')}
+                    use:tooltip={t('folder.menu.newFolder')}
+                    onclick={newFolder}><Icon name="plus" size={14} /></button
+                >
+            </div>
             {#if feedsStore.error !== null}
                 <p class="sidebar-status error" role="alert">{feedsError()}</p>
             {:else if !feedsStore.loaded}
@@ -225,14 +247,36 @@ function feedsError(): string {
         gap: 2px;
     }
 
+    .sidebar-feeds-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-right: var(--space-1);
+        margin-bottom: var(--space-1);
+    }
+
     .sidebar-heading {
         padding: 0 var(--space-3);
-        margin-bottom: var(--space-1);
         font-size: 0.6875rem;
         font-weight: 650;
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
+    }
+
+    .chrome-button-sm {
+        width: 24px;
+        height: 24px;
+        opacity: 0;
+        transition:
+            opacity var(--dur-fast) var(--ease),
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .sidebar-feeds:hover .chrome-button-sm,
+    .chrome-button-sm:focus-visible {
+        opacity: 1;
     }
 
     .sidebar-list {

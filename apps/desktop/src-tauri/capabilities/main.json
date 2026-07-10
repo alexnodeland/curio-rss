@@ -1,7 +1,7 @@
 {
   "$schema": "gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "The single main window. Minimal ACL: IPC core, native file dialogs, and a URL-scoped opener for open-in-browser. No shell plugin, no fs plugin — all file IO happens in Rust commands behind the ipc_policy path gate.",
+  "description": "The single main window. Minimal ACL: IPC core, native file dialogs, and a URL-scoped opener for open-in-browser plus mailto/tel hand-off. No shell plugin, no fs plugin — all file IO happens in Rust commands behind the ipc_policy path gate.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -12,7 +12,12 @@
     "process:allow-restart",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" },
+        { "url": "mailto:*" },
+        { "url": "tel:*" }
+      ]
     }
   ]
 }

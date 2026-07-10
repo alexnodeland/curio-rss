@@ -257,10 +257,12 @@ export function selectFolder(path: string): void {
 }
 
 /**
- * Jumps to the next unread article, crossing feed boundaries. The current
- * scope switches to unread-only (so the target is guaranteed in the list) and
- * the next unread strictly below the selection is chosen; when the scope is
- * out of unread, it hops to the next feed with unread and takes its first.
+ * Jumps to the next unread article, crossing feed boundaries. The next unread
+ * strictly below the selection is chosen *within the current view* — the
+ * displayed filter is left untouched (an unread row is present in an
+ * all/unread view, so no silent switch to unread-only is needed). When the
+ * current scope is out of unread, it hops to the next feed with unread and
+ * takes its first; when nothing unread remains anywhere, it says so.
  */
 export async function goToNextUnread(): Promise<void> {
     const before = selectionStore.selectedArticleId;
@@ -268,17 +270,17 @@ export async function goToNextUnread(): Promise<void> {
         commands.listArticles(unreadScopeDto(articlesStore.filters, before)),
     );
     if (next !== undefined && next.length > 0) {
-        articlesStore.filters = { ...articlesStore.filters, read: false };
         selectionStore.selectedArticleId = next[0].id;
         return;
     }
     const feed = feedsStore.nextFeedWithUnread(selectionStore.selectedFeedId);
     if (feed === null) {
+        uiStore.showToast(t('nav.noMoreUnread'), 'info');
         return;
     }
     searchStore.clear();
     selectionStore.selectedFeedId = feed;
-    articlesStore.filters = { ...ALL_ARTICLES, feedId: feed, read: false };
+    articlesStore.filters = { ...ALL_ARTICLES, feedId: feed };
     const first = await run(() =>
         commands.listArticles(unreadScopeDto({ ...ALL_ARTICLES, feedId: feed }, null)),
     );

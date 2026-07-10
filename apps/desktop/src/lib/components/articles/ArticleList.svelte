@@ -143,6 +143,33 @@ $effect(() => {
     // Re-key on the list identity: a new filter is a fresh reading session.
     void list;
     markedThrough = 0;
+    // If the prior selection isn't in the new window (an unread-only toggle or
+    // feed switch dropped it), restart the resume anchor at the top so j/k
+    // can't teleport off a now-stale index into an unrelated row.
+    untrack(() => {
+        if (selectionStore.selectedIndex === -1) {
+            selectionStore.rememberIndex(0);
+        }
+    });
+});
+
+/** The final "no articles" branch (loaded, no error, no rows). */
+const showingEmpty = $derived(list.items.length === 0 && list.loaded && list.error === null);
+
+/**
+ * The empty state is a focus holder: when the list empties while it owned the
+ * keyboard (mark-all-read in an unread view, or `g f` → open an empty feed),
+ * the virtualizer unmounts and focus would fall to `<body>`, stranding every
+ * listbox shortcut. Moving focus here keeps the list "in focus" so navigation
+ * resumes the moment rows return.
+ */
+let emptyRegion = $state<HTMLElement | null>(null);
+
+$effect(() => {
+    void selectionStore.listFocusNonce;
+    if (showingEmpty && selectionStore.focus === 'list' && emptyRegion !== null) {
+        emptyRegion.focus();
+    }
 });
 
 /**
@@ -221,7 +248,9 @@ function onScrollPast(firstVisibleIndex: number): void {
         <!-- No rows to preserve: the first load itself failed. -->
         <p class="list-status error" role="alert">{listError}</p>
     {:else}
-        <EmptyState icon="inbox" title={t('list.empty')} />
+        <div class="empty-region" bind:this={emptyRegion} tabindex="-1">
+            <EmptyState icon="inbox" title={t('list.empty')} />
+        </div>
     {/if}
 </div>
 
@@ -253,6 +282,16 @@ function onScrollPast(firstVisibleIndex: number): void {
         background: var(--error-bg);
         color: var(--error-text);
         font-size: var(--text-xs);
+    }
+
+    /* Focus holder for the empty list (see the emptyRegion effect). Fills the
+       pane so the shared EmptyState centres, and stays outline-free since focus
+       here is programmatic, never a visible tab landing. */
+    .empty-region {
+        flex: 1 1 auto;
+        display: flex;
+        min-height: 0;
+        outline: none;
     }
 
     .list-skeleton {

@@ -136,6 +136,7 @@ export const en = {
     'toast.promote.saved': 'Saved to {name}',
     'toast.promote.unchanged': 'Already up to date in {name}',
     'toast.markAllRead': 'Marked {count} read',
+    'nav.noMoreUnread': 'No more unread',
 
     'help.title': 'Keyboard shortcuts',
     'help.close': 'Close',

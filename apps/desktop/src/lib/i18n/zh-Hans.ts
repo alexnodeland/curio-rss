@@ -124,6 +124,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'toast.promote.saved': '已保存到 {name}',
     'toast.promote.unchanged': '在 {name} 中已是最新',
     'toast.markAllRead': '已将 {count} 条标为已读',
+    'nav.noMoreUnread': '没有更多未读',
     'help.title': '键盘快捷键',
     'help.close': '关闭',
     'help.chord.then': '然后',

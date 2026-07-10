@@ -499,12 +499,28 @@ function onKeydown(event: KeyboardEvent): void {
     }
 
     .field-select {
-        padding: var(--space-1) var(--space-2);
+        padding: var(--space-1) calc(var(--space-3) + 1em) var(--space-1) var(--space-2);
         border-radius: var(--radius-md);
-        background: var(--bg-inset, transparent);
+        background-color: var(--bg-inset, transparent);
         color: var(--fg);
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-sm);
+    }
+
+    /* Time fields share the box treatment but carry no caret — reclaim the
+       caret's inline-end room and tint the native clock indicator to match. */
+    input[type='time'].field-select {
+        padding-inline-end: var(--space-2);
+        color-scheme: light dark;
+    }
+
+    input[type='time'].field-select::-webkit-calendar-picker-indicator {
+        opacity: 0.55;
+        cursor: pointer;
+    }
+
+    input[type='time'].field-select:hover::-webkit-calendar-picker-indicator {
+        opacity: 0.85;
     }
 
     .toggle {

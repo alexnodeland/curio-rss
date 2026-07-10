@@ -52,6 +52,18 @@ select {
     font: inherit;
 }
 
+/* Native selects render their own OS chevron (a heavy triangle in WKWebView);
+   suppress it and paint one consistent token-driven caret. Each scoped select
+   rule leaves inline-end padding so the caret never overlaps the value text. */
+select {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: var(--select-caret);
+    background-repeat: no-repeat;
+    background-position: right var(--space-3) center;
+    background-size: 0.8em;
+}
+
 p,
 h1,
 h2,
@@ -128,6 +140,11 @@ h6 {
     --surface-raised: color-mix(in srgb, var(--bg-secondary), var(--fg) 4%);
     --surface-overlay: color-mix(in srgb, var(--bg-secondary), var(--fg) 6%);
     --surface-inset: color-mix(in srgb, var(--bg), #000 8%);
+
+    /* One chevron for every native <select> (the OS chevron is suppressed).
+       A neutral mid-gray reads legibly on all nine theme grounds; SVG
+       background-images can't inherit a token colour, so this is baked. */
+    --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237c8085' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 
     /* Hairlines: a crisp line and a whisper line. */
     --hairline: color-mix(in srgb, var(--border-subtle), var(--fg) 8%);

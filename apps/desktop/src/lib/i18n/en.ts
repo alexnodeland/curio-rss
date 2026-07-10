@@ -114,6 +114,12 @@ export const en = {
         'Good typography disappears — it carries the words without calling attention to itself. Adjust the size, spacing, and width until a long article feels effortless to read.',
     'typography.preview.quote':
         'Type is a beautiful group of letters, not a group of beautiful letters.',
+    'typography.preview.listIntro': 'Type shapes a reading in a few ways:',
+    'typography.preview.item1': 'Rhythm — even spacing between lines and paragraphs.',
+    'typography.preview.item2': 'Measure — a line length the eye can track.',
+    'typography.preview.item3': 'Contrast — weight and colour that never strain.',
+    'typography.preview.inlineLead': 'Inline touches sit in the flow too, like',
+    'typography.preview.linkText': 'a link',
 
     'tags.label': 'Tags',
     'tags.placeholder': 'Add a tag…',

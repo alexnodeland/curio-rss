@@ -13,12 +13,21 @@ import SanitizedHtml from '$components/reader/SanitizedHtml.svelte';
 import { t } from '$lib/i18n';
 import { uiStore } from '$lib/state/ui.svelte';
 
-// Assembled from i18n strings so the sample text localizes; the markup (a
-// heading, prose, and a pull-quote) exercises the prose rhythm the controls
-// affect. It flows through SanitizedHtml → DOMPurify like any article body.
+// Assembled from i18n strings so the sample text localizes; the markup
+// deliberately exercises every block the reader stylesheet styles — heading,
+// prose, a bulleted list, an inline-code + link line, and a pull-quote — so the
+// preview genuinely tests the reader CSS, not just paragraph rhythm. It flows
+// through SanitizedHtml → DOMPurify like any article body. The link is an
+// in-page anchor (`#`) so a stray click in the settings preview can't navigate.
 const sampleHtml = $derived(
     `<h2>${t('typography.preview.heading')}</h2>` +
         `<p>${t('typography.preview.body')}</p>` +
+        `<p>${t('typography.preview.listIntro')}</p>` +
+        `<ul><li>${t('typography.preview.item1')}</li>` +
+        `<li>${t('typography.preview.item2')}</li>` +
+        `<li>${t('typography.preview.item3')}</li></ul>` +
+        `<p>${t('typography.preview.inlineLead')} <code>text-align: justify</code>, ` +
+        `<a href="#">${t('typography.preview.linkText')}</a>.</p>` +
         `<blockquote><p>${t('typography.preview.quote')}</p></blockquote>`,
 );
 </script>

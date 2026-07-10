@@ -108,6 +108,13 @@ export const fr: Partial<Record<MessageKey, string>> = {
         'Une bonne typographie s’efface : elle porte les mots sans attirer l’attention sur elle-même. Ajustez la taille, l’interligne et la largeur jusqu’à ce qu’un long article se lise sans effort.',
     'typography.preview.quote':
         'La typographie est un bel ensemble de lettres, non un ensemble de belles lettres.',
+    'typography.preview.listIntro': 'La typographie façonne la lecture de plusieurs manières :',
+    'typography.preview.item1':
+        'Rythme — un espacement régulier entre les lignes et les paragraphes.',
+    'typography.preview.item2': 'Mesure — une longueur de ligne que l’œil suit sans effort.',
+    'typography.preview.item3': 'Contraste — une graisse et une couleur qui ne fatiguent jamais.',
+    'typography.preview.inlineLead': 'Les éléments en ligne s’intègrent aussi au flux, comme',
+    'typography.preview.linkText': 'un lien',
     'tags.label': 'Étiquettes',
     'tags.placeholder': 'Ajouter une étiquette…',
     'tags.add': 'Ajouter une étiquette',

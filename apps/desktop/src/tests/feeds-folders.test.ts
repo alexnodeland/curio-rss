@@ -45,6 +45,36 @@ describe('feeds store — folder operations', () => {
         harness = null;
     });
 
+    it('keeps a folder visible when its last feed is ungrouped out of it', async () => {
+        const setup = await storeWithFeeds([feedFixture({ id: 1, tags: ['Solo'] })]);
+        harness = setup.harness;
+
+        await setup.store.ungroupFeed(1);
+
+        // The now-empty 'Solo' folder is re-scaffolded as pending so it doesn't
+        // silently vanish with its last feed.
+        const pendingWrites = harness
+            .callsFor('set_setting')
+            .filter((call) => call.key === 'ui.sidebar.pending-folders');
+        expect(pendingWrites.at(-1)?.value).toBe(JSON.stringify(['Solo']));
+    });
+
+    it('does not re-scaffold a folder another feed still occupies', async () => {
+        const setup = await storeWithFeeds([
+            feedFixture({ id: 1, tags: ['Shared'] }),
+            feedFixture({ id: 2, tags: ['Shared'], url: 'https://b.example/feed' }),
+        ]);
+        harness = setup.harness;
+
+        await setup.store.ungroupFeed(1);
+
+        const pendingWrites = harness
+            .callsFor('set_setting')
+            .filter((call) => call.key === 'ui.sidebar.pending-folders');
+        // 'Shared' still holds feed 2, so nothing is re-scaffolded.
+        expect(pendingWrites).toHaveLength(0);
+    });
+
     it('moveFeedToFolder retags the feed and clears the pending scaffold', async () => {
         const setup = await storeWithFeeds([feedFixture({ id: 1, tags: ['Old', 'Keep'] })]);
         harness = setup.harness;

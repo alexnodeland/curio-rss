@@ -13,12 +13,14 @@ import {
     activeView,
     importFromFile,
     refreshAll,
+    runCommand,
     selectFolder,
     selectView,
     type ViewId,
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
-import { buildFeedTree, flattenVisibleTree } from '$lib/state/feed-tree';
+import { moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { buildFeedTree, flattenVisibleTree, type VisibleRow } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
@@ -120,6 +122,69 @@ function activateRow(index: number): void {
     treeEl?.blur();
 }
 
+/**
+ * Reorders the feed under the cursor by one slot within its own drag group
+ * (the feeds sharing its parent folder). Returns false when the row isn't a
+ * feed or the move would fall off the group's end. The cursor rides along —
+ * the row key is `feed:<parentPath>:<id>`, unchanged by a within-group move.
+ */
+function reorderFeedRow(index: number, direction: 1 | -1): boolean {
+    const row = rows[index];
+    if (row === undefined || row.kind !== 'feed') {
+        return false;
+    }
+    const rowParent = (r: VisibleRow): string =>
+        r.key.slice('feed:'.length, r.key.lastIndexOf(':'));
+    const parentPath = rowParent(row);
+    const group = rows
+        .filter((r): r is Extract<VisibleRow, { kind: 'feed' }> => r.kind === 'feed')
+        .filter((r) => rowParent(r) === parentPath)
+        .map((r) => r.id);
+    const at = group.indexOf(row.id);
+    const target = group[at + direction];
+    if (target === undefined) {
+        return false;
+    }
+    const newGroup = moveWithinGroup(group, row.id, target);
+    const globalOrder = rebuildGlobalOrder(
+        feedsStore.feeds.map((candidate) => candidate.id),
+        newGroup,
+    );
+    void runCommand(() => feedsStore.reorderFeeds(globalOrder));
+    return true;
+}
+
+/**
+ * Alt+↑/↓ reorders the feed under the cursor within its group (keyboard DnD),
+ * distinct from a plain arrow's cursor move. Returns whether it consumed the
+ * event (only when a reorder actually happened — an end-of-group Alt+arrow
+ * falls through so nothing surprising occurs).
+ */
+function tryKeyboardReorder(event: KeyboardEvent, cursorIndex: number): boolean {
+    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) {
+        return false;
+    }
+    const moved = reorderFeedRow(cursorIndex, event.key === 'ArrowDown' ? 1 : -1);
+    if (moved) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    return moved;
+}
+
+/** Applies a resolved (non-`none`) tree key action — move, toggle, or activate. */
+function applyTreeResult(
+    result: Exclude<ReturnType<typeof treeKeyAction>, { type: 'none' }>,
+): void {
+    if (result.type === 'move') {
+        sidebarTreeStore.activeKey = rows[result.index]?.key ?? null;
+    } else if (result.type === 'toggle') {
+        feedsStore.toggleFolder(result.path);
+    } else {
+        activateRow(result.index);
+    }
+}
+
 function onTreeKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
         event.preventDefault();
@@ -134,6 +199,9 @@ function onTreeKeydown(event: KeyboardEvent): void {
     // the same next row — the cursor sticks. The raw `activeKey` is always
     // current, so this advances smoothly however fast the keys arrive.
     const cursorIndex = rows.findIndex((row) => row.key === sidebarTreeStore.activeKey);
+    if (tryKeyboardReorder(event, cursorIndex)) {
+        return;
+    }
     const result = treeKeyAction(rows, cursorIndex, event.key);
     if (result.type === 'none') {
         // → at a tree dead-end (a leaf feed, or an already-expanded end) drills
@@ -150,13 +218,7 @@ function onTreeKeydown(event: KeyboardEvent): void {
     }
     event.preventDefault();
     event.stopPropagation();
-    if (result.type === 'move') {
-        sidebarTreeStore.activeKey = rows[result.index]?.key ?? null;
-    } else if (result.type === 'toggle') {
-        feedsStore.toggleFolder(result.path);
-    } else {
-        activateRow(result.index);
-    }
+    applyTreeResult(result);
 }
 
 function currentView(): ViewId | null {

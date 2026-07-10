@@ -68,9 +68,14 @@ $effect(() => {
     overflow = { x: nx - x, y: ny - y };
 });
 
-// Move focus to the active item whenever it changes.
+// Move focus to the active item whenever it changes, scrolling it into view
+// so arrow-nav past the fold (a long "Move to folder" list) stays visible.
 $effect(() => {
-    if (activeIndex >= 0) itemEls[activeIndex]?.focus();
+    if (activeIndex >= 0) {
+        const el = itemEls[activeIndex];
+        el?.focus();
+        el?.scrollIntoView?.({ block: 'nearest' });
+    }
 });
 
 // Focus the first enabled item on mount.

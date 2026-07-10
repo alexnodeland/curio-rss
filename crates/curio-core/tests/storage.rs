@@ -1144,6 +1144,22 @@ fn storage_handle_is_send_and_sync() {
     assert_send_sync::<Storage>();
 }
 
+/// Guards the single-writer WAL invariant against regression: every mutation
+/// must open its transaction through `begin_write` (which is `IMMEDIATE`), never
+/// the default `conn.transaction()` (DEFERRED). A deferred transaction that
+/// reads before it writes starts as a reader and, under concurrent readers in
+/// WAL mode, can fail to upgrade with `SQLITE_BUSY_SNAPSHOT` — an error
+/// `busy_timeout` does not retry, which is what made
+/// `parallel_readers_stay_consistent_during_writes` flake in CI.
+#[test]
+fn writer_mutations_use_immediate_transactions() {
+    let repo = include_str!("../src/storage/repo.rs");
+    assert!(
+        !repo.contains("conn.transaction()"),
+        "writer mutations must use begin_write() (IMMEDIATE), not the deferred conn.transaction()",
+    );
+}
+
 #[test]
 fn parallel_readers_stay_consistent_during_writes() {
     let (_dir, storage) = temp_storage();

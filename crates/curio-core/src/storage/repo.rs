@@ -12,13 +12,28 @@ use std::collections::BTreeMap;
 
 use curio_types::{ArticleSnapshot, CurioId, EventEnvelope, EventPayload, Timestamp};
 use rusqlite::types::ToSql;
-use rusqlite::{Connection, OptionalExtension as _, Row};
+use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior};
 
 use super::{Storage, StorageError};
 use crate::model::{
     Article, ArticleContent, ArticleId, ArticleState, Feed, FeedId, FeedStatus, FetchRecord,
     FetchStatus, NewArticle, NewFeed,
 };
+
+/// Begins a write-intent transaction on the writer connection.
+///
+/// Always `IMMEDIATE`: every writer-thread transaction here intends to write,
+/// and rusqlite's default `BEGIN DEFERRED` takes no lock until the first
+/// statement — so a transaction that reads (e.g. a dedupe `SELECT`) before it
+/// writes starts as a reader and, under concurrent readers in WAL mode, can
+/// fail to upgrade with `SQLITE_BUSY_SNAPSHOT`, an error `busy_timeout` does
+/// **not** retry. Taking the write lock up front removes that failure mode
+/// entirely; it never contends here because a single writer thread owns the
+/// only read-write connection. Every mutation routes through this so the
+/// deferred read-then-write pattern can't creep back in.
+fn begin_write(conn: &mut Connection) -> Result<Transaction<'_>, StorageError> {
+    Ok(conn.transaction_with_behavior(TransactionBehavior::Immediate)?)
+}
 
 /// What a batch upsert did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -110,7 +125,7 @@ impl Storage {
     /// subscribed (UNIQUE), or on any database error.
     pub fn add_feed(&self, new: NewFeed) -> Result<(Feed, EventEnvelope), StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let now = Timestamp::now();
             let tags = normalize_tags(new.tags);
             tx.prepare_cached(
@@ -145,7 +160,7 @@ impl Storage {
     /// [`StorageError::NotFound`] if the feed does not exist.
     pub fn remove_feed(&self, id: FeedId) -> Result<EventEnvelope, StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let url: String = tx
                 .prepare_cached("SELECT url FROM feeds WHERE id = ?1")?
                 .query_row([id.0], |row| row.get(0))
@@ -390,7 +405,7 @@ impl Storage {
     pub fn reorder_feeds(&self, ordered: &[FeedId]) -> Result<(), StorageError> {
         let ids: Vec<i64> = ordered.iter().map(|feed| feed.0).collect();
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             {
                 let mut stmt =
                     tx.prepare_cached("UPDATE feeds SET sort_order = ?2 WHERE id = ?1")?;
@@ -420,7 +435,7 @@ impl Storage {
     /// Database errors.
     pub fn update_feed_url(&self, id: FeedId, url: String) -> Result<(), StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let row: Option<(String, Option<String>, String)> = tx
                 .prepare_cached("SELECT url, title, tags FROM feeds WHERE id = ?1")?
                 .query_row([id.0], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
@@ -496,7 +511,7 @@ impl Storage {
         articles: Vec<NewArticle>,
     ) -> Result<UpsertOutcome, StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let mut outcome = UpsertOutcome::default();
             let now = Timestamp::now().to_string();
             for article in articles {
@@ -785,7 +800,7 @@ impl Storage {
     /// [`StorageError::NotFound`] if the article does not exist.
     pub fn mark_read(&self, id: ArticleId, read: bool) -> Result<bool, StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             require_article(&tx, id.0)?;
             let changed = set_flag(&tx, id.0, "is_read", read)?;
             tx.commit()?;
@@ -913,7 +928,7 @@ impl Storage {
         dwell_ms: Option<u64>,
     ) -> Result<EventEnvelope, StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let curio_id = require_article(&tx, id.0)?;
             let envelope = EventEnvelope::new(EventPayload::ArticleOpened { curio_id, dwell_ms });
             insert_intent(&tx, &envelope)?;
@@ -950,7 +965,7 @@ impl Storage {
 
     fn stage_snapshot_event(&self, payload: EventPayload) -> Result<EventEnvelope, StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let envelope = EventEnvelope::new(payload);
             insert_intent(&tx, &envelope)?;
             tx.commit()?;
@@ -968,7 +983,7 @@ impl Storage {
         payload: impl FnOnce(CurioId, Vec<String>) -> EventPayload + Send + 'static,
     ) -> Result<Option<EventEnvelope>, StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let curio_id = require_article(&tx, id.0)?;
             let changed = set_flag(&tx, id.0, column, value)?;
             let envelope = if changed {
@@ -1002,7 +1017,7 @@ impl Storage {
     ) -> Result<Option<EventEnvelope>, StorageError> {
         let tag = validated_tag(tag)?;
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let curio_id = require_article(&tx, id.0)?;
             tx.prepare_cached("INSERT OR IGNORE INTO tags (name) VALUES (?1)")?
                 .execute([&tag])?;
@@ -1041,7 +1056,7 @@ impl Storage {
     ) -> Result<Option<EventEnvelope>, StorageError> {
         let tag = validated_tag(tag)?;
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             let curio_id = require_article(&tx, id.0)?;
             let n = tx
                 .prepare_cached(
@@ -1240,7 +1255,7 @@ impl Storage {
     /// Database errors.
     pub fn mark_intents_emitted(&self, intent_ids: Vec<i64>) -> Result<(), StorageError> {
         self.write(move |conn| {
-            let tx = conn.transaction()?;
+            let tx = begin_write(conn)?;
             for id in intent_ids {
                 tx.prepare_cached("DELETE FROM event_intents WHERE id = ?1")?
                     .execute([id])?;

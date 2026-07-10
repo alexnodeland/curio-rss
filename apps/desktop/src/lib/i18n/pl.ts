@@ -19,7 +19,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
         'Zasubskrybuj kanał, aby zacząć czytać, lub przenieś subskrypcje z innego czytnika.',
     'emptyState.addFeed': 'Dodaj pierwszy kanał',
     'emptyState.importOpml': 'Importuj OPML…',
-    'shell.feeds.count': '{count} kanałów',
+    'shell.feeds.count':
+        '{count, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanału}}',
     'shell.unread.count': '{count} nieprzeczytanych',
     'view.all': 'Wszystkie artykuły',
     'view.starred': 'Oznaczone gwiazdką',
@@ -76,7 +77,9 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.action.loadFull': 'Wczytaj pełny artykuł',
     'reader.action.promote': 'Zapisz do notatek',
     'reader.action.typography': 'Typografia',
-    'reader.meta.words': '{count} słów',
+    'reader.meta.words':
+        '{count, plural, one {# słowo} few {# słowa} many {# słów} other {# słowa}}',
+    'reddit.postedBy': 'Opublikowane przez u/{author}',
     'reader.youtube.play': 'Odtwórz {title}',
     'reader.youtube.hint': 'Kliknij, aby wczytać — nic się nie wczyta, dopóki tego nie zrobisz',
     'reader.youtube.badge': 'YouTube',
@@ -108,7 +111,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'search.clear': 'Wyczyść wyszukiwanie',
     'search.loading': 'Wyszukiwanie…',
     'search.empty': 'Brak wyników',
-    'search.results': '{count} wyników',
+    'search.results':
+        '{count, plural, one {# wynik} few {# wyniki} many {# wyników} other {# wyniku}}',
     'destinations.title': 'Miejsca docelowe',
     'destinations.open': 'Miejsca docelowe',
     'destinations.empty':
@@ -287,7 +291,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'doctor.vacuumed': 'Baza danych skompaktowana',
     'doctor.swept': 'Usunięto {count} starych plików dziennika',
     'doctor.diagnosticsReady': 'Pakiet diagnostyczny zapisano w {path}',
-    'doctor.stats.articles': '{count} artykułów',
+    'doctor.stats.articles':
+        '{count, plural, one {# artykuł} few {# artykuły} many {# artykułów} other {# artykułu}}',
     'doctor.stats.db': 'Baza danych: {path}',
     'doctor.check.integrity': 'Kontrola integralności',
     'doctor.check.fts': 'Kontrola indeksu wyszukiwania',

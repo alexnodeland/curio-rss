@@ -19,7 +19,7 @@ export const en = {
         'Subscribe to a feed to start reading, or bring your subscriptions over from another reader.',
     'emptyState.addFeed': 'Add your first feed',
     'emptyState.importOpml': 'Import OPML…',
-    'shell.feeds.count': '{count} feeds',
+    'shell.feeds.count': '{count, plural, one {# feed} other {# feeds}}',
     'shell.unread.count': '{count} unread',
 
     'view.all': 'All articles',
@@ -80,7 +80,8 @@ export const en = {
     'reader.action.loadFull': 'Load full article',
     'reader.action.promote': 'Save to notes',
     'reader.action.typography': 'Typography',
-    'reader.meta.words': '{count} words',
+    'reader.meta.words': '{count, plural, one {# word} other {# words}}',
+    'reddit.postedBy': 'Posted by u/{author}',
 
     'reader.youtube.play': 'Play {title}',
     'reader.youtube.hint': 'Click to load — nothing loads until you do',
@@ -117,7 +118,7 @@ export const en = {
     'search.clear': 'Clear search',
     'search.loading': 'Searching…',
     'search.empty': 'No matches',
-    'search.results': '{count} results',
+    'search.results': '{count, plural, one {# result} other {# results}}',
 
     'destinations.title': 'Destinations',
     'destinations.open': 'Destinations',
@@ -302,7 +303,7 @@ export const en = {
     'doctor.vacuumed': 'Database compacted',
     'doctor.swept': 'Removed {count} old log files',
     'doctor.diagnosticsReady': 'Diagnostics bundle written to {path}',
-    'doctor.stats.articles': '{count} articles',
+    'doctor.stats.articles': '{count, plural, one {# article} other {# articles}}',
     'doctor.stats.db': 'Database: {path}',
     'doctor.check.integrity': 'Integrity check',
     'doctor.check.fts': 'Search index check',

@@ -33,23 +33,51 @@ const CATALOGS: Record<LocaleId, Partial<Record<MessageKey, string>>> = {
     yue,
 };
 
-function interpolate(template: string, params?: Record<string, string | number>): string {
-    if (params === undefined) {
-        return template;
-    }
-    return template.replace(/\{(\w+)\}/g, (match, name: string) => {
-        const value = params[name];
+/**
+ * A plural block: `{count, plural, one {# feed} other {# feeds}}`. The form for
+ * the count's plural category (per `Intl.PluralRules` for the active locale) is
+ * chosen — falling back to `other` — and `#` is replaced with the count
+ * formatted through `Intl.NumberFormat`. Form bodies are brace-free (no nested
+ * placeholders), which is all the count strings need.
+ */
+const PLURAL_BLOCK = /\{(\w+),\s*plural,\s*((?:\w+\s*\{[^{}]*\}\s*)+)\}/g;
+const PLURAL_FORM = /(\w+)\s*\{([^{}]*)\}/g;
+
+function interpolate(
+    template: string,
+    locale: LocaleId,
+    params?: Record<string, string | number>,
+): string {
+    const p = params ?? {};
+    // Plural blocks first (they contain their own `{form}` braces).
+    const withPlurals = template.replace(PLURAL_BLOCK, (match, name: string, forms: string) => {
+        const count = Number(p[name]);
+        if (Number.isNaN(count)) {
+            return match;
+        }
+        const category = new Intl.PluralRules(locale).select(count);
+        const byCategory = new Map<string, string>();
+        for (const form of forms.matchAll(PLURAL_FORM)) {
+            byCategory.set(form[1], form[2]);
+        }
+        const chosen = byCategory.get(category) ?? byCategory.get('other') ?? '';
+        return chosen.replace(/#/g, new Intl.NumberFormat(locale).format(count));
+    });
+    // Then simple `{name}` placeholders.
+    return withPlurals.replace(/\{(\w+)\}/g, (match, name: string) => {
+        const value = p[name];
         return value === undefined ? match : String(value);
     });
 }
 
 /**
  * Resolves `key` against the active locale (English fallback) and interpolates
- * `{name}` placeholders from `params`.
+ * `{name}` placeholders and `{n, plural, …}` blocks from `params`.
  */
 export function t(key: MessageKey, params?: Record<string, string | number>): string {
-    const template = CATALOGS[localeStore.active][key] ?? en[key];
-    return interpolate(template, params);
+    const locale = localeStore.active;
+    const template = CATALOGS[locale][key] ?? en[key];
+    return interpolate(template, locale, params);
 }
 
 /** `June 3` this year, `June 3, 2024` otherwise — in the active locale. An

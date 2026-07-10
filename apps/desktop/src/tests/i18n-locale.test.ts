@@ -9,6 +9,7 @@ import { en } from '$lib/i18n/en';
 import { es } from '$lib/i18n/es';
 import { fr } from '$lib/i18n/fr';
 import { it as itCatalog } from '$lib/i18n/it';
+import { localeDir } from '$lib/i18n/locale.svelte';
 import { pl } from '$lib/i18n/pl';
 import { yue } from '$lib/i18n/yue';
 import { zhHans } from '$lib/i18n/zh-Hans';
@@ -103,13 +104,28 @@ describe('locale switching', () => {
         }
     });
 
-    it('persists the choice and sets <html lang> through set()', async () => {
+    it('persists the choice and sets <html lang> + dir through set()', async () => {
         harness = installIpcHarness({ set_setting: null });
         await localeStore.set('es');
 
         expect(localeStore.active).toBe('es');
         expect(document.documentElement.lang).toBe('es');
+        // Every shipped locale is LTR today; the scaffolding still writes dir.
+        expect(document.documentElement.dir).toBe('ltr');
+        expect(localeStore.dir).toBe('ltr');
         expect(harness.callsFor('set_setting')).toEqual([{ key: 'ui.locale', value: 'es' }]);
+    });
+
+    it('derives writing direction from the base language subtag (RTL scaffolding)', () => {
+        // Shipped locales are all LTR.
+        for (const locale of LOCALES) {
+            expect(localeDir(locale.id)).toBe('ltr');
+        }
+        // The mechanism flips for RTL languages, and reads the base subtag.
+        expect(localeDir('ar')).toBe('rtl');
+        expect(localeDir('he')).toBe('rtl');
+        expect(localeDir('ar-EG')).toBe('rtl');
+        expect(localeDir('en-US')).toBe('ltr');
     });
 });
 

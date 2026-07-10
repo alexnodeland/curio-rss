@@ -25,14 +25,17 @@ const sampleHtml = $derived(
 
 <div class="preview" role="group" aria-label={t('typography.preview')}>
     <span class="preview-label">{t('typography.preview')}</span>
-    <div class="preview-surface">
+    <div class="preview-surface" data-reading-theme={uiStore.readingTheme}>
         <article
             class="preview-article"
             class:justify={uiStore.textAlign === 'justify'}
+            class:hyphenate={uiStore.hyphenate}
             style:font-size="{uiStore.fontSize}px"
             style:line-height={uiStore.lineHeight}
             style:max-width="{uiStore.measure}px"
             style:font-family={uiStore.readerFontStack}
+            style:font-weight={uiStore.fontWeight}
+            style:letter-spacing="{uiStore.letterSpacing}em"
             style:--para-spacing={uiStore.paragraphSpacing}
         >
             <SanitizedHtml html={sampleHtml} />
@@ -72,5 +75,31 @@ const sampleHtml = $derived(
     .preview-article.justify :global(.sanitized-content) {
         text-align: justify;
         hyphens: auto;
+    }
+
+    .preview-article.hyphenate :global(.sanitized-content) {
+        hyphens: auto;
+    }
+
+    /* Mirrors ReaderPane's reading-surface tints so the control previews. The
+       ink tokens are forced directly (`--ink` is a :root color-mix that
+       inherits its computed value, so overriding `--fg` alone wouldn't repaint
+       the prose). */
+    .preview-surface[data-reading-theme='sepia'] {
+        background: #f1e5cf;
+        --ink: #43392b;
+        --ink-soft: #6b5b45;
+        --fg: #43392b;
+        --fg-muted: #5c4f3b;
+        --fg-subtle: #7a6a52;
+    }
+
+    .preview-surface[data-reading-theme='paper'] {
+        background: #faf6ee;
+        --ink: #2b2b2b;
+        --ink-soft: #555555;
+        --fg: #2b2b2b;
+        --fg-muted: #4a4a4a;
+        --fg-subtle: #6b6b6b;
     }
 </style>

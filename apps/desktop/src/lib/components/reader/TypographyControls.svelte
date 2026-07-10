@@ -12,6 +12,7 @@ import {
     TYPOGRAPHY_LIMITS,
     isReaderFontId,
     isReaderTextAlign,
+    isReaderTheme,
     uiStore,
 } from '$lib/state/ui.svelte';
 
@@ -44,6 +45,24 @@ function onAlign(event: Event & { currentTarget: HTMLSelectElement }): void {
     }
 }
 
+function onWeight(event: Event & { currentTarget: HTMLInputElement }): void {
+    void uiStore.setFontWeight(Number(event.currentTarget.value));
+}
+
+function onLetterSpacing(event: Event & { currentTarget: HTMLInputElement }): void {
+    void uiStore.setLetterSpacing(Number(event.currentTarget.value));
+}
+
+function onHyphenate(event: Event & { currentTarget: HTMLInputElement }): void {
+    void uiStore.setHyphenate(event.currentTarget.checked);
+}
+
+function onReadingTheme(event: Event & { currentTarget: HTMLSelectElement }): void {
+    if (isReaderTheme(event.currentTarget.value)) {
+        void uiStore.setReadingTheme(event.currentTarget.value);
+    }
+}
+
 function reset(): void {
     void uiStore.setFontFamily('serif');
     void uiStore.setFontSize(TYPOGRAPHY_LIMITS.fontSize.default);
@@ -51,6 +70,10 @@ function reset(): void {
     void uiStore.setMeasure(TYPOGRAPHY_LIMITS.measure.default);
     void uiStore.setParagraphSpacing(TYPOGRAPHY_LIMITS.paragraphSpacing.default);
     void uiStore.setTextAlign('left');
+    void uiStore.setFontWeight(TYPOGRAPHY_LIMITS.fontWeight.default);
+    void uiStore.setLetterSpacing(TYPOGRAPHY_LIMITS.letterSpacing.default);
+    void uiStore.setHyphenate(false);
+    void uiStore.setReadingTheme('default');
 }
 </script>
 
@@ -128,6 +151,48 @@ function reset(): void {
         </select>
     </label>
 
+    <label class="row">
+        <span class="row-label">{t('typography.weight')}</span>
+        <input
+            type="range"
+            min={TYPOGRAPHY_LIMITS.fontWeight.min}
+            max={TYPOGRAPHY_LIMITS.fontWeight.max}
+            step="25"
+            value={uiStore.fontWeight}
+            oninput={onWeight}
+            use:rangeFill={uiStore.fontWeight}
+        />
+        <span class="row-value">{uiStore.fontWeight}</span>
+    </label>
+
+    <label class="row">
+        <span class="row-label">{t('typography.letterSpacing')}</span>
+        <input
+            type="range"
+            min={TYPOGRAPHY_LIMITS.letterSpacing.min}
+            max={TYPOGRAPHY_LIMITS.letterSpacing.max}
+            step="0.005"
+            value={uiStore.letterSpacing}
+            oninput={onLetterSpacing}
+            use:rangeFill={uiStore.letterSpacing}
+        />
+        <span class="row-value">{uiStore.letterSpacing.toFixed(3)}</span>
+    </label>
+
+    <label class="row">
+        <span class="row-label">{t('typography.readingTheme')}</span>
+        <select value={uiStore.readingTheme} onchange={onReadingTheme}>
+            <option value="default">{t('typography.readingTheme.default')}</option>
+            <option value="sepia">{t('typography.readingTheme.sepia')}</option>
+            <option value="paper">{t('typography.readingTheme.paper')}</option>
+        </select>
+    </label>
+
+    <label class="row row-toggle">
+        <span class="row-label">{t('typography.hyphens')}</span>
+        <input type="checkbox" checked={uiStore.hyphenate} onchange={onHyphenate} />
+    </label>
+
     <button class="reset" type="button" onclick={reset}>{t('typography.reset')}</button>
 </div>
 
@@ -157,6 +222,14 @@ function reset(): void {
         text-align: right;
         font-variant-numeric: tabular-nums;
         color: var(--fg-muted);
+    }
+
+    /* The hyphenation toggle: a checkbox sitting in the control column. */
+    .row-toggle input {
+        justify-self: start;
+        width: 1.1rem;
+        height: 1.1rem;
+        accent-color: var(--accent);
     }
 
     select {

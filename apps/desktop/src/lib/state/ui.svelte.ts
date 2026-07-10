@@ -160,6 +160,10 @@ export const TYPOGRAPHY_LIMITS = {
     measure: { min: 520, max: 960, default: 720 },
     /** Space between paragraphs, as a multiple of the font size (em). */
     paragraphSpacing: { min: 0.4, max: 2, default: 1 },
+    /** Reader body font weight (100-step CSS weights). */
+    fontWeight: { min: 300, max: 700, default: 400 },
+    /** Extra tracking between letters, in em. */
+    letterSpacing: { min: -0.02, max: 0.08, default: 0 },
 } as const;
 
 /** Reader text alignment. `justify` sets `text-align: justify` with hyphenation. */
@@ -168,6 +172,18 @@ export const READER_TEXT_ALIGNS: readonly ReaderTextAlign[] = ['left', 'justify'
 
 export function isReaderTextAlign(value: string): value is ReaderTextAlign {
     return (READER_TEXT_ALIGNS as readonly string[]).includes(value);
+}
+
+/**
+ * A reading surface tint applied to the reader body only, independent of the
+ * app theme: `default` follows the app theme, `sepia`/`paper` force a warm
+ * paper ground with dark ink so long reads stay comfortable on any theme.
+ */
+export type ReaderTheme = 'default' | 'sepia' | 'paper';
+export const READER_THEMES: readonly ReaderTheme[] = ['default', 'sepia', 'paper'] as const;
+
+export function isReaderTheme(value: string): value is ReaderTheme {
+    return (READER_THEMES as readonly string[]).includes(value);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -301,6 +317,10 @@ export class UiStore {
     fontFamily: ReaderFontId = $state('serif');
     paragraphSpacing: number = $state(TYPOGRAPHY_LIMITS.paragraphSpacing.default);
     textAlign: ReaderTextAlign = $state('left');
+    fontWeight: number = $state(TYPOGRAPHY_LIMITS.fontWeight.default);
+    letterSpacing: number = $state(TYPOGRAPHY_LIMITS.letterSpacing.default);
+    hyphenate: boolean = $state(false);
+    readingTheme: ReaderTheme = $state('default');
 
     toasts: Toast[] = $state([]);
 
@@ -428,6 +448,21 @@ export class UiStore {
         const persistedAlign = settingsStore.get(SETTING_KEYS.textAlign);
         if (persistedAlign !== undefined && isReaderTextAlign(persistedAlign)) {
             this.textAlign = persistedAlign;
+        }
+        this.fontWeight = readNumber(
+            SETTING_KEYS.fontWeight,
+            TYPOGRAPHY_LIMITS.fontWeight,
+            TYPOGRAPHY_LIMITS.fontWeight.default,
+        );
+        this.letterSpacing = readNumber(
+            SETTING_KEYS.letterSpacing,
+            TYPOGRAPHY_LIMITS.letterSpacing,
+            TYPOGRAPHY_LIMITS.letterSpacing.default,
+        );
+        this.hyphenate = settingsStore.get(SETTING_KEYS.hyphenate) === 'true';
+        const persistedReadingTheme = settingsStore.get(SETTING_KEYS.readingTheme);
+        if (persistedReadingTheme !== undefined && isReaderTheme(persistedReadingTheme)) {
+            this.readingTheme = persistedReadingTheme;
         }
     }
 
@@ -602,6 +637,32 @@ export class UiStore {
     async setTextAlign(align: ReaderTextAlign): Promise<void> {
         this.textAlign = align;
         await settingsStore.set(SETTING_KEYS.textAlign, align);
+    }
+
+    /** Sets the reader body font weight, clamped, and persists it. */
+    async setFontWeight(value: number): Promise<void> {
+        const { min, max } = TYPOGRAPHY_LIMITS.fontWeight;
+        this.fontWeight = clamp(value, min, max);
+        await settingsStore.set(SETTING_KEYS.fontWeight, String(this.fontWeight));
+    }
+
+    /** Sets the reader letter spacing (em), clamped, and persists it. */
+    async setLetterSpacing(value: number): Promise<void> {
+        const { min, max } = TYPOGRAPHY_LIMITS.letterSpacing;
+        this.letterSpacing = clamp(value, min, max);
+        await settingsStore.set(SETTING_KEYS.letterSpacing, String(this.letterSpacing));
+    }
+
+    /** Toggles automatic hyphenation of reader body text and persists it. */
+    async setHyphenate(value: boolean): Promise<void> {
+        this.hyphenate = value;
+        await settingsStore.set(SETTING_KEYS.hyphenate, String(value));
+    }
+
+    /** Sets the reading-surface tint (independent of the app theme) and persists it. */
+    async setReadingTheme(theme: ReaderTheme): Promise<void> {
+        this.readingTheme = theme;
+        await settingsStore.set(SETTING_KEYS.readingTheme, theme);
     }
 
     /** Picks a theme: applies it, mirrors it, persists it. */

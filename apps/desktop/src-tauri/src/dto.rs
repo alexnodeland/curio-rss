@@ -121,6 +121,12 @@ pub struct FeedDto {
     pub added_at: String,
     /// Last fetch attempt, if any (RFC 3339 UTC).
     pub last_fetched_at: Option<String>,
+    /// Error text of the feed's most recent fetch, when that attempt errored
+    /// (`null` ⇒ currently healthy). Persisted-derived, so the sidebar health
+    /// dot is honest on a cold start before any in-session refresh.
+    pub last_error: Option<String>,
+    /// When the feed last fetched successfully (RFC 3339 UTC), if ever.
+    pub last_ok_at: Option<String>,
     /// Feed-level tags (OPML folders land here).
     pub tags: Vec<String>,
 }
@@ -136,6 +142,8 @@ impl From<Feed> for FeedDto {
             status: feed.status.into(),
             added_at: feed.added_at.to_string(),
             last_fetched_at: feed.last_fetched_at.map(|t| t.to_string()),
+            last_error: feed.last_error,
+            last_ok_at: feed.last_ok_at.map(|t| t.to_string()),
             tags: feed.tags,
         }
     }

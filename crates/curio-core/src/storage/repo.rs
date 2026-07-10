@@ -103,8 +103,17 @@ pub struct PendingIntent {
     pub envelope: EventEnvelope,
 }
 
+// The trailing two columns derive current health from `fetch_log`: the error
+// text iff the *newest* attempt errored, and the timestamp of the newest
+// successful attempt. Correlated on `feeds.id` — every FEED_COLS query is a
+// bare `FROM feeds` (no aliases/joins), so the reference is unambiguous.
 const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modified, status, \
-                         allow_private_network, added_at, last_fetched_at, tags";
+                         allow_private_network, added_at, last_fetched_at, tags, \
+                         (SELECT CASE WHEN status = 'error' THEN error END FROM fetch_log \
+                          WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error, \
+                         (SELECT fetched_at FROM fetch_log WHERE feed_id = feeds.id \
+                          AND status IN ('ok', 'not_modified') ORDER BY id DESC LIMIT 1) \
+                          AS last_ok_at";
 
 const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url, author, \
                             published_at, content_html, content_text, lang, word_count, \
@@ -1503,6 +1512,8 @@ struct RawFeed {
     added_at: String,
     last_fetched_at: Option<String>,
     tags: String,
+    last_error: Option<String>,
+    last_ok_at: Option<String>,
 }
 
 fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
@@ -1519,6 +1530,8 @@ fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         added_at: row.get(9)?,
         last_fetched_at: row.get(10)?,
         tags: row.get(11)?,
+        last_error: row.get(12)?,
+        last_ok_at: row.get(13)?,
     })
 }
 
@@ -1539,6 +1552,8 @@ impl RawFeed {
             allow_private_network: self.allow_private_network,
             added_at: parse_ts("feeds.added_at", &self.added_at)?,
             last_fetched_at: parse_opt_ts("feeds.last_fetched_at", self.last_fetched_at)?,
+            last_error: self.last_error,
+            last_ok_at: parse_opt_ts("fetch_log.fetched_at", self.last_ok_at)?,
             tags: serde_json::from_str(&self.tags).map_err(|err| StorageError::Corrupt {
                 column: "feeds.tags",
                 message: err.to_string(),

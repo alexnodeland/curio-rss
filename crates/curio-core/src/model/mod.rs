@@ -90,6 +90,14 @@ pub struct Feed {
     pub added_at: Timestamp,
     /// When the feed was last fetched, if ever.
     pub last_fetched_at: Option<Timestamp>,
+    /// Error text of the feed's most recent fetch attempt, when that attempt
+    /// errored (`None` ⇒ currently healthy). Derived from the persisted
+    /// `fetch_log`, so the sidebar health dot is honest on a cold start,
+    /// before any in-session refresh has run.
+    pub last_error: Option<String>,
+    /// When the feed last fetched *successfully* (`ok`/`not_modified`), if ever.
+    /// Also derived from `fetch_log`.
+    pub last_ok_at: Option<Timestamp>,
     /// Tags assigned to the feed (normalized: non-empty, unique). Carried
     /// on `feed.added` and exported as the OPML `category` attribute, so
     /// an import/export cycle keeps folder/category structure.

@@ -115,6 +115,34 @@ describe('Sidebar', () => {
         expect(selectionStore.selectedFeedId).toBeNull();
     });
 
+    it('shows the error dot from the persisted DTO on a cold start (no refresh yet)', async () => {
+        // last_error is set on the feed itself — no in-session refresh has run,
+        // so this is the cold-start signal the session-only outcomes used to miss.
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Broken', last_error: 'HTTP 500' })],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+        });
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+
+        const row = getByLabelText('Broken');
+        expect(row.classList.contains('unhealthy')).toBe(true);
+        expect(row.querySelector('.health-errored')).not.toBeNull();
+    });
+
+    it('a healthy feed shows no error dot on a cold start', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Fine', last_error: null })],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+        });
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+
+        const row = getByLabelText('Fine');
+        expect(row.classList.contains('unhealthy')).toBe(false);
+        expect(row.querySelector('.health-errored')).toBeNull();
+    });
+
     it('surfaces feed-list failures', async () => {
         harness = installIpcHarness({
             list_feeds: rejectWith(commandErrorFixture({ kind: 'user', message: 'db locked' })),

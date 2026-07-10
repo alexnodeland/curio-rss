@@ -1059,6 +1059,56 @@ fn fetch_log_round_trips_newest_first() {
 }
 
 #[test]
+fn feed_health_derives_from_the_latest_fetch_outcome() {
+    let (_dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let only = |s: &Storage| s.list_feeds().unwrap().pop().unwrap();
+
+    // Cold: never fetched ⇒ no error, no success time (the healthy default).
+    let fresh = only(&storage);
+    assert_eq!(fresh.last_error, None);
+    assert_eq!(fresh.last_ok_at, None);
+
+    let record = |status: FetchStatus, error: Option<&str>| {
+        storage
+            .record_fetch(FetchRecord {
+                feed_id: feed.id,
+                fetched_at: Timestamp::now(),
+                status,
+                http_status: None,
+                error: error.map(str::to_owned),
+                articles_new: 0,
+                duration_ms: None,
+            })
+            .unwrap();
+    };
+
+    // A success stamps last_ok_at and keeps last_error clear.
+    record(FetchStatus::Ok, None);
+    let healthy = only(&storage);
+    assert_eq!(healthy.last_error, None);
+    let ok_at = healthy.last_ok_at;
+    assert!(ok_at.is_some());
+
+    // A later error surfaces on last_error; last_ok_at still points at the success.
+    record(FetchStatus::Error, Some("connection refused"));
+    let errored = only(&storage);
+    assert_eq!(errored.last_error.as_deref(), Some("connection refused"));
+    assert_eq!(errored.last_ok_at, ok_at);
+
+    // Recovery clears last_error again — the dot follows the newest attempt.
+    record(FetchStatus::Ok, None);
+    let recovered = only(&storage);
+    assert_eq!(recovered.last_error, None);
+}
+
+#[test]
 fn settings_upsert_and_read_back() {
     let (_dir, storage) = temp_storage();
     assert_eq!(storage.get_setting("theme").unwrap(), None);

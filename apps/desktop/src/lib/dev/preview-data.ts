@@ -34,6 +34,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'active',
         added_at: '2026-05-02T10:00:00.000Z',
         last_fetched_at: '2026-07-06T08:12:00.000Z',
+        last_error: null,
+        last_ok_at: '2026-07-06T08:12:00.000Z',
         tags: ['Engineering'],
     },
     {
@@ -45,6 +47,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'active',
         added_at: '2026-05-10T10:00:00.000Z',
         last_fetched_at: '2026-07-06T07:40:00.000Z',
+        last_error: null,
+        last_ok_at: '2026-07-06T07:40:00.000Z',
         tags: ['Design'],
     },
     {
@@ -56,6 +60,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'active',
         added_at: '2026-06-01T10:00:00.000Z',
         last_fetched_at: '2026-07-06T09:01:00.000Z',
+        last_error: null,
+        last_ok_at: '2026-07-06T09:01:00.000Z',
         tags: ['Design', 'Community'],
     },
     {
@@ -67,6 +73,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'active',
         added_at: '2026-06-03T10:00:00.000Z',
         last_fetched_at: '2026-07-06T06:22:00.000Z',
+        last_error: null,
+        last_ok_at: '2026-07-06T06:22:00.000Z',
         tags: ['Video'],
     },
     {
@@ -78,6 +86,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'active',
         added_at: '2026-04-18T10:00:00.000Z',
         last_fetched_at: '2026-07-06T05:55:00.000Z',
+        last_error: 'HTTP 429: rate limited by the origin',
+        last_ok_at: '2026-07-05T05:55:00.000Z',
         tags: ['Business'],
     },
     {
@@ -89,6 +99,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'active',
         added_at: '2026-04-22T10:00:00.000Z',
         last_fetched_at: '2026-07-06T04:30:00.000Z',
+        last_error: null,
+        last_ok_at: '2026-07-06T04:30:00.000Z',
         tags: ['Essays'],
     },
     {
@@ -100,6 +112,8 @@ export const previewFeeds: FeedDto[] = [
         status: 'paused',
         added_at: '2026-03-30T10:00:00.000Z',
         last_fetched_at: '2026-07-05T22:10:00.000Z',
+        last_error: null,
+        last_ok_at: '2026-07-05T22:10:00.000Z',
         tags: ['Engineering'],
     },
 ];

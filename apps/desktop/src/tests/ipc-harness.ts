@@ -132,6 +132,8 @@ export function feedFixture(overrides: Partial<FeedDto> = {}): FeedDto {
         status: 'active',
         added_at: '2026-07-01T10:00:00.000Z',
         last_fetched_at: null,
+        last_error: null,
+        last_ok_at: null,
         tags: [],
         ...overrides,
     };

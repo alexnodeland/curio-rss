@@ -126,6 +126,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'toast.promote.saved': 'In {name} gespeichert',
     'toast.promote.unchanged': 'In {name} bereits aktuell',
     'toast.markAllRead': '{count} als gelesen markiert',
+    'nav.noMoreUnread': 'Nichts Ungelesenes mehr',
     'help.title': 'Tastenkürzel',
     'help.close': 'Schließen',
     'help.chord.then': 'dann',

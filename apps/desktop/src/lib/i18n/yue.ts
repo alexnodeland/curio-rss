@@ -125,6 +125,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'toast.promote.saved': '已儲存到 {name}',
     'toast.promote.unchanged': '{name} 入面已經係最新',
     'toast.markAllRead': '已標 {count} 篇為已睇',
+    'nav.noMoreUnread': '冇更多未讀',
     'help.title': '鍵盤快捷鍵',
     'help.close': '閂',
     'help.chord.then': '跟住',

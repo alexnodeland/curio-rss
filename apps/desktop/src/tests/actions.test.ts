@@ -129,17 +129,28 @@ describe('actions — views and shortcut routing', () => {
         harness = null;
     });
 
-    it('goToNextUnread selects the next unread and enters unread-only', async () => {
+    it('goToNextUnread selects the next unread without rewriting the visible view', async () => {
         harness = installIpcHarness({ list_articles: [articleSummaryFixture({ id: 42 })] });
         selectionStore.selectedArticleId = 100;
         await goToNextUnread();
 
         expect(selectionStore.selectedArticleId).toBe(42);
-        expect(articlesStore.filters.read).toBe(false);
+        // The displayed filter is left alone — no silent switch to unread-only.
+        expect(articlesStore.filters.read).toBeNull();
+        // The query still scopes to unread rows below the selection.
         const sent = harness.callsFor('list_articles')[0].params as ListArticlesDto;
         expect(sent.read).toBe(false);
         expect(sent.before).toBe(100);
         expect(sent.limit).toBe(1);
+    });
+
+    it('goToNextUnread toasts on the dead end when nothing unread remains', async () => {
+        harness = installIpcHarness({ list_articles: [] });
+        selectionStore.selectedArticleId = 100;
+        await goToNextUnread();
+
+        expect(selectionStore.selectedArticleId).toBe(100);
+        expect(uiStore.toasts.some((toast) => toast.message === 'No more unread')).toBe(true);
     });
 
     it('goToNextUnread hops to the next feed with unread when the scope is dry', async () => {
@@ -160,7 +171,9 @@ describe('actions — views and shortcut routing', () => {
         await goToNextUnread();
         expect(selectionStore.selectedFeedId).toBe(2);
         expect(articlesStore.filters.feedId).toBe(2);
-        expect(articlesStore.filters.read).toBe(false);
+        // The hopped-to feed shows all its rows — the unread one is present
+        // without forcing an unread-only view.
+        expect(articlesStore.filters.read).toBeNull();
         expect(selectionStore.selectedArticleId).toBe(99);
     });
 

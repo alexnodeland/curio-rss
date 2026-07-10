@@ -5,6 +5,7 @@
  * table (each change writes through `set_setting`). No local state — the
  * uiStore is the single source of truth, clamped on write.
  */
+import { rangeFill } from '$lib/actions/range-fill';
 import { t } from '$lib/i18n';
 import { READER_FONTS, TYPOGRAPHY_LIMITS, isReaderFontId, uiStore } from '$lib/state/ui.svelte';
 
@@ -54,6 +55,7 @@ function reset(): void {
             step="1"
             value={uiStore.fontSize}
             oninput={onSize}
+            use:rangeFill={uiStore.fontSize}
         />
         <span class="row-value">{uiStore.fontSize}px</span>
     </label>
@@ -67,6 +69,7 @@ function reset(): void {
             step="0.1"
             value={uiStore.lineHeight}
             oninput={onLineHeight}
+            use:rangeFill={uiStore.lineHeight}
         />
         <span class="row-value">{uiStore.lineHeight.toFixed(1)}</span>
     </label>
@@ -80,6 +83,7 @@ function reset(): void {
             step="20"
             value={uiStore.measure}
             oninput={onMeasure}
+            use:rangeFill={uiStore.measure}
         />
         <span class="row-value">{uiStore.measure}px</span>
     </label>
@@ -123,10 +127,8 @@ function reset(): void {
         border: 1px solid var(--hairline);
     }
 
-    input[type='range'] {
-        width: 100%;
-        accent-color: var(--accent);
-    }
+    /* The bespoke range treatment is global (app.css); the fill tracks each
+       slider's value via use:rangeFill. */
 
     .reset {
         align-self: flex-end;

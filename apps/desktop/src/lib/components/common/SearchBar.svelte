@@ -42,6 +42,7 @@ function onKeydown(event: KeyboardEvent): void {
         bind:this={input}
         class="search-input"
         type="search"
+        spellcheck="false"
         value={searchStore.query}
         placeholder={t('search.placeholder')}
         aria-label={t('search.label')}

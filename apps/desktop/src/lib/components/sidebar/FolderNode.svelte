@@ -177,6 +177,7 @@ function onFolderDrop(event: DragEvent): void {
         {#if renaming}
             <input
                 class="rename-input"
+                spellcheck="false"
                 bind:this={inputEl}
                 bind:value={draft}
                 onkeydown={onRenameKeydown}

@@ -75,6 +75,7 @@ function onKeydown(event: KeyboardEvent): void {
     <input
         class="tag-input"
         type="text"
+        spellcheck="false"
         bind:value={draft}
         placeholder={t('tags.placeholder')}
         aria-label={t('tags.add')}

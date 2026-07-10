@@ -127,9 +127,15 @@ $effect(() => {
     }
 });
 
-/** Enter on the listbox opens the selected article (the empty-state hint). */
-function openSelected(): void {
-    handleShortcut('article.open');
+/**
+ * Enter on the listbox drills rightward into the reader to read the selected
+ * article (it is already shown by the selection). This mirrors → (list →
+ * reader) and the sidebar's Enter (feed → list), so Enter consistently means
+ * "go into this". Opening the source in the browser is a distinct action — the
+ * `o` shortcut and the reader's open-in-browser button.
+ */
+function enterReader(): void {
+    selectionStore.focusReader();
 }
 
 /**
@@ -212,7 +218,7 @@ function onScrollPast(firstVisibleIndex: number): void {
             onscrollpast={onScrollPast}
             onmove={moveSelection}
             onmenukey={openSelectedMenu}
-            onactivate={openSelected}
+            onactivate={enterReader}
         >
             {#snippet row(article, index)}
                 <ArticleRow

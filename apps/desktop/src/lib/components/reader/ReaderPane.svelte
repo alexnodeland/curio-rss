@@ -148,7 +148,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     {#if selectionStore.selectedArticleId === null}
         <EmptyState icon="sparkle" title={t('reader.empty')}>
             {#snippet hint()}
-                <kbd>j</kbd><kbd>k</kbd> to move · <kbd>Enter</kbd> to open · <kbd>?</kbd> for shortcuts
+                <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>→</kbd> or <kbd>Enter</kbd> to read · <kbd>?</kbd> for shortcuts
             {/snippet}
         </EmptyState>
     {:else}

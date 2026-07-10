@@ -106,7 +106,7 @@ function openSelectedMenu(): void {
             focusNonce={selectionStore.listFocusNonce}
             onmove={moveSelection}
             onmenukey={openSelectedMenu}
-            onactivate={() => handleShortcut('article.open')}
+            onactivate={() => selectionStore.focusReader()}
         >
             {#snippet row(article, index)}
                 <ArticleRow

@@ -190,6 +190,10 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         font-size: var(--text-md);
         font-weight: 560;
         line-height: 1.3;
+        /* Reserve both clamp lines so a 1-line title occupies the same height as
+           a 2-line one — otherwise the channel/date row rides up and the grid's
+           baselines go ragged card-to-card. */
+        min-height: calc(1.3em * 2);
         color: var(--fg);
         letter-spacing: var(--tracking-snug);
     }

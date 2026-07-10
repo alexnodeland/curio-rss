@@ -117,6 +117,7 @@ function openSelectedMenu(): void {
                     setsize={searchStore.results.length}
                     selected={article.id === selectionStore.selectedArticleId}
                     onselect={selectArticle}
+                    highlight={searchStore.query}
                 />
             {/snippet}
         </VirtualList>

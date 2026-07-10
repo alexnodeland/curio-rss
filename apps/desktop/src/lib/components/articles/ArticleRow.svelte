@@ -88,6 +88,7 @@ import { contextMenu } from '$lib/actions/context-menu';
 import { formatIntlDate, t } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
+import { highlightSegments } from '$lib/utils/highlight';
 
 let {
     article,
@@ -97,6 +98,7 @@ let {
     setsize,
     selected,
     onselect,
+    highlight,
 }: {
     article: ArticleSummaryDto;
     index: number;
@@ -105,6 +107,8 @@ let {
     setsize: number;
     selected: boolean;
     onselect: (articleId: number) => void;
+    /** Active search query — when set, its terms are `<mark>`-ed in title/snippet. */
+    highlight?: string;
 } = $props();
 
 function flags() {
@@ -138,6 +142,18 @@ function onKeyDown(event: KeyboardEvent): void {
 }
 </script>
 
+<!-- Renders text with the active search query's terms wrapped in <mark>. Each
+     segment is plain, Svelte-escaped text — no raw-HTML injection is involved. -->
+{#snippet marked(text: string)}
+    {#if highlight}
+        {#each highlightSegments(text, highlight) as segment, i (i)}
+            {#if segment.mark}<mark class="row-mark">{segment.text}</mark>{:else}{segment.text}{/if}
+        {/each}
+    {:else}
+        {text}
+    {/if}
+{/snippet}
+
 <div
     id={articleOptionId(article.id)}
     class="article-row"
@@ -159,9 +175,9 @@ function onKeyDown(event: KeyboardEvent): void {
         <span class="sr-only">{t('list.row.unread')}</span>
     {/if}
     <div class="row-main">
-        <span class="row-title truncate">{article.title}</span>
+        <span class="row-title truncate">{@render marked(article.title)}</span>
         {#if !compact && article.snippet !== null}
-            <span class="row-snippet truncate">{article.snippet}</span>
+            <span class="row-snippet truncate">{@render marked(article.snippet)}</span>
         {/if}
         <span class="row-meta truncate">
             {#if feedTitle() !== null}
@@ -276,6 +292,15 @@ function onKeyDown(event: KeyboardEvent): void {
         font-size: var(--text-xs);
         line-height: 1.4;
         color: var(--fg-subtle);
+    }
+
+    /* Search-term hit: a soft accent wash that reads on every theme without
+       recolouring the surrounding text. */
+    .row-mark {
+        background: color-mix(in srgb, var(--accent), transparent 72%);
+        color: inherit;
+        border-radius: 3px;
+        padding: 0 1px;
     }
 
     .row-meta {

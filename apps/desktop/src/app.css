@@ -232,6 +232,11 @@ h6 {
     --read: var(--fg-muted);
     --link: #1565c0;
     --link-visited: #7950f2;
+    /* Deeper recessed surfaces: the shared color-mix steps land near-white on
+       a white ground, so the list-vs-content layering reads flat. Step them
+       onto the theme's own greys so the recessed list sits below the content. */
+    --surface-list: var(--bg-tertiary);
+    --surface-inset: var(--bg-hover);
 }
 
 /* Nord Theme */
@@ -417,6 +422,10 @@ h6 {
     --read: var(--fg-muted);
     --link: #1a6a9e;
     --link-visited: #6c71c4;
+    /* Deeper recessed surfaces (see the light theme). bg-hover is a mid grey
+       here, so the inset steps off bg-tertiary instead. */
+    --surface-list: var(--bg-tertiary);
+    --surface-inset: color-mix(in srgb, var(--bg-tertiary), #000 5%);
 }
 
 /* Utility Classes */

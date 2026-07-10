@@ -66,15 +66,6 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
                 <Icon name={homeOn ? 'rows' : 'grid'} />
             </button>
         {/if}
-        <button
-            class="list-tool"
-            type="button"
-            use:tooltip={t('destinations.open')}
-            aria-label={t('destinations.open')}
-            onclick={() => uiStore.openModal('destinations')}
-        >
-            <Icon name="folder" />
-        </button>
     </div>
     {#if searchStore.active}
         <SearchResults />

@@ -28,6 +28,7 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import EmptyState from '$components/common/EmptyState.svelte';
 import Icon from '$components/common/Icon.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
@@ -132,15 +133,11 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 
 <div class="reader">
     {#if selectionStore.selectedArticleId === null}
-        <div class="reader-empty">
-            <div class="empty-mark" aria-hidden="true">
-                <Icon name="sparkle" size={30} strokeWidth={1.5} />
-            </div>
-            <p class="empty-title">{t('reader.empty')}</p>
-            <p class="empty-hint">
+        <EmptyState icon="sparkle" title={t('reader.empty')}>
+            {#snippet hint()}
                 <kbd>j</kbd><kbd>k</kbd> to move · <kbd>Enter</kbd> to open · <kbd>?</kbd> for shortcuts
-            </p>
-        </div>
+            {/snippet}
+        </EmptyState>
     {:else if failure() !== null}
         <div class="reader-status">
             <p class="error" role="alert">{failureMessage()}</p>
@@ -167,7 +164,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     <Icon name="check" />
                 </button>
                 <button
-                    class="tool"
+                    class="tool star"
                     class:on={flags()?.starred === true}
                     aria-pressed={flags()?.starred === true}
                     aria-label={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
@@ -339,55 +336,6 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     }
 
     /* Empty state */
-    .reader-empty {
-        flex: 1 1 auto;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-4);
-        padding: var(--space-8);
-        text-align: center;
-    }
-
-    .empty-mark {
-        display: grid;
-        place-items: center;
-        width: 68px;
-        height: 68px;
-        border-radius: var(--radius-xl);
-        color: var(--accent);
-        background: var(--selected);
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent), transparent 70%);
-    }
-
-    .empty-title {
-        font-size: var(--text-lg);
-        font-weight: 560;
-        color: var(--fg);
-        letter-spacing: var(--tracking-snug);
-    }
-
-    .empty-hint {
-        font-size: var(--text-sm);
-        color: var(--fg-subtle);
-    }
-
-    .empty-hint kbd {
-        display: inline-block;
-        min-width: 1.5em;
-        padding: 0.1em 0.4em;
-        margin: 0 0.1em;
-        border-radius: var(--radius-sm);
-        background: var(--surface-raised);
-        border: 1px solid var(--hairline);
-        box-shadow: 0 1px 0 var(--hairline-strong);
-        font-family: var(--font-mono);
-        font-size: 0.82em;
-        color: var(--fg-muted);
-        text-align: center;
-    }
-
     .reader-toolbar {
         flex: 0 0 auto;
         display: flex;
@@ -425,6 +373,12 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     .tool.on {
         color: var(--accent);
         background: var(--selected);
+    }
+
+    /* The starred state is gold everywhere — matches the list row's star, not
+       the accent blue the other toggles use. */
+    .tool.star.on {
+        color: var(--warning-text);
     }
 
     .typography-anchor {

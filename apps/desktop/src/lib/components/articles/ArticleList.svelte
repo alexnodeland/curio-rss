@@ -32,6 +32,7 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import EmptyState from '$components/common/EmptyState.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { untrack } from 'svelte';
 import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
@@ -220,7 +221,7 @@ function onScrollPast(firstVisibleIndex: number): void {
         <!-- No rows to preserve: the first load itself failed. -->
         <p class="list-status error" role="alert">{listError}</p>
     {:else}
-        <p class="list-status">{t('list.empty')}</p>
+        <EmptyState icon="inbox" title={t('list.empty')} />
     {/if}
 </div>
 

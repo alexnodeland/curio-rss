@@ -67,6 +67,23 @@ describe('actions — toggles', () => {
         expect(harness.callsFor('set_archived')).toEqual([{ articleId: 7, archived: true }]);
     });
 
+    it('serializes rapid presses so the second alternates instead of being dropped', async () => {
+        // Two fast presses off the same backend flag: a naive read-then-write
+        // has both read `false` and both write `true`. Serialized, the second
+        // sees the first's written value and writes its negation.
+        harness = installIpcHarness({
+            get_article_state: articleStateFixture({ starred: false }),
+            set_starred: true,
+        });
+        await Promise.all([toggleStar(7), toggleStar(7)]);
+        expect(harness.callsFor('set_starred')).toEqual([
+            { articleId: 7, starred: true },
+            { articleId: 7, starred: false },
+        ]);
+        // The backend flag was read once; the follow-up alternated from cache.
+        expect(harness.callsFor('get_article_state')).toHaveLength(1);
+    });
+
     it('a user-tier failure surfaces verbatim as a toast and stops the flip', async () => {
         harness = installIpcHarness({
             get_article_state: rejectWith(

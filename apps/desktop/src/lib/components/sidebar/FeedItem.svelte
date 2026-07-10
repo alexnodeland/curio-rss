@@ -10,7 +10,7 @@ import type { FeedDto } from '$lib/bindings';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { markAllRead, toastCommandError } from '$lib/state/actions';
+import { markAllRead, runCommand, toastCommandError } from '$lib/state/actions';
 import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
 import { feedRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -77,7 +77,7 @@ function commitRename(): void {
     if (!renaming) return;
     renaming = false;
     const title = draft.trim();
-    void feedsStore.setFeedTitle(feed.id, title.length > 0 ? title : null);
+    void runCommand(() => feedsStore.setFeedTitle(feed.id, title.length > 0 ? title : null));
 }
 
 function onRenameKeydown(event: KeyboardEvent): void {
@@ -110,20 +110,20 @@ function feedMenu(): MenuItem[] {
     const moveTo: MenuItem[] = allFolderPaths(feedsStore.feeds).map((path) => ({
         id: `move:${path}`,
         label: path,
-        onSelect: () => void feedsStore.moveFeedToFolder(feed.id, path),
+        onSelect: () => void runCommand(() => feedsStore.moveFeedToFolder(feed.id, path)),
     }));
     moveTo.push({
         id: 'ungroup',
         labelKey: 'feed.menu.ungroup',
         separatorBefore: moveTo.length > 0,
-        onSelect: () => void feedsStore.ungroupFeed(feed.id),
+        onSelect: () => void runCommand(() => feedsStore.ungroupFeed(feed.id)),
     });
     return [
         { id: 'open', labelKey: 'feed.menu.openSite', onSelect: () => void openExternal(feed.url) },
         {
             id: 'refresh',
             labelKey: 'feed.menu.refresh',
-            onSelect: () => void feedsStore.refreshFeed(feed.id),
+            onSelect: () => void runCommand(() => feedsStore.refreshFeed(feed.id)),
         },
         { id: 'rename', labelKey: 'feed.menu.rename', onSelect: startRename },
         {
@@ -142,7 +142,10 @@ function feedMenu(): MenuItem[] {
         {
             id: 'status',
             labelKey: paused ? 'feed.menu.resume' : 'feed.menu.pause',
-            onSelect: () => void feedsStore.setFeedStatus(feed.id, paused ? 'active' : 'paused'),
+            onSelect: () =>
+                void runCommand(() =>
+                    feedsStore.setFeedStatus(feed.id, paused ? 'active' : 'paused'),
+                ),
         },
         {
             id: 'unsub',
@@ -184,7 +187,7 @@ function onDrop(event: DragEvent): void {
         feedsStore.feeds.map((candidate) => candidate.id),
         newGroup,
     );
-    void feedsStore.reorderFeeds(globalOrder);
+    void runCommand(() => feedsStore.reorderFeeds(globalOrder));
     feedDnd.clear();
 }
 

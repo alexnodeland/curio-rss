@@ -93,7 +93,7 @@ consumer implementation.
 
 ## Publication status (RESOLVED at v0.2.0)
 
-The repo is **public** and both v0.1.0 and v0.2.0 are published GitHub
+The repo is **public** and v0.1.0, v0.2.0, and v0.3.0 are published GitHub
 releases. `.github/workflows/` is now the active server-side gate on every
 push — the same `just ci` suite (fmt, clippy `-D warnings`, hermetic tests,
 cargo-deny, boundary check, coverage floor, blob guard, frontend gates) runs

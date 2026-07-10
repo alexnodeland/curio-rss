@@ -41,6 +41,7 @@ export const es: Partial<Record<MessageKey, string>> = {
     'feed.menu.rename': 'Renombrar',
     'feed.menu.markAllRead': 'Marcar todo como leído',
     'feed.menu.moveToFolder': 'Mover a carpeta',
+    'feed.menu.newFolder': 'Nueva carpeta…',
     'feed.menu.ungroup': 'Quitar de la carpeta',
     'feed.menu.edit': 'Editar feed…',
     'feed.menu.copyUrl': 'Copiar URL del feed',

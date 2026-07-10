@@ -42,6 +42,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'feed.menu.rename': '重新命名',
     'feed.menu.markAllRead': '全部標為已讀',
     'feed.menu.moveToFolder': '移去資料夾',
+    'feed.menu.newFolder': '新資料夾…',
     'feed.menu.ungroup': '移出資料夾',
     'feed.menu.edit': '編輯訂閱源…',
     'feed.menu.copyUrl': '複製訂閱源網址',

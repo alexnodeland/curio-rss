@@ -44,6 +44,7 @@ export const en = {
     'feed.menu.rename': 'Rename',
     'feed.menu.markAllRead': 'Mark all read',
     'feed.menu.moveToFolder': 'Move to folder',
+    'feed.menu.newFolder': 'New folder…',
     'feed.menu.ungroup': 'Remove from folder',
     'feed.menu.edit': 'Edit feed…',
     'feed.menu.copyUrl': 'Copy feed URL',

@@ -14,7 +14,7 @@ import { markAllRead, runCommand, toastCommandError } from '$lib/state/actions';
 import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
 import { feedRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
-import { allFolderPaths } from '$lib/state/folder-ops';
+import { allFolderPaths, folderPathsForTags } from '$lib/state/folder-ops';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import type { EditFeedSection } from '$lib/state/ui.svelte';
@@ -108,19 +108,48 @@ async function unsubscribe(): Promise<void> {
     uiStore.showToast(t('feed.unsubscribed', { name: label }), 'info');
 }
 
+/** A unique default name for a fresh top-level folder (matches Sidebar.newFolder). */
+function uniqueTopLevelName(): string {
+    const existing = new Set(
+        allFolderPaths(feedsStore.feeds).filter((path) => !path.includes('/')),
+    );
+    const base = t('folder.defaultName');
+    if (!existing.has(base)) return base;
+    let n = 2;
+    while (existing.has(`${base} ${n}`)) n += 1;
+    return `${base} ${n}`;
+}
+
 function feedMenu(): MenuItem[] {
     const paused = feed.status === 'paused';
-    const moveTo: MenuItem[] = allFolderPaths(feedsStore.feeds).map((path) => ({
-        id: `move:${path}`,
-        label: path,
-        onSelect: () => void runCommand(() => feedsStore.moveFeedToFolder(feed.id, path)),
-    }));
+    // Offer only folders the feed isn't already in — a move into its own folder
+    // is a no-op the menu shouldn't advertise.
+    const currentPaths = new Set(feed.tags);
+    const moveTo: MenuItem[] = allFolderPaths(feedsStore.feeds)
+        .filter((path) => !currentPaths.has(path))
+        .map((path) => ({
+            id: `move:${path}`,
+            label: path,
+            onSelect: () => void runCommand(() => feedsStore.moveFeedToFolder(feed.id, path)),
+        }));
+    // "New folder…" — retagging the feed into a fresh top-level folder springs it
+    // into existence; rename it via its own menu afterward.
     moveTo.push({
-        id: 'ungroup',
-        labelKey: 'feed.menu.ungroup',
+        id: 'new-folder',
+        labelKey: 'feed.menu.newFolder',
         separatorBefore: moveTo.length > 0,
-        onSelect: () => void runCommand(() => feedsStore.ungroupFeed(feed.id)),
+        onSelect: () =>
+            void runCommand(() => feedsStore.moveFeedToFolder(feed.id, uniqueTopLevelName())),
     });
+    // Ungroup only when the feed actually sits in a folder — otherwise it's a no-op.
+    if (folderPathsForTags(feed.tags).length > 0) {
+        moveTo.push({
+            id: 'ungroup',
+            labelKey: 'feed.menu.ungroup',
+            separatorBefore: true,
+            onSelect: () => void runCommand(() => feedsStore.ungroupFeed(feed.id)),
+        });
+    }
     return [
         { id: 'open', labelKey: 'feed.menu.openSite', onSelect: () => void openExternal(feed.url) },
         {
@@ -234,6 +263,8 @@ function hue(text: string): number {
     role="treeitem"
     tabindex="-1"
     aria-level={level}
+    aria-posinset={siblings ? siblings.indexOf(feed.id) + 1 : undefined}
+    aria-setsize={siblings ? siblings.length : undefined}
     aria-selected={selected}
     aria-label={label}
     use:contextMenu={{ items: feedMenu, ariaLabel: label }}
@@ -257,7 +288,7 @@ function hue(text: string): number {
             onclick={() => onselect(feed.id)}
         >
             <span class="feed-mono" style:--mono-hue={hue(label)} aria-hidden="true"
-                >{label.slice(0, 1).toUpperCase()}</span
+                >{(Array.from(label)[0] ?? '').toUpperCase()}</span
             >
             <span class="feed-title truncate" use:tooltip={label}>{label}</span>
         </button>

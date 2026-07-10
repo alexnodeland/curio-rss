@@ -6,10 +6,14 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-informational)
 ![Built with](https://img.shields.io/badge/Rust%20%C2%B7%20Tauri%20%C2%B7%20Svelte-555)
 
-> **v0.2.0** — a big polish-and-power release: right-click menus, folders you
-> create & reorder, tabbed settings, source presets (Reddit / Mastodon /
-> YouTube / Hacker News), background refresh with notifications, native menus &
-> hotkeys, custom themes, and an in-app auto-updater.
+> **v0.3.0** — a reading-and-refinement release: new reader typography controls
+> (weight, letter-spacing, hyphenation) and **Sepia / Paper reading themes**,
+> keyboard feed reordering, drag a feed out of a folder, search-term
+> highlighting, `mailto:` / `tel:` links, honest cold-start feed health, and
+> localized plurals across all eight languages. (See the
+> [changelog](CHANGELOG.md) for the full list; v0.2.0 brought right-click menus,
+> folders, tabbed settings, source presets, background refresh, and the in-app
+> updater.)
 > **Website:** <https://alexnodeland.github.io/curio-rss/> ·
 > Changelog: [CHANGELOG.md](CHANGELOG.md) ·
 > Roadmap: [docs/design/roadmap.md](docs/design/roadmap.md).
@@ -46,13 +50,13 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 |---|---|
 | 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh, **background refresh on launch + a configurable interval**, health tracking + backoff |
 | ➕ **Add anything** | Smart-input add — paste a URL, `r/subreddit`, `@user@instance` (Mastodon), a YouTube channel, or Hacker News; plus a Popular-sources quick-add row |
-| 🗂️ **Organize** | Create / rename / delete folders, drag feeds into folders, drag-reorder, inline rename, keyboard tree navigation, right-click menus, an edit-feed panel (URL visible + health), and a warning dot on any feed whose refresh errored |
-| 📖 **Read** | Three-pane reader, on-demand full-article readability, comfortable/compact list density, inline snippets, mark-on-open, opt-in mark-on-scroll, next-unread across feeds |
+| 🗂️ **Organize** | Create / rename / delete folders, drag feeds **into and out of** folders, drag- or **keyboard-reorder (`Alt`+↑/↓)**, inline rename, keyboard tree navigation, right-click menus, an edit-feed panel (URL visible + health), and a warning dot on any feed whose last refresh errored — **honest from a cold start** |
+| 📖 **Read** | Three-pane reader with **adjustable typography** (size, width, weight, line-height, letter-spacing, hyphenation) and **Sepia / Paper reading themes**, on-demand full-article readability, comfortable/compact list density, inline snippets, mark-on-open, opt-in mark-on-scroll, next-unread across feeds |
 | ⭐ **State** | Read · star · read-later · archive — event-sourced with negation events |
-| 🔎 **Search** | Full-text search over everything (SQLite FTS5) |
+| 🔎 **Search** | Full-text search over everything (SQLite FTS5), with **match highlighting** in results |
 | ↔️ **Import / export** | OPML in/out + Pocket, Instapaper & Readwise CSV importers |
 | 📝 **Save to notes** | Named destinations → markdown notes with a byte-preserved managed region |
-| 🎨 **Appearance** | 9 built-in themes + System, **custom themes you export & import as YAML**, live typography preview, RSS-native Reddit layout + **click-to-play YouTube** |
+| 🎨 **Appearance** | 9 built-in themes + System, **custom themes you export & import as YAML**, **Sepia / Paper reading themes** independent of the app theme, a rich live typography preview, RSS-native Reddit layout + **click-to-play YouTube** |
 | 🔔 **Notifications** | Optional desktop notifications on new articles — per-event toggles, quiet hours, per-feed opt-out |
 | 🔄 **Auto-updates** | Built-in "Check for updates" that installs & relaunches; auto-check / auto-install toggles; signed GitHub-release artifacts |
 | ⌨️ **Keyboard & menus** | Native macOS menu bar, ⌘-chord hotkeys, vim-style keys, tooltips, and a help overlay |
@@ -117,6 +121,10 @@ command-key chords).
 | <kbd>m</kbd> | Mark read / unread | | <kbd>a</kbd> | Archive |
 | <kbd>o</kbd> | Open in browser | | <kbd>p</kbd> | Save to notes |
 | <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
+
+Move between panes with the arrow keys (<kbd>←</kbd>/<kbd>→</kbd> across panes,
+<kbd>↑</kbd>/<kbd>↓</kbd> within one), and reorder a feed inside its folder with
+<kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
 
 macOS command chords (also in the menu bar):
 <kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·

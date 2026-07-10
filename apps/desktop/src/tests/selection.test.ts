@@ -4,7 +4,7 @@
  */
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
-import { LOAD_MORE_MARGIN, SelectionStore } from '$lib/state/selection.svelte';
+import { LOAD_MORE_MARGIN, PAGE_ROWS, SelectionStore } from '$lib/state/selection.svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, articleSummaryFixture, flushIpc, installIpcHarness } from './ipc-harness';
 
@@ -82,6 +82,42 @@ describe('selection store', () => {
 
         selection.selectFeed(null);
         expect(articlesStore.filters.feedId).toBeNull();
+    });
+
+    it('resumes j/k from the last position when the selected row leaves the window', async () => {
+        // Reproduces the auto-mark-read case: selecting a row marks it read, an
+        // unread view refetches it out, and selectedIndex goes to -1. j must
+        // not teleport to the top and k must still step back.
+        const selection = await loadedSelection();
+        for (let i = 0; i < 4; i += 1) {
+            selection.selectNextArticle(); // lands on index 3 (id 97)
+        }
+        expect(selection.selectedArticleId).toBe(97);
+
+        // Simulate the row dropping out of the window (now absent → index -1).
+        selection.selectedArticleId = 999;
+        expect(selection.selectedIndex).toBe(-1);
+
+        // j resumes at the captured position (the row that shifted into the gap).
+        selection.selectNextArticle();
+        expect(selection.selectedArticleId).toBe(97);
+
+        // k from the same orphaned state steps back, not to the top.
+        selection.selectedArticleId = 999;
+        selection.selectPreviousArticle();
+        expect(selection.selectedArticleId).toBe(98);
+    });
+
+    it('PageDown / PageUp move a page and clamp at the ends', async () => {
+        const selection = await loadedSelection();
+        selection.selectNextArticle(); // index 0 (id 100)
+
+        selection.selectPageDown(); // +PAGE_ROWS, clamped to the last loaded row
+        expect(PAGE_ROWS).toBeGreaterThanOrEqual(ROWS.length);
+        expect(selection.selectedArticleId).toBe(91); // last of the 10 rows
+
+        selection.selectPageUp(); // back to the top
+        expect(selection.selectedArticleId).toBe(100);
     });
 
     it('does nothing on an empty window', async () => {

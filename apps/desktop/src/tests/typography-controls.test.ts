@@ -80,10 +80,57 @@ describe('reader typography', () => {
         expect(writes).toContainEqual({ key: 'ui.typography.text-align', value: 'justify' });
     });
 
+    it('the reading controls write through and persist weight/tracking/theme/hyphens', async () => {
+        harness = installIpcHarness({ get_setting: null, set_setting: null });
+        const { getAllByRole } = render(TypographyControls);
+
+        // Sliders 5 and 6 are the new weight + letter-spacing controls.
+        const sliders = getAllByRole('slider');
+        await fireEvent.input(sliders[4], { target: { value: '600' } });
+        await fireEvent.input(sliders[5], { target: { value: '0.05' } });
+        // The reading-theme select is the third combobox (font, align, theme).
+        const themeSelect = getAllByRole('combobox')[2];
+        await fireEvent.change(themeSelect, { target: { value: 'sepia' } });
+        // The hyphenation checkbox.
+        await fireEvent.click(getAllByRole('checkbox')[0]);
+        await flushIpc();
+
+        expect(uiStore.fontWeight).toBe(600);
+        expect(uiStore.letterSpacing).toBeCloseTo(0.05);
+        expect(uiStore.readingTheme).toBe('sepia');
+        expect(uiStore.hyphenate).toBe(true);
+
+        const writes = harness.callsFor('set_setting');
+        expect(writes).toContainEqual({ key: 'ui.typography.font-weight', value: '600' });
+        expect(writes).toContainEqual({ key: 'ui.typography.letter-spacing', value: '0.05' });
+        expect(writes).toContainEqual({ key: 'ui.typography.reading-theme', value: 'sepia' });
+        expect(writes).toContainEqual({ key: 'ui.typography.hyphenate', value: 'true' });
+    });
+
+    it('adopts the persisted reading controls at init, clamped', async () => {
+        const stored: Record<string, string> = {
+            'ui.typography.font-weight': '9000', // above max → clamps down
+            'ui.typography.letter-spacing': '0.03',
+            'ui.typography.hyphenate': 'true',
+            'ui.typography.reading-theme': 'paper',
+        };
+        harness = installIpcHarness({ get_setting: (args) => stored[args.key as string] ?? null });
+        await settingsStore.load();
+        uiStore.initTypography();
+
+        expect(uiStore.fontWeight).toBe(TYPOGRAPHY_LIMITS.fontWeight.max);
+        expect(uiStore.letterSpacing).toBeCloseTo(0.03);
+        expect(uiStore.hyphenate).toBe(true);
+        expect(uiStore.readingTheme).toBe('paper');
+    });
+
     it('reset restores the defaults', async () => {
         harness = installIpcHarness({ get_setting: null, set_setting: null });
         await uiStore.setFontSize(22);
         await uiStore.setFontFamily('mono');
+        await uiStore.setFontWeight(700);
+        await uiStore.setHyphenate(true);
+        await uiStore.setReadingTheme('sepia');
         const { getByRole } = render(TypographyControls);
 
         await fireEvent.click(getByRole('button', { name: 'Reset' }));
@@ -91,5 +138,8 @@ describe('reader typography', () => {
 
         expect(uiStore.fontSize).toBe(TYPOGRAPHY_LIMITS.fontSize.default);
         expect(uiStore.fontFamily).toBe('serif');
+        expect(uiStore.fontWeight).toBe(TYPOGRAPHY_LIMITS.fontWeight.default);
+        expect(uiStore.hyphenate).toBe(false);
+        expect(uiStore.readingTheme).toBe('default');
     });
 });

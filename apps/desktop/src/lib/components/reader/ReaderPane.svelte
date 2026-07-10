@@ -292,14 +292,22 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <!-- Key on the article id so switching articles remounts the scroll
                  body at the top instead of inheriting the previous scroll offset. -->
             {#key current.id}
-            <div class="reader-scroll" tabindex="-1" bind:this={scrollEl}>
+            <div
+                class="reader-scroll"
+                tabindex="-1"
+                bind:this={scrollEl}
+                data-reading-theme={uiStore.readingTheme}
+            >
                 <article
                     class="reader-article"
                     class:justify={uiStore.textAlign === 'justify'}
+                    class:hyphenate={uiStore.hyphenate}
                     style:font-size="{uiStore.fontSize}px"
                     style:line-height={uiStore.lineHeight}
                     style:max-width="{uiStore.measure}px"
                     style:font-family={uiStore.readerFontStack}
+                    style:font-weight={uiStore.fontWeight}
+                    style:letter-spacing="{uiStore.letterSpacing}em"
                     style:--para-spacing={uiStore.paragraphSpacing}
                 >
                     <header class="reader-header">
@@ -458,6 +466,34 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     .reader-article.justify :global(.sanitized-content) {
         text-align: justify;
         hyphens: auto;
+    }
+
+    /* Independent hyphenation toggle (applies to left-aligned prose too). */
+    .reader-article.hyphenate :global(.sanitized-content) {
+        hyphens: auto;
+    }
+
+    /* Reading-surface tints, independent of the app theme: a warm paper ground
+       with dark ink so long reads stay comfortable on any theme. The tint sits
+       on the scroll surface; the ink tokens are forced directly (`--ink` is a
+       :root color-mix that inherits its computed value, so overriding `--fg`
+       alone would not repaint the prose) while links keep their accent. */
+    .reader-scroll[data-reading-theme='sepia'] {
+        background: #f1e5cf;
+        --ink: #43392b;
+        --ink-soft: #6b5b45;
+        --fg: #43392b;
+        --fg-muted: #5c4f3b;
+        --fg-subtle: #7a6a52;
+    }
+
+    .reader-scroll[data-reading-theme='paper'] {
+        background: #faf6ee;
+        --ink: #2b2b2b;
+        --ink-soft: #555555;
+        --fg: #2b2b2b;
+        --fg-muted: #4a4a4a;
+        --fg-subtle: #6b6b6b;
     }
 
     .reader-article {

@@ -337,4 +337,33 @@ describe('Sidebar — folder tree', () => {
         const loose = moveSubmenuIds('Loose', getByLabelText);
         expect(loose).toEqual(['move:Tech', 'move:Tech/Databases', 'new-folder']);
     });
+
+    it('Alt+↓ reorders the feed under the cursor within its group', async () => {
+        harness = installIpcHarness({
+            list_feeds: [
+                feedFixture({ id: 1, title: 'Alpha' }),
+                feedFixture({ id: 2, title: 'Beta', url: 'https://beta.example/feed' }),
+            ],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+            reorder_feeds: null,
+        });
+        const { getByRole } = render(Sidebar);
+        await flushIpc();
+
+        selectionStore.focusSidebar();
+        await tick();
+        const tree = getByRole('tree');
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed::1');
+
+        // Alt+↓ moves Alpha past Beta — a within-group reorder, not a cursor move.
+        await fireEvent.keyDown(tree, { key: 'ArrowDown', altKey: true });
+        expect(harness.callsFor('reorder_feeds').at(-1)?.feedIds).toEqual([2, 1]);
+
+        // Move the cursor to the last row; Alt+↓ there falls off the end — a no-op.
+        // (The mock emits no FeedsChanged, so the rendered order is still Alpha, Beta.)
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed::2');
+        await fireEvent.keyDown(tree, { key: 'ArrowDown', altKey: true });
+        expect(harness.callsFor('reorder_feeds')).toHaveLength(1);
+    });
 });

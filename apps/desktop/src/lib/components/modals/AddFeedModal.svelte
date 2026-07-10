@@ -44,9 +44,20 @@ function targetUrl(): string {
     return (detected?.feedUrl ?? selectedUrl ?? url).trim();
 }
 
+/** Clears any prior discovery result — the candidates belong to an earlier URL
+ *  and must not survive an edit, or `add()` would subscribe to a stale one. */
+function resetDiscovery(): void {
+    candidates = [];
+    selectedUrl = null;
+    searched = false;
+    faviconSrc = null;
+    triedRemoteFavicon = false;
+}
+
 /** Fills the URL input with a starter pattern and focuses it (presets row). */
 function useTemplate(template: string): void {
     url = template;
+    resetDiscovery();
     showHnPresets = false;
     urlInput?.focus();
 }
@@ -54,6 +65,7 @@ function useTemplate(template: string): void {
 /** Picks a Hacker News feed: sets the URL and suggests the HN folder. */
 function pickHnPreset(feedUrl: string): void {
     url = feedUrl;
+    resetDiscovery();
     showHnPresets = false;
     if (tagsInput.trim() === '') {
         tagsInput = 'Community/Hacker News';
@@ -68,6 +80,9 @@ function parsedTags(): string[] {
 }
 
 async function find(): Promise<void> {
+    if (finding) {
+        return; // reentrancy guard — an Enter + button double-fire is one find
+    }
     const query = url.trim();
     if (query.length === 0) {
         uiStore.showToast(t('addFeed.needUrl'), 'warning');
@@ -113,6 +128,9 @@ function hostOf(value: string): string | null {
 }
 
 async function add(): Promise<void> {
+    if (adding) {
+        return; // reentrancy guard against a double-submit
+    }
     const target = targetUrl();
     if (target.length === 0) {
         uiStore.showToast(t('addFeed.needUrl'), 'warning');
@@ -171,6 +189,21 @@ async function add(): Promise<void> {
                     type="text"
                     bind:this={urlInput}
                     bind:value={url}
+                    oninput={resetDiscovery}
+                    onkeydown={(event) => {
+                        // Enter with nothing discovered yet finds feeds first
+                        // (rather than submitting a raw, likely-not-a-feed URL);
+                        // once a source is recognized or a candidate is chosen,
+                        // Enter falls through to the form's subscribe.
+                        if (
+                            event.key === 'Enter' &&
+                            detected === null &&
+                            !(searched && selectedUrl !== null)
+                        ) {
+                            event.preventDefault();
+                            void find();
+                        }
+                    }}
                     placeholder={t('addFeed.urlPlaceholder')}
                     autocomplete="off"
                     spellcheck="false"

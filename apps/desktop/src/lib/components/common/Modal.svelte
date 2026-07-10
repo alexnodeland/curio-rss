@@ -17,16 +17,40 @@ let {
     title,
     onclose,
     size = 'medium',
+    closeOnBackdrop = true,
     children,
 }: {
     title: string;
     onclose: () => void;
     size?: 'medium' | 'large';
+    /** Whether a click on the backdrop dismisses the modal. Off for modals
+     *  holding a dirty draft the user shouldn't lose to a stray click. */
+    closeOnBackdrop?: boolean;
     children: Snippet;
 } = $props();
+
+// Only close when the press *starts and ends* on the backdrop itself — so a
+// text selection that drags out of the dialog onto the backdrop, or a click
+// that bubbled from inside, never dismisses it.
+let pressedBackdrop = false;
+
+function onBackdropPointerDown(event: PointerEvent): void {
+    pressedBackdrop = event.target === event.currentTarget;
+}
+
+function onBackdropClick(event: MouseEvent): void {
+    if (closeOnBackdrop && pressedBackdrop && event.target === event.currentTarget) {
+        onclose();
+    }
+    pressedBackdrop = false;
+}
 </script>
 
-<div class="overlay-backdrop">
+<!-- Backdrop dismissal is a pointer convenience layered on top of the shell's
+     Escape handling and the header close button; the dialog itself keeps the
+     keyboard focus trap, so this is not the only accessible way out. -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="overlay-backdrop" onpointerdown={onBackdropPointerDown} onclick={onBackdropClick}>
     <div
         class="overlay"
         class:large={size === 'large'}

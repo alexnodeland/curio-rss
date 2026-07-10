@@ -73,6 +73,30 @@ describe('AddFeedModal', () => {
         expect(onclose).toHaveBeenCalledOnce();
     });
 
+    it('discards a stale discovery candidate when the URL is edited', async () => {
+        harness = installIpcHarness(base());
+        const { getByText, queryByText, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+        const input = getByPlaceholderText('https://example.com');
+
+        await fireEvent.input(input, { target: { value: 'https://example.org' } });
+        await fireEvent.click(getByText('Find feeds'));
+        await flushIpc();
+        expect(getByText('Example Feed')).toBeTruthy(); // candidate listed
+
+        // Editing the URL must clear the now-stale candidate...
+        await fireEvent.input(input, { target: { value: 'https://other.example/feed.xml' } });
+        expect(queryByText('Example Feed')).toBeNull();
+
+        // ...so subscribe uses the edited URL, not the old candidate's feed URL.
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+        expect(harness.callsFor('add_feed')).toEqual([
+            { newFeed: { url: 'https://other.example/feed.xml', title: null, tags: [] } },
+        ]);
+    });
+
     it('parses comma-separated tags into the subscription', async () => {
         harness = installIpcHarness(base());
         const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose: vi.fn() });

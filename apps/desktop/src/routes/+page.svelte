@@ -72,10 +72,14 @@ function onKeydown(event: KeyboardEvent): void {
     if (menuStore.isOpen) {
         return;
     }
-    if (shouldIgnoreKeyEvent(event)) {
+    // A modal owns the keyboard *before* the typing guard, so Escape closes it
+    // even while one of its fields is focused (the guard used to swallow the
+    // Escape first). Non-Escape keys are swallowed too, but not preventDefault'd,
+    // so typing into the modal's inputs still works.
+    if (handleModalKey(event)) {
         return;
     }
-    if (handleModalKey(event)) {
+    if (shouldIgnoreKeyEvent(event)) {
         return;
     }
     if (selectionStore.focus === 'sidebar') {

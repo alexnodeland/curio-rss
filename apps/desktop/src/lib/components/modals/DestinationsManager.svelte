@@ -15,6 +15,7 @@ import { uiStore } from '$lib/state/ui.svelte';
 let draftName = $state('');
 let pickedToken: string | null = $state(null);
 let pickedPath: string | null = $state(null);
+let adding = $state(false);
 
 destinationsStore.prime();
 
@@ -35,11 +36,15 @@ async function chooseFolder(): Promise<void> {
 }
 
 async function add(): Promise<void> {
+    if (adding) {
+        return; // reentrancy guard against a double-submit
+    }
     const name = draftName.trim();
     if (name.length === 0 || pickedToken === null) {
         uiStore.showToast(t('destinations.needNameAndFolder'), 'warning');
         return;
     }
+    adding = true;
     try {
         const result = await destinationsStore.add(name, pickedToken);
         if (result.status === 'error') {
@@ -51,6 +56,8 @@ async function add(): Promise<void> {
         pickedPath = null;
     } catch {
         uiStore.showToast(t('app.error.internal'), 'error');
+    } finally {
+        adding = false;
     }
 }
 
@@ -135,7 +142,7 @@ async function makeDefault(name: string): Promise<void> {
         {#if pickedPath !== null}
             <span class="picked truncate" title={pickedPath}>{pickedPath}</span>
         {/if}
-        <button class="add-button" type="submit">{t('destinations.add')}</button>
+        <button class="add-button" type="submit" disabled={adding}>{t('destinations.add')}</button>
     </form>
 </div>
 

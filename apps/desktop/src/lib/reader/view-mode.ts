@@ -205,9 +205,12 @@ export function stripRedditFooter(html: string): string {
     if (commentsAnchor === null) {
         return html;
     }
-    // Remove the smallest self-contained block that holds the footer anchor
-    // (Reddit wraps it in a <table> or a trailing <p>).
-    const footer = commentsAnchor.closest('table, p, div');
+    // Remove the smallest *footer-shaped* block that holds the anchor: Reddit
+    // wraps its footer in a <table> or a trailing <p>. Deliberately NOT <div> —
+    // a generic wrapper can enclose the entire post body, and matching it would
+    // delete the article. If the footer isn't in a table/p, leave the markup
+    // untouched rather than risk removing content.
+    const footer = commentsAnchor.closest('table, p');
     footer?.remove();
     return doc.body.innerHTML.trim();
 }

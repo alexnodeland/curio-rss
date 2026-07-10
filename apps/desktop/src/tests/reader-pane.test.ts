@@ -85,6 +85,30 @@ describe('ReaderPane', () => {
         expect(harness.callsFor('mark_read')).toHaveLength(1);
     });
 
+    it('does not mark read when the article fails to load', async () => {
+        harness = installIpcHarness({
+            ...baseResponders(),
+            get_article: rejectWith(commandErrorFixture({ kind: 'user', message: 'gone' })),
+        });
+        selectionStore.selectedArticleId = 100;
+        render(ReaderPane);
+        await flushIpc();
+        expect(harness.callsFor('mark_read')).toHaveLength(0);
+    });
+
+    it('the typography popover opens and dismisses on Escape', async () => {
+        harness = installIpcHarness(baseResponders());
+        selectionStore.selectedArticleId = 100;
+        const { getByRole, queryByRole } = render(ReaderPane);
+        await flushIpc();
+
+        await fireEvent.click(getByRole('button', { name: 'Typography' }));
+        expect(getByRole('dialog', { name: 'Typography' })).toBeTruthy();
+
+        await fireEvent.keyDown(window, { key: 'Escape' });
+        expect(queryByRole('dialog', { name: 'Typography' })).toBeNull();
+    });
+
     it('toolbar star flips through the backend and refreshes on the event', async () => {
         harness = installIpcHarness({
             ...baseResponders(),

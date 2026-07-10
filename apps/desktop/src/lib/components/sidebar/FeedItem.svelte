@@ -52,7 +52,9 @@ const errored = $derived(feed.status === 'active' && feedsStore.lastErrored(feed
 const healthClass = $derived(errored ? 'errored' : feed.status);
 /** This row's stable tree id (matches the flattened `VisibleRow.key`). */
 const rowId = $derived(feedRowKey(parentPath, feed.id));
-const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId);
+// The cursor ring only paints while the tree holds focus, so it never lingers
+// as a second highlight once the keyboard has moved into the list/reader.
+const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId && sidebarTreeStore.focused);
 
 let dropTarget = $state(false);
 let dropBelow = $state(false);

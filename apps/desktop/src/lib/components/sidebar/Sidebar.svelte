@@ -74,7 +74,15 @@ $effect(() => {
             return;
         }
         if (activeIndex < 0) {
-            sidebarTreeStore.activeKey = rows[0].key;
+            // Land the cursor on the feed currently open in the list (so ←
+            // back into the sidebar returns you to where you are, not the top),
+            // falling back to the first row when nothing is selected.
+            const selectedId = selectionStore.selectedFeedId;
+            const seat =
+                selectedId === null
+                    ? -1
+                    : rows.findIndex((row) => row.kind !== 'folder' && row.id === selectedId);
+            sidebarTreeStore.activeKey = rows[seat >= 0 ? seat : 0].key;
         }
         treeEl.focus();
     });
@@ -116,17 +124,23 @@ function onTreeKeydown(event: KeyboardEvent): void {
         treeEl?.blur();
         return;
     }
-    const result = treeKeyAction(rows, activeIndex, event.key);
+    // Read the cursor index straight from the store state, not the `activeIndex`
+    // $derived: a fast burst of arrow keys fires several keydowns before Svelte
+    // flushes the derived, so the derived stays stale and every press computes
+    // the same next row — the cursor sticks. The raw `activeKey` is always
+    // current, so this advances smoothly however fast the keys arrive.
+    const cursorIndex = rows.findIndex((row) => row.key === sidebarTreeStore.activeKey);
+    const result = treeKeyAction(rows, cursorIndex, event.key);
     if (result.type === 'none') {
         // → at a tree dead-end (a leaf feed, or an already-expanded end) drills
         // rightward into the article list — the same "move right" that carries
         // the list into the reader — so → means one thing everywhere. It
         // activates the row first so the list shows the feed under the cursor,
         // not a stale selection.
-        if (event.key === 'ArrowRight' && activeIndex >= 0) {
+        if (event.key === 'ArrowRight' && cursorIndex >= 0) {
             event.preventDefault();
             event.stopPropagation();
-            activateRow(activeIndex);
+            activateRow(cursorIndex);
         }
         return;
     }
@@ -280,12 +294,17 @@ function newFolder(): void {
                     aria-activedescendant={activeDescendant}
                     bind:this={treeEl}
                     onkeydown={onTreeKeydown}
+                    onfocus={() => {
+                        sidebarTreeStore.focused = true;
+                    }}
                     onblur={() => {
                         // Losing focus hands the keyboard back to the list — without
-                        // this, `focus` stayed 'sidebar' and the window keydown handler
-                        // swallowed every shortcut (the global deadlock), and clicking
-                        // out could snap focus back.
-                        sidebarTreeStore.reset();
+                        // handing `focus` off, it stayed 'sidebar' and the window
+                        // keydown handler swallowed every shortcut (the global
+                        // deadlock). Only the focus *flag* clears (so the cursor ring
+                        // stops painting); the cursor *position* is kept so ← back
+                        // into the sidebar returns exactly where you were.
+                        sidebarTreeStore.focused = false;
                         if (selectionStore.focus === 'sidebar') {
                             selectionStore.focus = 'list';
                         }

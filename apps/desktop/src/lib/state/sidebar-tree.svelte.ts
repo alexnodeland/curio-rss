@@ -10,9 +10,17 @@ class SidebarTreeStore {
     /** The active row's key/id, or `null` when the tree has no cursor yet. */
     activeKey: string | null = $state(null);
 
+    /**
+     * Whether the tree currently holds keyboard focus. The cursor ring only
+     * paints while this is true, so it never lingers on a row after focus has
+     * moved into the list/reader (which would read as a second selection).
+     */
+    focused: boolean = $state(false);
+
     /** Test isolation + "the tree yielded focus" reset. */
     reset(): void {
         this.activeKey = null;
+        this.focused = false;
     }
 }
 

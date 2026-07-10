@@ -165,29 +165,13 @@ function onScrollPast(firstVisibleIndex: number): void {
 </script>
 
 <div class="article-list">
-    {#if list.error !== null}
-        <p class="list-status error" role="alert">{listError}</p>
-    {:else if !list.loaded}
-        <div class="list-skeleton" aria-hidden="true">
-            {#each SKELETON_ROWS as index (index)}
-                <div class="skeleton-row" style="height: {rowHeight}px">
-                    <div class="skeleton-row-main">
-                        <Skeleton width="65%" height="0.9rem" />
-                        {#if !compact}
-                            <Skeleton width="92%" height="0.75rem" />
-                        {/if}
-                        <Skeleton width="35%" height="0.7rem" />
-                    </div>
-                    {#if !compact}
-                        <Skeleton width="52px" height="52px" radius="var(--radius-md)" />
-                    {/if}
-                </div>
-            {/each}
-        </div>
-        <span class="sr-only">{t('list.loading')}</span>
-    {:else if list.items.length === 0}
-        <p class="list-status">{t('list.empty')}</p>
-    {:else}
+    {#if list.items.length > 0}
+        <!-- Stale-while-revalidate: keep showing the loaded rows even if a
+             refetch just errored; surface the failure as a non-destructive
+             banner instead of blanking a populated list. -->
+        {#if list.error !== null}
+            <p class="list-banner" role="alert">{listError}</p>
+        {/if}
         <VirtualList
             items={list.items}
             {rowHeight}
@@ -214,6 +198,29 @@ function onScrollPast(firstVisibleIndex: number): void {
                 />
             {/snippet}
         </VirtualList>
+    {:else if !list.loaded}
+        <div class="list-skeleton" aria-hidden="true">
+            {#each SKELETON_ROWS as index (index)}
+                <div class="skeleton-row" style="height: {rowHeight}px">
+                    <div class="skeleton-row-main">
+                        <Skeleton width="65%" height="0.9rem" />
+                        {#if !compact}
+                            <Skeleton width="92%" height="0.75rem" />
+                        {/if}
+                        <Skeleton width="35%" height="0.7rem" />
+                    </div>
+                    {#if !compact}
+                        <Skeleton width="52px" height="52px" radius="var(--radius-md)" />
+                    {/if}
+                </div>
+            {/each}
+        </div>
+        <span class="sr-only">{t('list.loading')}</span>
+    {:else if list.error !== null}
+        <!-- No rows to preserve: the first load itself failed. -->
+        <p class="list-status error" role="alert">{listError}</p>
+    {:else}
+        <p class="list-status">{t('list.empty')}</p>
     {/if}
 </div>
 
@@ -234,6 +241,17 @@ function onScrollPast(firstVisibleIndex: number): void {
 
     .list-status.error {
         color: var(--error-text);
+    }
+
+    /* Non-destructive refetch-failure strip above the retained rows. */
+    .list-banner {
+        flex: 0 0 auto;
+        padding: var(--space-2) var(--space-4);
+        margin: var(--space-2) var(--space-2) 0;
+        border-radius: var(--radius-md);
+        background: var(--error-bg);
+        color: var(--error-text);
+        font-size: var(--text-xs);
     }
 
     .list-skeleton {

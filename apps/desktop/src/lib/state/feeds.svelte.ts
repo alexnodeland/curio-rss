@@ -45,12 +45,23 @@ function readStringArray(raw: string | undefined): string[] {
     }
 }
 
+/**
+ * How long the refresh flag may stay set with no progress before the watchdog
+ * force-clears it. Re-armed on every progress event, so it only trips after a
+ * genuine stall — the `RefreshFinished` event failing to arrive must never
+ * wedge the refresh button disabled forever.
+ */
+const REFRESH_WATCHDOG_MS = 120_000;
+
 export class FeedsStore {
     /** True while a `refresh_all` sweep is in flight. */
     refreshing: boolean = $state(false);
 
     /** Per-feed outcomes of the current/last sweep, in refresh order. */
     refreshOutcomes: RefreshOutcomeDto[] = $state([]);
+
+    /** Backstop timer that clears `refreshing` if no finish/progress arrives. */
+    #refreshWatchdog: ReturnType<typeof setTimeout> | undefined;
 
     /**
      * Folder paths the user has collapsed in the sidebar tree. In-memory and
@@ -242,27 +253,42 @@ export class FeedsStore {
         return this.setFeedTags(feedId, tagsForUngroup(feed.tags));
     }
 
-    /** Renames folder `oldPath` → `newPath` across every feed in its subtree. */
-    async renameFolder(oldPath: string, newPath: string): Promise<void> {
+    /**
+     * Renames folder `oldPath` → `newPath` across every feed in its subtree.
+     * Returns the first per-feed failure so the caller surfaces it instead of
+     * falsely reporting success; the local path rewrite runs only on full
+     * success (a partial retag leaves the backend authoritative, no bad local
+     * state). A single atomic backend retag is the follow-up.
+     */
+    async renameFolder(oldPath: string, newPath: string): Promise<CommandResult<null>> {
         for (const feed of this.feeds.filter((candidate) => feedInFolder(candidate, oldPath))) {
-            await this.setFeedTags(feed.id, tagsForRename(feed.tags, oldPath, newPath));
+            const result = await this.setFeedTags(
+                feed.id,
+                tagsForRename(feed.tags, oldPath, newPath),
+            );
+            if (result.status === 'error') return result;
         }
         this.#rewritePrefixedState(oldPath, newPath);
+        return { status: 'ok', data: null };
     }
 
     /** Deletes folder `path`, moving its feeds to the parent (never unsubscribes). */
-    async deleteFolder(path: string): Promise<void> {
+    async deleteFolder(path: string): Promise<CommandResult<null>> {
         for (const feed of this.feeds.filter((candidate) => feedInFolder(candidate, path))) {
-            await this.setFeedTags(feed.id, tagsForDelete(feed.tags, path));
+            const result = await this.setFeedTags(feed.id, tagsForDelete(feed.tags, path));
+            if (result.status === 'error') return result;
         }
         this.#dropPrefixedState(path);
+        return { status: 'ok', data: null };
     }
 
-    /** Marks every feed in a folder subtree read. */
-    async markFolderRead(folder: FeedFolder): Promise<void> {
+    /** Marks every feed in a folder subtree read. Returns the first failure. */
+    async markFolderRead(folder: FeedFolder): Promise<CommandResult<null>> {
         for (const id of subtreeFeedIds(folder)) {
-            await commands.markAllRead(id);
+            const result = await commands.markAllRead(id);
+            if (result.status === 'error') return result;
         }
+        return { status: 'ok', data: null };
     }
 
     /** Rewrites collapse/pending paths under `oldPath` to `newPath` (folder rename). */
@@ -317,6 +343,7 @@ export class FeedsStore {
         this.#collapsedFolders.clear();
         this.#pendingFolders.clear();
         this.#mutedNotifyFeeds.clear();
+        this.#clearRefreshWatchdog();
         this.refreshing = false;
         this.refreshOutcomes = [];
     }
@@ -376,15 +403,33 @@ export class FeedsStore {
         return commands.refreshFeed(feedId);
     }
 
+    /** Re-arms the stall watchdog: clears `refreshing` after a quiet interval. */
+    #armRefreshWatchdog(): void {
+        this.#clearRefreshWatchdog();
+        this.#refreshWatchdog = setTimeout(() => {
+            this.refreshing = false;
+            this.#refreshWatchdog = undefined;
+        }, REFRESH_WATCHDOG_MS);
+    }
+
+    #clearRefreshWatchdog(): void {
+        if (this.#refreshWatchdog !== undefined) {
+            clearTimeout(this.#refreshWatchdog);
+            this.#refreshWatchdog = undefined;
+        }
+    }
+
     /** Kicks off the full sweep; progress arrives via events. */
     async refreshAll(): Promise<CommandResult<RefreshOutcomeDto[]>> {
         this.refreshing = true;
         this.refreshOutcomes = [];
+        this.#armRefreshWatchdog();
         const result = await commands.refreshAll();
         // `RefreshFinished` normally clears the flag; this covers the
         // command erroring before any event fires.
         if (result.status === 'error') {
             this.refreshing = false;
+            this.#clearRefreshWatchdog();
         }
         return result;
     }
@@ -398,10 +443,12 @@ export class FeedsStore {
             events.refreshProgress.listen((event) => {
                 this.refreshing = true;
                 this.refreshOutcomes = [...this.refreshOutcomes, event.payload.outcome];
+                this.#armRefreshWatchdog(); // still alive — push the deadline out
             }),
             events.refreshFinished.listen((event) => {
                 this.refreshing = false;
                 this.refreshOutcomes = event.payload.outcomes;
+                this.#clearRefreshWatchdog();
             }),
         ]);
         return () => {

@@ -146,6 +146,10 @@ export interface Toast {
 
 export const DEFAULT_TOAST_DURATION_MS = 3000;
 
+/** The most toasts kept on screen at once; older ones drop so the stack can't
+ *  overflow off the viewport (e.g. a failing sweep firing one per feed). */
+export const MAX_TOASTS = 4;
+
 function systemTheme(): ThemeId {
     if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
         return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -627,22 +631,51 @@ export class UiStore {
         tone: ToastTone = 'info',
         durationMs: number = DEFAULT_TOAST_DURATION_MS,
     ): number {
+        // Dedup: an identical message+tone already showing just refreshes its
+        // timer, so a repeated failure doesn't stack N copies.
+        const existing = this.toasts.find(
+            (toast) => toast.message === message && toast.tone === tone,
+        );
+        if (existing !== undefined) {
+            this.#armToastTimer(existing.id, durationMs);
+            return existing.id;
+        }
         const id = this.#nextToastId;
         this.#nextToastId += 1;
-        this.toasts = [...this.toasts, { id, message, tone }];
-        if (durationMs > 0) {
-            const timer = setTimeout(() => this.dismissToast(id), durationMs);
-            this.#toastTimers.set(id, timer);
+        let next = [...this.toasts, { id, message, tone }];
+        // Cap the stack so it can't overflow off-screen; drop the oldest.
+        if (next.length > MAX_TOASTS) {
+            for (const toast of next.slice(0, next.length - MAX_TOASTS)) {
+                this.#clearToastTimer(toast.id);
+            }
+            next = next.slice(next.length - MAX_TOASTS);
         }
+        this.toasts = next;
+        this.#armToastTimer(id, durationMs);
         return id;
     }
 
-    dismissToast(id: number): void {
+    /** (Re)arms the auto-dismiss timer for a toast; duration 0 means sticky. */
+    #armToastTimer(id: number, durationMs: number): void {
+        this.#clearToastTimer(id);
+        if (durationMs > 0) {
+            this.#toastTimers.set(
+                id,
+                setTimeout(() => this.dismissToast(id), durationMs),
+            );
+        }
+    }
+
+    #clearToastTimer(id: number): void {
         const timer = this.#toastTimers.get(id);
         if (timer !== undefined) {
             clearTimeout(timer);
             this.#toastTimers.delete(id);
         }
+    }
+
+    dismissToast(id: number): void {
+        this.#clearToastTimer(id);
         this.toasts = this.toasts.filter((toast) => toast.id !== id);
     }
 

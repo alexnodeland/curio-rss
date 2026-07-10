@@ -46,40 +46,83 @@ async function run<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | unde
     return result.data;
 }
 
+/**
+ * Public unwrap for fire-and-forget mutation call sites that would otherwise
+ * `void` the `CommandResult` and swallow failures (sidebar/folder ops). A
+ * failure toasts; success is silent. Route every such mutation through this so
+ * no failure is lost and none falsely reports success.
+ */
+export function runCommand<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | undefined> {
+    return run(invoke);
+}
+
+type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
+
+/**
+ * Per-article-field toggle serialization. A naive toggle reads the backend flag
+ * then writes its negation; two fast presses both read the *pre-write* value
+ * concurrently and both write the same negation, so the second press is
+ * silently dropped. Serializing per key (chained promise) makes the second
+ * press run only after the first settles, and `#toggleDesired` carries the
+ * last-written value so the follow-up alternates without a redundant read.
+ */
+const toggleChain = new Map<string, Promise<unknown>>();
+const toggleDesired = new Map<string, boolean>();
+
+async function toggleFlag(
+    articleId: number,
+    field: ToggleField,
+    write: (id: number, value: boolean) => Promise<CommandResult<boolean>>,
+): Promise<void> {
+    const key = `${field}:${articleId}`;
+    const previous = toggleChain.get(key) ?? Promise.resolve();
+    const task = previous.then(async () => {
+        let current: boolean;
+        if (toggleDesired.has(key)) {
+            current = toggleDesired.get(key) as boolean;
+        } else {
+            const state = await run(() => commands.getArticleState(articleId));
+            if (state === undefined) {
+                return; // read failed (a toast fired); nothing to flip
+            }
+            current = state[field];
+        }
+        const target = !current;
+        toggleDesired.set(key, target);
+        const ok = await run(() => write(articleId, target));
+        if (ok === undefined) {
+            // The write failed (toast already fired) — forget the optimistic
+            // value so the next press reads the real backend flag again.
+            toggleDesired.delete(key);
+        }
+    });
+    toggleChain.set(key, task);
+    await task;
+    // Drain once this press is the tail of the chain, so the maps don't grow.
+    if (toggleChain.get(key) === task) {
+        toggleChain.delete(key);
+        toggleDesired.delete(key);
+    }
+}
+
 /** Stars / unstars against the current backend flag. */
 export async function toggleStar(articleId: number): Promise<void> {
-    const state = await run(() => commands.getArticleState(articleId));
-    if (state === undefined) {
-        return;
-    }
-    await run(() => commands.setStarred(articleId, !state.starred));
+    await toggleFlag(articleId, 'starred', (id, value) => commands.setStarred(id, value));
 }
 
 /** Adds to / removes from the read-later queue. */
 export async function toggleReadLater(articleId: number): Promise<void> {
-    const state = await run(() => commands.getArticleState(articleId));
-    if (state === undefined) {
-        return;
-    }
-    await run(() => commands.setReadLater(articleId, !state.read_later));
+    await toggleFlag(articleId, 'read_later', (id, value) => commands.setReadLater(id, value));
 }
 
 /** Marks read / unread against the current backend flag. */
 export async function toggleRead(articleId: number): Promise<void> {
-    const state = await run(() => commands.getArticleState(articleId));
-    if (state === undefined) {
-        return;
-    }
-    await run(() => commands.markRead(articleId, !state.read));
+    await toggleFlag(articleId, 'read', (id, value) => commands.markRead(id, value));
 }
 
 /** Archives / unarchives against the current backend flag. */
 export async function toggleArchived(articleId: number): Promise<void> {
-    const state = await run(() => commands.getArticleState(articleId));
-    if (state === undefined) {
-        return;
-    }
-    await run(() => commands.setArchived(articleId, !state.archived));
+    await toggleFlag(articleId, 'archived', (id, value) => commands.setArchived(id, value));
 }
 
 /**

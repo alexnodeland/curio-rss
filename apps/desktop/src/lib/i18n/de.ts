@@ -36,6 +36,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'folder.menu.markRead': 'Ordner als gelesen markieren',
     'folder.menu.delete': 'Ordner löschen',
     'folder.deleted': '„{name}“ gelöscht',
+    'folder.renameCollision': 'Ein Ordner namens „{name}“ existiert hier bereits',
     'feed.menu.openSite': 'Website öffnen',
     'feed.menu.refresh': 'Aktualisieren',
     'feed.menu.rename': 'Umbenennen',

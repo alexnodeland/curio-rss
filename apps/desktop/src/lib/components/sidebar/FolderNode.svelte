@@ -15,6 +15,7 @@ import { articlesStore } from '$lib/state/articles.svelte';
 import { feedDnd } from '$lib/state/feed-dnd.svelte';
 import { type FeedFolder, folderRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { allFolderPaths } from '$lib/state/folder-ops';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
@@ -59,6 +60,13 @@ function commitRename(): void {
     if (name.length === 0 || name === folder.name) return;
     const parent = folder.path.split('/').slice(0, -1).join('/');
     const newPath = parent === '' ? name : `${parent}/${name}`;
+    // Renaming onto an existing sibling would silently *merge* the two folders
+    // (irreversible). Refuse it and keep the old name — the tag rewrite that
+    // renameFolder performs has no undo.
+    if (newPath !== folder.path && allFolderPaths(feedsStore.feeds).includes(newPath)) {
+        uiStore.showToast(t('folder.renameCollision', { name }), 'error');
+        return;
+    }
     void runCommand(() => feedsStore.renameFolder(folder.path, newPath));
 }
 

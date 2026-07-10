@@ -21,7 +21,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'emptyState.importOpml': 'Importuj OPML…',
     'shell.feeds.count':
         '{count, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanału}}',
-    'shell.unread.count': '{count} nieprzeczytanych',
+    'shell.unread.count':
+        '{count, plural, one {# nieprzeczytany} few {# nieprzeczytane} many {# nieprzeczytanych} other {# nieprzeczytanych}}',
     'view.all': 'Wszystkie artykuły',
     'view.starred': 'Oznaczone gwiazdką',
     'view.readLater': 'Do przeczytania',
@@ -143,7 +144,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'destinations.needNameAndFolder': 'Najpierw wpisz nazwę i wybierz folder.',
     'toast.promote.saved': 'Zapisano w {name}',
     'toast.promote.unchanged': 'Już aktualne w {name}',
-    'toast.markAllRead': 'Oznaczono {count} jako przeczytane',
+    'toast.markAllRead':
+        '{count, plural, one {Oznaczono # jako przeczytany} few {Oznaczono # jako przeczytane} many {Oznaczono # jako przeczytane} other {Oznaczono # jako przeczytane}}',
     'nav.noMoreUnread': 'Brak nieprzeczytanych',
     'help.title': 'Skróty klawiszowe',
     'help.close': 'Zamknij',
@@ -280,7 +282,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'opml.export': 'Eksportuj OPML…',
     'opml.importing': 'Importowanie…',
     'opml.exporting': 'Eksportowanie…',
-    'opml.imported': 'Zaimportowano {added} kanałów, pominięto {skipped}',
+    'opml.imported':
+        'Zaimportowano {added, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanałów}}, pominięto {skipped, plural, other {#}}',
     'opml.exported': 'Wyeksportowano twoje subskrypcje',
     'opml.cancelled': 'Anulowano',
     'opml.hint':
@@ -293,7 +296,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'import.source.readwise_csv': 'Readwise Reader — CSV',
     'import.run': 'Importuj…',
     'import.running': 'Importowanie…',
-    'import.done': 'Zaimportowano {feeds} kanałów i {articles} artykułów, pominięto {skipped}',
+    'import.done':
+        'Zaimportowano {feeds, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanałów}} i {articles, plural, one {# artykuł} few {# artykuły} many {# artykułów} other {# artykułów}}, pominięto {skipped, plural, other {#}}',
     'import.hint':
         'OPML importuje subskrypcje kanałów; pliki CSV z Pocket, Instapaper i Readwise importują zapisane artykuły jako pozycje do przeczytania wraz z ich tagami.',
     'doctor.title': 'Doktor bazy danych',
@@ -319,7 +323,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'feedHealth.revive': 'Reaktywuj',
     'feedHealth.recent': 'Ostatnie pobrania',
     'feedHealth.none': 'Nie zarejestrowano jeszcze żadnych pobrań',
-    'feedHealth.new': '{count} nowych',
+    'feedHealth.new': '{count, plural, one {# nowy} few {# nowe} many {# nowych} other {# nowych}}',
     'feedHealth.open': 'Kondycja kanału {name}',
     'feedHealth.badge.active': 'Aktywny',
     'feedHealth.badge.paused': 'Wstrzymany',
@@ -359,7 +363,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'tagEditor.placeholder': 'Dodaj tag…',
     'tagEditor.remove': 'Usuń {tag}',
     'refresh.announce.start': 'Odświeżanie kanałów',
-    'refresh.announce.done': 'Odświeżanie zakończone: {count} nowych artykułów w {feeds} kanałach',
+    'refresh.announce.done':
+        'Odświeżanie zakończone: {count, plural, one {# nowy artykuł} few {# nowe artykuły} many {# nowych artykułów} other {# nowych artykułów}} w {feeds, plural, one {# kanale} few {# kanałach} many {# kanałach} other {# kanałach}}',
     'refresh.inProgress': 'Odświeżanie… {done} z {total}',
     'pane.sidebar.resize': 'Zmień rozmiar paska bocznego',
     'pane.list.resize': 'Zmień rozmiar listy artykułów',

@@ -18,7 +18,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'emptyState.addFeed': 'Aggiungi il tuo primo feed',
     'emptyState.importOpml': 'Importa OPML…',
     'shell.feeds.count': '{count, plural, one {# feed} other {# feed}}',
-    'shell.unread.count': '{count} non letti',
+    'shell.unread.count': '{count, plural, one {# non letto} other {# non letti}}',
     'view.all': 'Tutti gli articoli',
     'view.starred': 'Preferiti',
     'view.readLater': 'Leggi dopo',
@@ -139,7 +139,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'destinations.needNameAndFolder': 'Inserisci prima un nome e scegli una cartella.',
     'toast.promote.saved': 'Salvato in {name}',
     'toast.promote.unchanged': 'Già aggiornato in {name}',
-    'toast.markAllRead': '{count} segnati come letti',
+    'toast.markAllRead': '{count, plural, one {# segnato come letto} other {# segnati come letti}}',
     'nav.noMoreUnread': 'Nessun non letto rimasto',
     'help.title': 'Scorciatoie da tastiera',
     'help.close': 'Chiudi',
@@ -278,7 +278,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'opml.export': 'Esporta OPML…',
     'opml.importing': 'Importazione…',
     'opml.exporting': 'Esportazione…',
-    'opml.imported': 'Importati {added} feed, saltati {skipped}',
+    'opml.imported':
+        '{added, plural, one {# feed importato} other {# feed importati}}, {skipped, plural, one {# saltato} other {# saltati}}',
     'opml.exported': 'Iscrizioni esportate',
     'opml.cancelled': 'Annullato',
     'opml.hint':
@@ -291,7 +292,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'import.source.readwise_csv': 'Readwise Reader — CSV',
     'import.run': 'Importa…',
     'import.running': 'Importazione…',
-    'import.done': 'Importati {feeds} feed e {articles} articoli, saltati {skipped}',
+    'import.done':
+        'Importati {feeds, plural, one {# feed} other {# feed}} e {articles, plural, one {# articolo} other {# articoli}}, saltati {skipped, plural, other {#}}',
     'import.hint':
         'OPML importa le iscrizioni ai feed; i CSV di Pocket, Instapaper e Readwise importano gli articoli salvati come elementi da leggere dopo con i loro tag.',
     'doctor.title': 'Diagnosi del database',
@@ -316,7 +318,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'feedHealth.revive': 'Riattiva',
     'feedHealth.recent': 'Recuperi recenti',
     'feedHealth.none': 'Nessun recupero registrato',
-    'feedHealth.new': '{count} nuovi',
+    'feedHealth.new': '{count, plural, one {# nuovo} other {# nuovi}}',
     'feedHealth.open': 'Salute del feed per {name}',
     'feedHealth.badge.active': 'Attivo',
     'feedHealth.badge.paused': 'Sospeso',
@@ -357,7 +359,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'tagEditor.placeholder': 'Aggiungi un tag…',
     'tagEditor.remove': 'Rimuovi {tag}',
     'refresh.announce.start': 'Aggiornamento feed',
-    'refresh.announce.done': 'Aggiornamento completato: {count} nuovi articoli in {feeds} feed',
+    'refresh.announce.done':
+        'Aggiornamento completato: {count, plural, one {# nuovo articolo} other {# nuovi articoli}} in {feeds, plural, one {# feed} other {# feed}}',
     'refresh.inProgress': 'Aggiornamento… {done} di {total}',
     'pane.sidebar.resize': 'Ridimensiona barra laterale',
     'pane.list.resize': 'Ridimensiona elenco articoli',

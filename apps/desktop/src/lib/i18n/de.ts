@@ -19,7 +19,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'emptyState.addFeed': 'Ersten Feed hinzufügen',
     'emptyState.importOpml': 'OPML importieren…',
     'shell.feeds.count': '{count, plural, one {# Feed} other {# Feeds}}',
-    'shell.unread.count': '{count} ungelesen',
+    'shell.unread.count': '{count, plural, one {# ungelesen} other {# ungelesen}}',
     'view.all': 'Alle Artikel',
     'view.starred': 'Favoriten',
     'view.readLater': 'Später lesen',
@@ -140,7 +140,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'destinations.needNameAndFolder': 'Gib zuerst einen Namen ein und wähle einen Ordner.',
     'toast.promote.saved': 'In {name} gespeichert',
     'toast.promote.unchanged': 'In {name} bereits aktuell',
-    'toast.markAllRead': '{count} als gelesen markiert',
+    'toast.markAllRead':
+        '{count, plural, one {# als gelesen markiert} other {# als gelesen markiert}}',
     'nav.noMoreUnread': 'Nichts Ungelesenes mehr',
     'help.title': 'Tastenkürzel',
     'help.close': 'Schließen',
@@ -280,7 +281,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'opml.export': 'OPML exportieren…',
     'opml.importing': 'Wird importiert…',
     'opml.exporting': 'Wird exportiert…',
-    'opml.imported': '{added} Feeds importiert, {skipped} übersprungen',
+    'opml.imported':
+        '{added, plural, one {# Feed} other {# Feeds}} importiert, {skipped, plural, other {#}} übersprungen',
     'opml.exported': 'Abonnements exportiert',
     'opml.cancelled': 'Abgebrochen',
     'opml.hint':
@@ -293,7 +295,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'import.source.readwise_csv': 'Readwise Reader — CSV',
     'import.run': 'Importieren…',
     'import.running': 'Wird importiert…',
-    'import.done': '{feeds} Feeds und {articles} Artikel importiert, {skipped} übersprungen',
+    'import.done':
+        '{feeds, plural, one {# Feed} other {# Feeds}} und {articles, plural, one {# Artikel} other {# Artikel}} importiert, {skipped, plural, other {#}} übersprungen',
     'import.hint':
         'OPML bringt Feed-Abonnements ein; Pocket-, Instapaper- und Readwise-CSVs bringen gespeicherte Artikel als „Später lesen“-Einträge mit ihren Tags ein.',
     'doctor.title': 'Datenbank-Doctor',
@@ -318,7 +321,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'feedHealth.revive': 'Reaktivieren',
     'feedHealth.recent': 'Letzte Abrufe',
     'feedHealth.none': 'Noch keine Abrufe aufgezeichnet',
-    'feedHealth.new': '{count} neu',
+    'feedHealth.new': '{count, plural, one {# neu} other {# neu}}',
     'feedHealth.open': 'Feed-Zustand für {name}',
     'feedHealth.badge.active': 'Aktiv',
     'feedHealth.badge.paused': 'Pausiert',
@@ -359,7 +362,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'tagEditor.placeholder': 'Tag hinzufügen…',
     'tagEditor.remove': '{tag} entfernen',
     'refresh.announce.start': 'Feeds werden aktualisiert',
-    'refresh.announce.done': 'Aktualisierung abgeschlossen: {count} neue Artikel in {feeds} Feeds',
+    'refresh.announce.done':
+        'Aktualisierung abgeschlossen: {count, plural, one {# neuer Artikel} other {# neue Artikel}} in {feeds, plural, one {# Feed} other {# Feeds}}',
     'refresh.inProgress': 'Wird aktualisiert… {done} von {total}',
     'pane.sidebar.resize': 'Seitenleiste anpassen',
     'pane.list.resize': 'Artikelliste anpassen',

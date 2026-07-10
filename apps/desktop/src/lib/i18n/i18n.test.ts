@@ -15,7 +15,7 @@ describe('t', () => {
     });
 
     it('leaves unknown placeholders visible rather than eating them', () => {
-        expect(t('shell.unread.count', {})).toBe('{count} unread');
+        expect(t('reddit.postedBy', {})).toBe('Posted by u/{author}');
     });
 
     it('selects the grammatical plural form by count', () => {
@@ -23,6 +23,20 @@ describe('t', () => {
         expect(t('shell.feeds.count', { count: 5 })).toBe('5 feeds');
         expect(t('reader.meta.words', { count: 1 })).toBe('1 word');
         expect(t('reader.meta.words', { count: 240 })).toBe('240 words');
+    });
+
+    it('pluralizes each count in the compound summary strings (B3/B4)', () => {
+        // Single-noun count keys inflect on their own count.
+        expect(t('shell.unread.count', { count: 1 })).toBe('1 unread');
+        expect(t('toast.markAllRead', { count: 3 })).toBe('Marked 3 read');
+        // Compound strings pluralize every noun independently.
+        expect(t('opml.imported', { added: 1, skipped: 0 })).toBe('Imported 1 feed, skipped 0');
+        expect(t('import.done', { feeds: 2, articles: 1, skipped: 5 })).toBe(
+            'Imported 2 feeds and 1 article, skipped 5',
+        );
+        expect(t('refresh.announce.done', { count: 1, feeds: 4 })).toBe(
+            'Refresh complete: 1 new article across 4 feeds',
+        );
     });
 });
 

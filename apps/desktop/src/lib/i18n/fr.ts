@@ -19,7 +19,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'emptyState.addFeed': 'Ajouter votre premier flux',
     'emptyState.importOpml': 'Importer OPML…',
     'shell.feeds.count': '{count, plural, one {# flux} other {# flux}}',
-    'shell.unread.count': '{count} non lus',
+    'shell.unread.count': '{count, plural, one {# non lu} other {# non lus}}',
     'view.all': 'Tous les articles',
     'view.starred': 'Favoris',
     'view.readLater': 'À lire plus tard',
@@ -142,7 +142,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'destinations.needNameAndFolder': 'Saisissez d’abord un nom et choisissez un dossier.',
     'toast.promote.saved': 'Enregistré dans {name}',
     'toast.promote.unchanged': 'Déjà à jour dans {name}',
-    'toast.markAllRead': '{count} articles marqués comme lus',
+    'toast.markAllRead':
+        '{count, plural, one {# article marqué comme lu} other {# articles marqués comme lus}}',
     'nav.noMoreUnread': 'Plus aucun non lu',
     'help.title': 'Raccourcis clavier',
     'help.close': 'Fermer',
@@ -282,7 +283,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'opml.export': 'Exporter un OPML…',
     'opml.importing': 'Importation…',
     'opml.exporting': 'Exportation…',
-    'opml.imported': '{added} flux importés, {skipped} ignorés',
+    'opml.imported':
+        '{added, plural, one {# flux importé} other {# flux importés}}, {skipped, plural, one {# ignoré} other {# ignorés}}',
     'opml.exported': 'Abonnements exportés',
     'opml.cancelled': 'Annulé',
     'opml.hint':
@@ -295,7 +297,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'import.source.readwise_csv': 'Readwise Reader — CSV',
     'import.run': 'Importer…',
     'import.running': 'Importation…',
-    'import.done': '{feeds} flux et {articles} articles importés, {skipped} ignorés',
+    'import.done':
+        '{feeds, plural, one {# flux} other {# flux}} et {articles, plural, one {# article} other {# articles}} importés, {skipped, plural, one {# ignoré} other {# ignorés}}',
     'import.hint':
         'Les fichiers OPML importent les abonnements aux flux ; les CSV de Pocket, Instapaper et Readwise importent les articles enregistrés comme éléments à lire plus tard, avec leurs étiquettes.',
     'doctor.title': 'Diagnostic de la base de données',
@@ -320,7 +323,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'feedHealth.revive': 'Réactiver',
     'feedHealth.recent': 'Récupérations récentes',
     'feedHealth.none': 'Aucune récupération enregistrée pour l’instant',
-    'feedHealth.new': '{count} nouveaux',
+    'feedHealth.new': '{count, plural, one {# nouveau} other {# nouveaux}}',
     'feedHealth.open': 'État du flux {name}',
     'feedHealth.badge.active': 'Actif',
     'feedHealth.badge.paused': 'Suspendu',
@@ -361,7 +364,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'tagEditor.placeholder': 'Ajouter une étiquette…',
     'tagEditor.remove': 'Retirer {tag}',
     'refresh.announce.start': 'Actualisation des flux',
-    'refresh.announce.done': 'Actualisation terminée : {count} nouveaux articles dans {feeds} flux',
+    'refresh.announce.done':
+        'Actualisation terminée : {count, plural, one {# nouvel article} other {# nouveaux articles}} dans {feeds, plural, one {# flux} other {# flux}}',
     'refresh.inProgress': 'Actualisation… {done} sur {total}',
     'pane.sidebar.resize': 'Redimensionner la barre latérale',
     'pane.list.resize': 'Redimensionner la liste des articles',

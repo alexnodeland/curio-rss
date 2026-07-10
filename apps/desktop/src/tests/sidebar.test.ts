@@ -342,6 +342,35 @@ describe('Sidebar — folder tree', () => {
         expect(loose).toEqual(['move:Tech', 'move:Tech/Databases', 'new-folder']);
     });
 
+    it('refuses to rename a folder onto an existing sibling (no silent merge)', async () => {
+        harness = installIpcHarness({
+            list_feeds: [
+                feedFixture({ id: 1, title: 'Rust', tags: ['Tech'] }),
+                feedFixture({
+                    id: 2,
+                    title: 'World',
+                    url: 'https://n.example/feed',
+                    tags: ['News'],
+                }),
+            ],
+            get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
+            set_feed_tags: null,
+        });
+        const { getByText } = render(Sidebar);
+        await flushIpc();
+
+        // Start renaming the 'Tech' folder, then try to name it 'News' (a sibling).
+        await fireEvent.dblClick(getByText('Tech'));
+        const input = document.querySelector('.folder-header input') as HTMLInputElement;
+        await fireEvent.input(input, { target: { value: 'News' } });
+        await fireEvent.keyDown(input, { key: 'Enter' });
+        await flushIpc();
+
+        // The rename is refused (no tag rewrite) and a collision toast is shown.
+        expect(harness.callsFor('set_feed_tags')).toHaveLength(0);
+        expect(uiStore.toasts.at(-1)?.tone).toBe('error');
+    });
+
     it('Alt+↓ reorders the feed under the cursor within its group', async () => {
         harness = installIpcHarness({
             list_feeds: [

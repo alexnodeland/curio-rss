@@ -39,6 +39,7 @@ export const en = {
     'folder.menu.markRead': 'Mark folder read',
     'folder.menu.delete': 'Delete folder',
     'folder.deleted': 'Deleted “{name}”',
+    'folder.renameCollision': 'A folder named “{name}” already exists here',
     'feed.menu.openSite': 'Open site',
     'feed.menu.refresh': 'Refresh',
     'feed.menu.rename': 'Rename',

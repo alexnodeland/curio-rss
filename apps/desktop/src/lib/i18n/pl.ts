@@ -109,6 +109,12 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'typography.preview.body':
         'Dobra typografia znika — niesie słowa, nie zwracając na siebie uwagi. Dostosuj rozmiar, odstępy i szerokość, aż długi artykuł będzie się czytać bez wysiłku.',
     'typography.preview.quote': 'Krój pisma to piękna grupa liter, a nie grupa pięknych liter.',
+    'typography.preview.listIntro': 'Typografia kształtuje czytanie na kilka sposobów:',
+    'typography.preview.item1': 'Rytm — równe odstępy między wierszami i akapitami.',
+    'typography.preview.item2': 'Miara — długość wiersza, którą oko łatwo śledzi.',
+    'typography.preview.item3': 'Kontrast — grubość i kolor, które nigdy nie męczą.',
+    'typography.preview.inlineLead': 'Elementy w tekście też płyną z nurtem, jak',
+    'typography.preview.linkText': 'odnośnik',
     'tags.label': 'Tagi',
     'tags.placeholder': 'Dodaj tag…',
     'tags.add': 'Dodaj tag',

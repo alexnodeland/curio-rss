@@ -106,6 +106,12 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'typography.preview.body':
         '好的排版会隐于无形——它承载文字，却不喧宾夺主。调整字号、行距和宽度，直到长文读起来毫不费力。',
     'typography.preview.quote': '字体是一组美丽的字母，而非一组美丽字母的堆砌。',
+    'typography.preview.listIntro': '字体从几个方面塑造阅读体验：',
+    'typography.preview.item1': '节奏——行与段之间均匀的间距。',
+    'typography.preview.item2': '行宽——视线易于跟随的行长。',
+    'typography.preview.item3': '对比——从不刺眼的字重与颜色。',
+    'typography.preview.inlineLead': '行内元素也融入文流，例如',
+    'typography.preview.linkText': '一个链接',
     'tags.label': '标签',
     'tags.placeholder': '添加标签…',
     'tags.add': '添加标签',

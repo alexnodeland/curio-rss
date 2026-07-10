@@ -107,6 +107,12 @@ export const es: Partial<Record<MessageKey, string>> = {
         'La buena tipografía desaparece: transmite las palabras sin llamar la atención sobre sí misma. Ajusta el tamaño, el interlineado y el ancho hasta que un artículo largo se lea sin esfuerzo.',
     'typography.preview.quote':
         'La tipografía es un hermoso grupo de letras, no un grupo de letras hermosas.',
+    'typography.preview.listIntro': 'La tipografía moldea la lectura de varias formas:',
+    'typography.preview.item1': 'Ritmo: espaciado uniforme entre líneas y párrafos.',
+    'typography.preview.item2': 'Medida: una longitud de línea que la vista siga con facilidad.',
+    'typography.preview.item3': 'Contraste: grosor y color que nunca cansan.',
+    'typography.preview.inlineLead': 'Los detalles en línea también fluyen, como',
+    'typography.preview.linkText': 'un enlace',
     'tags.label': 'Etiquetas',
     'tags.placeholder': 'Añadir una etiqueta…',
     'tags.add': 'Añadir etiqueta',

@@ -107,6 +107,12 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'typography.preview.body':
         '好嘅排版會隱於無形——佢承載文字，但唔會喧賓奪主。調整字號、行距同闊度，直到一篇長文讀起上嚟毫不費力。',
     'typography.preview.quote': '字體係一組優美嘅字母，而唔係一堆各自漂亮嘅字母。',
+    'typography.preview.listIntro': '字體從幾方面塑造閱讀體驗：',
+    'typography.preview.item1': '節奏——行同段之間均勻嘅間距。',
+    'typography.preview.item2': '行寬——視線容易跟到嘅行長。',
+    'typography.preview.item3': '對比——從來唔刺眼嘅字重同顏色。',
+    'typography.preview.inlineLead': '行內元素都融入文流，例如',
+    'typography.preview.linkText': '一個連結',
     'tags.label': '標籤',
     'tags.placeholder': '加個標籤…',
     'tags.add': '加標籤',

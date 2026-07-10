@@ -7,6 +7,51 @@ All notable changes to the Curio app. The format follows
 (The versioned Curio↔notes **contract** schemas have their own changelog at
 [`schemas/CHANGELOG.md`](schemas/CHANGELOG.md).)
 
+## [0.3.0] — 2026-07-10
+
+A reading-and-refinement release: new reader typography controls and paper
+reading themes, faster keyboard-driven feed management, sharper search, and a
+thorough folder, accessibility, and localization polish pass.
+
+### Added
+
+- **Reader typography** — new **font-weight**, **letter-spacing**, and
+  **hyphenation** controls, plus **Sepia** and **Paper** reading themes (a warm
+  paper ground with dark ink, independent of the app theme). The Settings
+  preview now renders real headings, lists, inline code, and links, so what you
+  see is what the reader paints.
+- **Keyboard feed reordering** — reorder a feed within its folder with
+  **Alt+↑ / Alt+↓**, no mouse required.
+- **Drag a feed out of a folder** — a "Remove from folder" drop zone appears
+  while dragging, and the sidebar auto-scrolls near its top/bottom edge.
+- **Search-term highlighting** — matched query terms are highlighted in the
+  result titles and snippets.
+- **"New folder…"** directly in a feed's Move-to-folder menu.
+- **`mailto:` and `tel:` links** in articles now open your mail client / dialer.
+- **Arrow-key navigation** between panes is now documented in the `?` overlay.
+
+### Changed
+
+- **Honest feed health on launch** — a feed whose last refresh failed now shows
+  its warning dot immediately on a cold start, not only after the first manual
+  refresh.
+- **Localized plurals** across all eight languages — counts like "1 feed" vs
+  "2 feeds" (and the correct Polish forms) are now grammatical everywhere.
+- The **Move-to-folder** menu no longer lists the feed's own folder, and hides
+  "Remove from folder" for feeds that aren't in one.
+
+### Fixed
+
+- Renaming a folder onto an existing sibling no longer silently **merges** the
+  two — the collision is refused and the old name kept.
+- Empty folders show an "Empty folder" label instead of a blank gap.
+- A long submenu that runs past the screen edge now flips to the other side
+  instead of covering its parent menu.
+- Feed titles that start with an emoji render a whole glyph in the monogram.
+- YouTube grid cards line up regardless of title length.
+- Double-clicking a folder or feed name to rename no longer re-scopes the
+  article list first.
+
 ## [0.2.0] — 2026-07-09
 
 A polish-and-power release: right-click everywhere, tabbed settings, source

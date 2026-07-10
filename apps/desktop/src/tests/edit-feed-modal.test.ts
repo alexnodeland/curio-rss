@@ -105,6 +105,40 @@ describe('EditFeedModal', () => {
         expect(harness.callsFor('set_feed_title')).toEqual([{ feedId: 1, title: 'Company Blog' }]);
     });
 
+    it('auto-saves the name on blur (no explicit Save click needed)', async () => {
+        harness = harnessFor('active');
+        const { getByLabelText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+
+        const input = getByLabelText('Name') as HTMLInputElement;
+        await fireEvent.input(input, { target: { value: 'Renamed On Blur' } });
+        await fireEvent.blur(input);
+        await flushIpc();
+
+        expect(harness.callsFor('set_feed_title')).toEqual([
+            { feedId: 1, title: 'Renamed On Blur' },
+        ]);
+    });
+
+    it('flushes a dirty edit when the modal is closed', async () => {
+        harness = harnessFor('active');
+        const onclose = vi.fn();
+        const { getByLabelText } = render(EditFeedModal, { feedId: 1, onclose });
+        await flushIpc();
+
+        // Edit without blurring or clicking Save, then close via the header X.
+        await fireEvent.input(getByLabelText('Description'), {
+            target: { value: 'unsaved note' },
+        });
+        await fireEvent.click(getByLabelText('Close'));
+        await flushIpc();
+
+        expect(harness.callsFor('set_feed_metadata')).toContainEqual(
+            expect.objectContaining({ feedId: 1, description: 'unsaved note' }),
+        );
+        expect(onclose).toHaveBeenCalled();
+    });
+
     it('overwrites site URL and description through set_feed_metadata', async () => {
         harness = harnessFor('active');
         const { getByLabelText, getByText } = render(EditFeedModal, {

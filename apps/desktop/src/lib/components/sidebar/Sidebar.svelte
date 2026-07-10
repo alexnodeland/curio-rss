@@ -61,12 +61,24 @@ const activeDescendant = $derived(
 
 let treeEl: HTMLUListElement | undefined = $state();
 
+// Where the cursor lands on entry when it has none: the feed currently open in
+// the list (so ← back into the sidebar returns you to where you are, not the
+// top), falling back to the first row when nothing is selected.
+function entrySeatKey(): string {
+    const selectedId = selectionStore.selectedFeedId;
+    const seat =
+        selectedId === null
+            ? -1
+            : rows.findIndex((row) => row.kind !== 'folder' && row.id === selectedId);
+    return rows[seat >= 0 ? seat : 0].key;
+}
+
 // When `g f` (or a native-menu "Go to feeds") hands the keyboard to the
-// sidebar, move DOM focus to the tree and seat the cursor on the first row if
-// it has none (or a stale one). Gated on the entry *nonce* only: seating the
-// cursor and reading rows/activeIndex happen inside untrack, so a later
-// activeIndex change never re-fires this and re-grabs focus — which is what
-// made clicking out of the sidebar snap straight back.
+// sidebar, move DOM focus to the tree and seat the cursor if it has none (or a
+// stale one). Gated on the entry *nonce* only: seating the cursor and reading
+// rows/activeIndex happen inside untrack, so a later activeIndex change never
+// re-fires this and re-grabs focus — which is what made clicking out of the
+// sidebar snap straight back.
 $effect(() => {
     void selectionStore.sidebarFocusNonce;
     untrack(() => {
@@ -74,15 +86,7 @@ $effect(() => {
             return;
         }
         if (activeIndex < 0) {
-            // Land the cursor on the feed currently open in the list (so ←
-            // back into the sidebar returns you to where you are, not the top),
-            // falling back to the first row when nothing is selected.
-            const selectedId = selectionStore.selectedFeedId;
-            const seat =
-                selectedId === null
-                    ? -1
-                    : rows.findIndex((row) => row.kind !== 'folder' && row.id === selectedId);
-            sidebarTreeStore.activeKey = rows[seat >= 0 ? seat : 0].key;
+            sidebarTreeStore.activeKey = entrySeatKey();
         }
         treeEl.focus();
     });

@@ -51,7 +51,7 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
                     : t('list.filter.unreadOnly')}
                 onclick={() => articlesStore.toggleUnreadOnly()}
             >
-                <Icon name="dot" />
+                <Icon name="circle-dot" />
             </button>
         {/if}
         {#if homeType !== null && !searchStore.active}

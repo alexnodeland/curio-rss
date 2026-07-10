@@ -80,6 +80,17 @@ $effect(() => {
     });
 });
 
+// Keep the arrow-key cursor visible: when the active row changes, scroll it
+// into view within the sidebar's own scroll container (jsdom lacks
+// scrollIntoView, hence the optional call).
+$effect(() => {
+    const key = sidebarTreeStore.activeKey;
+    if (key === null) {
+        return;
+    }
+    document.getElementById(key)?.scrollIntoView?.({ block: 'nearest' });
+});
+
 /** Commits the row under the cursor (Enter/Space), then hands focus back. */
 function activateRow(index: number): void {
     const row = rows[index];

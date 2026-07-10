@@ -37,6 +37,14 @@ export const commands = {
 	added_at: string,
 	/**  Last fetch attempt, if any (RFC 3339 UTC). */
 	last_fetched_at: string | null,
+	/**
+	 *  Error text of the feed's most recent fetch, when that attempt errored
+	 *  (`null` ⇒ currently healthy). Persisted-derived, so the sidebar health
+	 *  dot is honest on a cold start before any in-session refresh.
+	 */
+	last_error: string | null,
+	/**  When the feed last fetched successfully (RFC 3339 UTC), if ever. */
+	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
 	tags: string[],
 } | null, CommandError>(__TAURI_INVOKE("get_feed", { feedId })),
@@ -58,6 +66,14 @@ export const commands = {
 	added_at: string,
 	/**  Last fetch attempt, if any (RFC 3339 UTC). */
 	last_fetched_at: string | null,
+	/**
+	 *  Error text of the feed's most recent fetch, when that attempt errored
+	 *  (`null` ⇒ currently healthy). Persisted-derived, so the sidebar health
+	 *  dot is honest on a cold start before any in-session refresh.
+	 */
+	last_error: string | null,
+	/**  When the feed last fetched successfully (RFC 3339 UTC), if ever. */
+	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
 	tags: string[],
 } | null, CommandError>(__TAURI_INVOKE("get_feed_by_url", { url })),
@@ -547,6 +563,14 @@ export type FeedDto = {
 	added_at: string,
 	/**  Last fetch attempt, if any (RFC 3339 UTC). */
 	last_fetched_at: string | null,
+	/**
+	 *  Error text of the feed's most recent fetch, when that attempt errored
+	 *  (`null` ⇒ currently healthy). Persisted-derived, so the sidebar health
+	 *  dot is honest on a cold start before any in-session refresh.
+	 */
+	last_error: string | null,
+	/**  When the feed last fetched successfully (RFC 3339 UTC), if ever. */
+	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
 	tags: string[],
 };

@@ -47,8 +47,14 @@ let {
 
 const label = $derived(feed.title ?? feed.url);
 // An active feed whose last refresh errored gets a warning dot; paused/dead
-// already carry their own lifecycle dot.
-const errored = $derived(feed.status === 'active' && feedsStore.lastErrored(feed.id));
+// already carry their own lifecycle dot. The signal is the union of the live
+// session outcome (updates the instant a manual refresh completes) and the
+// persisted `last_error` on the DTO (correct on a cold start, before any
+// in-session refresh has run) — so an errored feed no longer shows a healthy
+// dot until the first manual refresh.
+const errored = $derived(
+    feed.status === 'active' && (feedsStore.lastErrored(feed.id) || feed.last_error !== null),
+);
 const healthClass = $derived(errored ? 'errored' : feed.status);
 /** This row's stable tree id (matches the flattened `VisibleRow.key`). */
 const rowId = $derived(feedRowKey(parentPath, feed.id));

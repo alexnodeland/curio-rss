@@ -49,26 +49,35 @@ describe('reader typography', () => {
 
     it('controls write through and persist each preference', async () => {
         harness = installIpcHarness({ get_setting: null, set_setting: null });
-        const { getByRole, getAllByRole } = render(TypographyControls);
+        const { getAllByRole } = render(TypographyControls);
 
-        await fireEvent.change(getByRole('combobox'), { target: { value: 'mono' } });
+        // Two selects: font (first) and text-align (second).
+        const [fontSelect, alignSelect] = getAllByRole('combobox');
+        await fireEvent.change(fontSelect, { target: { value: 'mono' } });
         await flushIpc();
         expect(uiStore.fontFamily).toBe('mono');
 
-        const [sizeRange, lineRange, measureRange] = getAllByRole('slider');
+        // Four sliders in order: size, line height, measure, paragraph spacing.
+        const [sizeRange, lineRange, measureRange, spacingRange] = getAllByRole('slider');
         await fireEvent.input(sizeRange, { target: { value: '20' } });
         await fireEvent.input(lineRange, { target: { value: '1.4' } });
         await fireEvent.input(measureRange, { target: { value: '820' } });
+        await fireEvent.input(spacingRange, { target: { value: '1.5' } });
+        await fireEvent.change(alignSelect, { target: { value: 'justify' } });
         await flushIpc();
 
         expect(uiStore.fontSize).toBe(20);
         expect(uiStore.lineHeight).toBeCloseTo(1.4);
         expect(uiStore.measure).toBe(820);
+        expect(uiStore.paragraphSpacing).toBeCloseTo(1.5);
+        expect(uiStore.textAlign).toBe('justify');
 
         const writes = harness.callsFor('set_setting');
         expect(writes).toContainEqual({ key: 'ui.typography.font-family', value: 'mono' });
         expect(writes).toContainEqual({ key: 'ui.typography.font-size', value: '20' });
         expect(writes).toContainEqual({ key: 'ui.typography.measure', value: '820' });
+        expect(writes).toContainEqual({ key: 'ui.typography.paragraph-spacing', value: '1.5' });
+        expect(writes).toContainEqual({ key: 'ui.typography.text-align', value: 'justify' });
     });
 
     it('reset restores the defaults', async () => {

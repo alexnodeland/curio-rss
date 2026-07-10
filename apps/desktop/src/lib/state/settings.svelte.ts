@@ -15,6 +15,8 @@ export const SETTING_KEYS = {
     lineHeight: 'ui.typography.line-height',
     measure: 'ui.typography.measure',
     fontFamily: 'ui.typography.font-family',
+    paragraphSpacing: 'ui.typography.paragraph-spacing',
+    textAlign: 'ui.typography.text-align',
     sidebarCollapsed: 'ui.panes.sidebar-collapsed',
     sidebarWidth: 'ui.panes.sidebar-width',
     listWidth: 'ui.panes.list-width',

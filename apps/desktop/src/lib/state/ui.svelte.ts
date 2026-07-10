@@ -91,7 +91,15 @@ export const REFRESH_INTERVAL_DEFAULT = 30;
 export const REFRESH_INTERVAL_OPTIONS: readonly number[] = [0, 15, 30, 60, 180];
 
 /** Reader body font — an id mapped to a concrete CSS font stack. */
-export type ReaderFontId = 'sans' | 'serif' | 'mono';
+export type ReaderFontId =
+    | 'sans'
+    | 'serif'
+    | 'mono'
+    | 'humanist'
+    | 'grotesque'
+    | 'georgia'
+    | 'charter'
+    | 'readable';
 
 export interface ReaderFontInfo {
     readonly id: ReaderFontId;
@@ -101,9 +109,10 @@ export interface ReaderFontInfo {
 }
 
 /**
- * The three reader fonts. `sans`/`mono` reuse the app's own token stacks;
- * `serif` is a self-contained system-serif stack (no bundled webfont — the
- * CSP blocks remote fonts and we ship none).
+ * The reader font choices — all **offline-safe system stacks** (Curio is
+ * offline-first: the CSP blocks remote fonts and we ship none), each falling
+ * through widely-available faces to a generic family. The Settings select and
+ * the reader Typography popover both render each option in its own face.
  */
 export const READER_FONTS: readonly ReaderFontInfo[] = [
     { id: 'sans', name: 'Sans', stack: 'var(--font-family)' },
@@ -113,6 +122,31 @@ export const READER_FONTS: readonly ReaderFontInfo[] = [
         stack: 'Iowan Old Style, "Palatino Linotype", Palatino, Georgia, Cambria, "Times New Roman", serif',
     },
     { id: 'mono', name: 'Mono', stack: 'var(--font-mono)' },
+    {
+        id: 'humanist',
+        name: 'Humanist',
+        stack: 'Seravek, "Gill Sans Nova", "Gill Sans", Calibri, "Segoe UI", sans-serif',
+    },
+    {
+        id: 'grotesque',
+        name: 'Grotesque',
+        stack: '"Helvetica Neue", Helvetica, "Arial Nova", Arial, sans-serif',
+    },
+    {
+        id: 'georgia',
+        name: 'Georgia',
+        stack: 'Georgia, Cambria, "Times New Roman", Times, serif',
+    },
+    {
+        id: 'charter',
+        name: 'Charter',
+        stack: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif',
+    },
+    {
+        id: 'readable',
+        name: 'Readable',
+        stack: '"Comic Sans MS", "Comic Neue", "Trebuchet MS", "Segoe UI", sans-serif',
+    },
 ] as const;
 
 export function isReaderFontId(value: string): value is ReaderFontId {
@@ -124,7 +158,17 @@ export const TYPOGRAPHY_LIMITS = {
     fontSize: { min: 13, max: 24, default: 16 },
     lineHeight: { min: 1.3, max: 2, default: 1.6 },
     measure: { min: 520, max: 960, default: 720 },
+    /** Space between paragraphs, as a multiple of the font size (em). */
+    paragraphSpacing: { min: 0.4, max: 2, default: 1 },
 } as const;
+
+/** Reader text alignment. `justify` sets `text-align: justify` with hyphenation. */
+export type ReaderTextAlign = 'left' | 'justify';
+export const READER_TEXT_ALIGNS: readonly ReaderTextAlign[] = ['left', 'justify'] as const;
+
+export function isReaderTextAlign(value: string): value is ReaderTextAlign {
+    return (READER_TEXT_ALIGNS as readonly string[]).includes(value);
+}
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -255,6 +299,8 @@ export class UiStore {
     lineHeight: number = $state(TYPOGRAPHY_LIMITS.lineHeight.default);
     measure: number = $state(TYPOGRAPHY_LIMITS.measure.default);
     fontFamily: ReaderFontId = $state('serif');
+    paragraphSpacing: number = $state(TYPOGRAPHY_LIMITS.paragraphSpacing.default);
+    textAlign: ReaderTextAlign = $state('left');
 
     toasts: Toast[] = $state([]);
 
@@ -370,9 +416,18 @@ export class UiStore {
             TYPOGRAPHY_LIMITS.measure,
             TYPOGRAPHY_LIMITS.measure.default,
         );
+        this.paragraphSpacing = readNumber(
+            SETTING_KEYS.paragraphSpacing,
+            TYPOGRAPHY_LIMITS.paragraphSpacing,
+            TYPOGRAPHY_LIMITS.paragraphSpacing.default,
+        );
         const persistedFont = settingsStore.get(SETTING_KEYS.fontFamily);
         if (persistedFont !== undefined && isReaderFontId(persistedFont)) {
             this.fontFamily = persistedFont;
+        }
+        const persistedAlign = settingsStore.get(SETTING_KEYS.textAlign);
+        if (persistedAlign !== undefined && isReaderTextAlign(persistedAlign)) {
+            this.textAlign = persistedAlign;
         }
     }
 
@@ -534,6 +589,19 @@ export class UiStore {
     async setFontFamily(id: ReaderFontId): Promise<void> {
         this.fontFamily = id;
         await settingsStore.set(SETTING_KEYS.fontFamily, id);
+    }
+
+    /** Sets the paragraph spacing (em multiple), clamped, and persists it. */
+    async setParagraphSpacing(value: number): Promise<void> {
+        const { min, max } = TYPOGRAPHY_LIMITS.paragraphSpacing;
+        this.paragraphSpacing = clamp(value, min, max);
+        await settingsStore.set(SETTING_KEYS.paragraphSpacing, String(this.paragraphSpacing));
+    }
+
+    /** Sets the reader text alignment and persists it. */
+    async setTextAlign(align: ReaderTextAlign): Promise<void> {
+        this.textAlign = align;
+        await settingsStore.set(SETTING_KEYS.textAlign, align);
     }
 
     /** Picks a theme: applies it, mirrors it, persists it. */

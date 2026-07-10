@@ -115,6 +115,14 @@ function feedTitle(current: ArticleDto): string | null {
     return feed.title ?? feed.url;
 }
 
+// The scroll body, focused on request (→ from the list) so ↑/↓ scroll it.
+let scrollEl = $state<HTMLDivElement>();
+$effect(() => {
+    if (selectionStore.readerFocusNonce > 0) {
+        scrollEl?.focus();
+    }
+});
+
 // Displaying an article marks it read — once per selection, not per render.
 let lastOpenedId: number | null = null;
 $effect(() => {
@@ -262,13 +270,15 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <!-- Key on the article id so switching articles remounts the scroll
                  body at the top instead of inheriting the previous scroll offset. -->
             {#key current.id}
-            <div class="reader-scroll">
+            <div class="reader-scroll" tabindex="-1" bind:this={scrollEl}>
                 <article
                     class="reader-article"
+                    class:justify={uiStore.textAlign === 'justify'}
                     style:font-size="{uiStore.fontSize}px"
                     style:line-height={uiStore.lineHeight}
                     style:max-width="{uiStore.measure}px"
                     style:font-family={uiStore.readerFontStack}
+                    style:--para-spacing={uiStore.paragraphSpacing}
                 >
                     <header class="reader-header">
                         {#if feedTitle(current) !== null}
@@ -401,6 +411,20 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
+    }
+
+    /* Focused for ↑/↓ scrolling (→ from the list): a soft inset frame rather
+       than a hard ring around the whole column. */
+    .reader-scroll:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent), transparent 66%);
+    }
+
+    /* Justified reading: only the prose body (not the header), with hyphenation
+       so justification doesn't open rivers of whitespace. */
+    .reader-article.justify :global(.sanitized-content) {
+        text-align: justify;
+        hyphens: auto;
     }
 
     .reader-article {

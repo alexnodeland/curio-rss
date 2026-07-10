@@ -245,7 +245,9 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
     }
 
     .sanitized-content :global(p) {
-        margin: 0 0 1.1em;
+        /* --para-spacing (a multiple, set on .reader-article by the Reading
+           controls) scales the inter-paragraph gap; 1 = the default 1.1em. */
+        margin: 0 0 calc(var(--para-spacing, 1) * 1.1em);
         hanging-punctuation: first;
     }
 

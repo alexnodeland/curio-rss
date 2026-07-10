@@ -66,6 +66,35 @@ function handleEscapeStepback(event: KeyboardEvent): boolean {
     return true;
 }
 
+// Arrow-key spatial navigation across panes (composes with the WP2 focus
+// holder): ←/→ move focus sidebar ↔ list ↔ reader. ↑/↓ stay within the focused
+// pane (the listbox's row nav, the reader's native scroll) and are left alone.
+// The sidebar tree owns ←/→ for collapse/expand, so this only runs once focus
+// has left the tree. Returns true when it moved focus.
+function handleArrowNav(event: KeyboardEvent): boolean {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return false;
+    }
+    if (event.key === 'ArrowRight' && selectionStore.focus === 'list') {
+        event.preventDefault();
+        selectionStore.focusReader();
+        return true;
+    }
+    if (event.key === 'ArrowLeft') {
+        if (selectionStore.focus === 'reader') {
+            event.preventDefault();
+            selectionStore.focusList();
+            return true;
+        }
+        if (selectionStore.focus === 'list') {
+            event.preventDefault();
+            selectionStore.focusSidebar();
+            return true;
+        }
+    }
+    return false;
+}
+
 function onKeydown(event: KeyboardEvent): void {
     // An open menu owns the keyboard entirely (its own level handles Escape,
     // arrows, activation); never let app shortcuts fire underneath it.
@@ -87,6 +116,9 @@ function onKeydown(event: KeyboardEvent): void {
         // keys (which stopPropagation), so anything reaching here is a stray
         // that must not fire an article-pane shortcut underneath the tree.
         matcher.reset();
+        return;
+    }
+    if (handleArrowNav(event)) {
         return;
     }
     if (handleEscapeStepback(event)) {

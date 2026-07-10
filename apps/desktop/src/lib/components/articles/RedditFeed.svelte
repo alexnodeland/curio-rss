@@ -109,7 +109,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         color: var(--fg-muted);
     }
     .status.error {
-        color: var(--error);
+        color: var(--error-text);
     }
     .status.subtle {
         text-align: center;

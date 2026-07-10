@@ -296,7 +296,7 @@ function onkeydown(event: KeyboardEvent): void {
     }
 
     .menu-item.danger {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .menu-item.danger:hover:not(:disabled),
@@ -314,7 +314,7 @@ function onkeydown(event: KeyboardEvent): void {
     }
 
     .menu-item.danger .menu-icon {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .menu-label {

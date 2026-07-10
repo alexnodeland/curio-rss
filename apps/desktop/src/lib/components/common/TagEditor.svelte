@@ -134,7 +134,7 @@ function onKeydown(event: KeyboardEvent): void {
     }
 
     .chip-remove:hover {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .tag-input {

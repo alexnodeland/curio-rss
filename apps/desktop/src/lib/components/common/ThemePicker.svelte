@@ -124,7 +124,7 @@ async function importTheme(): Promise<void> {
         const failures = contrastFailures(theme);
         if (failures.length > 0) {
             const pairs = failures
-                .map((failure) => `--${failure.token} ${failure.ratio.toFixed(2)}`)
+                .map((failure) => `--${failure.fg}/--${failure.bg} ${failure.ratio.toFixed(2)}`)
                 .join(', ');
             uiStore.showToast(t('theme.contrastWarning', { pairs }), 'warning', 8000);
         }

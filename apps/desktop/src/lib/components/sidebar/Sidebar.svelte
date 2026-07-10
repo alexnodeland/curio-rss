@@ -414,7 +414,7 @@ function newFolder(): void {
     }
 
     .sidebar-status.error {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .sidebar-skeleton {

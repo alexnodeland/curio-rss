@@ -218,11 +218,31 @@ export function buildThemeRule(theme: CustomTheme): string {
 const AA_NORMAL = 4.5;
 const AA_LARGE = 3;
 
-/** The token/`--bg` pairs and their WCAG floors, matching the #36 gate. */
-const CONTRAST_PAIRS: readonly { readonly token: CurioBaseToken; readonly min: number }[] = [
-    { token: 'fg', min: AA_NORMAL },
-    { token: 'fg-muted', min: AA_NORMAL },
-    { token: 'fg-subtle', min: AA_LARGE },
+/**
+ * The gated (foreground, background) token pairs and their WCAG floors. This
+ * mirrors the widened CI gate (`theme-contrast.test.ts`): text and UI tokens
+ * are checked against every surface they render on, not just `--bg`. A custom
+ * theme only supplies the 21 base tokens (no `--*-text`), and its semantic
+ * *text* inherits the raw hue via the `--error-text: var(--error)` default —
+ * so here the raw `error`/`warning`/`success` are the effective text color and
+ * are what we check. Import is warn-only: a failing pair surfaces a toast, it
+ * never rejects the theme.
+ */
+const CONTRAST_PAIRS: readonly {
+    readonly fg: CurioBaseToken;
+    readonly bg: CurioBaseToken;
+    readonly min: number;
+}[] = [
+    { fg: 'fg', bg: 'bg', min: AA_NORMAL },
+    { fg: 'fg-muted', bg: 'bg', min: AA_NORMAL },
+    { fg: 'fg-muted', bg: 'bg-secondary', min: AA_NORMAL },
+    { fg: 'fg-subtle', bg: 'bg', min: AA_LARGE },
+    { fg: 'fg-subtle', bg: 'bg-secondary', min: AA_LARGE },
+    { fg: 'accent-fg', bg: 'accent', min: AA_NORMAL },
+    { fg: 'link', bg: 'bg', min: AA_NORMAL },
+    { fg: 'error', bg: 'bg', min: AA_NORMAL },
+    { fg: 'warning', bg: 'bg', min: AA_NORMAL },
+    { fg: 'success', bg: 'bg', min: AA_NORMAL },
 ];
 
 /** Normalizes `#rgb`/`#rrggbb`/`#rrggbbaa` to `#rrggbb`; null for anything else. */
@@ -255,26 +275,26 @@ function contrast(a: string, b: string): number {
 }
 
 export interface ContrastFailure {
-    readonly token: CurioBaseToken;
+    readonly fg: CurioBaseToken;
+    readonly bg: CurioBaseToken;
     readonly ratio: number;
     readonly min: number;
 }
 
 /**
- * The token pairs that fall below their WCAG floor against `--bg`. Pairs whose
- * colours aren't plain hex are skipped (can't be evaluated cheaply) rather than
- * flagged — this is a warning, never a hard reject.
+ * The token pairs that fall below their WCAG floor. Pairs whose colours aren't
+ * plain hex are skipped (can't be evaluated cheaply) rather than flagged — this
+ * is a warning, never a hard reject.
  */
 export function contrastFailures(theme: CustomTheme): ContrastFailure[] {
-    const bg = toHex6(theme.tokens.bg);
-    if (bg === null) return [];
     const failures: ContrastFailure[] = [];
-    for (const { token, min } of CONTRAST_PAIRS) {
-        const fg = toHex6(theme.tokens[token]);
-        if (fg === null) continue;
+    for (const { fg: fgToken, bg: bgToken, min } of CONTRAST_PAIRS) {
+        const fg = toHex6(theme.tokens[fgToken]);
+        const bg = toHex6(theme.tokens[bgToken]);
+        if (fg === null || bg === null) continue;
         const ratio = contrast(fg, bg);
         if (ratio < min) {
-            failures.push({ token, ratio, min });
+            failures.push({ fg: fgToken, bg: bgToken, ratio, min });
         }
     }
     return failures;

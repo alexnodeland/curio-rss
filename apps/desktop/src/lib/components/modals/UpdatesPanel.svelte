@@ -121,7 +121,7 @@ async function install(update: Update): Promise<void> {
     }
 
     .updates-status.error {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .field-button {

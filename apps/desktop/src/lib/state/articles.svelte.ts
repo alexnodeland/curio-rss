@@ -138,12 +138,17 @@ export class ArticleListState {
         try {
             const result = await commands.listArticles(toDto(this.filters, cursor, this.pageSize));
             if (result.status !== 'ok') {
-                return; // the cache entry keeps its data; the next event retries
+                // Surface the page failure through the list's stale-while-
+                // revalidate banner (rows are retained; the next refetch clears
+                // it) rather than swallowing it into a silent scroll dead stop.
+                this.query.error = result.error;
+                return;
             }
             if (this.query.loading || this.items !== window) {
                 return; // a refetch replaced the window while we appended
             }
             this.query.data = [...window, ...result.data];
+            this.query.error = null; // a good page clears any prior append banner
             this.exhausted = result.data.length < this.pageSize;
         } finally {
             this.appending = false;

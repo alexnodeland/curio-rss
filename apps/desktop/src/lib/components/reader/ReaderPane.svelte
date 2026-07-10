@@ -57,30 +57,31 @@ async function hydrate(articleId: number): Promise<void> {
     }
 }
 
-function article(): ArticleDto | null {
+/**
+ * The selected article's query, created in a $derived — never first-created
+ * inside a template expression. Svelte excludes state created during a reaction
+ * from that reaction's own dependencies, so a template branch that both created
+ * and read this query would go blind to the article loading in (it would stick
+ * on the initial null and show "missing"). The helpers below only *read* the
+ * already-created query, so every template reaction tracks its fields.
+ */
+const articleQuery = $derived.by(() => {
     const articleId = selectionStore.selectedArticleId;
-    if (articleId === null) {
-        return null;
-    }
-    return (
-        ensureQuery(queryKeys.article(articleId), () => commands.getArticle(articleId)).data ?? null
-    );
+    return articleId === null
+        ? null
+        : ensureQuery(queryKeys.article(articleId), () => commands.getArticle(articleId));
+});
+
+function article(): ArticleDto | null {
+    return articleQuery?.data ?? null;
 }
 
 function articleLoaded(): boolean {
-    const articleId = selectionStore.selectedArticleId;
-    if (articleId === null) {
-        return false;
-    }
-    return ensureQuery(queryKeys.article(articleId), () => commands.getArticle(articleId)).loaded;
+    return articleQuery?.loaded ?? false;
 }
 
 function failure(): CommandError | null {
-    const articleId = selectionStore.selectedArticleId;
-    if (articleId === null) {
-        return null;
-    }
-    return ensureQuery(queryKeys.article(articleId), () => commands.getArticle(articleId)).error;
+    return articleQuery?.error ?? null;
 }
 
 function failureMessage(): string {
@@ -146,17 +147,27 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 <kbd>j</kbd><kbd>k</kbd> to move · <kbd>Enter</kbd> to open · <kbd>?</kbd> for shortcuts
             {/snippet}
         </EmptyState>
-    {:else if failure() !== null}
-        <div class="reader-status">
-            <p class="error" role="alert">{failureMessage()}</p>
-        </div>
     {:else}
         {@const current = article()}
         {#if current === null}
-            <div class="reader-status">
-                <p>{articleLoaded() ? t('reader.missing') : t('app.loading')}</p>
-            </div>
+            {#if failure() !== null}
+                <!-- No article to preserve: the load itself failed. -->
+                <div class="reader-status">
+                    <p class="error" role="alert">{failureMessage()}</p>
+                </div>
+            {:else}
+                <div class="reader-status">
+                    <p>{articleLoaded() ? t('reader.missing') : t('app.loading')}</p>
+                </div>
+            {/if}
         {:else}
+            {#if failure() !== null}
+                <!-- Stale-while-revalidate: a refetch failed but the article is
+                     still in hand — keep showing it under a non-destructive
+                     banner instead of blanking a populated reader (parity with
+                     the article list's refetch banner). -->
+                <p class="reader-banner" role="alert">{failureMessage()}</p>
+            {/if}
             <div class="reader-toolbar" role="toolbar" aria-label={t('reader.toolbar')}>
                 <button
                     class="tool"
@@ -343,6 +354,17 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 
     .reader-status .error {
         color: var(--error-text);
+    }
+
+    /* Non-destructive refetch-failure strip above the retained article. */
+    .reader-banner {
+        flex: 0 0 auto;
+        padding: var(--space-2) var(--space-4);
+        margin: var(--space-2) var(--space-3) 0;
+        border-radius: var(--radius-md);
+        background: var(--error-bg);
+        color: var(--error-text);
+        font-size: var(--text-xs);
     }
 
     /* Empty state */

@@ -76,6 +76,23 @@ describe('search store', () => {
         expect(selectionStore.selectedArticleId).toBe(8);
     });
 
+    it('is unsettled (pending) during the debounce gap, then settles', async () => {
+        vi.useFakeTimers();
+        try {
+            harness = installIpcHarness({ search_articles: [] });
+            searchStore.setQuery('rust');
+            // Query text is live but the request has not fired: not settled.
+            expect(searchStore.active).toBe(true);
+            expect(searchStore.pending).toBe(true);
+            expect(searchStore.settled).toBe(false);
+            await vi.advanceTimersByTimeAsync(300);
+            expect(searchStore.pending).toBe(false);
+            expect(searchStore.settled).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('debounces a burst of keystrokes into a single query', async () => {
         vi.useFakeTimers();
         try {
@@ -161,5 +178,14 @@ describe('SearchResults', () => {
         const { getByText } = render(SearchResults);
         await flushIpc();
         expect(getByText('No matches')).toBeTruthy();
+    });
+
+    it('does not flash "No matches" while the query is still pending', () => {
+        harness = installIpcHarness({ search_articles: [], list_feeds: [] });
+        // A live but not-yet-fired query (debounce gap): pending, no results.
+        searchStore.setQuery('rust');
+        const { queryByText, getByText } = render(SearchResults);
+        expect(queryByText('No matches')).toBeNull();
+        expect(getByText('Searching…')).toBeTruthy();
     });
 });

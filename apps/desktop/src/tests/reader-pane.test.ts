@@ -169,6 +169,29 @@ describe('ReaderPane', () => {
         expect(getByRole('alert').textContent).not.toContain('sql');
     });
 
+    it('keeps the article under a banner when a refetch fails (stale-while-revalidate)', async () => {
+        harness = installIpcHarness(baseResponders());
+        const unwire = await wireInvalidation();
+        selectionStore.selectedArticleId = 100;
+        const { getByText, getByRole, queryByText } = render(ReaderPane);
+        await flushIpc();
+        expect(getByText('The article')).toBeTruthy();
+
+        // A refetch now fails; the loaded article must survive under a banner
+        // rather than collapsing to the full-screen error tier.
+        harness.respond(
+            'get_article',
+            rejectWith(commandErrorFixture({ kind: 'user', message: 'feed went away' })),
+        );
+        await events.articlesChanged.emit({ feed_id: null });
+        await flushIpc();
+
+        expect(getByText('The article')).toBeTruthy(); // still shown
+        expect(getByRole('alert').textContent).toContain('feed went away'); // banner
+        expect(queryByText('This article no longer exists')).toBeNull();
+        unwire();
+    });
+
     it('the load-full-article button hydrates through load_full_article', async () => {
         harness = installIpcHarness({
             ...baseResponders(),

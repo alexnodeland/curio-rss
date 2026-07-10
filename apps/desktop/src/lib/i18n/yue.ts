@@ -38,6 +38,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'folder.menu.delete': '刪除資料夾',
     'folder.deleted': '已刪除「{name}」',
     'folder.renameCollision': '呢度已經有個叫「{name}」嘅資料夾',
+    'folder.empty': '空資料夾',
     'feed.menu.openSite': '開啟網站',
     'feed.menu.refresh': '重新整理',
     'feed.menu.rename': '重新命名',

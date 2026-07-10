@@ -37,6 +37,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'folder.menu.delete': '删除文件夹',
     'folder.deleted': '已删除“{name}”',
     'folder.renameCollision': '这里已存在名为“{name}”的文件夹',
+    'folder.empty': '空文件夹',
     'feed.menu.openSite': '打开网站',
     'feed.menu.refresh': '刷新',
     'feed.menu.rename': '重命名',

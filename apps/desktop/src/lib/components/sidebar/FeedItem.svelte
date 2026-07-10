@@ -291,7 +291,11 @@ function hue(text: string): number {
             tabindex="-1"
             aria-current={selected ? 'true' : undefined}
             ondblclick={startRename}
-            onclick={() => onselect(feed.id)}
+            onclick={(event) => {
+                // Ignore the second click of a rename double-click so it doesn't
+                // re-select (and re-scope the list) on the way into renaming.
+                if (event.detail < 2) onselect(feed.id);
+            }}
         >
             <span class="feed-mono" style:--mono-hue={hue(label)} aria-hidden="true"
                 >{(Array.from(label)[0] ?? '').toUpperCase()}</span

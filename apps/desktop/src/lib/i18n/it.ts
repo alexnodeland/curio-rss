@@ -369,6 +369,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'shortcut.nextArticle': 'Articolo successivo',
     'shortcut.previousArticle': 'Articolo precedente',
     'shortcut.nextUnread': 'Prossimo non letto (tra i feed)',
+    'shortcut.arrowPanes': 'Spostarsi tra i pannelli',
+    'shortcut.arrowWithin': 'Spostarsi in un pannello · scorrere il lettore',
     'shortcut.openArticle': 'Apri articolo nel browser',
     'shortcut.toggleStar': 'Aggiungi/rimuovi articolo dai preferiti',
     'shortcut.toggleReadLater': 'Aggiungi a / rimuovi da Leggi dopo',

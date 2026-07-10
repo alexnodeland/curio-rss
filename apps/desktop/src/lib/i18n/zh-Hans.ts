@@ -354,6 +354,8 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'shortcut.nextArticle': '下一篇文章',
     'shortcut.previousArticle': '上一篇文章',
     'shortcut.nextUnread': '下一条未读（跨订阅源）',
+    'shortcut.arrowPanes': '在面板间移动',
+    'shortcut.arrowWithin': '在面板内移动 · 滚动阅读器',
     'shortcut.openArticle': '在浏览器中打开文章',
     'shortcut.toggleStar': '加星标 / 取消星标',
     'shortcut.toggleReadLater': '加入 / 移出稍后阅读',

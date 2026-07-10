@@ -390,6 +390,8 @@ export const en = {
     'shortcut.nextArticle': 'Next article',
     'shortcut.previousArticle': 'Previous article',
     'shortcut.nextUnread': 'Next unread (across feeds)',
+    'shortcut.arrowPanes': 'Move between panes',
+    'shortcut.arrowWithin': 'Move within a pane · scroll the reader',
     'shortcut.openArticle': 'Open article in browser',
     'shortcut.toggleStar': 'Star / unstar article',
     'shortcut.toggleReadLater': 'Add to / remove from read later',

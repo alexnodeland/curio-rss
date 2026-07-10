@@ -4,7 +4,7 @@
  */
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
 import { t } from '$lib/i18n';
-import { SHORTCUTS } from '$lib/keyboard/registry';
+import { NAV_HINTS, SHORTCUTS } from '$lib/keyboard/registry';
 import { fireEvent, render } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -25,6 +25,20 @@ describe('HelpOverlay', () => {
         // Chords render both keys (g appears once per g-chord).
         expect(getAllByText('g').length).toBe(5);
         expect(getAllByText('then').length).toBe(5);
+    });
+
+    it('documents the arrow-key spatial navigation', () => {
+        const { getByText, container } = render(HelpOverlay, { props: { onclose: vi.fn() } });
+        for (const hint of NAV_HINTS) {
+            expect(getByText(t(hint.description))).toBeTruthy();
+        }
+        // The arrow glyphs render as their own keys, slash-joined (not "then").
+        expect(getByText('←')).toBeTruthy();
+        expect(getByText('→')).toBeTruthy();
+        const slashSeps = [...container.querySelectorAll('.chord-sep')].filter(
+            (el) => el.textContent === '/',
+        );
+        expect(slashSeps.length).toBe(NAV_HINTS.length);
     });
 
     it('renders the category headings in registry order', () => {

@@ -30,6 +30,7 @@ import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
 import Icon from '$components/common/Icon.svelte';
+import { dismissable } from '$lib/actions/dismissable';
 import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
 import TypographyControls from './TypographyControls.svelte';
@@ -45,6 +46,7 @@ function feedHue(label: string): number {
 }
 
 let showTypography = $state(false);
+let typographyToggle = $state<HTMLButtonElement>();
 let hydrating = $state(false);
 
 /** Loads the full readability-extracted article; content updates via events. */
@@ -124,11 +126,13 @@ $effect(() => {
     }
 });
 
-// Displaying an article marks it read — once per selection, not per render.
+// Displaying an article marks it read — once per selection, not per render,
+// and only once it has actually loaded. A failed fetch must not silently mark
+// an article the reader never managed to show.
 let lastOpenedId: number | null = null;
 $effect(() => {
     const articleId = selectionStore.selectedArticleId;
-    if (articleId !== null && articleId !== lastOpenedId) {
+    if (articleId !== null && articleId !== lastOpenedId && articleQuery?.data != null) {
         lastOpenedId = articleId;
         void markReadOnOpen(articleId);
     }
@@ -231,6 +235,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 </button>
                 <div class="typography-anchor">
                     <button
+                        bind:this={typographyToggle}
                         class="tool"
                         class:on={showTypography}
                         aria-haspopup="dialog"
@@ -244,15 +249,21 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         <Icon name="type" />
                     </button>
                     {#if showTypography}
+                        <!-- Focus enters on mount; Escape or an outside press
+                             closes it (window-level, so it works even when focus
+                             never reached inside). The toggle is excluded so its
+                             own click toggles closed cleanly. -->
                         <div
                             class="typography-popover"
                             role="dialog"
                             aria-label={t('reader.action.typography')}
                             tabindex="-1"
-                            onkeydown={(event) => {
-                                if (event.key === 'Escape') {
+                            use:dismissable={{
+                                onclose: () => {
                                     showTypography = false;
-                                }
+                                },
+                                ignore: () => typographyToggle,
+                                returnFocus: () => typographyToggle,
                             }}
                         >
                             <TypographyControls />

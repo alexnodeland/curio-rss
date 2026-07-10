@@ -130,6 +130,15 @@ describe('stripRedditFooter', () => {
         const html = '<p>just a body</p>';
         expect(stripRedditFooter(html)).toContain('just a body');
     });
+
+    it('never deletes the whole post when the footer sits in an outer wrapper', () => {
+        // The [comments] anchor is a direct child of a <div> that also holds
+        // the entire post body — matching that div would erase the article.
+        const html =
+            '<div><p>the real article body</p> <a href="https://www.reddit.com/r/x/comments/z/">[comments]</a></div>';
+        const out = stripRedditFooter(html);
+        expect(out).toContain('the real article body');
+    });
 });
 
 describe('feedHomeType', () => {

@@ -14,7 +14,11 @@ import { uiStore } from '$lib/state/ui.svelte';
 
 let { articleId }: { articleId: number } = $props();
 
+/** Client-side cap; core enforces its own — this is immediate feedback. */
+const TAG_MAX_LENGTH = 64;
+
 let draft = $state('');
+let adding = $state(false);
 
 function tags(): string[] {
     return (
@@ -25,17 +29,21 @@ function tags(): string[] {
 
 async function addTag(): Promise<void> {
     const tag = draft.trim();
-    if (tag.length === 0) {
+    if (tag.length === 0 || adding) {
         return;
     }
-    draft = '';
+    adding = true;
     try {
         const result = await commands.tagArticle(articleId, tag);
         if (result.status === 'error') {
             toastCommandError(result.error);
+            return; // keep the draft so the user can correct a rejected tag
         }
+        draft = ''; // committed — clear for the next tag
     } catch {
         uiStore.showToast(t('app.error.internal'), 'error');
+    } finally {
+        adding = false;
     }
 }
 
@@ -76,6 +84,7 @@ function onKeydown(event: KeyboardEvent): void {
         class="tag-input"
         type="text"
         spellcheck="false"
+        maxlength={TAG_MAX_LENGTH}
         bind:value={draft}
         placeholder={t('tags.placeholder')}
         aria-label={t('tags.add')}

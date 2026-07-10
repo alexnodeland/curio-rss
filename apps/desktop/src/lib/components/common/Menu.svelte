@@ -242,6 +242,11 @@ function onkeydown(event: KeyboardEvent): void {
         z-index: 1000;
         min-width: 200px;
         max-width: 320px;
+        /* Never taller than the viewport: a long "Move to folder" list (many
+           folders) scrolls instead of running its lowest items off-screen
+           where they're physically unreachable. */
+        max-height: calc(100vh - 16px);
+        overflow-y: auto;
         padding: var(--space-1);
         background: var(--surface-overlay);
         border: 1px solid var(--hairline);

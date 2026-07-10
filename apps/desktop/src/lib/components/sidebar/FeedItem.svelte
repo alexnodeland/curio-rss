@@ -55,6 +55,7 @@ const rowId = $derived(feedRowKey(parentPath, feed.id));
 const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId);
 
 let dropTarget = $state(false);
+let dropBelow = $state(false);
 
 // ─── inline rename ───────────────────────────────────────────────────────────
 let renaming = $state(false);
@@ -172,11 +173,20 @@ function onDragOver(event: DragEvent): void {
     if (isValidDrag()) {
         event.preventDefault(); // permit the drop
         dropTarget = true;
+        // The drop line must match where the feed actually lands: dragging
+        // down drops *after* this row (line below), up drops before (line
+        // above) — mirroring moveWithinGroup, which used to be contradicted by
+        // an always-top indicator.
+        const dragging = feedDnd.draggingId;
+        if (dragging !== null && siblings !== undefined) {
+            dropBelow = siblings.indexOf(dragging) < siblings.indexOf(feed.id);
+        }
     }
 }
 
 function onDrop(event: DragEvent): void {
     dropTarget = false;
+    dropBelow = false;
     const dragged = feedDnd.draggingId;
     if (siblings === undefined || dragged === null || !isValidDrag()) {
         return;
@@ -208,12 +218,14 @@ function hue(text: string): number {
     class:tree-active={isTreeActive}
     class:unhealthy={feed.status !== 'active' || errored}
     class:drop-target={dropTarget}
+    class:drop-below={dropBelow}
     class:dragging={feedDnd.draggingId === feed.id}
     draggable={siblings !== undefined && !renaming}
     ondragstart={() => feedDnd.start(feed.id)}
     ondragover={onDragOver}
     ondragleave={() => {
         dropTarget = false;
+        dropBelow = false;
     }}
     ondrop={onDrop}
     ondragend={() => feedDnd.clear()}
@@ -296,9 +308,14 @@ function hue(text: string): number {
         opacity: 0.5;
     }
 
-    /* A line where the dragged feed would land. */
+    /* A line where the dragged feed would land — top edge for an upward drag
+       (drops before this row), bottom edge for a downward drag (drops after). */
     .feed-item.drop-target {
         box-shadow: inset 0 2px 0 var(--accent);
+    }
+
+    .feed-item.drop-target.drop-below {
+        box-shadow: inset 0 -2px 0 var(--accent);
     }
 
     .feed-item.active::before {
@@ -421,16 +438,20 @@ function hue(text: string): number {
         background: var(--success);
     }
 
+    /* Paused is a deliberate user state — a hollow amber ring, distinct in both
+       shape and colour from the solid red error dot it used to be identical to. */
     .health-paused {
-        background: var(--warning);
+        background: transparent;
+        box-shadow: inset 0 0 0 2px var(--warning);
     }
 
-    /* Active, but its last refresh errored — a warning, not a lifecycle state. */
+    /* Active, but its last refresh errored — solid red (a real failure). */
     .health-errored {
-        background: var(--warning);
+        background: var(--error);
     }
 
+    /* Dead/removed feed — a quiet neutral, not another red. */
     .health-dead {
-        background: var(--error);
+        background: var(--fg-subtle);
     }
 </style>

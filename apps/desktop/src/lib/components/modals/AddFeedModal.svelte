@@ -172,6 +172,7 @@ async function add(): Promise<void> {
 
 <Modal title={t('addFeed.title')} {onclose}>
     <form
+        id="add-feed-form"
         class="add-feed"
         onsubmit={(event) => {
             event.preventDefault();
@@ -303,12 +304,14 @@ async function add(): Promise<void> {
             </span>
         </label>
 
-        <div class="actions">
-            <button class="add-button" type="submit" disabled={adding}>
-                {adding ? t('addFeed.adding') : t('addFeed.add')}
-            </button>
-        </div>
     </form>
+    {#snippet footer()}
+        <!-- Pinned so Subscribe stays reachable however long the discovery
+             list grows; `form=` keeps it submitting the form above. -->
+        <button class="add-button" type="submit" form="add-feed-form" disabled={adding}>
+            {adding ? t('addFeed.adding') : t('addFeed.add')}
+        </button>
+    {/snippet}
 </Modal>
 
 <style>
@@ -461,11 +464,6 @@ async function add(): Promise<void> {
         display: block;
         color: var(--fg-subtle);
         font-size: var(--text-xs);
-    }
-
-    .actions {
-        display: flex;
-        justify-content: flex-end;
     }
 
     .detected {

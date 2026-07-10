@@ -187,9 +187,31 @@ function whenDate(iso: string): string {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso : formatIntlDateTime(date);
 }
+
+// Unify the save model: text fields save as you leave them (like tags, pause,
+// and notify, which already save immediately), and any still-dirty draft is
+// flushed when the modal closes — so an edit is never silently lost to a stray
+// close. The explicit Save buttons still work as an obvious affordance.
+function saveTitleIfDirty(): void {
+    if (titleValue !== currentTitle) {
+        void saveTitle();
+    }
+}
+
+function saveDetailsIfDirty(): void {
+    if (detailsDirty) {
+        void saveDetails();
+    }
+}
+
+function closeWithFlush(): void {
+    saveTitleIfDirty();
+    saveDetailsIfDirty();
+    onclose();
+}
 </script>
 
-<Modal title={t('editFeed.title')} {onclose} size="large">
+<Modal title={t('editFeed.title')} onclose={closeWithFlush} size="large">
     {#if feed === null}
         <p class="status">{t('reader.missing')}</p>
     {:else}
@@ -226,6 +248,7 @@ function whenDate(iso: string): string {
                         value={titleValue}
                         placeholder={feed.url}
                         oninput={(event) => (titleDraft = event.currentTarget.value)}
+                        onblur={saveTitleIfDirty}
                     />
                     <button
                         type="button"
@@ -245,6 +268,7 @@ function whenDate(iso: string): string {
                     value={siteValue}
                     placeholder={t('editFeed.site.placeholder')}
                     oninput={(event) => (siteDraft = event.currentTarget.value)}
+                    onblur={saveDetailsIfDirty}
                 />
             </div>
 
@@ -256,6 +280,7 @@ function whenDate(iso: string): string {
                     rows="2"
                     value={descValue}
                     oninput={(event) => (descDraft = event.currentTarget.value)}
+                    onblur={saveDetailsIfDirty}
                 ></textarea>
                 <div class="field-row field-row-end">
                     <button

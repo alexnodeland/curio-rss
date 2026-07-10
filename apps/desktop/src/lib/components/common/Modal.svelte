@@ -18,6 +18,7 @@ let {
     onclose,
     size = 'medium',
     closeOnBackdrop = true,
+    footer,
     children,
 }: {
     title: string;
@@ -26,6 +27,9 @@ let {
     /** Whether a click on the backdrop dismisses the modal. Off for modals
      *  holding a dirty draft the user shouldn't lose to a stray click. */
     closeOnBackdrop?: boolean;
+    /** Optional pinned footer — stays visible below the scrollable body so a
+     *  modal's primary actions never scroll under the fold. */
+    footer?: Snippet;
     children: Snippet;
 } = $props();
 
@@ -69,6 +73,11 @@ function onBackdropClick(event: MouseEvent): void {
         <div class="overlay-body">
             {@render children()}
         </div>
+        {#if footer}
+            <footer class="overlay-footer">
+                {@render footer()}
+            </footer>
+        {/if}
     </div>
 </div>
 
@@ -158,5 +167,17 @@ function onBackdropClick(event: MouseEvent): void {
         display: flex;
         flex-direction: column;
         gap: var(--space-6);
+    }
+
+    /* Pinned action bar: never scrolls, so primary actions stay reachable
+       however long the body is. */
+    .overlay-footer {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--space-3);
+        padding: var(--space-4) var(--space-6);
+        border-top: 1px solid var(--hairline);
     }
 </style>

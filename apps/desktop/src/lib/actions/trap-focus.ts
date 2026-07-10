@@ -72,9 +72,15 @@ export function trapFocus(node: HTMLElement): { destroy(): void } {
     return {
         destroy(): void {
             node.removeEventListener('keydown', onKeydown);
-            // Restore focus unless the trigger has since left the DOM.
+            // Restore focus to the trigger; but a modal opened from a context
+            // menu was triggered by a menu item that unmounts when the menu
+            // closes, so `previouslyFocused` is detached by now. Fall back to
+            // the main content region (a `tabindex=-1` focus holder) so focus
+            // never drops to <body> and strands the keyboard user.
             if (previouslyFocused?.isConnected) {
                 previouslyFocused.focus();
+            } else {
+                document.getElementById('main-content')?.focus();
             }
         },
     };

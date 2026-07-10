@@ -118,6 +118,16 @@ function onTreeKeydown(event: KeyboardEvent): void {
     }
     const result = treeKeyAction(rows, activeIndex, event.key);
     if (result.type === 'none') {
+        // → at a tree dead-end (a leaf feed, or an already-expanded end) drills
+        // rightward into the article list — the same "move right" that carries
+        // the list into the reader — so → means one thing everywhere. It
+        // activates the row first so the list shows the feed under the cursor,
+        // not a stale selection.
+        if (event.key === 'ArrowRight' && activeIndex >= 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            activateRow(activeIndex);
+        }
         return;
     }
     event.preventDefault();

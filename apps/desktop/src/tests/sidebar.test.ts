@@ -238,6 +238,25 @@ describe('Sidebar — folder tree', () => {
         expect(selectionStore.focus).toBe('list');
     });
 
+    it('Right on a leaf feed drills into the list (selects it + focuses the list)', async () => {
+        harness = taggedHarness();
+        const { getByRole } = render(Sidebar);
+        await flushIpc();
+
+        selectionStore.focusSidebar();
+        await tick();
+        const tree = getByRole('tree');
+        // Walk down to a leaf feed (Tech → Databases → SQLite feed).
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
+
+        // Right at a tree dead-end crosses rightward into the article list.
+        await fireEvent.keyDown(tree, { key: 'ArrowRight' });
+        expect(selectionStore.selectedFeedId).toBe(2);
+        expect(selectionStore.focus).toBe('list');
+    });
+
     it('Left collapses the folder under the cursor', async () => {
         harness = taggedHarness();
         const { getByRole, getByLabelText, queryByText } = render(Sidebar);

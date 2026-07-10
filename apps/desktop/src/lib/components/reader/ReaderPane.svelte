@@ -497,6 +497,9 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         line-height: 1.16;
         letter-spacing: var(--tracking-tight);
         text-wrap: balance;
+        /* Floor: even in a very narrow reader, a long title wraps between
+           graphemes rather than breaking mid-word ("Identif/ied"). */
+        overflow-wrap: anywhere;
     }
 
     .reader-title a {

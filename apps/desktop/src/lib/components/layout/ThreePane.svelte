@@ -36,6 +36,7 @@ function persistListWidth(width: number): void {
             min={PANE_LIMITS.sidebar.min}
             max={PANE_LIMITS.sidebar.max}
             label={t('pane.sidebar.resize')}
+            variant="sidebar"
             onresizeend={persistSidebarWidth}
         >
             {@render sidebar()}
@@ -46,6 +47,7 @@ function persistListWidth(width: number): void {
         min={PANE_LIMITS.list.min}
         max={PANE_LIMITS.list.max}
         label={t('pane.list.resize')}
+        variant="list"
         onresizeend={persistListWidth}
     >
         {@render list()}
@@ -70,5 +72,26 @@ function persistListWidth(width: number): void {
         min-width: 0;
         min-height: 0;
         overflow: hidden;
+    }
+
+    /* Responsive degradation. The two left panes are fixed-width (flex 0 0), so
+       at the enforced 800px minimum they leave the reader ~150px — a broken,
+       mid-word-breaking column. Below these breakpoints, cap each pane with
+       max-width (which overrides the inline flex-basis) so the reader keeps a
+       legible width all the way down to 800px, without touching the user's
+       stored widths on larger screens. */
+    @media (max-width: 1000px) {
+        .three-pane :global(.pane.list) {
+            max-width: 34vw;
+        }
+    }
+
+    @media (max-width: 900px) {
+        .three-pane :global(.pane.sidebar) {
+            max-width: 24vw;
+        }
+        .three-pane :global(.pane.list) {
+            max-width: 30vw;
+        }
     }
 </style>

@@ -8,6 +8,7 @@ import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
+import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
@@ -47,6 +48,7 @@ describe('Sidebar', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
+        sidebarTreeStore.reset(); // the cursor now persists across blur (UX), so isolate it here
         uiStore.reset();
         feedsStore.reset();
         harness?.teardown();
@@ -130,6 +132,7 @@ describe('Sidebar — folder tree', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
+        sidebarTreeStore.reset(); // the cursor now persists across blur (UX), so isolate it here
         uiStore.reset();
         feedsStore.reset();
         harness?.teardown();
@@ -255,6 +258,36 @@ describe('Sidebar — folder tree', () => {
         await fireEvent.keyDown(tree, { key: 'ArrowRight' });
         expect(selectionStore.selectedFeedId).toBe(2);
         expect(selectionStore.focus).toBe('list');
+    });
+
+    it('keeps the cursor across blur so returning to the tree resumes there', async () => {
+        harness = taggedHarness();
+        const { getByRole } = render(Sidebar);
+        await flushIpc();
+
+        selectionStore.focusSidebar();
+        await tick();
+        const tree = getByRole('tree');
+        // The browser fires `focus` when the seat effect focuses the tree
+        // (jsdom does not dispatch it on programmatic .focus()).
+        await fireEvent.focus(tree);
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
+        expect(sidebarTreeStore.focused).toBe(true);
+
+        // Focus leaves the tree: the ring stops (focused=false) but the cursor
+        // position is kept, so it isn't forgotten.
+        await fireEvent.blur(tree);
+        expect(sidebarTreeStore.focused).toBe(false);
+        expect(sidebarTreeStore.activeKey).toBe('feed:Tech/Databases:2');
+
+        // Returning to the tree resumes on the same row, not the top.
+        selectionStore.focusSidebar();
+        await tick();
+        await fireEvent.focus(tree);
+        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
+        expect(sidebarTreeStore.focused).toBe(true);
     });
 
     it('Left collapses the folder under the cursor', async () => {

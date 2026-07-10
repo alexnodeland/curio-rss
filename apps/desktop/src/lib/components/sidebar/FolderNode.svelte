@@ -32,7 +32,8 @@ const selected = $derived(
 /** This folder's tree id + `aria-level`, and whether the keyboard cursor is on it. */
 const rowId = $derived(folderRowKey(folder.path));
 const level = $derived(depth + 1);
-const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId);
+// Cursor ring only while the tree holds focus (see FeedItem) — no stray ring.
+const isTreeActive = $derived(sidebarTreeStore.activeKey === rowId && sidebarTreeStore.focused);
 
 // ─── inline rename ───────────────────────────────────────────────────────────
 let renaming = $state(false);

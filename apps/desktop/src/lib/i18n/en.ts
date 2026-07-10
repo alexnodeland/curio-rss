@@ -20,7 +20,7 @@ export const en = {
     'emptyState.addFeed': 'Add your first feed',
     'emptyState.importOpml': 'Import OPML…',
     'shell.feeds.count': '{count, plural, one {# feed} other {# feeds}}',
-    'shell.unread.count': '{count} unread',
+    'shell.unread.count': '{count, plural, one {# unread} other {# unread}}',
 
     'view.all': 'All articles',
     'view.starred': 'Starred',
@@ -150,7 +150,7 @@ export const en = {
 
     'toast.promote.saved': 'Saved to {name}',
     'toast.promote.unchanged': 'Already up to date in {name}',
-    'toast.markAllRead': 'Marked {count} read',
+    'toast.markAllRead': '{count, plural, one {Marked # read} other {Marked # read}}',
     'nav.noMoreUnread': 'No more unread',
 
     'help.title': 'Keyboard shortcuts',
@@ -290,7 +290,8 @@ export const en = {
     'opml.export': 'Export OPML…',
     'opml.importing': 'Importing…',
     'opml.exporting': 'Exporting…',
-    'opml.imported': 'Imported {added} feeds, skipped {skipped}',
+    'opml.imported':
+        'Imported {added, plural, one {# feed} other {# feeds}}, skipped {skipped, plural, other {#}}',
     'opml.exported': 'Exported your subscriptions',
     'opml.cancelled': 'Cancelled',
     'opml.hint':
@@ -304,7 +305,8 @@ export const en = {
     'import.source.readwise_csv': 'Readwise Reader — CSV',
     'import.run': 'Import…',
     'import.running': 'Importing…',
-    'import.done': 'Imported {feeds} feeds and {articles} articles, skipped {skipped}',
+    'import.done':
+        'Imported {feeds, plural, one {# feed} other {# feeds}} and {articles, plural, one {# article} other {# articles}}, skipped {skipped, plural, other {#}}',
     'import.hint':
         'OPML brings in feed subscriptions; Pocket, Instapaper and Readwise CSVs bring in saved articles as read-later items with their tags.',
 
@@ -331,7 +333,7 @@ export const en = {
     'feedHealth.revive': 'Reactivate',
     'feedHealth.recent': 'Recent fetches',
     'feedHealth.none': 'No fetches recorded yet',
-    'feedHealth.new': '{count} new',
+    'feedHealth.new': '{count, plural, one {# new} other {# new}}',
     'feedHealth.open': 'Feed health for {name}',
     'feedHealth.badge.active': 'Active',
     'feedHealth.badge.paused': 'Paused',
@@ -374,7 +376,8 @@ export const en = {
     'tagEditor.remove': 'Remove {tag}',
 
     'refresh.announce.start': 'Refreshing feeds',
-    'refresh.announce.done': 'Refresh complete: {count} new articles across {feeds} feeds',
+    'refresh.announce.done':
+        'Refresh complete: {count, plural, one {# new article} other {# new articles}} across {feeds, plural, one {# feed} other {# feeds}}',
     'refresh.inProgress': 'Refreshing… {done} of {total}',
 
     'pane.sidebar.resize': 'Resize sidebar',

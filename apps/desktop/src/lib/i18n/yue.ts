@@ -355,6 +355,8 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'shortcut.nextArticle': '下一篇文章',
     'shortcut.previousArticle': '上一篇文章',
     'shortcut.nextUnread': '下一篇未睇（跨訂閱源）',
+    'shortcut.arrowPanes': '喺面板之間移動',
+    'shortcut.arrowWithin': '喺面板內移動 · 捲動閱讀器',
     'shortcut.openArticle': '喺瀏覽器打開文章',
     'shortcut.toggleStar': '加／移除文章星標',
     'shortcut.toggleReadLater': '加入／移除稍後睇',

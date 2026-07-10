@@ -371,6 +371,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'shortcut.nextArticle': 'Następny artykuł',
     'shortcut.previousArticle': 'Poprzedni artykuł',
     'shortcut.nextUnread': 'Następny nieprzeczytany (we wszystkich kanałach)',
+    'shortcut.arrowPanes': 'Przechodzenie między panelami',
+    'shortcut.arrowWithin': 'Ruch w obrębie panelu · przewijanie czytnika',
     'shortcut.openArticle': 'Otwórz artykuł w przeglądarce',
     'shortcut.toggleStar': 'Oznacz / usuń gwiazdkę artykułu',
     'shortcut.toggleReadLater': 'Dodaj / usuń z listy Do przeczytania',

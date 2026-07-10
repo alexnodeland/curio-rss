@@ -373,6 +373,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'shortcut.nextArticle': 'Article suivant',
     'shortcut.previousArticle': 'Article précédent',
     'shortcut.nextUnread': 'Prochain non lu (tous flux confondus)',
+    'shortcut.arrowPanes': 'Se déplacer entre les volets',
+    'shortcut.arrowWithin': 'Se déplacer dans un volet · faire défiler le lecteur',
     'shortcut.openArticle': 'Ouvrir l’article dans le navigateur',
     'shortcut.toggleStar': 'Ajouter / retirer des favoris',
     'shortcut.toggleReadLater': 'Ajouter à / retirer de la liste à lire',

@@ -8,7 +8,7 @@
  */
 import Modal from '$components/common/Modal.svelte';
 import { type MessageKey, t } from '$lib/i18n';
-import { SHORTCUTS, type ShortcutCategory } from '$lib/keyboard/registry';
+import { NAV_HINTS, SHORTCUTS, type ShortcutCategory } from '$lib/keyboard/registry';
 
 let { onclose }: { onclose: () => void } = $props();
 
@@ -31,6 +31,23 @@ function shortcutsIn(category: ShortcutCategory) {
         <section class="shortcut-group">
             <h3>{t(CATEGORY_LABELS[category])}</h3>
             <ul>
+                {#if category === 'navigation'}
+                    <!-- Arrow-key spatial nav is documented here even though it's
+                         handled outside the shortcut matcher (see NAV_HINTS). -->
+                    {#each NAV_HINTS as hint (hint.description)}
+                        <li>
+                            <span class="keys">
+                                {#each hint.keys as keyName, position (position)}
+                                    {#if position > 0}
+                                        <span class="chord-sep">/</span>
+                                    {/if}
+                                    <kbd>{keyName}</kbd>
+                                {/each}
+                            </span>
+                            <span class="description">{t(hint.description)}</span>
+                        </li>
+                    {/each}
+                {/if}
                 {#each shortcutsIn(category) as shortcut (shortcut.id)}
                     <li>
                         <span class="keys">

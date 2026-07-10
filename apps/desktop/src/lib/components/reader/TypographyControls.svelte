@@ -7,7 +7,13 @@
  */
 import { rangeFill } from '$lib/actions/range-fill';
 import { t } from '$lib/i18n';
-import { READER_FONTS, TYPOGRAPHY_LIMITS, isReaderFontId, uiStore } from '$lib/state/ui.svelte';
+import {
+    READER_FONTS,
+    TYPOGRAPHY_LIMITS,
+    isReaderFontId,
+    isReaderTextAlign,
+    uiStore,
+} from '$lib/state/ui.svelte';
 
 function onFont(event: Event & { currentTarget: HTMLSelectElement }): void {
     const value = event.currentTarget.value;
@@ -28,11 +34,23 @@ function onMeasure(event: Event & { currentTarget: HTMLInputElement }): void {
     void uiStore.setMeasure(Number(event.currentTarget.value));
 }
 
+function onSpacing(event: Event & { currentTarget: HTMLInputElement }): void {
+    void uiStore.setParagraphSpacing(Number(event.currentTarget.value));
+}
+
+function onAlign(event: Event & { currentTarget: HTMLSelectElement }): void {
+    if (isReaderTextAlign(event.currentTarget.value)) {
+        void uiStore.setTextAlign(event.currentTarget.value);
+    }
+}
+
 function reset(): void {
     void uiStore.setFontFamily('serif');
     void uiStore.setFontSize(TYPOGRAPHY_LIMITS.fontSize.default);
     void uiStore.setLineHeight(TYPOGRAPHY_LIMITS.lineHeight.default);
     void uiStore.setMeasure(TYPOGRAPHY_LIMITS.measure.default);
+    void uiStore.setParagraphSpacing(TYPOGRAPHY_LIMITS.paragraphSpacing.default);
+    void uiStore.setTextAlign('left');
 }
 </script>
 
@@ -41,7 +59,7 @@ function reset(): void {
         <span class="row-label">{t('typography.font')}</span>
         <select value={uiStore.fontFamily} onchange={onFont}>
             {#each READER_FONTS as font (font.id)}
-                <option value={font.id}>{font.name}</option>
+                <option value={font.id} style="font-family: {font.stack}">{font.name}</option>
             {/each}
         </select>
     </label>
@@ -86,6 +104,28 @@ function reset(): void {
             use:rangeFill={uiStore.measure}
         />
         <span class="row-value">{uiStore.measure}px</span>
+    </label>
+
+    <label class="row">
+        <span class="row-label">{t('typography.spacing')}</span>
+        <input
+            type="range"
+            min={TYPOGRAPHY_LIMITS.paragraphSpacing.min}
+            max={TYPOGRAPHY_LIMITS.paragraphSpacing.max}
+            step="0.1"
+            value={uiStore.paragraphSpacing}
+            oninput={onSpacing}
+            use:rangeFill={uiStore.paragraphSpacing}
+        />
+        <span class="row-value">{uiStore.paragraphSpacing.toFixed(1)}</span>
+    </label>
+
+    <label class="row">
+        <span class="row-label">{t('typography.align')}</span>
+        <select value={uiStore.textAlign} onchange={onAlign}>
+            <option value="left">{t('typography.align.left')}</option>
+            <option value="justify">{t('typography.align.justify')}</option>
+        </select>
     </label>
 
     <button class="reset" type="button" onclick={reset}>{t('typography.reset')}</button>

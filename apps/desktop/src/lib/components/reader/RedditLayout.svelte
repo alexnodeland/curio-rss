@@ -40,7 +40,7 @@ function linkHost(url: string): string {
                 <div class="post-ident">
                     <span class="subreddit">r/{subreddit}</span>
                     {#if post.author !== null}
-                        <span class="post-author">Posted by u/{post.author}</span>
+                        <span class="post-author">{t('reddit.postedBy', { author: post.author })}</span>
                     {/if}
                 </div>
             {/if}

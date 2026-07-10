@@ -15,7 +15,14 @@ describe('t', () => {
     });
 
     it('leaves unknown placeholders visible rather than eating them', () => {
-        expect(t('shell.feeds.count', {})).toBe('{count} feeds');
+        expect(t('shell.unread.count', {})).toBe('{count} unread');
+    });
+
+    it('selects the grammatical plural form by count', () => {
+        expect(t('shell.feeds.count', { count: 1 })).toBe('1 feed');
+        expect(t('shell.feeds.count', { count: 5 })).toBe('5 feeds');
+        expect(t('reader.meta.words', { count: 1 })).toBe('1 word');
+        expect(t('reader.meta.words', { count: 240 })).toBe('240 words');
     });
 });
 

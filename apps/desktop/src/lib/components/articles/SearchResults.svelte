@@ -68,6 +68,6 @@ function selectArticle(articleId: number): void {
     }
 
     .status.error {
-        color: var(--error);
+        color: var(--error-text);
     }
 </style>

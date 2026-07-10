@@ -207,7 +207,7 @@ function onScrollPast(firstVisibleIndex: number): void {
     }
 
     .list-status.error {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .list-skeleton {

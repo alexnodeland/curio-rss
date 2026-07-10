@@ -299,7 +299,7 @@ function onKeyDown(event: KeyboardEvent): void {
 
     .row-star {
         flex: 0 0 auto;
-        color: var(--warning);
+        color: var(--warning-text);
         font-size: 0.8125rem;
     }
 </style>

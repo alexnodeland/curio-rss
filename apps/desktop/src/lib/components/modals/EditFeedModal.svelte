@@ -585,7 +585,7 @@ function whenDate(iso: string): string {
     }
 
     .fetch-error {
-        color: var(--error);
+        color: var(--error-text);
         min-width: 0;
     }
 
@@ -652,7 +652,7 @@ function whenDate(iso: string): string {
     }
 
     .danger {
-        color: var(--error);
+        color: var(--error-text);
         border-color: color-mix(in srgb, var(--error), transparent 40%);
     }
 
@@ -660,6 +660,6 @@ function whenDate(iso: string): string {
     .danger:hover {
         background: color-mix(in srgb, var(--error), transparent 88%);
         border-color: var(--error);
-        color: var(--error);
+        color: var(--error-text);
     }
 </style>

@@ -127,16 +127,34 @@ describe('theme-format — contrast (warn-only)', () => {
             tokens: tokens({ bg: '#000000', 'fg-subtle': '#111111' }) as CustomTheme['tokens'],
         });
         const failures = contrastFailures(bad);
-        expect(failures.some((f) => f.token === 'fg-subtle')).toBe(true);
+        expect(failures.some((f) => f.fg === 'fg-subtle' && f.bg === 'bg')).toBe(true);
+    });
+
+    it('flags sub-AA primary-button text (the widened gate)', () => {
+        // white on a mid-blue accent — the real-world 3.56:1 failure that the
+        // old --bg-only gate shipped green.
+        const bad = theme({
+            tokens: tokens({ accent: '#228be6', 'accent-fg': '#ffffff' }) as CustomTheme['tokens'],
+        });
+        expect(contrastFailures(bad).some((f) => f.fg === 'accent-fg' && f.bg === 'accent')).toBe(
+            true,
+        );
     });
 
     it('passes a high-contrast theme and skips non-hex pairs', () => {
         const good = theme({
             tokens: tokens({
                 bg: '#000000',
+                'bg-secondary': '#000000',
                 fg: '#ffffff',
                 'fg-muted': '#eeeeee',
                 'fg-subtle': '#cccccc',
+                accent: '#000000',
+                'accent-fg': '#ffffff',
+                link: '#ffffff',
+                error: '#ffffff',
+                warning: '#ffffff',
+                success: '#ffffff',
             }) as CustomTheme['tokens'],
         });
         expect(contrastFailures(good)).toHaveLength(0);
@@ -145,6 +163,6 @@ describe('theme-format — contrast (warn-only)', () => {
             tokens: tokens({ bg: '#000000', fg: 'rgba(255,255,255,1)' }) as CustomTheme['tokens'],
         });
         expect(rgba.tokens.fg).toBe('rgba(255,255,255,1)');
-        expect(contrastFailures(rgba).some((f) => f.token === 'fg')).toBe(false);
+        expect(contrastFailures(rgba).some((f) => f.fg === 'fg')).toBe(false);
     });
 });

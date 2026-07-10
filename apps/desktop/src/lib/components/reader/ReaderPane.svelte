@@ -328,7 +328,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
     }
 
     .reader-status .error {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     /* Empty state */

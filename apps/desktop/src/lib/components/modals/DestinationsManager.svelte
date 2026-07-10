@@ -152,7 +152,7 @@ async function makeDefault(name: string): Promise<void> {
     }
 
     .status.error {
-        color: var(--error);
+        color: var(--error-text);
     }
 
     .destination-list {
@@ -234,7 +234,7 @@ async function makeDefault(name: string): Promise<void> {
     }
 
     .remove-button:hover {
-        color: var(--error);
+        color: var(--error-text);
         background: var(--hover);
     }
 

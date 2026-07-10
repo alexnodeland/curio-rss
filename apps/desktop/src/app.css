@@ -143,11 +143,25 @@ h6 {
     --ink: color-mix(in srgb, var(--fg), var(--bg) 6%);
     --ink-soft: var(--fg-muted);
 
+    /* Semantic *text* tokens — the on-surface, AA-legible reading of each
+       status hue, distinct from the bright fill/dot hue. Default to the raw
+       hue (correct for most dark themes and for imported custom themes); the
+       [data-theme] blocks below override only where the bright hue fails AA
+       as text. Use these for any status *text*; keep --error/--warning/
+       --success for fills, dots, borders, and progress. */
+    --error-text: var(--error);
+    --warning-text: var(--warning);
+    --success-text: var(--success);
+
     /* Layered, soft shadows (premium depth, not a hard drop). */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16);
     --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.14), 0 6px 16px -6px rgba(0, 0, 0, 0.28);
     --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.18), 0 18px 44px -12px rgba(0, 0, 0, 0.42);
-    --ring: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent), transparent 35%);
+    /* Focus ring — kept for components that compose it into a box-shadow, but
+       the inner halo is transparent (not --bg) so it no longer punches a
+       background-colored gap when a control sits on chrome/list/raised. The
+       canonical focus treatment is the outline below. */
+    --ring: 0 0 0 2px color-mix(in srgb, var(--accent), transparent 35%);
 }
 
 /* Dark Theme (Default) */
@@ -158,9 +172,9 @@ h6 {
     --bg-hover: #373a40;
     --fg: #c1c2c5;
     --fg-muted: #909296;
-    --fg-subtle: #696c72;
-    --accent: #228be6;
-    --accent-hover: #1c7ed6;
+    --fg-subtle: #7c8085;
+    --accent: #1971c2;
+    --accent-hover: #1864ab;
     --accent-fg: #fff;
     --accent-muted: rgba(34, 139, 230, 0.15);
     --border: #373a40;
@@ -182,10 +196,10 @@ h6 {
     --bg-tertiary: #f1f3f5;
     --bg-hover: #e9ecef;
     --fg: #212529;
-    --fg-muted: #6e747b;
+    --fg-muted: #676d74;
     --fg-subtle: #878d93;
-    --accent: #228be6;
-    --accent-hover: #1c7ed6;
+    --accent: #1971c2;
+    --accent-hover: #1864ab;
     --accent-fg: #fff;
     --accent-muted: rgba(34, 139, 230, 0.15);
     --border: #dee2e6;
@@ -194,9 +208,12 @@ h6 {
     --error-bg: rgba(250, 82, 82, 0.15);
     --warning: #fab005;
     --success: #40c057;
+    --error-text: #c92a2a;
+    --warning-text: #a15c00;
+    --success-text: #1e7a34;
     --unread: #228be6;
     --read: var(--fg-muted);
-    --link: #1c7ed6;
+    --link: #1565c0;
     --link-visited: #7950f2;
 }
 
@@ -208,7 +225,7 @@ h6 {
     --bg-hover: #4c566a;
     --fg: #eceff4;
     --fg-muted: #d8dee9;
-    --fg-subtle: #7b8291;
+    --fg-subtle: #8b93a3;
     --accent: #88c0d0;
     --accent-hover: #8fbcbb;
     --accent-fg: #2e3440;
@@ -219,6 +236,7 @@ h6 {
     --error-bg: rgba(191, 97, 106, 0.15);
     --warning: #ebcb8b;
     --success: #a3be8c;
+    --error-text: #eba7ae;
     --unread: #88c0d0;
     --read: var(--fg-muted);
     --link: #81a1c1;
@@ -233,7 +251,7 @@ h6 {
     --bg-hover: #585b70;
     --fg: #cdd6f4;
     --fg-muted: #a6adc8;
-    --fg-subtle: #6c7086;
+    --fg-subtle: #7e849c;
     --accent: #89b4fa;
     --accent-hover: #74c7ec;
     --accent-fg: #1e1e2e;
@@ -258,7 +276,7 @@ h6 {
     --bg-hover: #6272a4;
     --fg: #f8f8f2;
     --fg-muted: #bfbfbf;
-    --fg-subtle: #6878a8;
+    --fg-subtle: #8b9bd0;
     --accent: #bd93f9;
     --accent-hover: #ff79c6;
     --accent-fg: #282a36;
@@ -269,6 +287,7 @@ h6 {
     --error-bg: rgba(255, 85, 85, 0.15);
     --warning: #f1fa8c;
     --success: #50fa7b;
+    --error-text: #ffa8a8;
     --unread: #8be9fd;
     --read: var(--fg-muted);
     --link: #8be9fd;
@@ -282,10 +301,10 @@ h6 {
     --bg-tertiary: #504945;
     --bg-hover: #665c54;
     --fg: #ebdbb2;
-    --fg-muted: #a89984;
-    --fg-subtle: #7e766f;
-    --accent: #458588;
-    --accent-hover: #83a598;
+    --fg-muted: #b3a390;
+    --fg-subtle: #948570;
+    --accent: #2b5d5f;
+    --accent-hover: #3a7376;
     --accent-fg: #ebdbb2;
     --accent-muted: rgba(69, 133, 136, 0.15);
     --border: #504945;
@@ -294,6 +313,8 @@ h6 {
     --error-bg: rgba(204, 36, 29, 0.15);
     --warning: #d79921;
     --success: #98971a;
+    --error-text: #ff8f87;
+    --success-text: #b8bb26;
     --unread: #689d6a;
     --read: var(--fg-muted);
     --link: #83a598;
@@ -308,7 +329,7 @@ h6 {
     --bg-hover: #3b4261;
     --fg: #c0caf5;
     --fg-muted: #a9b1d6;
-    --fg-subtle: #646c92;
+    --fg-subtle: #7c85ad;
     --accent: #7aa2f7;
     --accent-hover: #7dcfff;
     --accent-fg: #1a1b26;
@@ -332,18 +353,21 @@ h6 {
     --bg-tertiary: #094452;
     --bg-hover: #586e75;
     --fg: #839496;
-    --fg-muted: #819399;
-    --fg-subtle: #657a80;
-    --accent: #268bd2;
+    --fg-muted: #8fa1a7;
+    --fg-subtle: #6f858c;
+    --accent: #1a6a9e;
     --accent-hover: #2aa198;
     --accent-fg: #fdf6e3;
     --accent-muted: rgba(38, 139, 210, 0.15);
     --border: #073642;
-    --border-subtle: #002b36;
+    --border-subtle: #0e3c4a;
     --error: #dc322f;
     --error-bg: rgba(220, 50, 47, 0.15);
     --warning: #b58900;
     --success: #859900;
+    --error-text: #ef7a72;
+    --warning-text: #c99a1e;
+    --success-text: #a5b400;
     --unread: #268bd2;
     --read: var(--fg-muted);
     --link: #2aa198;
@@ -357,21 +381,24 @@ h6 {
     --bg-tertiary: #e4dcc8;
     --bg-hover: #93a1a1;
     --fg: #5d7179;
-    --fg-muted: #647072;
-    --fg-subtle: #7e8a8a;
-    --accent: #268bd2;
+    --fg-muted: #586466;
+    --fg-subtle: #6f7a7a;
+    --accent: #1a6a9e;
     --accent-hover: #2aa198;
     --accent-fg: #fdf6e3;
     --accent-muted: rgba(38, 139, 210, 0.15);
     --border: #eee8d5;
-    --border-subtle: #fdf6e3;
+    --border-subtle: #ddd6c3;
     --error: #dc322f;
     --error-bg: rgba(220, 50, 47, 0.15);
     --warning: #b58900;
     --success: #859900;
+    --error-text: #a51f1d;
+    --warning-text: #6b5300;
+    --success-text: #4d5800;
     --unread: #268bd2;
     --read: var(--fg-muted);
-    --link: #2aa198;
+    --link: #1a6a9e;
     --link-visited: #6c71c4;
 }
 
@@ -467,10 +494,13 @@ h6 {
     background-clip: padding-box;
 }
 
-/* Focus Styles — a soft accent ring that reads on any surface. */
+/* Focus Styles — an accent outline with an offset gap. Outline (not a
+   box-shadow whose inner layer is a fixed surface color) means the gap is
+   transparent, so the ring reads correctly whether the control sits on the
+   app, list, chrome, or a raised surface. */
 :focus-visible {
-    outline: none;
-    box-shadow: var(--ring);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
     border-radius: var(--radius-md);
 }
 
@@ -511,5 +541,31 @@ a:visited {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
+    }
+}
+
+/* Increased contrast — firm up the whisper-thin hairlines and the muted ink
+   tiers when the user asks for more contrast, so pane edges and secondary
+   text stop dissolving into their surfaces. */
+@media (prefers-contrast: more) {
+    :root {
+        --hairline: var(--border);
+        --hairline-strong: var(--fg-subtle);
+        --fg-muted: var(--fg);
+        --fg-subtle: var(--fg-muted);
+    }
+}
+
+/* Forced colors (Windows High Contrast / forced-colors mode): let the OS
+   palette drive text and surfaces, and give focus a system-colored outline
+   that survives the override. */
+@media (forced-colors: active) {
+    :focus-visible {
+        outline: 2px solid CanvasText;
+        outline-offset: 2px;
+    }
+    ::selection {
+        background: Highlight;
+        color: HighlightText;
     }
 }

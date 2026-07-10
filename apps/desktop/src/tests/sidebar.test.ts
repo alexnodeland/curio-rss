@@ -5,6 +5,7 @@
  */
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
+import { feedDnd } from '$lib/state/feed-dnd.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
@@ -137,6 +138,7 @@ describe('Sidebar — folder tree', () => {
         uiStore.reset();
         feedsStore.reset();
         menuStore.reset();
+        feedDnd.clear();
         harness?.teardown();
         harness = null;
     });
@@ -161,6 +163,8 @@ describe('Sidebar — folder tree', () => {
                     [3, 0],
                 ],
             }),
+            set_feed_tags: null,
+            set_setting: null,
         });
     }
 
@@ -365,5 +369,34 @@ describe('Sidebar — folder tree', () => {
         expect(tree.getAttribute('aria-activedescendant')).toBe('feed::2');
         await fireEvent.keyDown(tree, { key: 'ArrowDown', altKey: true });
         expect(harness.callsFor('reorder_feeds')).toHaveLength(1);
+    });
+
+    it('dragging a folder-feed onto the ungroup zone removes it from its folder', async () => {
+        harness = taggedHarness();
+        const { getByText, queryByText } = render(Sidebar);
+        await flushIpc();
+
+        // No drag in progress ⇒ the ungroup zone is hidden.
+        expect(queryByText('Remove from folder')).toBeNull();
+
+        // Start dragging Rust Blog (in Tech): the pointer-only ungroup target appears.
+        feedDnd.start(1);
+        await tick();
+        const zone = getByText('Remove from folder');
+
+        await fireEvent.drop(zone);
+        // ungroupFeed(1) rewrites the feed's tags to none (dropping the Tech path tag).
+        expect(harness.callsFor('set_feed_tags').at(-1)).toEqual({ feedId: 1, tags: [] });
+    });
+
+    it('does not offer the ungroup zone for an already-ungrouped feed', async () => {
+        harness = taggedHarness();
+        const { queryByText } = render(Sidebar);
+        await flushIpc();
+
+        // Loose has no folder — dragging it out would be a no-op, so no zone.
+        feedDnd.start(3);
+        await tick();
+        expect(queryByText('Remove from folder')).toBeNull();
     });
 });

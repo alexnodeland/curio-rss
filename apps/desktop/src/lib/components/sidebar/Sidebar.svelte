@@ -19,9 +19,10 @@ import {
     type ViewId,
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
-import { moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
 import { buildFeedTree, flattenVisibleTree, type VisibleRow } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { folderPathsForTags } from '$lib/state/folder-ops';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
@@ -233,6 +234,50 @@ function feedsError(): string {
     return failure === null ? '' : commandErrorMessage(failure);
 }
 
+// The dragged feed sits in a folder ⇒ offer the "remove from folder" drop zone.
+// (Dragging an already-ungrouped feed onto it would be a no-op, so it stays hidden.)
+const draggedInFolder = $derived.by(() => {
+    const id = feedDnd.draggingId;
+    if (id === null) {
+        return false;
+    }
+    const dragged = feedsStore.feeds.find((candidate) => candidate.id === id);
+    return dragged !== undefined && folderPathsForTags(dragged.tags).length > 0;
+});
+
+let ungroupDropActive = $state(false);
+
+/** Drops a folder-feed onto the ungroup zone — the one-way trip back out of a folder. */
+function onUngroupDrop(event: DragEvent): void {
+    const dragged = feedDnd.draggingId;
+    ungroupDropActive = false;
+    if (dragged === null) {
+        return;
+    }
+    event.preventDefault();
+    void runCommand(() => feedsStore.ungroupFeed(dragged));
+    feedDnd.clear();
+}
+
+/**
+ * Edge auto-scroll while dragging: nudges the sidebar's own scroll container
+ * when the pointer nears its top/bottom, so a feed can be dragged to a folder
+ * currently off-screen. Rides the bubbling dragover from the rows below.
+ */
+function onScrollAreaDragOver(event: DragEvent): void {
+    if (feedDnd.draggingId === null) {
+        return;
+    }
+    const el = event.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const EDGE = 48;
+    if (event.clientY < rect.top + EDGE) {
+        el.scrollBy({ top: -14 });
+    } else if (event.clientY > rect.bottom - EDGE) {
+        el.scrollBy({ top: 14 });
+    }
+}
+
 /** Creates a new top-level folder with a unique default name (rename inline). */
 function newFolder(): void {
     const existing = feedTree.folders.map((folder) => folder.name);
@@ -280,7 +325,10 @@ function newFolder(): void {
         </div>
     </div>
 
-    <div class="sidebar-scroll">
+    <!-- ondragover drives edge auto-scroll from the bubbling drag over rows below;
+         the scroll container isn't itself an interactive target. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="sidebar-scroll" ondragover={onScrollAreaDragOver}>
         <section class="sidebar-group">
             <ul class="sidebar-list">
                 {#each VIEWS as view (view.id)}
@@ -393,6 +441,27 @@ function newFolder(): void {
                             />
                         </li>
                     {/each}
+                    {#if draggedInFolder}
+                        <!-- Pointer-only ungroup target (keyboard/menu users have
+                             "Remove from folder"); DnD out of a folder was one-way. -->
+                        <li aria-hidden="true">
+                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            <div
+                                class="ungroup-zone"
+                                class:drop-active={ungroupDropActive}
+                                ondragover={(event) => {
+                                    event.preventDefault();
+                                    ungroupDropActive = true;
+                                }}
+                                ondragleave={() => {
+                                    ungroupDropActive = false;
+                                }}
+                                ondrop={onUngroupDrop}
+                            >
+                                {t('feed.menu.ungroup')}
+                            </div>
+                        </li>
+                    {/if}
                 </ul>
             {/if}
         </section>
@@ -529,6 +598,28 @@ function newFolder(): void {
     .sidebar-list[role='tree']:focus,
     .sidebar-list[role='tree']:focus-visible {
         outline: none;
+    }
+
+    /* A dashed drop target that appears only while a folder-feed is dragged, to
+       pull it back out to the top level (the DnD mirror of "Remove from folder"). */
+    .ungroup-zone {
+        margin: var(--space-1) var(--space-2) 0;
+        padding: var(--space-2) var(--space-3);
+        border: 1px dashed var(--hairline-strong);
+        border-radius: var(--radius-md);
+        color: var(--fg-subtle);
+        font-size: var(--text-sm);
+        text-align: center;
+        transition:
+            background var(--dur-fast) var(--ease),
+            border-color var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .ungroup-zone.drop-active {
+        background: var(--selected);
+        border-color: color-mix(in srgb, var(--accent), transparent 40%);
+        color: var(--fg);
     }
 
     .sidebar-status {

@@ -36,6 +36,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'folder.menu.delete': 'Elimina cartella',
     'folder.deleted': 'Eliminata «{name}»',
     'folder.renameCollision': 'Esiste già una cartella chiamata «{name}» qui',
+    'folder.empty': 'Cartella vuota',
     'feed.menu.openSite': 'Apri sito',
     'feed.menu.refresh': 'Aggiorna',
     'feed.menu.rename': 'Rinomina',

@@ -40,6 +40,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'folder.menu.delete': 'Usuń folder',
     'folder.deleted': 'Usunięto „{name}”',
     'folder.renameCollision': 'Folder o nazwie „{name}” już tu istnieje',
+    'folder.empty': 'Pusty folder',
     'feed.menu.openSite': 'Otwórz witrynę',
     'feed.menu.refresh': 'Odśwież',
     'feed.menu.rename': 'Zmień nazwę',

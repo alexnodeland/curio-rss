@@ -40,6 +40,7 @@ export const en = {
     'folder.menu.delete': 'Delete folder',
     'folder.deleted': 'Deleted “{name}”',
     'folder.renameCollision': 'A folder named “{name}” already exists here',
+    'folder.empty': 'Empty folder',
     'feed.menu.openSite': 'Open site',
     'feed.menu.refresh': 'Refresh',
     'feed.menu.rename': 'Rename',

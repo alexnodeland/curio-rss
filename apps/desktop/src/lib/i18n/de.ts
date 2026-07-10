@@ -37,6 +37,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'folder.menu.delete': 'Ordner löschen',
     'folder.deleted': '„{name}“ gelöscht',
     'folder.renameCollision': 'Ein Ordner namens „{name}“ existiert hier bereits',
+    'folder.empty': 'Leerer Ordner',
     'feed.menu.openSite': 'Website öffnen',
     'feed.menu.refresh': 'Aktualisieren',
     'feed.menu.rename': 'Umbenennen',

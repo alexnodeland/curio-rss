@@ -200,7 +200,11 @@ function onFolderDrop(event: DragEvent): void {
                 tabindex="-1"
                 aria-current={selected ? 'true' : undefined}
                 ondblclick={startRename}
-                onclick={() => selectFolder(folder.path)}
+                onclick={(event) => {
+                    // The second click of a rename double-click shouldn't re-scope
+                    // the article list (event.detail === 2 is that second click).
+                    if (event.detail < 2) selectFolder(folder.path);
+                }}
             >
                 <span class="folder-name truncate" use:tooltip={folder.name}>{folder.name}</span>
                 {#if unread > 0}
@@ -229,6 +233,13 @@ function onFolderDrop(event: DragEvent): void {
                     />
                 </li>
             {/each}
+            {#if folder.subfolders.length === 0 && folder.feeds.length === 0}
+                <!-- A user-made folder that's still empty (e.g. just created, or
+                     everything moved out) — say so rather than showing a blank gap. -->
+                <li class="folder-empty" role="none" style:--depth={depth + 1}>
+                    {t('folder.empty')}
+                </li>
+            {/if}
         </ul>
     {/if}
 </li>
@@ -372,5 +383,13 @@ function onFolderDrop(event: DragEvent): void {
 
     .folder-feed {
         padding-left: calc(var(--depth) * var(--space-4));
+    }
+
+    .folder-empty {
+        padding: var(--space-1) var(--space-3);
+        padding-left: calc(var(--depth) * var(--space-4) + var(--space-3));
+        font-size: var(--text-sm);
+        font-style: italic;
+        color: var(--fg-subtle);
     }
 </style>

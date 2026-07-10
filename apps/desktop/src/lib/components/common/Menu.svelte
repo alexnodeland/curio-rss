@@ -98,7 +98,16 @@ function openSubmenu(index: number): void {
     const btn = itemEls[index];
     if (btn === undefined) return;
     const rect = btn.getBoundingClientRect();
-    submenuPos = { x: rect.right - 4, y: rect.top - 4 };
+    // Prefer the right side, but flip to the left of the parent item when the
+    // submenu would run past the viewport edge — otherwise the child's own
+    // viewport-clamp would slide it back *over* this menu, hiding it. The parent
+    // menu's width is a good proxy for the submenu's (shared min-width).
+    const width = menuEl?.offsetWidth ?? 220;
+    const openRight = rect.right + width <= window.innerWidth - 4;
+    submenuPos = {
+        x: openRight ? rect.right - 4 : Math.max(4, rect.left - width + 4),
+        y: rect.top - 4,
+    };
     submenuIndex = index;
 }
 

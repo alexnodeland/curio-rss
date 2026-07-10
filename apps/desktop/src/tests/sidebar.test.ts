@@ -370,6 +370,20 @@ describe('Sidebar — folder tree', () => {
         expect(loose).toEqual(['move:Tech', 'move:Tech/Databases', 'new-folder']);
     });
 
+    it('labels a newly-created empty folder rather than leaving a blank gap', async () => {
+        harness = taggedHarness();
+        const { getByText, queryByText } = render(Sidebar);
+        await flushIpc();
+
+        expect(queryByText('Empty folder')).toBeNull();
+        // A freshly-created top-level folder holds no feeds yet.
+        feedsStore.createFolder('Ideas');
+        await tick();
+
+        expect(getByText('Ideas')).toBeTruthy();
+        expect(getByText('Empty folder')).toBeTruthy();
+    });
+
     it('refuses to rename a folder onto an existing sibling (no silent merge)', async () => {
         harness = installIpcHarness({
             list_feeds: [

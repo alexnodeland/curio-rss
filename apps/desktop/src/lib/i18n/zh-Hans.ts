@@ -41,6 +41,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'feed.menu.rename': '重命名',
     'feed.menu.markAllRead': '全部标为已读',
     'feed.menu.moveToFolder': '移动到文件夹',
+    'feed.menu.newFolder': '新建文件夹…',
     'feed.menu.ungroup': '移出文件夹',
     'feed.menu.edit': '编辑订阅源…',
     'feed.menu.copyUrl': '复制订阅源网址',

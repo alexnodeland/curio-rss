@@ -43,6 +43,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'feed.menu.rename': 'Zmień nazwę',
     'feed.menu.markAllRead': 'Oznacz wszystko jako przeczytane',
     'feed.menu.moveToFolder': 'Przenieś do folderu',
+    'feed.menu.newFolder': 'Nowy folder…',
     'feed.menu.ungroup': 'Usuń z folderu',
     'feed.menu.edit': 'Edytuj kanał…',
     'feed.menu.copyUrl': 'Kopiuj adres URL kanału',

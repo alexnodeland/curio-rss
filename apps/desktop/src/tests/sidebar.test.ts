@@ -6,6 +6,7 @@
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
@@ -135,6 +136,7 @@ describe('Sidebar — folder tree', () => {
         sidebarTreeStore.reset(); // the cursor now persists across blur (UX), so isolate it here
         uiStore.reset();
         feedsStore.reset();
+        menuStore.reset();
         harness?.teardown();
         harness = null;
     });
@@ -303,5 +305,36 @@ describe('Sidebar — folder tree', () => {
         await fireEvent.keyDown(tree, { key: 'ArrowLeft' });
         expect(getByLabelText('Toggle Tech').getAttribute('aria-expanded')).toBe('false');
         expect(queryByText('SQLite')).toBeNull();
+    });
+
+    /** The ids of a feed row's "Move to folder" submenu, as built at open time. */
+    function moveSubmenuIds(label: string, getByLabelText: (l: string) => HTMLElement): string[] {
+        fireEvent.contextMenu(getByLabelText(label));
+        const move = menuStore.current?.items.find((item) => item.id === 'move');
+        return (move?.children ?? []).map((child) => child.id);
+    }
+
+    it('the move-to-folder menu omits the feed’s own folder and offers "New folder…"', async () => {
+        harness = taggedHarness();
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+
+        // Rust Blog sits in Tech: its own folder is not offered, deeper Tech/Databases is,
+        // "New folder…" is always present, and Ungroup shows (it is grouped).
+        const grouped = moveSubmenuIds('Rust Blog', getByLabelText);
+        expect(grouped).not.toContain('move:Tech');
+        expect(grouped).toContain('move:Tech/Databases');
+        expect(grouped).toContain('new-folder');
+        expect(grouped).toContain('ungroup');
+    });
+
+    it('an ungrouped feed’s move menu lists every folder and hides the no-op Ungroup', async () => {
+        harness = taggedHarness();
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+
+        // Loose has no folder: every path is a valid target, and Ungroup is a no-op so it's gone.
+        const loose = moveSubmenuIds('Loose', getByLabelText);
+        expect(loose).toEqual(['move:Tech', 'move:Tech/Databases', 'new-folder']);
     });
 });

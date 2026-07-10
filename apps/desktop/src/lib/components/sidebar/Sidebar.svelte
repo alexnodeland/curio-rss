@@ -25,6 +25,7 @@ import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { treeKeyAction } from '$lib/utils/tree-nav';
+import { untrack } from 'svelte';
 import FeedItem from './FeedItem.svelte';
 import FolderNode from './FolderNode.svelte';
 
@@ -62,15 +63,21 @@ let treeEl: HTMLUListElement | undefined = $state();
 
 // When `g f` (or a native-menu "Go to feeds") hands the keyboard to the
 // sidebar, move DOM focus to the tree and seat the cursor on the first row if
-// it has none (or a stale one).
+// it has none (or a stale one). Gated on the entry *nonce* only: seating the
+// cursor and reading rows/activeIndex happen inside untrack, so a later
+// activeIndex change never re-fires this and re-grabs focus — which is what
+// made clicking out of the sidebar snap straight back.
 $effect(() => {
-    if (selectionStore.focus !== 'sidebar' || treeEl === undefined || rows.length === 0) {
-        return;
-    }
-    if (activeIndex < 0) {
-        sidebarTreeStore.activeKey = rows[0].key;
-    }
-    treeEl.focus();
+    void selectionStore.sidebarFocusNonce;
+    untrack(() => {
+        if (selectionStore.focus !== 'sidebar' || treeEl === undefined || rows.length === 0) {
+            return;
+        }
+        if (activeIndex < 0) {
+            sidebarTreeStore.activeKey = rows[0].key;
+        }
+        treeEl.focus();
+    });
 });
 
 /** Commits the row under the cursor (Enter/Space), then hands focus back. */
@@ -84,7 +91,9 @@ function activateRow(index: number): void {
     } else {
         selectionStore.selectFeed(row.id);
     }
-    selectionStore.focus = 'list';
+    // Hand focus to the article listbox (it takes DOM focus on the nonce), so
+    // the keyboard lands in the list rather than on <body>.
+    selectionStore.focusList();
     treeEl?.blur();
 }
 
@@ -92,7 +101,7 @@ function onTreeKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        selectionStore.focus = 'list';
+        selectionStore.focusList();
         treeEl?.blur();
         return;
     }
@@ -250,7 +259,16 @@ function newFolder(): void {
                     aria-activedescendant={activeDescendant}
                     bind:this={treeEl}
                     onkeydown={onTreeKeydown}
-                    onblur={() => sidebarTreeStore.reset()}
+                    onblur={() => {
+                        // Losing focus hands the keyboard back to the list — without
+                        // this, `focus` stayed 'sidebar' and the window keydown handler
+                        // swallowed every shortcut (the global deadlock), and clicking
+                        // out could snap focus back.
+                        sidebarTreeStore.reset();
+                        if (selectionStore.focus === 'sidebar') {
+                            selectionStore.focus = 'list';
+                        }
+                    }}
                 >
                     {#each feedTree.folders as folder (folder.path)}
                         <FolderNode {folder} depth={0} />

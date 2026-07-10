@@ -217,7 +217,7 @@ describe('Sidebar — folder tree', () => {
         await flushIpc();
 
         // The `view.feeds` shortcut hands the keyboard to the sidebar.
-        selectionStore.focus = 'sidebar';
+        selectionStore.focusSidebar();
         await tick();
 
         const tree = getByRole('tree');
@@ -243,7 +243,7 @@ describe('Sidebar — folder tree', () => {
         const { getByRole, getByLabelText, queryByText } = render(Sidebar);
         await flushIpc();
 
-        selectionStore.focus = 'sidebar';
+        selectionStore.focusSidebar();
         await tick();
         const tree = getByRole('tree');
         expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech');

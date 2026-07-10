@@ -91,20 +91,44 @@ function openSelectedMenu(): void {
 
 /**
  * Arrow-key navigation while the listbox holds focus. Down/Up reuse the exact
- * `j`/`k` path (so paging-in stays wired); Home/End jump to the ends of the
- * loaded window.
+ * `j`/`k` path (so paging-in stays wired); Page keys move a page; Home/End jump
+ * to the ends of the loaded window.
  */
-function moveSelection(to: 'next' | 'previous' | 'first' | 'last'): void {
+function moveSelection(to: 'next' | 'previous' | 'first' | 'last' | 'pageDown' | 'pageUp'): void {
     const items = list.items;
     if (to === 'next') {
         handleShortcut('nav.nextArticle');
     } else if (to === 'previous') {
         handleShortcut('nav.previousArticle');
+    } else if (to === 'pageDown') {
+        if (selectionStore.selectPageDown()) {
+            void list.loadMore();
+        }
+    } else if (to === 'pageUp') {
+        selectionStore.selectPageUp();
     } else if (to === 'first' && items.length > 0) {
         selectionStore.selectedArticleId = items[0].id;
+        selectionStore.rememberIndex(0);
     } else if (to === 'last' && items.length > 0) {
         selectionStore.selectedArticleId = items[items.length - 1].id;
+        selectionStore.rememberIndex(items.length - 1);
     }
+}
+
+// Keep the selection store's last-present index current: whenever a real row is
+// selected (arrow, click, first/last), remember where it sits so that when
+// auto-mark-read later drops it from an unread view, j/k resume from here
+// instead of teleporting to the top.
+$effect(() => {
+    const index = selectionStore.selectedIndex;
+    if (index >= 0) {
+        selectionStore.rememberIndex(index);
+    }
+});
+
+/** Enter on the listbox opens the selected article (the empty-state hint). */
+function openSelected(): void {
+    handleShortcut('article.open');
 }
 
 /**
@@ -171,10 +195,12 @@ function onScrollPast(firstVisibleIndex: number): void {
             selectedIndex={selectionStore.selectedIndex}
             label={t('list.label')}
             {activeDescendantId}
+            focusNonce={selectionStore.listFocusNonce}
             onnearend={() => void list.loadMore()}
             onscrollpast={onScrollPast}
             onmove={moveSelection}
             onmenukey={openSelectedMenu}
+            onactivate={openSelected}
         >
             {#snippet row(article, index)}
                 <ArticleRow

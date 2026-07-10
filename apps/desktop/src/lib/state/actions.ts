@@ -389,7 +389,7 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'view.feeds':
             searchStore.clear();
-            selectionStore.focus = 'sidebar';
+            selectionStore.focusSidebar();
             break;
         case 'help.toggle':
             toggleHelp();

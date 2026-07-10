@@ -37,6 +37,14 @@ export class SearchStore {
     /** A search request is in flight. */
     loading: boolean = $state(false);
 
+    /**
+     * True between a keystroke and its debounced query actually firing. The
+     * gap is ~200ms where `active` is already true but `loading` is not yet —
+     * without this the empty-results view flashes "No matches" before the
+     * first query even runs.
+     */
+    pending: boolean = $state(false);
+
     /** The last search failure, if any. */
     error: CommandError | null = $state(null);
 
@@ -49,6 +57,15 @@ export class SearchStore {
     /** True while a non-empty query scopes the list to search results. */
     get active(): boolean {
         return this.query.trim().length > 0;
+    }
+
+    /**
+     * The results window is settled: nothing is pending or in flight, so an
+     * empty `results` genuinely means "no matches" rather than "hasn't run
+     * yet". Gates the empty state so it never flashes during the debounce gap.
+     */
+    get settled(): boolean {
+        return !this.loading && !this.pending;
     }
 
     /** Asks the mounted search input to focus (drives the `/` shortcut). */
@@ -71,8 +88,10 @@ export class SearchStore {
             this.results = [];
             this.error = null;
             this.loading = false;
+            this.pending = false;
             return;
         }
+        this.pending = true;
         if (debounceMs <= 0) {
             void this.#run();
             return;
@@ -90,6 +109,7 @@ export class SearchStore {
         }
         this.#generation += 1;
         const generation = this.#generation;
+        this.pending = false;
         this.loading = true;
         let result: CommandResult<ArticleSummaryDto[]>;
         try {
@@ -120,6 +140,7 @@ export class SearchStore {
         this.results = [];
         this.error = null;
         this.loading = false;
+        this.pending = false;
     }
 
     /** Test isolation. */

@@ -89,7 +89,9 @@ function openSelectedMenu(): void {
 <div class="search-results">
     {#if searchStore.error !== null}
         <p class="status error" role="alert">{resultsError}</p>
-    {:else if searchStore.loading && searchStore.results.length === 0}
+    {:else if searchStore.results.length === 0 && !searchStore.settled}
+        <!-- Debounce/in-flight gap: the query hasn't resolved, so show
+             "Searching…" rather than flashing "No matches". -->
         <p class="status">{t('search.loading')}</p>
     {:else if searchStore.results.length === 0}
         <EmptyState icon="search" title={t('search.empty')} />

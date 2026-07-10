@@ -8,15 +8,35 @@
 import { t } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 
+/** How long the completion summary lingers before the pill self-dismisses. */
+const REFRESH_DISMISS_MS = 5000;
+
 const completed = $derived(feedsStore.refreshOutcomes.length);
 const newArticles = $derived(
     feedsStore.refreshOutcomes.reduce((sum, outcome) => sum + outcome.new_articles, 0),
 );
 
+// The completion summary used to linger forever (refreshOutcomes persists).
+// A fresh sweep revives the pill; its summary then auto-dismisses.
+let dismissed = $state(false);
+$effect(() => {
+    if (feedsStore.refreshing) {
+        dismissed = false;
+        return;
+    }
+    if (completed === 0 || dismissed) {
+        return;
+    }
+    const timer = setTimeout(() => {
+        dismissed = true;
+    }, REFRESH_DISMISS_MS);
+    return () => clearTimeout(timer);
+});
+
 const message = $derived(
     feedsStore.refreshing
         ? t('refresh.announce.start')
-        : completed > 0
+        : completed > 0 && !dismissed
           ? t('refresh.announce.done', { count: newArticles, feeds: completed })
           : '',
 );

@@ -22,6 +22,17 @@ let {
 
 let loaded = $state(false);
 
+// Reset the click-to-load gate whenever the video changes. `loaded` is
+// component-local, so if this facade instance is reused for a different video
+// (only `videoId` changes, no remount) a stale `loaded=true` would recompute
+// `embedSrc` to the new id with `autoplay=1` and start playback with no click
+// — breaking the privacy promise. This makes the facade correct even without a
+// keyed parent.
+$effect(() => {
+    void videoId;
+    loaded = false;
+});
+
 // nocookie + no related-video leakage on end; autoplay so the click that
 // loaded the frame also starts playback (one gesture, not two). If the
 // webview blocks autoplay or rejects the embedding origin, the persistent

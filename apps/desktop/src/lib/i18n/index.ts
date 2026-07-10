@@ -52,8 +52,12 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
     return interpolate(template, params);
 }
 
-/** `June 3` this year, `June 3, 2024` otherwise — in the active locale. */
+/** `June 3` this year, `June 3, 2024` otherwise — in the active locale. An
+ *  unparseable date (`new Date('garbage')`) yields `''` rather than throwing a
+ *  `RangeError` from `Intl.DateTimeFormat().format()` — a malformed
+ *  `published_at` must not crash the reader to a blank screen. */
 export function formatIntlDate(date: Date, now: Date = new Date()): string {
+    if (Number.isNaN(date.getTime())) return '';
     const sameYear = date.getFullYear() === now.getFullYear();
     return new Intl.DateTimeFormat(localeStore.active, {
         month: 'long',
@@ -62,8 +66,10 @@ export function formatIntlDate(date: Date, now: Date = new Date()): string {
     }).format(date);
 }
 
-/** Full date + time, e.g. `Jun 3, 2025, 4:05 PM` — in the active locale. */
+/** Full date + time, e.g. `Jun 3, 2025, 4:05 PM` — in the active locale.
+ *  Returns `''` for an unparseable date (see `formatIntlDate`). */
 export function formatIntlDateTime(date: Date): string {
+    if (Number.isNaN(date.getTime())) return '';
     return new Intl.DateTimeFormat(localeStore.active, {
         month: 'short',
         day: 'numeric',

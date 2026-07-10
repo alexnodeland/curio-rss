@@ -85,7 +85,16 @@ $effect(() => {
     }
     let cancelled = false;
     let offCount = 0;
+    // Strip srcset/sizes on <img> and any <picture><source>: responsive
+    // candidates bypass the src-only media pipeline entirely — with media on
+    // the CSP blocks them (broken image), with media off they aren't hidden.
+    // Removing them forces the browser to fall back to the routed `src`.
+    for (const source of root.querySelectorAll('source[srcset]')) {
+        source.removeAttribute('srcset');
+    }
     for (const img of root.querySelectorAll('img')) {
+        img.removeAttribute('srcset');
+        img.removeAttribute('sizes');
         const original = img.dataset.origSrc ?? img.getAttribute('src') ?? '';
         img.dataset.origSrc = original;
         if (!/^https?:\/\//i.test(original)) {
@@ -113,6 +122,12 @@ $effect(() => {
 /** Delegates anchor clicks to the OS browser; the webview never navigates. */
 function interceptLinks(node: HTMLElement): { destroy(): void } {
     function onClick(event: MouseEvent): void {
+        // `auxclick` fires for middle/right; only middle-click (button 1)
+        // should open — otherwise a middle-click bypasses the opener and the
+        // webview navigates. Right-click (button 2) is left for the menu.
+        if (event.type === 'auxclick' && event.button !== 1) {
+            return;
+        }
         const target = event.target;
         if (!(target instanceof Element)) {
             return;
@@ -128,9 +143,11 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
         }
     }
     node.addEventListener('click', onClick);
+    node.addEventListener('auxclick', onClick);
     return {
         destroy(): void {
             node.removeEventListener('click', onClick);
+            node.removeEventListener('auxclick', onClick);
         },
     };
 }

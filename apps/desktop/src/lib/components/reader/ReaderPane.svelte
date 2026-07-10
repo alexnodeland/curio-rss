@@ -262,6 +262,9 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     <Icon name="external" />
                 </button>
             </div>
+            <!-- Key on the article id so switching articles remounts the scroll
+                 body at the top instead of inheriting the previous scroll offset. -->
+            {#key current.id}
             <div class="reader-scroll">
                 <article
                     class="reader-article"
@@ -294,7 +297,10 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                                 <span>{current.author}</span>
                             {/if}
                             {#if current.published_at !== null}
-                                <span>{formatIntlDateTime(new Date(current.published_at))}</span>
+                                {@const published = formatIntlDateTime(new Date(current.published_at))}
+                                {#if published !== ''}
+                                    <span>{published}</span>
+                                {/if}
                             {/if}
                             {#if current.word_count !== null}
                                 <span>{t('reader.meta.words', { count: current.word_count })}</span>
@@ -305,6 +311,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     <ViewModeDispatch article={current} feed={currentFeed(current)} />
                 </article>
             </div>
+            {/key}
         {/if}
     {/if}
 </div>

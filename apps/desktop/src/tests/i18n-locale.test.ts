@@ -3,7 +3,7 @@
  * non-English locale fully covers the English catalog (with placeholders
  * intact), and `set()` persists the choice and drives `<html lang>`.
  */
-import { LOCALES, localeStore, t } from '$lib/i18n';
+import { LOCALES, formatIntlDate, formatIntlDateTime, localeStore, t } from '$lib/i18n';
 import { de } from '$lib/i18n/de';
 import { en } from '$lib/i18n/en';
 import { es } from '$lib/i18n/es';
@@ -110,5 +110,23 @@ describe('locale switching', () => {
         expect(localeStore.active).toBe('es');
         expect(document.documentElement.lang).toBe('es');
         expect(harness.callsFor('set_setting')).toEqual([{ key: 'ui.locale', value: 'es' }]);
+    });
+});
+
+describe('date formatting — malformed dates never throw', () => {
+    it('returns an empty string instead of a RangeError-crashing the reader', () => {
+        // Intl.DateTimeFormat().format(invalidDate) throws RangeError; a
+        // malformed published_at must degrade to no date, not a blank reader.
+        const bad = new Date('not-a-date');
+        expect(Number.isNaN(bad.getTime())).toBe(true);
+        expect(formatIntlDate(bad)).toBe('');
+        expect(formatIntlDateTime(bad)).toBe('');
+    });
+
+    it('still formats a valid date', () => {
+        localeStore.active = 'en';
+        const good = new Date('2025-06-03T16:05:00Z');
+        expect(formatIntlDate(good, good)).not.toBe('');
+        expect(formatIntlDateTime(good)).not.toBe('');
     });
 });

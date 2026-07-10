@@ -12,6 +12,7 @@ let {
     min,
     max,
     label,
+    variant,
     onresizeend,
     children,
 }: {
@@ -19,6 +20,9 @@ let {
     min: number;
     max: number;
     label: string;
+    /** Names the pane ('sidebar' | 'list') so the frame can clamp it at narrow
+     *  viewports without disturbing the shared component. */
+    variant?: string;
     onresizeend?: (width: number) => void;
     children: Snippet;
 } = $props();
@@ -75,7 +79,7 @@ function onKeyDown(event: KeyboardEvent): void {
 }
 </script>
 
-<div class="pane" style:flex="0 0 {width}px" style:width="{width}px">
+<div class="pane {variant ?? ''}" style:flex="0 0 {width}px" style:width="{width}px">
     {@render children()}
 </div>
 <!--

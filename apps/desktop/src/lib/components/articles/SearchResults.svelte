@@ -13,6 +13,7 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import EmptyState from '$components/common/EmptyState.svelte';
 import { ROW_HEIGHT } from './ArticleList.svelte';
 import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
 import VirtualList from './VirtualList.svelte';
@@ -91,7 +92,7 @@ function openSelectedMenu(): void {
     {:else if searchStore.loading && searchStore.results.length === 0}
         <p class="status">{t('search.loading')}</p>
     {:else if searchStore.results.length === 0}
-        <p class="status">{t('search.empty')}</p>
+        <EmptyState icon="search" title={t('search.empty')} />
     {:else}
         <VirtualList
             items={searchStore.results}

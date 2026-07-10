@@ -74,12 +74,22 @@ export function tooltip(
         },
         destroy(): void {
             clearTimeout(timer);
-            hide();
+            if (node.getAttribute('aria-describedby') === tooltipStore.id) {
+                node.removeAttribute('aria-describedby');
+            }
+            const owned = tooltipStore.owner === node;
             node.removeEventListener('pointerenter', onPointerEnter);
             node.removeEventListener('pointerleave', hide);
             node.removeEventListener('pointerdown', hide);
             node.removeEventListener('focus', onFocus);
             node.removeEventListener('blur', hide);
+            // If this node owns the visible tooltip, clear it *after* the
+            // teardown flush: mutating the store's $state synchronously during
+            // unmount (e.g. Escape out of the reader while a tooltip shows)
+            // trips `state_unsafe_mutation` and can strand the tooltip.
+            if (owned) {
+                queueMicrotask(() => tooltipStore.hide(node));
+            }
         },
     };
 }

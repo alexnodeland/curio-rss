@@ -160,9 +160,9 @@ function reset(): void {
     }
 
     select {
-        padding: var(--space-1) var(--space-2);
+        padding: var(--space-1) calc(var(--space-3) + 1em) var(--space-1) var(--space-2);
         border-radius: var(--radius-md);
-        background: var(--surface-inset);
+        background-color: var(--surface-inset);
         color: var(--fg);
         border: 1px solid var(--hairline);
     }

@@ -18,6 +18,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import {
     feedInFolder,
+    folderPathsForTags,
     tagsForDelete,
     tagsForMove,
     tagsForRename,
@@ -243,6 +244,8 @@ export class FeedsStore {
         const feed = this.feeds.find((candidate) => candidate.id === feedId);
         if (feed === undefined) return { status: 'ok', data: null };
         if (this.#pendingFolders.delete(folderPath)) this.#persistPending();
+        // Relocating to another folder — an emptied source folder is expected
+        // to fold away (this isn't the "feed left the folder system" case).
         return this.setFeedTags(feedId, tagsForMove(feed.tags, folderPath));
     }
 
@@ -250,7 +253,33 @@ export class FeedsStore {
     async ungroupFeed(feedId: number): Promise<CommandResult<null>> {
         const feed = this.feeds.find((candidate) => candidate.id === feedId);
         if (feed === undefined) return { status: 'ok', data: null };
-        return this.setFeedTags(feedId, tagsForUngroup(feed.tags));
+        const nextTags = tagsForUngroup(feed.tags);
+        const result = await this.setFeedTags(feedId, nextTags);
+        if (result.status === 'ok') this.#preserveEmptiedFolders(feed.tags, nextTags, feedId);
+        return result;
+    }
+
+    /**
+     * Keeps a user-made folder from silently vanishing the moment its last
+     * feed is dragged out: any folder path the feed vacated that no other feed
+     * still occupies is re-scaffolded as pending (so it stays visible until the
+     * user explicitly deletes it). Reads the pre-refetch `feeds` — the moved
+     * feed is excluded by id, every other feed's tags are still authoritative.
+     */
+    #preserveEmptiedFolders(oldTags: string[], newTags: string[], movedFeedId: number): void {
+        const kept = folderPathsForTags(newTags);
+        const vacated = folderPathsForTags(oldTags).filter((path) => !kept.includes(path));
+        let changed = false;
+        for (const path of vacated) {
+            const stillUsed = this.feeds.some(
+                (candidate) => candidate.id !== movedFeedId && feedInFolder(candidate, path),
+            );
+            if (!stillUsed && !this.#pendingFolders.has(path)) {
+                this.#pendingFolders.add(path);
+                changed = true;
+            }
+        }
+        if (changed) this.#persistPending();
     }
 
     /**
@@ -353,9 +382,13 @@ export class FeedsStore {
         return commands.addFeed(newFeed);
     }
 
-    /** Unsubscribes. Stored articles survive. */
-    removeFeed(feedId: number): Promise<CommandResult<null>> {
-        return commands.removeFeed(feedId);
+    /** Unsubscribes. Stored articles survive. Any folder the feed emptied by
+     *  leaving stays visible (re-scaffolded) rather than vanishing with it. */
+    async removeFeed(feedId: number): Promise<CommandResult<null>> {
+        const vacatedTags = this.feeds.find((candidate) => candidate.id === feedId)?.tags ?? [];
+        const result = await commands.removeFeed(feedId);
+        if (result.status === 'ok') this.#preserveEmptiedFolders(vacatedTags, [], feedId);
+        return result;
     }
 
     /** Pause / resume / un-dead a feed. */

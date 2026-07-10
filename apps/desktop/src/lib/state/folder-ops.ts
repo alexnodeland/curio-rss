@@ -67,16 +67,25 @@ export function feedInFolder(feed: FeedDto, path: string): boolean {
     return feed.tags.some((tag) => tag === path || tag.startsWith(`${path}/`));
 }
 
+/** The folder paths a set of tags occupies — each tag and its ancestors. */
+export function folderPathsForTags(tags: string[]): string[] {
+    const paths = new Set<string>();
+    for (const tag of tags) {
+        let prefix = '';
+        for (const segment of tagSegments(tag)) {
+            prefix = prefix === '' ? segment : `${prefix}/${segment}`;
+            paths.add(prefix);
+        }
+    }
+    return [...paths];
+}
+
 /** Every distinct folder path across all feeds (each tag and its ancestors). */
 export function allFolderPaths(feeds: FeedDto[]): string[] {
     const paths = new Set<string>();
     for (const feed of feeds) {
-        for (const tag of feed.tags) {
-            let prefix = '';
-            for (const segment of tagSegments(tag)) {
-                prefix = prefix === '' ? segment : `${prefix}/${segment}`;
-                paths.add(prefix);
-            }
+        for (const path of folderPathsForTags(feed.tags)) {
+            paths.add(path);
         }
     }
     return [...paths].sort((a, b) => a.localeCompare(b));

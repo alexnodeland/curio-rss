@@ -227,6 +227,7 @@ function hue(text: string): number {
     {#if renaming}
         <input
             class="rename-input"
+            spellcheck="false"
             bind:this={inputEl}
             bind:value={draft}
             onkeydown={onRenameKeydown}

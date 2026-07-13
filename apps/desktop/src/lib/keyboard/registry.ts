@@ -112,23 +112,6 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     { id: 'help.toggle', keys: ['?'], description: 'shortcut.help', category: 'app' },
 ] as const;
 
-/**
- * Display-only navigation hints for the help overlay. The arrow keys drive the
- * spatial pane/scroll navigation, which `handleArrowNav` consumes *before* the
- * shortcut matcher ever runs — so they are documented here but never fed into
- * `SHORTCUTS` (the matcher would only ever see them if arrow nav were off). The
- * `keys` are alternatives (← or →), rendered slash-joined, not a chord.
- */
-export interface NavHint {
-    readonly keys: readonly string[];
-    readonly description: MessageKey;
-}
-
-export const NAV_HINTS: readonly NavHint[] = [
-    { keys: ['←', '→'], description: 'shortcut.arrowPanes' },
-    { keys: ['↑', '↓'], description: 'shortcut.arrowWithin' },
-];
-
 /** What a keystroke resolved to. */
 export type MatchResult =
     | { kind: 'match'; id: ShortcutId }

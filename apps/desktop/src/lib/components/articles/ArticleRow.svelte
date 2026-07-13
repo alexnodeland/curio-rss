@@ -134,12 +134,6 @@ function publishedLabel(): string | null {
     return published === null ? null : formatIntlDate(new Date(published));
 }
 
-function onKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        onselect(article.id);
-    }
-}
 </script>
 
 <!-- Renders text with the active search query's terms wrapped in <mark>. Each
@@ -154,6 +148,9 @@ function onKeyDown(event: KeyboardEvent): void {
     {/if}
 {/snippet}
 
+<!-- The listbox container owns all keyboard interaction (rows are
+     tabindex=-1 and never focused); the click here is the pointer path only. -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
 <div
     id={articleOptionId(article.id)}
     class="article-row"
@@ -167,7 +164,6 @@ function onKeyDown(event: KeyboardEvent): void {
     aria-setsize={setsize}
     tabindex="-1"
     onclick={() => onselect(article.id)}
-    onkeydown={onKeyDown}
     use:contextMenu={{ items: () => buildArticleMenu(article, flags()), ariaLabel: article.title }}
 >
     <span class="row-dot" aria-hidden="true"></span>

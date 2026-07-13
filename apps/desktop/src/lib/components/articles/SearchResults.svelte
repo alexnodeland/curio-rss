@@ -7,7 +7,6 @@
  */
 import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
-import { handleShortcut } from '$lib/state/actions';
 import { menuStore } from '$lib/state/menu.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
@@ -42,15 +41,11 @@ $effect(() => {
     }
 });
 
-/** Arrow/Page navigation while the results listbox holds focus (same paths as
- *  the filter list; search has no keyset paging, so first/last use the results). */
-function moveSelection(to: 'next' | 'previous' | 'first' | 'last' | 'pageDown' | 'pageUp'): void {
+/** Jump navigation while the results listbox holds focus (row-by-row movement
+ *  is `j`/`k`; search has no keyset paging, so first/last use the results). */
+function moveSelection(to: 'first' | 'last' | 'pageDown' | 'pageUp'): void {
     const results = searchStore.results;
-    if (to === 'next') {
-        handleShortcut('nav.nextArticle');
-    } else if (to === 'previous') {
-        handleShortcut('nav.previousArticle');
-    } else if (to === 'pageDown') {
+    if (to === 'pageDown') {
         selectionStore.selectPageDown();
     } else if (to === 'pageUp') {
         selectionStore.selectPageUp();
@@ -106,7 +101,6 @@ function openSelectedMenu(): void {
             focusNonce={selectionStore.listFocusNonce}
             onmove={moveSelection}
             onmenukey={openSelectedMenu}
-            onactivate={() => selectionStore.focusReader()}
         >
             {#snippet row(article, index)}
                 <ArticleRow

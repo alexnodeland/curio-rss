@@ -24,7 +24,7 @@ export const ROW_HEIGHT = ROW_HEIGHTS.comfortable;
  */
 import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
-import { handleShortcut, markReadOnScroll } from '$lib/state/actions';
+import { markReadOnScroll } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
@@ -91,17 +91,13 @@ function openSelectedMenu(): void {
 }
 
 /**
- * Arrow-key navigation while the listbox holds focus. Down/Up reuse the exact
- * `j`/`k` path (so paging-in stays wired); Page keys move a page; Home/End jump
- * to the ends of the loaded window.
+ * Jump navigation while the listbox holds focus (row-by-row movement is
+ * `j`/`k`): Page keys move a page; Home/End jump to the ends of the loaded
+ * window.
  */
-function moveSelection(to: 'next' | 'previous' | 'first' | 'last' | 'pageDown' | 'pageUp'): void {
+function moveSelection(to: 'first' | 'last' | 'pageDown' | 'pageUp'): void {
     const items = list.items;
-    if (to === 'next') {
-        handleShortcut('nav.nextArticle');
-    } else if (to === 'previous') {
-        handleShortcut('nav.previousArticle');
-    } else if (to === 'pageDown') {
+    if (to === 'pageDown') {
         if (selectionStore.selectPageDown()) {
             void list.loadMore();
         }
@@ -117,7 +113,7 @@ function moveSelection(to: 'next' | 'previous' | 'first' | 'last' | 'pageDown' |
 }
 
 // Keep the selection store's last-present index current: whenever a real row is
-// selected (arrow, click, first/last), remember where it sits so that when
+// selected (j/k, click, first/last), remember where it sits so that when
 // auto-mark-read later drops it from an unread view, j/k resume from here
 // instead of teleporting to the top.
 $effect(() => {
@@ -126,17 +122,6 @@ $effect(() => {
         selectionStore.rememberIndex(index);
     }
 });
-
-/**
- * Enter on the listbox drills rightward into the reader to read the selected
- * article (it is already shown by the selection). This mirrors → (list →
- * reader) and the sidebar's Enter (feed → list), so Enter consistently means
- * "go into this". Opening the source in the browser is a distinct action — the
- * `o` shortcut and the reader's open-in-browser button.
- */
-function enterReader(): void {
-    selectionStore.focusReader();
-}
 
 /**
  * Mark-on-scroll high-water: the number of leading rows already marked read
@@ -218,7 +203,6 @@ function onScrollPast(firstVisibleIndex: number): void {
             onscrollpast={onScrollPast}
             onmove={moveSelection}
             onmenukey={openSelectedMenu}
-            onactivate={enterReader}
         >
             {#snippet row(article, index)}
                 <ArticleRow

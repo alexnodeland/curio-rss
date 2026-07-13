@@ -8,7 +8,7 @@ import type { ArticleSummaryDto } from '$lib/bindings';
 import { articlesStore } from './articles.svelte';
 import { searchStore } from './search.svelte';
 
-export type FocusZone = 'sidebar' | 'list' | 'reader';
+export type FocusZone = 'sidebar' | 'list';
 
 /** How close to the window's end selection may get before paging in more. */
 export const LOAD_MORE_MARGIN = 5;
@@ -36,10 +36,6 @@ export class SelectionStore {
      * straight back.
      */
     sidebarFocusNonce: number = $state(0);
-
-    /** Bumped to move DOM focus onto the reader's scroll body (→ from the list),
-     *  so ↑/↓ scroll the article. */
-    readerFocusNonce: number = $state(0);
 
     /** Selected feed; `null` = the all-feeds views. */
     selectedFeedId: number | null = $state(null);
@@ -157,15 +153,6 @@ export class SelectionStore {
         this.sidebarFocusNonce += 1;
     }
 
-    /** Moves focus to the reader (→ from the list), if an article is open. */
-    focusReader(): void {
-        if (this.selectedArticleId === null) {
-            return;
-        }
-        this.focus = 'reader';
-        this.readerFocusNonce += 1;
-    }
-
     /** Selects a feed (or all feeds) and re-scopes the article list to it. */
     selectFeed(feedId: number | null): void {
         searchStore.clear(); // leaving search: the feed's own list takes over
@@ -180,7 +167,6 @@ export class SelectionStore {
         this.focus = 'list';
         this.listFocusNonce = 0;
         this.sidebarFocusNonce = 0;
-        this.readerFocusNonce = 0;
         this.selectedFeedId = null;
         this.selectedArticleId = null;
         this.lastPresentIndex = 0;

@@ -181,23 +181,4 @@ describe('ArticleList', () => {
         expect(selectionStore.selectedArticleId).toBe(499);
         expect(second.getAttribute('aria-selected')).toBe('true');
     });
-
-    it('Enter drills into the reader rather than opening the browser', async () => {
-        harness = installIpcHarness({
-            list_articles: (args) => (paramsOf(args).before === null ? pageOf(500, 3) : []),
-            get_article_state: articleStateFixture(),
-            list_feeds: [],
-        });
-        const { container, getByRole } = render(ArticleList);
-        await flushIpc();
-
-        await fireEvent.click(container.querySelector('.article-row') as Element);
-        expect(selectionStore.selectedArticleId).not.toBeNull();
-
-        await fireEvent.keyDown(getByRole('listbox'), { key: 'Enter' });
-        // Enter moves focus into the reader — it does not open the source in
-        // the browser (that is the `o` shortcut / the reader's own button).
-        expect(selectionStore.focus).toBe('reader');
-        expect(harness.callsFor('record_opened')).toHaveLength(0);
-    });
 });

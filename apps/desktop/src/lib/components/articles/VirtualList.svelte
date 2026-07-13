@@ -28,7 +28,6 @@ let {
     onscrollpast,
     onmove,
     onmenukey,
-    onactivate,
     row,
 }: {
     items: readonly T[];
@@ -57,25 +56,21 @@ let {
     /**
      * A listbox navigation key was pressed while the list held focus. The
      * owner moves selection (the same move `j`/`k` make); the listbox itself
-     * stays selection-agnostic.
+     * stays selection-agnostic. Row-by-row movement is `j`/`k` only — the
+     * arrow keys are deliberately unbound.
      */
-    onmove?: (to: 'next' | 'previous' | 'first' | 'last' | 'pageDown' | 'pageUp') => void;
+    onmove?: (to: 'first' | 'last' | 'pageDown' | 'pageUp') => void;
     /**
      * The keyboard context-menu key (ContextMenu / Shift+F10) was pressed while
      * the list held focus. Rows are `tabindex="-1"` so their own menu-key
      * handler never fires; the owner opens the menu for the selected row.
      */
     onmenukey?: () => void;
-    /** Enter/Space on the listbox opens the active row (the empty-state hint
-     *  promises this). The owner opens the selected article. */
-    onactivate?: () => void;
     row: Snippet<[T, number]>;
 } = $props();
 
 /** Maps the roving-navigation keys to a move; other keys fall through. */
-const MOVE_KEYS: Record<string, 'next' | 'previous' | 'first' | 'last' | 'pageDown' | 'pageUp'> = {
-    ArrowDown: 'next',
-    ArrowUp: 'previous',
+const MOVE_KEYS: Record<string, 'first' | 'last' | 'pageDown' | 'pageUp'> = {
     Home: 'first',
     End: 'last',
     PageDown: 'pageDown',
@@ -98,16 +93,8 @@ function onKeydown(event: KeyboardEvent): void {
         onmenukey();
         return;
     }
-    if (event.key === 'Enter') {
-        // Enter opens the active row (makes the empty-state "Enter to open" hint
-        // truthful — rows are tabindex=-1, so their own handler never fires).
-        event.preventDefault();
-        keyboardMode = true;
-        onactivate?.();
-        return;
-    }
     if (event.key === ' ') {
-        // Suppress Space's native page-scroll; selection is driven by the arrows.
+        // Suppress Space's native page-scroll; selection is driven by j/k.
         event.preventDefault();
         return;
     }
@@ -159,7 +146,7 @@ $effect(() => {
 });
 
 // Entering the list from elsewhere (the owner bumps `focusNonce`): pull DOM
-// focus onto the listbox itself, so Home/End/PageUp/PageDown/Enter/menu reach
+// focus onto the listbox itself, so Home/End/PageUp/PageDown/menu reach
 // this handler instead of landing on <body>.
 $effect(() => {
     if (focusNonce > 0) {

@@ -118,14 +118,6 @@ function feedTitle(current: ArticleDto): string | null {
     return feed.title ?? feed.url;
 }
 
-// The scroll body, focused on request (→ from the list) so ↑/↓ scroll it.
-let scrollEl = $state<HTMLDivElement>();
-$effect(() => {
-    if (selectionStore.readerFocusNonce > 0) {
-        scrollEl?.focus();
-    }
-});
-
 // Displaying an article marks it read — once per selection, not per render,
 // and only once it has actually loaded. A failed fetch must not silently mark
 // an article the reader never managed to show.
@@ -292,10 +284,11 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <!-- Key on the article id so switching articles remounts the scroll
                  body at the top instead of inheriting the previous scroll offset. -->
             {#key current.id}
+            <!-- tabindex=-1: clicking into the article focuses the scroll body,
+                 so the platform's native key scrolling works. -->
             <div
                 class="reader-scroll"
                 tabindex="-1"
-                bind:this={scrollEl}
                 data-reading-theme={uiStore.readingTheme}
             >
                 <article

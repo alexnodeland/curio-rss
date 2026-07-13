@@ -248,7 +248,7 @@ describe('Sidebar — folder tree', () => {
         expect(articlesStore.filters.feedTag).toBe('Tech/Databases');
     });
 
-    it('g-f focuses the tree; arrows walk the visible rows and Enter selects', async () => {
+    it('g-f seats the tree cursor on the first row when nothing is selected', async () => {
         harness = taggedHarness();
         const { getByRole } = render(Sidebar);
         await flushIpc();
@@ -258,40 +258,28 @@ describe('Sidebar — folder tree', () => {
         await tick();
 
         const tree = getByRole('tree');
-        // Cursor seats on the first row (the Tech folder).
         expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech');
 
-        // Down walks: Tech → Tech/Databases → SQLite → Rust (DFS render order).
+        // Plain arrows no longer move the cursor — tree navigation is
+        // pointer-driven (arrow/enter nav was removed deliberately).
         await fireEvent.keyDown(tree, { key: 'ArrowDown' });
-        expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech/Databases');
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
-        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
-        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech:1');
-
-        // Enter selects the feed under the cursor and hands the keyboard back.
+        expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech');
         await fireEvent.keyDown(tree, { key: 'Enter' });
-        expect(selectionStore.selectedFeedId).toBe(1);
-        expect(selectionStore.focus).toBe('list');
+        expect(selectionStore.selectedFeedId).toBeNull();
     });
 
-    it('Right on a leaf feed drills into the list (selects it + focuses the list)', async () => {
+    it('g-f seats the tree cursor on the feed open in the list', async () => {
         harness = taggedHarness();
         const { getByRole } = render(Sidebar);
         await flushIpc();
 
+        selectionStore.selectFeed(2);
         selectionStore.focusSidebar();
         await tick();
-        const tree = getByRole('tree');
-        // Walk down to a leaf feed (Tech → Databases → SQLite feed).
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
-        expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
 
-        // Right at a tree dead-end crosses rightward into the article list.
-        await fireEvent.keyDown(tree, { key: 'ArrowRight' });
-        expect(selectionStore.selectedFeedId).toBe(2);
-        expect(selectionStore.focus).toBe('list');
+        expect(getByRole('tree').getAttribute('aria-activedescendant')).toBe(
+            'feed:Tech/Databases:2',
+        );
     });
 
     it('keeps the cursor across blur so returning to the tree resumes there', async () => {
@@ -305,8 +293,8 @@ describe('Sidebar — folder tree', () => {
         // The browser fires `focus` when the seat effect focuses the tree
         // (jsdom does not dispatch it on programmatic .focus()).
         await fireEvent.focus(tree);
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        sidebarTreeStore.activeKey = 'feed:Tech/Databases:2';
+        await tick();
         expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
         expect(sidebarTreeStore.focused).toBe(true);
 
@@ -322,21 +310,6 @@ describe('Sidebar — folder tree', () => {
         await fireEvent.focus(tree);
         expect(tree.getAttribute('aria-activedescendant')).toBe('feed:Tech/Databases:2');
         expect(sidebarTreeStore.focused).toBe(true);
-    });
-
-    it('Left collapses the folder under the cursor', async () => {
-        harness = taggedHarness();
-        const { getByRole, getByLabelText, queryByText } = render(Sidebar);
-        await flushIpc();
-
-        selectionStore.focusSidebar();
-        await tick();
-        const tree = getByRole('tree');
-        expect(tree.getAttribute('aria-activedescendant')).toBe('folder:Tech');
-
-        await fireEvent.keyDown(tree, { key: 'ArrowLeft' });
-        expect(getByLabelText('Toggle Tech').getAttribute('aria-expanded')).toBe('false');
-        expect(queryByText('SQLite')).toBeNull();
     });
 
     /** The ids of a feed row's "Move to folder" submenu, as built at open time. */
@@ -434,9 +407,10 @@ describe('Sidebar — folder tree', () => {
         await fireEvent.keyDown(tree, { key: 'ArrowDown', altKey: true });
         expect(harness.callsFor('reorder_feeds').at(-1)?.feedIds).toEqual([2, 1]);
 
-        // Move the cursor to the last row; Alt+↓ there falls off the end — a no-op.
+        // Seat the cursor on the last row; Alt+↓ there falls off the end — a no-op.
         // (The mock emits no FeedsChanged, so the rendered order is still Alpha, Beta.)
-        await fireEvent.keyDown(tree, { key: 'ArrowDown' });
+        sidebarTreeStore.activeKey = 'feed::2';
+        await tick();
         expect(tree.getAttribute('aria-activedescendant')).toBe('feed::2');
         await fireEvent.keyDown(tree, { key: 'ArrowDown', altKey: true });
         expect(harness.callsFor('reorder_feeds')).toHaveLength(1);

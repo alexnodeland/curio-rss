@@ -7,6 +7,58 @@ All notable changes to the Curio app. The format follows
 (The versioned Curio↔notes **contract** schemas have their own changelog at
 [`schemas/CHANGELOG.md`](schemas/CHANGELOG.md).)
 
+## [0.4.0] — 2026-07-13
+
+The read-later release: Curio grows from an RSS reader into a full
+read-it-later hybrid — save any link, pull full text for excerpt-only feeds,
+export the whole library as markdown, and read complete Reddit posts.
+
+### Added
+
+- **Save any URL to Read Later** — paste a link in the add dialog and hit
+  **Save to Read Later** (or `curio clip <url>`). The page is fetched and
+  readability-extracted with its own title, author, and lead image; an
+  unreachable page still saves the bare link, and re-saving a known URL
+  re-flags it without refetching.
+- **Per-feed full text** — a **Fetch full text** toggle (edit-feed dialog, or
+  `curio feed full-text <feed> on|off`) hydrates each *new* article from its
+  source page at refresh time, for feeds that ship only excerpts.
+- **Export everything** — an **Export all** button per destination (and
+  `curio save --all`, with `--read-later` / `--starred` / `--feed` / `--tag`
+  filters) writes the whole library as markdown notes. Idempotent: re-running
+  only rewrites what changed.
+- **Full Reddit posts** — a **Load full post** action on Reddit items pulls
+  the complete selftext, inline images, and galleries (in order) through the
+  same sanitize-at-ingest gate as everything else.
+- **Optional Reddit API credentials** — bring your own free Reddit app
+  (Settings → Media & Privacy, or `curio reddit login`) to load full posts at
+  the authenticated ~100 requests/min tier. The secret is stored in the
+  system keychain, never in config or logs, and never leaves the device
+  except to Reddit.
+- **Instant first fetch** — a newly added feed loads its articles immediately
+  instead of waiting for the next refresh cycle.
+
+### Changed
+
+- **Reddit request pacing is honest about the limits** — anonymous requests
+  are spaced ~9/min (under Reddit's unauthenticated cap), authenticated API
+  calls ~85/min. A rate-limit response opens a circuit breaker immediately
+  (honoring `Retry-After`) instead of hammering, and surfaces a clear
+  "try again in N min" message.
+- **Anonymous Reddit full-post requests are blocked by Reddit** (their 2026
+  API lockdown) — Curio now says so plainly and points at the credentials
+  setting, instead of failing with an opaque error. Feeds themselves still
+  work without credentials.
+- PRIVACY.md discloses the new Reddit pacing and the opt-in authenticated
+  mode.
+
+### Removed
+
+- **Arrow/Enter navigation** — the spatial pane navigation never worked well
+  and fought native key handling. `j`/`k`/`n`, all letter shortcuts and `g`
+  chords, Home/End/Page jumps, and Alt+↑/↓ feed reorder are unchanged;
+  clicking into an article restores native scrolling.
+
 ## [0.3.0] — 2026-07-10
 
 A reading-and-refinement release: new reader typography controls and paper

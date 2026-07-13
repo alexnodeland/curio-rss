@@ -101,7 +101,7 @@ CREATE TABLE feeds (
     added_at              TEXT    NOT NULL,
     last_fetched_at       TEXT,
     modified_at           TEXT    NOT NULL
-, tags TEXT NOT NULL DEFAULT '[]', sort_order INTEGER NOT NULL DEFAULT 0)
+, tags TEXT NOT NULL DEFAULT '[]', sort_order INTEGER NOT NULL DEFAULT 0, fetch_full_text INTEGER NOT NULL DEFAULT 0)
 
 -- table fetch_log
 CREATE TABLE fetch_log (

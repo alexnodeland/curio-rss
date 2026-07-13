@@ -37,6 +37,23 @@ fn open_core(profile: &std::path::Path) -> CoreHandle {
     .unwrap()
 }
 
+/// A core whose SSRF guard trusts `127.0.0.1` — for paths like
+/// [`CoreHandle::save_url`] that carry no per-feed W1 exemption but must
+/// still be exercised against hermetic localhost fixtures.
+fn open_core_trusting_localhost(profile: &std::path::Path) -> CoreHandle {
+    CoreHandle::open_with(
+        profile,
+        CoreOptions {
+            fetch: FetchConfig {
+                politeness_delay: Duration::ZERO,
+                trusted_addrs: std::iter::once(std::net::IpAddr::from([127, 0, 0, 1])).collect(),
+                ..FetchConfig::default()
+            },
+        },
+    )
+    .unwrap()
+}
+
 /// A manual (feedless) article for facade tests that need rows without
 /// a network round trip.
 fn manual_article(key: &str, title: &str) -> NewArticle {
@@ -879,4 +896,425 @@ async fn hydrate_article_replaces_the_excerpt_with_the_extracted_full_body() {
         "chrome stripped by extract + sanitize"
     );
     assert!(hydrated.word_count.unwrap_or(0) > 20);
+}
+
+/// End-to-end proof of the `enrich-reddit` seam: hydrating a
+/// reddit-shaped article hits the post's `.json` endpoint (not the HTML
+/// page), and the stored content is the sanitized full selftext.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn hydrating_a_reddit_post_uses_the_json_enrichment() {
+    let server = MockServer::start().await;
+    let post_json = include_str!("../../../fixtures/feeds/reddit_post.json");
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/abc123/title.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(post_json, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The HTML page must never be fetched when enrichment succeeds.
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/abc123/title/"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let mut article = manual_article("r1", "Reddit stub");
+    article.source_url = format!("{}/r/rust/comments/abc123/title/", server.uri());
+    core.storage().upsert_articles(vec![article]).unwrap();
+    let stored = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+
+    let hydrated = core.hydrate_article(stored.id).await.unwrap();
+    assert!(
+        hydrated.content.text.contains("cut compile times in half"),
+        "full selftext stored: {}",
+        hydrated.content.text
+    );
+    assert!(
+        hydrated
+            .content
+            .html
+            .contains("https://preview.redd.it/buildchart.png"),
+        "preview image inlined: {}",
+        hydrated.content.html
+    );
+    assert!(!hydrated.content.html.contains("<script"));
+}
+
+/// BYO Reddit OAuth (D15) end-to-end: with credentials installed, the
+/// core trades them for a bearer ONCE (the token is cached), and every
+/// post fetch goes to the API origin carrying `Authorization: Bearer` —
+/// the mocks only answer requests that actually carry it.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn authenticated_reddit_enrichment_grants_once_and_sends_the_bearer() {
+    use wiremock::matchers::header;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/access_token"))
+        // The grant carries HTTP Basic credentials.
+        .and(wiremock::matchers::header_exists("authorization"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"access_token":"tok123","token_type":"bearer","expires_in":3600}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let post_json = include_str!("../../../fixtures/feeds/reddit_post.json");
+    for comments_id in ["auth1", "auth2"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/r/rust/comments/{comments_id}/title.json")))
+            .and(header("authorization", "Bearer tok123"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(post_json, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+        client_id: "cid".to_owned(),
+        client_secret: "sec".to_owned(),
+        token_url: format!("{}/api/v1/access_token", server.uri()),
+        api_origin: server.uri(),
+    }));
+    assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid"));
+
+    let mk = |key: &str, comments_id: &str| {
+        let mut article = manual_article(key, "Reddit stub");
+        article.source_url = format!("{}/r/rust/comments/{comments_id}/title/", server.uri());
+        article
+    };
+    core.storage()
+        .upsert_articles(vec![mk("k1", "auth1"), mk("k2", "auth2")])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+
+    // Both hydrates enrich through the authenticated endpoint; the
+    // expect(1) on the token mock proves the bearer was granted once.
+    for id in ids {
+        let hydrated = core.hydrate_article(id).await.unwrap();
+        assert!(
+            hydrated.content.text.contains("cut compile times in half"),
+            "{}",
+            hydrated.content.text
+        );
+    }
+
+    // Clearing credentials reports unconfigured again.
+    core.set_reddit_api(None);
+    assert!(core.reddit_api_client_id().is_none());
+}
+
+/// A reddit 429 trips the breaker at once (honoring Retry-After), makes
+/// NO fallback fetch of the HTML page, and every hydrate while the
+/// breaker is open fails fast without touching the network — the
+/// rate-limit answer.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn a_reddit_429_opens_the_breaker_and_stops_all_reddit_fetches() {
+    let server = MockServer::start().await;
+    // Exactly ONE request ever reaches the JSON endpoint.
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/limit1/title.json"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "120"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The HTML fallback must never fire — it would be one more request
+    // to the very host that just throttled us.
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/limit1/title/"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let mk = |key: &str, comments_id: &str| {
+        let mut article = manual_article(key, "Reddit stub");
+        article.source_url = format!("{}/r/rust/comments/{comments_id}/title/", server.uri());
+        article
+    };
+    core.storage()
+        .upsert_articles(vec![mk("k1", "limit1"), mk("k2", "limit2")])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+
+    // First hydrate: hits the endpoint once, gets 429, surfaces the
+    // rate limit with the server's Retry-After (120s → "2 min").
+    let err = core.hydrate_article(ids[1]).await.unwrap_err();
+    assert!(
+        matches!(err, curio_core::CoreError::RateLimited { .. }),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("2 min"), "{err}");
+
+    // Second hydrate (different post): breaker open → fails fast,
+    // zero network (the mocks' expect() counts prove it).
+    let err = core.hydrate_article(ids[0]).await.unwrap_err();
+    assert!(matches!(err, curio_core::CoreError::RateLimited { .. }));
+}
+
+#[tokio::test]
+async fn bulk_export_writes_every_matching_note_idempotently() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let dest: DestinationName = "vault".parse().unwrap();
+    core.add_destination(dest.clone(), vault.path().to_path_buf())
+        .unwrap();
+
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "First note"),
+            manual_article("k2", "Second note"),
+            manual_article("k3", "Third note"),
+        ])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    core.set_read_later(ids[0], true).unwrap();
+
+    // Scoped export first: only the read-later article lands.
+    let later_only = core
+        .save_all_to_destination(
+            &ListArticles {
+                read_later: Some(true),
+                ..ListArticles::default()
+            },
+            &dest,
+        )
+        .unwrap();
+    assert_eq!(later_only.created, 1);
+    assert_eq!(later_only.total(), 1);
+
+    // Export everything: the remaining two are created, the exported one
+    // is an idempotency hit.
+    let all = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!(all.created, 2);
+    assert_eq!(all.unchanged, 1);
+
+    // Re-running the full export rewrites nothing.
+    let again = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!(again.created, 0);
+    assert_eq!(again.updated, 0);
+    assert_eq!(again.unchanged, 3);
+
+    let notes: Vec<_> = std::fs::read_dir(vault.path().join("curio"))
+        .unwrap()
+        .collect();
+    assert_eq!(notes.len(), 3, "one markdown note per article");
+
+    let missing: DestinationName = "nowhere".parse().unwrap();
+    let err = core
+        .save_all_to_destination(&ListArticles::default(), &missing)
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        curio_core::CoreError::UnknownDestination { .. }
+    ));
+}
+
+#[tokio::test]
+async fn full_text_mode_hydrates_new_articles_at_refresh() {
+    let server = MockServer::start().await;
+    let feed_xml = format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Excerpts</title><link>{0}</link>
+        <item><guid>p1</guid><title>Post One</title><link>{0}/post</link>
+        <description>Just a stub excerpt.</description></item>
+        </channel></rss>"#,
+        server.uri()
+    );
+    let page = r"<html><body><article>
+        <h1>Post One</h1>
+        <p>The full body of the post that the feed only excerpted, with enough
+           genuine running prose that the readability scorer confidently keeps
+           this container as the main content of the fetched page.</p>
+        <p>A second paragraph makes the extraction unambiguous and pushes the
+           word count well past the one-line stub the feed shipped.</p>
+        </article></body></html>";
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .mount(&server)
+        .await;
+    // expect(1): re-refreshing must NOT re-hydrate the already-known item.
+    Mock::given(method("GET"))
+        .and(path("/post"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page, "text/html"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    core.set_feed_full_text(feed.id, true).unwrap();
+    assert!(core.get_feed(feed.id).unwrap().unwrap().fetch_full_text);
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(outcome.new_articles, 1);
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    assert!(
+        article.content.text.contains("full body of the post"),
+        "hydrated at refresh: {}",
+        article.content.text
+    );
+
+    // A second refresh sees no new items and fetches no pages (expect(1)).
+    core.refresh_feed(feed.id).await.unwrap();
+}
+
+#[tokio::test]
+async fn save_url_clips_a_page_into_read_later_with_its_own_metadata() {
+    let server = MockServer::start().await;
+    let page = r#"<html><head>
+        <title>Clipped Page</title>
+        <meta property="og:image" content="https://cdn.example.com/lead.jpg">
+        <meta name="author" content="Jane Writer">
+        </head><body>
+        <nav>menu · menu · menu</nav>
+        <article>
+          <h1>Clipped Page</h1>
+          <p>The body of the page being clipped straight from a URL, written with
+             enough genuine prose that the readability scorer selects this region
+             as the main content over the navigation chrome around it.</p>
+          <p>A second substantial paragraph keeps the extraction unambiguous and
+             gives the word counter something honest to measure for the note.</p>
+        </article></body></html>"#;
+    Mock::given(method("GET"))
+        .and(path("/clip"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page, "text/html"))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let url = format!("{}/clip", server.uri());
+    let saved = core.save_url(&url, vec!["clips".to_owned()]).await.unwrap();
+
+    assert!(saved.created);
+    assert!(saved.hydrated);
+    assert_eq!(saved.article.feed_id, None, "a feedless manual save");
+    assert_eq!(saved.article.title, "Clipped Page");
+    assert!(saved.article.content.text.contains("body of the page"));
+    assert_eq!(
+        saved.article.lead_image.as_deref(),
+        Some("https://cdn.example.com/lead.jpg"),
+        "og:image becomes the lead image"
+    );
+    let state = core.article_state(saved.article.id).unwrap();
+    assert!(state.read_later, "a URL save IS a read-later add");
+    assert_eq!(
+        core.article_tags(saved.article.id).unwrap(),
+        vec!["clips".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn save_url_of_an_unreachable_page_still_saves_the_bare_link() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/gone"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let url = format!("{}/gone", server.uri());
+    let saved = core.save_url(&url, vec![]).await.unwrap();
+
+    assert!(saved.created);
+    assert!(!saved.hydrated, "no content, but the link is not lost");
+    assert_eq!(saved.article.title, url, "the URL stands in for a title");
+    assert!(saved.article.content.text.is_empty());
+    assert!(
+        core.article_state(saved.article.id).unwrap().read_later,
+        "still lands in read-later"
+    );
+}
+
+#[tokio::test]
+async fn save_url_twice_reflags_without_duplicating_or_refetching() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/once"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "<html><body><article><p>A page fetched exactly once, with prose long
+             enough for the extractor to score it as the main content.</p>
+             <p>Padding paragraph so readability has two blocks to work with
+             and the extraction remains stable across runs.</p></article></body></html>",
+            "text/html",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let url = format!("{}/once", server.uri());
+    let first = core.save_url(&url, vec![]).await.unwrap();
+    assert!(first.created);
+
+    // Un-flag, then re-save: the row is reused and re-flagged, not refetched
+    // (the mock's expect(1) proves no second GET happened).
+    core.set_read_later(first.article.id, false).unwrap();
+    let second = core.save_url(&url, vec!["again".to_owned()]).await.unwrap();
+    assert!(!second.created);
+    assert!(!second.hydrated);
+    assert_eq!(second.article.id, first.article.id, "same row");
+    assert!(core.article_state(first.article.id).unwrap().read_later);
+    assert_eq!(
+        core.article_tags(first.article.id).unwrap(),
+        vec!["again".to_owned()]
+    );
+    let all = core.list_articles(ListArticles::default()).unwrap();
+    assert_eq!(all.len(), 1, "no duplicate row");
+}
+
+#[tokio::test]
+async fn save_url_rejects_non_http_input() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    for bad in ["not a url", "ftp://example.com/x", "javascript:alert(1)"] {
+        let err = core.save_url(bad, vec![]).await.unwrap_err();
+        assert!(
+            matches!(err, curio_core::CoreError::InvalidUrl { .. }),
+            "{bad} must be rejected, got {err:?}"
+        );
+    }
 }

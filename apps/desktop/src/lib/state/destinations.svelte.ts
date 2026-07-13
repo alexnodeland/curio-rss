@@ -7,6 +7,7 @@
  * dialog-pick TOKEN (`pick_destination_root` → `PathTokenDto`), never a path.
  */
 import {
+    type BulkSaveOutcomeDto,
     type CommandError,
     type DestinationDto,
     type PathTokenDto,
@@ -101,6 +102,24 @@ export class DestinationsStore {
     /** Promotes an article into a destination by NAME. */
     promote(articleId: number, name: string): Promise<CommandResult<SaveOutcomeDto>> {
         return commands.promoteArticle(articleId, name);
+    }
+
+    /**
+     * Exports the whole library into a destination as markdown notes —
+     * idempotent per note, so re-exporting only rewrites what changed.
+     */
+    exportAll(name: string): Promise<CommandResult<BulkSaveOutcomeDto>> {
+        return commands.promoteAll(name, {
+            feed_id: null,
+            before: null,
+            limit: 0,
+            read: null,
+            starred: null,
+            read_later: null,
+            archived: null,
+            tag: null,
+            feed_tag: null,
+        });
     }
 
     /** Test isolation — the registry lives in the query cache, reset there. */

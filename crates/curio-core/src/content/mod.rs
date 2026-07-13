@@ -23,7 +23,7 @@ mod sanitize;
 
 pub use extract::extract_main_content;
 pub use markdown::to_markdown;
-pub use readable::extract_full_page;
+pub use readable::{PageMeta, extract_full_page, extract_full_page_with_meta};
 pub use sanitize::sanitize;
 
 /// Storage-ready content: sanitized/extracted HTML plus the extracted
@@ -76,14 +76,37 @@ pub fn process(raw_html: &str, base_url: Option<&str>) -> ProcessedContent {
 ///
 /// [`ContentError::Readability`] if the page cannot be parsed or scored.
 pub fn process_full_page(raw_html: &str, url: &str) -> Result<ProcessedContent, ContentError> {
-    let extracted = extract_full_page(raw_html, url)?;
+    Ok(process_page(raw_html, url)?.content)
+}
+
+/// A processed full page plus the metadata the page itself declared —
+/// what a single-URL save needs (title, byline, lead image) on top of
+/// the body that [`process_full_page`] yields.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProcessedPage {
+    /// The sanitized, extracted body.
+    pub content: ProcessedContent,
+    /// The page's own metadata, best-effort.
+    pub meta: PageMeta,
+}
+
+/// [`process_full_page`], also surfacing the page's own metadata.
+///
+/// # Errors
+///
+/// [`ContentError::Readability`] if the page cannot be parsed or scored.
+pub fn process_page(raw_html: &str, url: &str) -> Result<ProcessedPage, ContentError> {
+    let (extracted, meta) = extract_full_page_with_meta(raw_html, url)?;
     let html = sanitize(&extracted, Some(url));
     let text = plain_text(&html);
     let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
-    Ok(ProcessedContent {
-        html,
-        text,
-        word_count,
+    Ok(ProcessedPage {
+        content: ProcessedContent {
+            html,
+            text,
+            word_count,
+        },
+        meta,
     })
 }
 

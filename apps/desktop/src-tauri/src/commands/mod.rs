@@ -28,6 +28,8 @@ pub mod opml;
 #[allow(clippy::missing_errors_doc)]
 pub mod platform;
 #[allow(clippy::missing_errors_doc)]
+pub mod reddit;
+#[allow(clippy::missing_errors_doc)]
 pub mod settings;
 #[allow(clippy::missing_errors_doc)]
 pub mod state;

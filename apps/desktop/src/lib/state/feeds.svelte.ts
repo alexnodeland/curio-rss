@@ -424,6 +424,14 @@ export class FeedsStore {
     }
 
     /**
+     * Flips a feed's full-text mode: when on, refreshes hydrate new
+     * articles from their source pages (for feeds that ship excerpts).
+     */
+    setFeedFullText(feedId: number, enabled: boolean): Promise<CommandResult<null>> {
+        return commands.setFeedFullText(feedId, enabled);
+    }
+
+    /**
      * Persists a new global feed order (drag-to-reorder); `orderedIds` is the
      * complete sequence. The tree refreshes off the emitted `FeedsChanged`.
      */

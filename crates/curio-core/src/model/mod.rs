@@ -102,6 +102,9 @@ pub struct Feed {
     /// on `feed.added` and exported as the OPML `category` attribute, so
     /// an import/export cycle keeps folder/category structure.
     pub tags: Vec<String>,
+    /// Full-text mode: fetch + readability-extract the source page of
+    /// every new article at refresh time (for content-free feeds).
+    pub fetch_full_text: bool,
 }
 
 /// Input for subscribing to a feed.

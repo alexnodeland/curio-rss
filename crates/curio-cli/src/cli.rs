@@ -71,16 +71,45 @@ pub(crate) enum Command {
     Tag { id: String, tag: String },
     /// Remove a tag from an article (emits the article.untagged negation).
     Untag { id: String, tag: String },
-    /// Export an article to a named destination as a curio.frontmatter.v1
-    /// markdown note (emits article.saved / article.updated).
+    /// Save a single URL as a feedless read-later article: the page is
+    /// fetched through the policed client and readability-extracted
+    /// (emits the read-later-added event). An unreachable page still
+    /// saves the bare link. Re-clipping a known URL re-flags it without
+    /// refetching.
+    Clip {
+        /// The http(s) URL to save.
+        url: String,
+        /// Tags for the saved article (repeat or comma-separate).
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+    },
+    /// Export articles to a named destination as curio.frontmatter.v1
+    /// markdown notes (emits article.saved / article.updated). Pass an
+    /// article id for one note, or --all / a filter flag for a bulk
+    /// export ("my library as markdown") — idempotent either way.
     Save {
-        /// A unique fragment of the article's id (listings show the
-        /// typable 8-character tail).
-        id: String,
+        /// A unique fragment of one article's id (listings show the
+        /// typable 8-character tail). Omit for a bulk export.
+        id: Option<String>,
         /// Destination name; defaults to the default destination
         /// configured in curio.toml.
         #[arg(long, value_name = "NAME")]
         dest: Option<String>,
+        /// Export the whole library.
+        #[arg(long, conflicts_with = "id")]
+        all: bool,
+        /// Bulk: only read-later articles.
+        #[arg(long, conflicts_with = "id")]
+        read_later: bool,
+        /// Bulk: only starred articles.
+        #[arg(long, conflicts_with = "id")]
+        starred: bool,
+        /// Bulk: only articles from this feed (id, URL, or substring).
+        #[arg(long, value_name = "FEED", conflicts_with = "id")]
+        feed: Option<String>,
+        /// Bulk: only articles carrying this tag.
+        #[arg(long, value_name = "TAG", conflicts_with = "id")]
+        tag: Option<String>,
     },
     /// Manage named export destinations.
     #[command(subcommand)]
@@ -99,6 +128,12 @@ pub(crate) enum Command {
         #[arg(long = "from", value_enum, default_value_t = ImportFormat::Opml)]
         from: ImportFormat,
     },
+    /// Manage the optional Reddit API credentials (BYO OAuth, stored in
+    /// the OS keychain). Without them Reddit enrichment works
+    /// unauthenticated at ~10 requests/min; with your own free app from
+    /// reddit.com/prefs/apps it runs at the 100/min tier.
+    #[command(subcommand)]
+    Reddit(RedditCommand),
     /// Inspect the curio.events.v1 log.
     #[command(subcommand)]
     Events(EventsCommand),
@@ -132,6 +167,31 @@ pub(crate) enum FeedCommand {
     /// Unsubscribe a feed (by id, URL, or unique substring). Articles
     /// keep their rows; emits the feed.removed negation.
     Rm { feed: String },
+    /// Turn full-text mode on or off for a feed. When on, every refresh
+    /// fetches each NEW article's source page and stores the
+    /// readability-extracted full body (for feeds that ship excerpts).
+    FullText {
+        /// Feed to change (by id, URL, or unique substring).
+        feed: String,
+        /// `on` or `off`.
+        #[arg(value_enum)]
+        mode: OnOff,
+    },
+}
+
+/// A human-friendly boolean for mode switches.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum OnOff {
+    /// Enable.
+    On,
+    /// Disable.
+    Off,
+}
+
+impl OnOff {
+    pub(crate) fn as_bool(self) -> bool {
+        matches!(self, Self::On)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -197,6 +257,26 @@ impl From<ImportFormat> for curio_core::ImportSource {
             ImportFormat::Readwise => Self::ReadwiseCsv,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum RedditCommand {
+    /// Store your Reddit app's credentials in the OS keychain and start
+    /// using the authenticated API. Create the (free) app at
+    /// reddit.com/prefs/apps — type "script" works for Curio.
+    Login {
+        /// The app's client id.
+        #[arg(long)]
+        client_id: String,
+        /// The app's client secret. Omit to read it from stdin instead
+        /// of leaving it in your shell history.
+        #[arg(long)]
+        client_secret: Option<String>,
+    },
+    /// Show whether credentials are stored (never prints the secret).
+    Status,
+    /// Remove the stored credentials and go back to unauthenticated.
+    Logout,
 }
 
 #[derive(Debug, Subcommand)]

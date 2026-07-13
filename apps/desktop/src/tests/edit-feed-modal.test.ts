@@ -47,6 +47,7 @@ function harnessFor(status: 'active' | 'paused' | 'dead', overrides = {}): IpcHa
         set_feed_title: null,
         set_feed_tags: null,
         set_feed_metadata: null,
+        set_feed_full_text: null,
         remove_feed: null,
         mark_all_read: 3,
         ...overrides,
@@ -183,6 +184,21 @@ describe('EditFeedModal', () => {
         await fireEvent.click(getByLabelText('Remove Tech'));
         await flushIpc();
         expect(harness.callsFor('set_feed_tags')).toContainEqual({ feedId: 1, tags: [] });
+    });
+
+    it('flips full-text mode through set_feed_full_text', async () => {
+        harness = harnessFor('active');
+        const { getByText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+
+        const toggle = getByText('Fetch full text')
+            .closest('label')
+            ?.querySelector('input') as HTMLInputElement;
+        expect(toggle.checked).toBe(false);
+        await fireEvent.click(toggle);
+        await flushIpc();
+
+        expect(harness.callsFor('set_feed_full_text')).toEqual([{ feedId: 1, enabled: true }]);
     });
 
     it('renders the recent fetches in the Health section', async () => {

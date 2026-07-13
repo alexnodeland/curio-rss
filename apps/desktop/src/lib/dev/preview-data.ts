@@ -36,6 +36,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-06T08:12:00.000Z',
         last_error: null,
         last_ok_at: '2026-07-06T08:12:00.000Z',
+        fetch_full_text: false,
         tags: ['Engineering'],
     },
     {
@@ -49,6 +50,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-06T07:40:00.000Z',
         last_error: null,
         last_ok_at: '2026-07-06T07:40:00.000Z',
+        fetch_full_text: false,
         tags: ['Design'],
     },
     {
@@ -62,6 +64,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-06T09:01:00.000Z',
         last_error: null,
         last_ok_at: '2026-07-06T09:01:00.000Z',
+        fetch_full_text: false,
         tags: ['Design', 'Community'],
     },
     {
@@ -75,6 +78,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-06T06:22:00.000Z',
         last_error: null,
         last_ok_at: '2026-07-06T06:22:00.000Z',
+        fetch_full_text: false,
         tags: ['Video'],
     },
     {
@@ -88,6 +92,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-06T05:55:00.000Z',
         last_error: 'HTTP 429: rate limited by the origin',
         last_ok_at: '2026-07-05T05:55:00.000Z',
+        fetch_full_text: false,
         tags: ['Business'],
     },
     {
@@ -101,6 +106,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-06T04:30:00.000Z',
         last_error: null,
         last_ok_at: '2026-07-06T04:30:00.000Z',
+        fetch_full_text: false,
         tags: ['Essays'],
     },
     {
@@ -114,6 +120,7 @@ export const previewFeeds: FeedDto[] = [
         last_fetched_at: '2026-07-05T22:10:00.000Z',
         last_error: null,
         last_ok_at: '2026-07-05T22:10:00.000Z',
+        fetch_full_text: false,
         tags: ['Engineering'],
     },
 ];

@@ -80,4 +80,21 @@ describe('destinations store', () => {
         expect(harness.callsFor('remove_destination')).toEqual([{ name: 'notes' }]);
         expect(destinationsStore.destinations).toEqual([]);
     });
+
+    it('exportAll bulk-promotes the whole library into a destination', async () => {
+        harness = installIpcHarness({
+            promote_all: { created: 4, updated: 1, unchanged: 7 },
+        });
+        const result = await destinationsStore.exportAll('vault');
+        expect(result.status).toBe('ok');
+        if (result.status === 'ok') {
+            expect(result.data.created).toBe(4);
+        }
+        const call = harness.callsFor('promote_all')[0] as {
+            destination: string;
+            filter: { read_later: null };
+        };
+        expect(call.destination).toBe('vault');
+        expect(call.filter.read_later).toBeNull();
+    });
 });

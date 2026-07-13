@@ -24,6 +24,8 @@
 #![warn(missing_docs)]
 
 pub mod content;
+#[cfg(feature = "enrich-reddit")]
+pub mod enrich;
 pub mod events;
 pub mod export;
 pub mod feeds;
@@ -31,12 +33,14 @@ pub mod fetch;
 mod handle;
 pub mod import;
 pub mod model;
+#[cfg(feature = "keychain")]
+pub mod secrets;
 pub mod storage;
 
 pub use curio_types as types;
 pub use handle::{
-    CoreError, CoreHandle, CoreOptions, ImportOutcome, OpmlImportOutcome, RefreshOutcome,
-    SaveOutcome,
+    BulkSaveOutcome, CoreError, CoreHandle, CoreOptions, ImportOutcome, OpmlImportOutcome,
+    RefreshOutcome, SaveOutcome, SavedUrl,
 };
 pub use import::{ImportError, ImportKind, ImportSource, ImportedItem};
 

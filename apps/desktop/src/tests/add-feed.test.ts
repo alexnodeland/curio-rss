@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
     type Responder,
+    articleFixture,
     commandErrorFixture,
     discoveryFixture,
     feedFixture,
@@ -193,6 +194,63 @@ describe('AddFeedModal', () => {
                 },
             },
         ]);
+    });
+
+    it('saves the typed URL to read-later without subscribing', async () => {
+        const onclose = vi.fn();
+        harness = installIpcHarness(
+            base({
+                save_url: {
+                    article: articleFixture({ title: 'Clipped Essay' }),
+                    created: true,
+                    hydrated: true,
+                },
+            }),
+        );
+        const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose });
+
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'https://example.org/essay' },
+        });
+        await fireEvent.click(getByText('Save to Read Later'));
+        await flushIpc();
+
+        expect(harness.callsFor('save_url')).toEqual([
+            { url: 'https://example.org/essay', tags: [] },
+        ]);
+        expect(harness.callsFor('add_feed')).toHaveLength(0);
+        expect(uiStore.toasts.at(-1)?.message).toContain('Clipped Essay');
+        expect(uiStore.toasts.at(-1)?.tone).toBe('success');
+        expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('warns when a saved link could not be fetched, and disables save for non-URLs', async () => {
+        harness = installIpcHarness(
+            base({
+                save_url: {
+                    article: articleFixture({ title: 'https://dead.example/x' }),
+                    created: true,
+                    hydrated: false,
+                },
+            }),
+        );
+        const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose: vi.fn() });
+        const saveButton = getByText('Save to Read Later').closest('button') as HTMLButtonElement;
+
+        // Not a page URL (an r/ shorthand) — the save-link path stays off.
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'r/rust' },
+        });
+        expect(saveButton.disabled).toBe(true);
+
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'https://dead.example/x' },
+        });
+        expect(saveButton.disabled).toBe(false);
+        await fireEvent.click(saveButton);
+        await flushIpc();
+
+        expect(uiStore.toasts.at(-1)?.tone).toBe('warning');
     });
 
     it('offers Hacker News presets that fill a working feed URL', async () => {

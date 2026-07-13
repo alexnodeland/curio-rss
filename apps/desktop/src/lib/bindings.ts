@@ -13,7 +13,11 @@ export const commands = {
 	 *  platform policy; the Google favicon fallback is the frontend's opt-in.
 	 */
 	discoverFeeds: (url: string) => typedError<DiscoveryDto, CommandError>(__TAURI_INVOKE("discover_feeds", { url })),
-	/**  Subscribes to a feed. Duplicate URLs are a storage error (user tier). */
+	/**
+	 *  Subscribes to a feed and kicks off its first fetch in the background —
+	 *  a new subscription must not sit empty until the next refresh cycle.
+	 *  Duplicate URLs are a storage error (user tier).
+	 */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
 	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
 	removeFeed: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("remove_feed", { feedId })),
@@ -47,6 +51,11 @@ export const commands = {
 	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
 	tags: string[],
+	/**
+	 *  Full-text mode: new articles are hydrated from their source pages
+	 *  at refresh time.
+	 */
+	fetch_full_text: boolean,
 } | null, CommandError>(__TAURI_INVOKE("get_feed", { feedId })),
 	/**  Lookup by subscription URL — the add-feed dedupe check. */
 	getFeedByUrl: (url: string) => typedError<{
@@ -76,6 +85,11 @@ export const commands = {
 	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
 	tags: string[],
+	/**
+	 *  Full-text mode: new articles are hydrated from their source pages
+	 *  at refresh time.
+	 */
+	fetch_full_text: boolean,
 } | null, CommandError>(__TAURI_INVOKE("get_feed_by_url", { url })),
 	/**  Pause / resume / un-dead a feed. */
 	setFeedStatus: (feedId: number, status: FeedStatusDto) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_status", { feedId, status })),
@@ -102,6 +116,12 @@ export const commands = {
 	 *  overwrite; an empty value clears the field.
 	 */
 	setFeedMetadata: (feedId: number, siteUrl: string | null, description: string | null) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_metadata", { feedId, siteUrl, description })),
+	/**
+	 *  Flips a feed's full-text mode: when on, every refresh hydrates the
+	 *  feed's new articles from their source pages (readability-extracted
+	 *  through the policed client) — for feeds that ship only excerpts.
+	 */
+	setFeedFullText: (feedId: number, enabled: boolean) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_full_text", { feedId, enabled })),
 	/**
 	 *  Rewrites the sidebar feed order (drag-to-reorder): `feed_ids` is the
 	 *  complete new sequence. DB-local, no event.
@@ -167,6 +187,12 @@ export const commands = {
 	 *  article; emits `ArticlesChanged` so the open reader + list refetch.
 	 */
 	loadFullArticle: (articleId: number) => typedError<ArticleDto, CommandError>(__TAURI_INVOKE("load_full_article", { articleId })),
+	/**
+	 *  Saves a single URL as a feedless read-later article (fetch +
+	 *  readability-extract; an unreachable page still saves the bare link).
+	 *  Emits `ArticlesChanged` so the read-later view picks it up.
+	 */
+	saveUrl: (url: string, tags: string[]) => typedError<SavedUrlDto, CommandError>(__TAURI_INVOKE("save_url", { url, tags })),
 	/**  The read/starred/read-later/archived flag projection. */
 	getArticleState: (articleId: number) => typedError<ArticleStateDto, CommandError>(__TAURI_INVOKE("get_article_state", { articleId })),
 	/**  The article's tags, sorted. */
@@ -226,6 +252,12 @@ export const commands = {
 	 */
 	promoteArticle: (articleId: number, destination: string) => typedError<SaveOutcomeDto, CommandError>(__TAURI_INVOKE("promote_article", { articleId, destination })),
 	/**
+	 *  Bulk-promotes every article matching `filter` into a destination —
+	 *  the export-everything path. Idempotent per note (manifest checksums);
+	 *  `filter.before`/`limit` are ignored (pagination is internal).
+	 */
+	promoteAll: (destination: string, filter: ListArticlesDto) => typedError<BulkSaveOutcomeDto, CommandError>(__TAURI_INVOKE("promote_all", { destination, filter })),
+	/**
 	 *  Imports subscriptions from a dialog-picked OPML file. Already
 	 *  subscribed URLs are skipped; OPML folders land as feed tags.
 	 */
@@ -246,6 +278,21 @@ export const commands = {
 	 *  contents for the frontend to parse and validate.
 	 */
 	readTextFile: (pathToken: string) => typedError<string, CommandError>(__TAURI_INVOKE("read_text_file", { pathToken })),
+	/**
+	 *  Stores the user's Reddit app credentials (keychain) and switches the
+	 *  engine to the authenticated 100/min tier immediately.
+	 */
+	setRedditApi: (clientId: string, clientSecret: string) => typedError<RedditApiStatusDto, CommandError>(__TAURI_INVOKE("set_reddit_api", { clientId, clientSecret })),
+	/**
+	 *  Removes the stored credentials and returns to the unauthenticated
+	 *  tier. Idempotent.
+	 */
+	clearRedditApi: () => typedError<RedditApiStatusDto, CommandError>(__TAURI_INVOKE("clear_reddit_api")),
+	/**
+	 *  Whether credentials are installed, and under which client id — never
+	 *  the secret.
+	 */
+	getRedditApiStatus: () => typedError<RedditApiStatusDto, CommandError>(__TAURI_INVOKE("get_reddit_api_status")),
 	/**  Reads a setting. */
 	getSetting: (key: string) => typedError<string | null, CommandError>(__TAURI_INVOKE("get_setting", { key })),
 	/**  Writes a setting. */
@@ -448,6 +495,16 @@ export type ArticlesChanged = {
 	feed_id: number | null,
 };
 
+/**  Mirror of [`curio_core::BulkSaveOutcome`] — what a bulk note export did. */
+export type BulkSaveOutcomeDto = {
+	/**  Notes written for the first time. */
+	created: number,
+	/**  Existing notes whose content changed. */
+	updated: number,
+	/**  Idempotency hits — already exported and unchanged. */
+	unchanged: number,
+};
+
 /**  The serializable error every command returns. */
 export type CommandError = {
 	/**  User-actionable vs internal. */
@@ -573,6 +630,11 @@ export type FeedDto = {
 	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
 	tags: string[],
+	/**
+	 *  Full-text mode: new articles are hydrated from their source pages
+	 *  at refresh time.
+	 */
+	fetch_full_text: boolean,
 };
 
 /**  Mirror of [`FeedStatus`]. */
@@ -714,6 +776,17 @@ export type PathTokenDto = {
 	path: string,
 };
 
+/**
+ *  Reddit API credential status (D15). Deliberately secret-free: the
+ *  client secret never crosses IPC back toward the webview.
+ */
+export type RedditApiStatusDto = {
+	/**  Whether credentials are installed. */
+	configured: boolean,
+	/**  The stored app's client id, when configured. */
+	client_id: string | null,
+};
+
 /**  The whole `refresh_all` sweep finished. */
 export type RefreshFinished = {
 	/**  Every feed's outcome, in refresh order. */
@@ -757,6 +830,19 @@ export type SaveOutcomeDto = {
 	checksum: string,
 	/**  Created / updated / unchanged. */
 	disposition: ExportDispositionDto,
+};
+
+/**  Mirror of [`curio_core::SavedUrl`] — what a single-URL save did. */
+export type SavedUrlDto = {
+	/**  The stored (or already-present) article. */
+	article: ArticleDto,
+	/**  `false`: the URL was already in the library and was re-flagged. */
+	created: boolean,
+	/**
+	 *  Whether full-text content was fetched by this save (`false` for an
+	 *  unreachable page — the bare link is kept — and for existing rows).
+	 */
+	hydrated: boolean,
 };
 
 /**

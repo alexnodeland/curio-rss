@@ -122,6 +122,12 @@ impl From<CoreError> for CommandError {
                 Self::user(ErrorCode::UnknownDestination, error.to_string(), true)
             }
             CoreError::Fetch(_) => Self::user(ErrorCode::Network, error.to_string(), true),
+            CoreError::InvalidUrl { .. } => {
+                Self::user(ErrorCode::InvalidInput, error.to_string(), true)
+            }
+            CoreError::RateLimited { .. } => {
+                Self::user(ErrorCode::Network, error.to_string(), true)
+            }
             CoreError::FeedParse(_) | CoreError::Opml(_) | CoreError::Import(_) => {
                 Self::user(ErrorCode::Parse, error.to_string(), true)
             }

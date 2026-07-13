@@ -183,6 +183,13 @@ async function saveTags(next: string[]): Promise<void> {
     }
 }
 
+async function setFullText(enabled: boolean): Promise<void> {
+    const result = await feedsStore.setFeedFullText(feedId, enabled);
+    if (result.status === 'error') {
+        toastCommandError(result.error);
+    }
+}
+
 function whenDate(iso: string): string {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso : formatIntlDateTime(date);
@@ -302,6 +309,18 @@ function closeWithFlush(): void {
                 />
                 <p class="field-hint" id="edit-tags-hint">{t('feedTags.hint')}</p>
             </div>
+
+            <label class="full-text-toggle">
+                <input
+                    type="checkbox"
+                    checked={feed.fetch_full_text}
+                    onchange={(event) => void setFullText(event.currentTarget.checked)}
+                />
+                <span>
+                    <span class="optin-label">{t('editFeed.fullText')}</span>
+                    <span class="optin-hint">{t('editFeed.fullText.hint')}</span>
+                </span>
+            </label>
         </section>
 
         <section class="health" aria-label={t('editFeed.section.health')} bind:this={healthEl}>
@@ -525,6 +544,26 @@ function closeWithFlush(): void {
     .field-hint {
         font-size: var(--text-xs);
         color: var(--fg-subtle);
+    }
+
+    .full-text-toggle {
+        display: flex;
+        gap: var(--space-2);
+        align-items: flex-start;
+        font-size: var(--text-md);
+        color: var(--fg-muted);
+        cursor: pointer;
+    }
+
+    .optin-label {
+        display: block;
+        color: var(--fg);
+    }
+
+    .optin-hint {
+        display: block;
+        color: var(--fg-subtle);
+        font-size: var(--text-xs);
     }
 
     .health {

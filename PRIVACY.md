@@ -21,10 +21,21 @@ classes of request the app can make; there are no others:
    layers: the default (rustls) TLS fingerprint *and* the honest curio
    User-Agent. So requests to `reddit.com` (and its subdomains) — and only
    those — use the platform-native TLS stack and send a browser-class
-   User-Agent plus an `Accept-Language` header, spaced by a 2-second
-   politeness delay. This is the *only* host that sees anything but the honest
+   User-Agent plus an `Accept-Language` header, spaced by a 6.5-second
+   politeness delay (about nine requests per minute, under Reddit's
+   unauthenticated rate limit). This is the *only* host that sees anything but the honest
    curio UA and the default TLS stack; no cookies, credentials, or identifiers
    are ever sent, and no other host is affected.
+
+   **Optional Reddit API credentials (opt-in).** If you add your own Reddit
+   app's client id and secret (Settings → Media & Privacy, or `curio reddit
+   login`), Curio exchanges them for short-lived tokens at
+   `www.reddit.com/api/v1/access_token` and loads full posts from
+   `oauth.reddit.com` at the faster authenticated rate (~85 requests per
+   minute). The secret is stored in your operating system's keychain — never
+   in Curio's config, database, or logs — and is sent to no host other than
+   Reddit. Removing the credentials returns Curio to the unauthenticated
+   behavior above; nothing else changes.
 
 2. **Favicons.** *Add feed* fetches the page you typed to discover its feeds
    and reads its declared icon (or the site's own `/favicon.ico`) —

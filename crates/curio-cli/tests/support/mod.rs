@@ -43,6 +43,8 @@ pub fn curio(profile: &Path) -> assert_cmd::Command {
     let mut cmd = assert_cmd::Command::cargo_bin("curio").unwrap();
     cmd.arg("--profile").arg(profile);
     cmd.env_remove("BROWSER");
+    // Hermetic keychain: the mock store, never the real OS one.
+    cmd.env("CURIO_MOCK_KEYRING", "1");
     cmd
 }
 

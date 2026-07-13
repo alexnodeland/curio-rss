@@ -26,9 +26,31 @@ struct SaveView {
     disposition: &'static str,
 }
 
-pub(crate) fn save(app: &App, id: &str, dest: Option<String>) -> anyhow::Result<ExitCode> {
-    let article = resolve::article_by_prefix(&app.core, id)?;
-    let name = dest
+/// What `curio save` was asked to do (single note or a bulk filter).
+#[derive(Debug)]
+pub(crate) struct SaveRequest {
+    pub(crate) id: Option<String>,
+    pub(crate) dest: Option<String>,
+    pub(crate) all: bool,
+    pub(crate) read_later: bool,
+    pub(crate) starred: bool,
+    pub(crate) feed: Option<String>,
+    pub(crate) tag: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BulkSaveView {
+    destination: String,
+    created: u64,
+    updated: u64,
+    unchanged: u64,
+    total: u64,
+}
+
+pub(crate) fn save(app: &App, request: SaveRequest) -> anyhow::Result<ExitCode> {
+    let name = request
+        .dest
+        .clone()
         .or_else(|| app.config.settings.default_destination.clone())
         .context(
             "no destination — pass --dest NAME or set settings.default_destination in curio.toml",
@@ -36,7 +58,60 @@ pub(crate) fn save(app: &App, id: &str, dest: Option<String>) -> anyhow::Result<
     let name: DestinationName = name
         .parse()
         .map_err(|err| anyhow!("invalid destination name: {err}"))?;
-    let outcome = app.core.save_to_destination(article.id, &name)?;
+    match request.id {
+        Some(id) => save_one(app, &id, &name),
+        None => save_bulk(app, request, &name),
+    }
+}
+
+/// Bulk export: `--all` or at least one filter flag (a bare `curio save`
+/// must not silently export the whole library).
+fn save_bulk(app: &App, request: SaveRequest, name: &DestinationName) -> anyhow::Result<ExitCode> {
+    let filtered =
+        request.read_later || request.starred || request.feed.is_some() || request.tag.is_some();
+    if !request.all && !filtered {
+        anyhow::bail!(
+            "nothing selected — pass an article id, --all, or a filter \
+             (--read-later / --starred / --feed / --tag)"
+        );
+    }
+    let feed = request
+        .feed
+        .as_deref()
+        .map(|reference| resolve::feed_by_ref(&app.core, reference))
+        .transpose()?;
+    let filter = curio_core::storage::ListArticles {
+        feed_id: feed.map(|f| f.id),
+        read_later: request.read_later.then_some(true),
+        starred: request.starred.then_some(true),
+        tag: request.tag,
+        ..curio_core::storage::ListArticles::default()
+    };
+    let outcome = app.core.save_all_to_destination(&filter, name)?;
+    if app.json {
+        emit_json(&BulkSaveView {
+            destination: name.to_string(),
+            created: outcome.created,
+            updated: outcome.updated,
+            unchanged: outcome.unchanged,
+            total: outcome.total(),
+        })?;
+    } else {
+        println!(
+            "exported {} note(s) to {:?} — {} created, {} updated, {} unchanged",
+            outcome.total(),
+            name.as_str(),
+            outcome.created,
+            outcome.updated,
+            outcome.unchanged
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn save_one(app: &App, id: &str, name: &DestinationName) -> anyhow::Result<ExitCode> {
+    let article = resolve::article_by_prefix(&app.core, id)?;
+    let outcome = app.core.save_to_destination(article.id, name)?;
     let disposition = match outcome.disposition {
         ExportDisposition::Created => "created",
         ExportDisposition::Updated => "updated",

@@ -9,7 +9,7 @@ use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
 use crate::dto::{
-    ArticleDto, ArticleStateDto, ArticleSummaryDto, ListArticlesDto, UnreadCountsDto,
+    ArticleDto, ArticleStateDto, ArticleSummaryDto, ListArticlesDto, SavedUrlDto, UnreadCountsDto,
 };
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, emit_or_log};
@@ -51,6 +51,23 @@ pub async fn load_full_article(
     let article = load_full_article_impl(&core, article_id).await?;
     emit_or_log(&app, &ArticlesChanged { feed_id: None });
     Ok(article)
+}
+
+/// Saves a single URL as a feedless read-later article (fetch +
+/// readability-extract; an unreachable page still saves the bare link).
+/// Emits `ArticlesChanged` so the read-later view picks it up.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_url(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    url: String,
+    tags: Vec<String>,
+) -> Result<SavedUrlDto, CommandError> {
+    let core = Arc::clone(core.inner());
+    let saved = save_url_impl(&core, &url, tags).await?;
+    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    Ok(saved)
 }
 
 /// The read/starred/read-later/archived flag projection.
@@ -147,6 +164,14 @@ async fn load_full_article_impl(
     article_id: i64,
 ) -> Result<ArticleDto, CommandError> {
     Ok(core.hydrate_article(ArticleId(article_id)).await?.into())
+}
+
+async fn save_url_impl(
+    core: &CoreHandle,
+    url: &str,
+    tags: Vec<String>,
+) -> Result<SavedUrlDto, CommandError> {
+    Ok(core.save_url(url, tags).await?.into())
 }
 
 fn get_article_state_impl(

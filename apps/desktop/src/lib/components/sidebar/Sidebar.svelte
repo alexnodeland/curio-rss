@@ -14,7 +14,6 @@ import {
     importFromFile,
     refreshAll,
     runCommand,
-    selectFolder,
     selectView,
     type ViewId,
 } from '$lib/state/actions';
@@ -27,7 +26,6 @@ import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
-import { treeKeyAction } from '$lib/utils/tree-nav';
 import { untrack } from 'svelte';
 import FeedItem from './FeedItem.svelte';
 import FolderNode from './FolderNode.svelte';
@@ -52,7 +50,7 @@ feedsStore.prime();
 // fall into `ungrouped` and render flat below the folders.
 const feedTree = $derived(buildFeedTree(feedsStore.feeds, feedsStore.pendingPaths));
 
-// The flattened, depth-annotated visible rows the arrow keys walk. Reads
+// The flattened, depth-annotated visible rows the reorder cursor sits in. Reads
 // collapse through feedsStore (a tracked SvelteSet) so it re-flattens on toggle
 // or startup load — never a snapshot (see the WP7 reloadSet note).
 const rows = $derived(flattenVisibleTree(feedTree, (path) => feedsStore.isFolderCollapsed(path)));
@@ -65,7 +63,7 @@ const activeDescendant = $derived(
 let treeEl: HTMLUListElement | undefined = $state();
 
 // Where the cursor lands on entry when it has none: the feed currently open in
-// the list (so ← back into the sidebar returns you to where you are, not the
+// the list (so entering the sidebar returns you to where you are, not the
 // top), falling back to the first row when nothing is selected.
 function entrySeatKey(): string {
     const selectedId = selectionStore.selectedFeedId;
@@ -95,9 +93,9 @@ $effect(() => {
     });
 });
 
-// Keep the arrow-key cursor visible: when the active row changes, scroll it
-// into view within the sidebar's own scroll container (jsdom lacks
-// scrollIntoView, hence the optional call).
+// Keep the cursor visible: when the active row changes, scroll it into view
+// within the sidebar's own scroll container (jsdom lacks scrollIntoView,
+// hence the optional call).
 $effect(() => {
     const key = sidebarTreeStore.activeKey;
     if (key === null) {
@@ -105,23 +103,6 @@ $effect(() => {
     }
     document.getElementById(key)?.scrollIntoView?.({ block: 'nearest' });
 });
-
-/** Commits the row under the cursor (Enter/Space), then hands focus back. */
-function activateRow(index: number): void {
-    const row = rows[index];
-    if (row === undefined) {
-        return;
-    }
-    if (row.kind === 'folder') {
-        selectFolder(row.path);
-    } else {
-        selectionStore.selectFeed(row.id);
-    }
-    // Hand focus to the article listbox (it takes DOM focus on the nonce), so
-    // the keyboard lands in the list rather than on <body>.
-    selectionStore.focusList();
-    treeEl?.blur();
-}
 
 /**
  * Reorders the feed under the cursor by one slot within its own drag group
@@ -173,19 +154,6 @@ function tryKeyboardReorder(event: KeyboardEvent, cursorIndex: number): boolean 
     return moved;
 }
 
-/** Applies a resolved (non-`none`) tree key action — move, toggle, or activate. */
-function applyTreeResult(
-    result: Exclude<ReturnType<typeof treeKeyAction>, { type: 'none' }>,
-): void {
-    if (result.type === 'move') {
-        sidebarTreeStore.activeKey = rows[result.index]?.key ?? null;
-    } else if (result.type === 'toggle') {
-        feedsStore.toggleFolder(result.path);
-    } else {
-        activateRow(result.index);
-    }
-}
-
 function onTreeKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
         event.preventDefault();
@@ -194,32 +162,13 @@ function onTreeKeydown(event: KeyboardEvent): void {
         treeEl?.blur();
         return;
     }
-    // Read the cursor index straight from the store state, not the `activeIndex`
-    // $derived: a fast burst of arrow keys fires several keydowns before Svelte
-    // flushes the derived, so the derived stays stale and every press computes
-    // the same next row — the cursor sticks. The raw `activeKey` is always
-    // current, so this advances smoothly however fast the keys arrive.
+    // The cursor seats on entry (the selected feed, else the first row) and is
+    // otherwise pointer-driven; the only keyboard move here is the Alt+arrow
+    // reorder. Read the index straight from the store state, not the
+    // `activeIndex` $derived, so a fast burst of keydowns never sees a stale
+    // derived.
     const cursorIndex = rows.findIndex((row) => row.key === sidebarTreeStore.activeKey);
-    if (tryKeyboardReorder(event, cursorIndex)) {
-        return;
-    }
-    const result = treeKeyAction(rows, cursorIndex, event.key);
-    if (result.type === 'none') {
-        // → at a tree dead-end (a leaf feed, or an already-expanded end) drills
-        // rightward into the article list — the same "move right" that carries
-        // the list into the reader — so → means one thing everywhere. It
-        // activates the row first so the list shows the feed under the cursor,
-        // not a stale selection.
-        if (event.key === 'ArrowRight' && cursorIndex >= 0) {
-            event.preventDefault();
-            event.stopPropagation();
-            activateRow(cursorIndex);
-        }
-        return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    applyTreeResult(result);
+    tryKeyboardReorder(event, cursorIndex);
 }
 
 function currentView(): ViewId | null {
@@ -416,8 +365,8 @@ function newFolder(): void {
                         // handing `focus` off, it stayed 'sidebar' and the window
                         // keydown handler swallowed every shortcut (the global
                         // deadlock). Only the focus *flag* clears (so the cursor ring
-                        // stops painting); the cursor *position* is kept so ← back
-                        // into the sidebar returns exactly where you were.
+                        // stops painting); the cursor *position* is kept so entering
+                        // the sidebar again returns exactly where you were.
                         sidebarTreeStore.focused = false;
                         if (selectionStore.focus === 'sidebar') {
                             selectionStore.focus = 'list';

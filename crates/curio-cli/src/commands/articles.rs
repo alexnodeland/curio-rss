@@ -146,6 +146,53 @@ fn default_opener() -> &'static str {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct ClipView {
+    #[serde(flatten)]
+    article: ArticleView,
+    /// `false`: the URL was already in the library and was re-flagged.
+    created: bool,
+    /// Whether full-text content was fetched and stored by this clip.
+    hydrated: bool,
+}
+
+/// `curio clip <url>` — the single-URL read-later save.
+pub(crate) fn clip(app: &App, url: &str, tags: Vec<String>) -> anyhow::Result<ExitCode> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building the clip runtime")?;
+    let saved = runtime.block_on(app.core.save_url(url, tags))?;
+    let feeds = feed_map(&app.core)?;
+    let view = ArticleView::build(&app.core, &saved.article, &feeds)?;
+    if app.json {
+        emit_json(&ClipView {
+            article: view,
+            created: saved.created,
+            hydrated: saved.hydrated,
+        })?;
+    } else {
+        let verb = if saved.created {
+            "clipped"
+        } else {
+            "re-flagged"
+        };
+        println!(
+            "{verb} {} — {} ({})",
+            short_id(&saved.article.curio_id.to_string()),
+            saved.article.title,
+            if saved.hydrated {
+                format!("{} words", saved.article.word_count.unwrap_or(0))
+            } else if saved.created {
+                "page unreachable — saved the bare link".to_owned()
+            } else {
+                "already in the library".to_owned()
+            }
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// The six flag flips, one command each.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StateAction {

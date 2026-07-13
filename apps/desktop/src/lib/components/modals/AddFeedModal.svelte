@@ -27,6 +27,7 @@ let faviconSrc: string | null = $state(null);
 let triedRemoteFavicon = $state(false);
 let finding = $state(false);
 let adding = $state(false);
+let savingLink = $state(false);
 let searched = $state(false);
 let urlInput = $state<HTMLInputElement>();
 let showHnPresets = $state(false);
@@ -35,6 +36,10 @@ let showHnPresets = $state(false);
 // subreddit, Mastodon handle, YouTube channel, HN URL). A YouTube @handle
 // isn't recognized here — it needs discovery to find its channel id.
 const detected = $derived(detectSource(url));
+
+// The typed text is a fetchable page URL ⇒ offer the read-later save
+// (the GoodLinks path: one article, no subscription).
+const canSaveLink = $derived(/^https?:\/\//i.test(url.trim()));
 
 /**
  * The URL a subscribe will use: a recognized source's constructed feed URL
@@ -166,6 +171,34 @@ async function add(): Promise<void> {
         uiStore.showToast(t('app.error.internal'), 'error');
     } finally {
         adding = false;
+    }
+}
+
+/** Saves the typed URL itself as a read-later article (no subscription). */
+async function saveLink(): Promise<void> {
+    if (savingLink) {
+        return; // reentrancy guard against a double-click
+    }
+    savingLink = true;
+    try {
+        const result = await commands.saveUrl(url.trim(), parsedTags());
+        if (result.status === 'error') {
+            toastCommandError(result.error);
+            return;
+        }
+        if (result.data.created && !result.data.hydrated) {
+            uiStore.showToast(t('addFeed.linkSavedBare'), 'warning');
+        } else {
+            uiStore.showToast(
+                t('addFeed.linkSaved', { title: result.data.article.title }),
+                'success',
+            );
+        }
+        onclose();
+    } catch {
+        uiStore.showToast(t('app.error.internal'), 'error');
+    } finally {
+        savingLink = false;
     }
 }
 </script>
@@ -308,6 +341,14 @@ async function add(): Promise<void> {
     {#snippet footer()}
         <!-- Pinned so Subscribe stays reachable however long the discovery
              list grows; `form=` keeps it submitting the form above. -->
+        <button
+            class="save-link-button"
+            type="button"
+            onclick={() => void saveLink()}
+            disabled={savingLink || !canSaveLink}
+        >
+            {savingLink ? t('addFeed.savingLink') : t('addFeed.saveLink')}
+        </button>
         <button class="add-button" type="submit" form="add-feed-form" disabled={adding}>
             {adding ? t('addFeed.adding') : t('addFeed.add')}
         </button>
@@ -363,6 +404,7 @@ async function add(): Promise<void> {
     }
 
     .find-button,
+    .save-link-button,
     .add-button {
         flex: 0 0 auto;
         border-radius: var(--radius-md);
@@ -382,6 +424,22 @@ async function add(): Promise<void> {
     .find-button:hover:not(:disabled) {
         background: var(--hover);
         color: var(--fg);
+    }
+
+    .save-link-button {
+        padding: var(--space-2) var(--space-3);
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+    }
+
+    .save-link-button:hover:not(:disabled) {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .save-link-button:disabled {
+        opacity: 0.5;
     }
 
     .add-button {

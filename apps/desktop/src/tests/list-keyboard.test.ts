@@ -1,7 +1,7 @@
 /**
  * List keyboard semantics: the virtualizer is a listbox whose
- * `aria-activedescendant` tracks the selected row, and Arrow/Home/End move
- * selection while focus stays on the listbox (the same moves `j`/`k` make).
+ * `aria-activedescendant` tracks the selected row, and Home/End/Page keys
+ * jump selection while focus stays on the listbox (row-by-row is `j`/`k`).
  */
 import ArticleList from '$components/articles/ArticleList.svelte';
 import { articleOptionId } from '$components/articles/ArticleRow.svelte';
@@ -61,23 +61,20 @@ describe('list keyboard navigation', () => {
         expect(listbox.getAttribute('aria-activedescendant')).toBe(articleOptionId(2000));
     });
 
-    it('moves selection with Arrow, Home and End keys', async () => {
+    it('jumps selection with Home and End; arrows are deliberately unbound', async () => {
         installed = harness();
         selectionStore.selectedArticleId = 2000;
         const listbox = await renderList();
 
-        await fireEvent.keyDown(listbox, { key: 'ArrowDown' });
-        expect(selectionStore.selectedArticleId).toBe(2001);
-        expect(listbox.getAttribute('aria-activedescendant')).toBe(articleOptionId(2001));
-
         await fireEvent.keyDown(listbox, { key: 'End' });
         expect(selectionStore.selectedArticleId).toBe(2005);
+        expect(listbox.getAttribute('aria-activedescendant')).toBe(articleOptionId(2005));
 
         await fireEvent.keyDown(listbox, { key: 'Home' });
         expect(selectionStore.selectedArticleId).toBe(2000);
 
-        // ArrowUp from the first row clamps — selection stays at the top.
-        await fireEvent.keyDown(listbox, { key: 'ArrowUp' });
+        // Arrow keys no longer move selection (j/k are the row-by-row moves).
+        await fireEvent.keyDown(listbox, { key: 'ArrowDown' });
         expect(selectionStore.selectedArticleId).toBe(2000);
     });
 

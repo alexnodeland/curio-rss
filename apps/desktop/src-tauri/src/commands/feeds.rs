@@ -26,7 +26,9 @@ pub async fn discover_feeds(
     discovery.discover(&url).await
 }
 
-/// Subscribes to a feed. Duplicate URLs are a storage error (user tier).
+/// Subscribes to a feed and kicks off its first fetch in the background —
+/// a new subscription must not sit empty until the next refresh cycle.
+/// Duplicate URLs are a storage error (user tier).
 // The arg is `new_feed`, not `new` — `new` is a reserved word in the
 // generated TypeScript.
 #[tauri::command]
@@ -37,8 +39,25 @@ pub async fn add_feed(
     new_feed: NewFeedDto,
 ) -> Result<FeedDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let feed = run_blocking(move || add_feed_impl(&core, new_feed)).await?;
+    let feed = {
+        let core = Arc::clone(&core);
+        run_blocking(move || add_feed_impl(&core, new_feed)).await?
+    };
     emit_or_log(&app, &FeedsChanged);
+    // Fire-and-forget so the add returns as soon as the row exists; a failed
+    // first fetch surfaces through feed health, like any scheduled refresh.
+    let feed_id = feed.id;
+    tauri::async_runtime::spawn(async move {
+        if refresh_feed_impl(&core, feed_id).await.is_ok() {
+            emit_or_log(&app, &FeedsChanged);
+            emit_or_log(
+                &app,
+                &ArticlesChanged {
+                    feed_id: Some(feed_id),
+                },
+            );
+        }
+    });
     Ok(feed)
 }
 
@@ -169,6 +188,23 @@ pub async fn set_feed_metadata(
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
     run_blocking(move || set_feed_metadata_impl(&core, feed_id, site_url, description)).await?;
+    emit_or_log(&app, &FeedsChanged);
+    Ok(())
+}
+
+/// Flips a feed's full-text mode: when on, every refresh hydrates the
+/// feed's new articles from their source pages (readability-extracted
+/// through the policed client) — for feeds that ship only excerpts.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_feed_full_text(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    feed_id: i64,
+    enabled: bool,
+) -> Result<(), CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || set_feed_full_text_impl(&core, feed_id, enabled)).await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -334,6 +370,14 @@ fn set_feed_title_impl(
     title: Option<String>,
 ) -> Result<(), CommandError> {
     Ok(core.set_feed_title(FeedId(feed_id), title)?)
+}
+
+fn set_feed_full_text_impl(
+    core: &CoreHandle,
+    feed_id: i64,
+    enabled: bool,
+) -> Result<(), CommandError> {
+    Ok(core.set_feed_full_text(FeedId(feed_id), enabled)?)
 }
 
 fn reorder_feeds_impl(core: &CoreHandle, feed_ids: &[i64]) -> Result<(), CommandError> {

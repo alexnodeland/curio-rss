@@ -408,6 +408,168 @@ fn pocket_csv_imports_articles_as_read_later_via_the_cli() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bulk_save_exports_the_library_idempotently() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    seed(profile.path(), &server);
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(vault.path())
+        .assert()
+        .success();
+
+    // The fixture feed carries 3 items; --all exports each as a note.
+    let first = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(first["created"], 3);
+    assert_eq!(first["total"], 3);
+
+    let notes = std::fs::read_dir(vault.path().join("curio"))
+        .unwrap()
+        .count();
+    assert_eq!(notes, 3);
+
+    // Re-running rewrites nothing (manifest idempotency per note).
+    let again = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(again["created"], 0);
+    assert_eq!(again["unchanged"], 3);
+
+    // A filtered bulk export walks only the matching set.
+    let starred = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--starred", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(starred["total"], 0, "nothing starred yet");
+
+    // A bare `curio save` selects nothing — refused, not a silent full export.
+    curio(profile.path())
+        .args(["save", "--dest", "vault"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn reddit_credentials_have_a_full_cli_surface_and_never_echo_the_secret() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    // Unconfigured by default — reddit works unauthenticated out of the box.
+    let status = stdout_json(
+        &curio(profile.path())
+            .args(["reddit", "status", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(status["configured"], false);
+
+    // Login stores + activates in one step; the secret comes from stdin
+    // (not shell history) and never appears in any output.
+    let login = curio(profile.path())
+        .args(["reddit", "login", "--client-id", "cid123", "--json"])
+        .write_stdin("sekret\n")
+        .assert()
+        .success();
+    let logged_in = stdout_json(&login);
+    assert_eq!(logged_in["configured"], true);
+    assert_eq!(logged_in["client_id"], "cid123");
+    let all_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&login.get_output().stdout),
+        String::from_utf8_lossy(&login.get_output().stderr),
+    );
+    assert!(
+        !all_output.contains("sekret"),
+        "secret leaked: {all_output}"
+    );
+
+    // Empty inputs are refused, not stored.
+    curio(profile.path())
+        .args([
+            "reddit",
+            "login",
+            "--client-id",
+            "  ",
+            "--client-secret",
+            "x",
+        ])
+        .assert()
+        .failure();
+
+    // Logout is idempotent and reports unconfigured.
+    let logout = stdout_json(
+        &curio(profile.path())
+            .args(["reddit", "logout", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(logout["configured"], false);
+}
+
+#[test]
+fn clip_saves_a_bare_link_read_later_and_reflags_idempotently() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    // The URL is unreachable (loopback is SSRF-guarded for manual saves),
+    // so this exercises the save-the-bare-link guarantee; hydration is
+    // covered by the core suite.
+    let url = "http://127.0.0.1:9/unreachable-page";
+    let clipped = stdout_json(
+        &curio(profile.path())
+            .args(["clip", url, "--tags", "inbox", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(clipped["created"], true);
+    assert_eq!(clipped["hydrated"], false);
+    assert_eq!(clipped["title"], url, "the URL stands in for a title");
+
+    // It landed in read-later, feedless, with its tag.
+    let later = stdout_json(
+        &curio(profile.path())
+            .args(["list", "--read-later", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(later.as_array().unwrap().len(), 1);
+    assert_eq!(later[0]["tags"][0], "inbox");
+
+    // Re-clipping the same URL reuses the row.
+    let again = stdout_json(
+        &curio(profile.path())
+            .args(["clip", url, "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(again["created"], false);
+    assert_eq!(again["curio_id"], clipped["curio_id"]);
+
+    // The read-later flag is a real event; a garbage URL is a real error.
+    let events = events_lines(profile.path());
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "article.read_later.added")
+    );
+    curio(profile.path())
+        .args(["clip", "not-a-url"])
+        .assert()
+        .failure();
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn open_emits_article_opened_and_launches_the_browser() {

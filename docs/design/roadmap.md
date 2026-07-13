@@ -141,8 +141,8 @@ following the runbook.
 
 Server head (GReader/Fever/REST — stays a design doc until then); sync client mode
 (StateBackend port → FreshRSS/Miniflux/Feedbin); file-based journal merge as **the**
-serverless multi-device direction; enrichment providers behind cargo features (Reddit
-JSON with circuit breaker; external pinned SHA256-verified yt-dlp — never bundled);
+serverless multi-device direction; enrichment providers behind cargo features (**shipped: `enrich-reddit`** — Reddit
+JSON with circuit breaker, see D14; external pinned SHA256-verified yt-dlp — never bundled);
 podcasts v1.1; git-push vault destination; highlights-in-vault; strictly-optional BYO-AI;
 multi-profile (SQLite-first); MCP server head; Flathub. Full list and the first-30-days
 launch plan: [research/roadmap.json](research/roadmap.json).

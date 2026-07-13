@@ -108,7 +108,7 @@ pub struct PendingIntent {
 // successful attempt. Correlated on `feeds.id` — every FEED_COLS query is a
 // bare `FROM feeds` (no aliases/joins), so the reference is unambiguous.
 const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modified, status, \
-                         allow_private_network, added_at, last_fetched_at, tags, \
+                         allow_private_network, added_at, last_fetched_at, tags, fetch_full_text, \
                          (SELECT CASE WHEN status = 'error' THEN error END FROM fetch_log \
                           WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error, \
                          (SELECT fetched_at FROM fetch_log WHERE feed_id = feeds.id \
@@ -275,6 +275,26 @@ impl Storage {
                     "UPDATE feeds SET allow_private_network = ?2, modified_at = ?3 WHERE id = ?1",
                 )?
                 .execute((id.0, allow, Timestamp::now().to_string()))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
+    /// Flips a feed's full-text mode: fetch + readability-extract the
+    /// source page of every new article at refresh time.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist.
+    pub fn set_feed_full_text(&self, id: FeedId, enabled: bool) -> Result<(), StorageError> {
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached(
+                    "UPDATE feeds SET fetch_full_text = ?2, modified_at = ?3 WHERE id = ?1",
+                )?
+                .execute((id.0, enabled, Timestamp::now().to_string()))?;
             if n == 0 {
                 return Err(StorageError::NotFound { entity: "feed" });
             }
@@ -1512,6 +1532,7 @@ struct RawFeed {
     added_at: String,
     last_fetched_at: Option<String>,
     tags: String,
+    fetch_full_text: bool,
     last_error: Option<String>,
     last_ok_at: Option<String>,
 }
@@ -1530,8 +1551,9 @@ fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         added_at: row.get(9)?,
         last_fetched_at: row.get(10)?,
         tags: row.get(11)?,
-        last_error: row.get(12)?,
-        last_ok_at: row.get(13)?,
+        fetch_full_text: row.get(12)?,
+        last_error: row.get(13)?,
+        last_ok_at: row.get(14)?,
     })
 }
 
@@ -1558,6 +1580,7 @@ impl RawFeed {
                 column: "feeds.tags",
                 message: err.to_string(),
             })?,
+            fetch_full_text: self.fetch_full_text,
         })
     }
 }

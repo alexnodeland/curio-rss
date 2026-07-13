@@ -129,6 +129,9 @@ pub struct FeedDto {
     pub last_ok_at: Option<String>,
     /// Feed-level tags (OPML folders land here).
     pub tags: Vec<String>,
+    /// Full-text mode: new articles are hydrated from their source pages
+    /// at refresh time.
+    pub fetch_full_text: bool,
 }
 
 impl From<Feed> for FeedDto {
@@ -145,6 +148,7 @@ impl From<Feed> for FeedDto {
             last_error: feed.last_error,
             last_ok_at: feed.last_ok_at.map(|t| t.to_string()),
             tags: feed.tags,
+            fetch_full_text: feed.fetch_full_text,
         }
     }
 }
@@ -287,6 +291,59 @@ impl From<Article> for ArticleDto {
             word_count: article.word_count,
             saved_at: article.saved_at.to_string(),
             source_updated_at: article.source_updated_at.map(|t| t.to_string()),
+        }
+    }
+}
+
+/// Mirror of [`curio_core::BulkSaveOutcome`] — what a bulk note export did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct BulkSaveOutcomeDto {
+    /// Notes written for the first time.
+    pub created: u64,
+    /// Existing notes whose content changed.
+    pub updated: u64,
+    /// Idempotency hits — already exported and unchanged.
+    pub unchanged: u64,
+}
+
+impl From<curio_core::BulkSaveOutcome> for BulkSaveOutcomeDto {
+    fn from(outcome: curio_core::BulkSaveOutcome) -> Self {
+        Self {
+            created: outcome.created,
+            updated: outcome.updated,
+            unchanged: outcome.unchanged,
+        }
+    }
+}
+
+/// Reddit API credential status (D15). Deliberately secret-free: the
+/// client secret never crosses IPC back toward the webview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct RedditApiStatusDto {
+    /// Whether credentials are installed.
+    pub configured: bool,
+    /// The stored app's client id, when configured.
+    pub client_id: Option<String>,
+}
+
+/// Mirror of [`curio_core::SavedUrl`] — what a single-URL save did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SavedUrlDto {
+    /// The stored (or already-present) article.
+    pub article: ArticleDto,
+    /// `false`: the URL was already in the library and was re-flagged.
+    pub created: bool,
+    /// Whether full-text content was fetched by this save (`false` for an
+    /// unreachable page — the bare link is kept — and for existing rows).
+    pub hydrated: bool,
+}
+
+impl From<curio_core::SavedUrl> for SavedUrlDto {
+    fn from(saved: curio_core::SavedUrl) -> Self {
+        Self {
+            article: saved.article.into(),
+            created: saved.created,
+            hydrated: saved.hydrated,
         }
     }
 }

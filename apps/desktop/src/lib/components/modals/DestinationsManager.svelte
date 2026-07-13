@@ -82,6 +82,37 @@ async function makeDefault(name: string): Promise<void> {
         uiStore.showToast(t('app.error.internal'), 'error');
     }
 }
+
+// Which destination an export-all is currently running against (its
+// button shows the busy label; re-clicks are ignored).
+let exportingTo: string | null = $state(null);
+
+/** Exports the whole library into `name` as markdown notes. */
+async function exportAll(name: string): Promise<void> {
+    if (exportingTo !== null) {
+        return;
+    }
+    exportingTo = name;
+    try {
+        const result = await destinationsStore.exportAll(name);
+        if (result.status === 'error') {
+            toastCommandError(result.error);
+            return;
+        }
+        const written = result.data.created + result.data.updated;
+        uiStore.showToast(
+            t('destinations.exportAll.done', {
+                written,
+                unchanged: result.data.unchanged,
+            }),
+            'success',
+        );
+    } catch {
+        uiStore.showToast(t('app.error.internal'), 'error');
+    } finally {
+        exportingTo = null;
+    }
+}
 </script>
 
 <div class="manager">
@@ -110,6 +141,16 @@ async function makeDefault(name: string): Promise<void> {
                             {t('destinations.makeDefault')}
                         </button>
                     {/if}
+                    <button
+                        class="link-button"
+                        type="button"
+                        disabled={exportingTo !== null}
+                        onclick={() => void exportAll(destination.name)}
+                    >
+                        {exportingTo === destination.name
+                            ? t('destinations.exportAll.running')
+                            : t('destinations.exportAll')}
+                    </button>
                     <button
                         class="remove-button"
                         type="button"

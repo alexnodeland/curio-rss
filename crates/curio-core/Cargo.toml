@@ -8,6 +8,16 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+# Post-v1 enrichment providers (D8/D14): each provider is opt-in per
+# head. `enrich-reddit` upgrades reddit posts via the public JSON
+# endpoint on the load-full / full-text-hydrate path.
+enrich-reddit = []
+# OS-keychain storage for user secrets (D15). Heads opt in and call the
+# `secrets` module explicitly — the core never reads the keychain on its
+# own, so core tests stay hermetic.
+keychain = ["dep:keyring"]
+
 [dependencies]
 ammonia = { workspace = true }
 chrono = { workspace = true }
@@ -17,6 +27,7 @@ dom_smoothie = { workspace = true }
 ego-tree = { workspace = true }
 feed-rs = { workspace = true }
 htmd = { workspace = true }
+keyring = { workspace = true, optional = true }
 quick-xml = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }

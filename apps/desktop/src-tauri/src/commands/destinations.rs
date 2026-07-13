@@ -13,7 +13,7 @@ use curio_types::DestinationName;
 use tauri::State;
 
 use super::{SharedCore, run_blocking};
-use crate::dto::{DestinationDto, SaveOutcomeDto};
+use crate::dto::{BulkSaveOutcomeDto, DestinationDto, ListArticlesDto, SaveOutcomeDto};
 use crate::error::CommandError;
 use crate::ipc_policy::{PathIntent, PathRegistry};
 
@@ -67,6 +67,20 @@ pub async fn promote_article(
     run_blocking(move || promote_article_impl(&core, article_id, &destination)).await
 }
 
+/// Bulk-promotes every article matching `filter` into a destination —
+/// the export-everything path. Idempotent per note (manifest checksums);
+/// `filter.before`/`limit` are ignored (pagination is internal).
+#[tauri::command]
+#[specta::specta]
+pub async fn promote_all(
+    core: State<'_, SharedCore>,
+    destination: String,
+    filter: ListArticlesDto,
+) -> Result<BulkSaveOutcomeDto, CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking(move || promote_all_impl(&core, &destination, filter)).await
+}
+
 // ------------------------------------------------------------------ impls
 
 fn add_destination_impl(
@@ -99,6 +113,15 @@ fn promote_article_impl(
     Ok(core
         .save_to_destination(ArticleId(article_id), &name)?
         .into())
+}
+
+fn promote_all_impl(
+    core: &CoreHandle,
+    destination: &str,
+    filter: ListArticlesDto,
+) -> Result<BulkSaveOutcomeDto, CommandError> {
+    let name: DestinationName = destination.parse()?;
+    Ok(core.save_all_to_destination(&filter.into(), &name)?.into())
 }
 
 #[cfg(test)]
@@ -148,6 +171,60 @@ mod tests {
 
         let second = promote_article_impl(&core, id, "notes").unwrap();
         assert_eq!(second.disposition, ExportDispositionDto::Unchanged);
+    }
+
+    #[test]
+    fn promote_all_walks_the_filtered_set_idempotently() {
+        let (dir, core) = temp_core();
+        let first_id = seed_article(&core, "one");
+        seed_article(&core, "two");
+        core.set_read_later(curio_core::model::ArticleId(first_id), true)
+            .unwrap();
+        add_destination_impl(&core, "notes", dir.path().join("notes")).unwrap();
+
+        let filter = ListArticlesDto {
+            feed_id: None,
+            before: None,
+            limit: 50,
+            read: None,
+            starred: None,
+            read_later: Some(true),
+            archived: None,
+            tag: None,
+            feed_tag: None,
+        };
+        let later_only = promote_all_impl(&core, "notes", filter.clone()).unwrap();
+        assert_eq!(later_only.created, 1);
+
+        let all = promote_all_impl(
+            &core,
+            "notes",
+            ListArticlesDto {
+                read_later: None,
+                ..filter
+            },
+        )
+        .unwrap();
+        assert_eq!(all.created, 1, "only the not-yet-exported article");
+        assert_eq!(all.unchanged, 1);
+
+        let error = promote_all_impl(
+            &core,
+            "nowhere",
+            ListArticlesDto {
+                feed_id: None,
+                before: None,
+                limit: 50,
+                read: None,
+                starred: None,
+                read_later: None,
+                archived: None,
+                tag: None,
+                feed_tag: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::UnknownDestination);
     }
 
     #[test]

@@ -87,6 +87,29 @@ pub enum CoreError {
         /// What was looked up.
         entity: &'static str,
     },
+    /// The URL handed to a save operation is not a fetchable http(s) URL.
+    #[error("not a fetchable http(s) URL: {url}")]
+    InvalidUrl {
+        /// The rejected input.
+        url: String,
+    },
+    /// The upstream service is rate-limiting us; the enrichment breaker
+    /// is open and no request was (or will be) made until it cools down.
+    #[error("{host} is rate-limiting requests — try again in about {} min", retry_after_secs.div_ceil(60))]
+    RateLimited {
+        /// The throttling host.
+        host: String,
+        /// Seconds until the breaker re-tries.
+        retry_after_secs: u64,
+    },
+    /// Reddit refused the request for auth reasons (missing, rejected,
+    /// or revoked credentials) — actionable by the user, so the detail
+    /// is surfaced verbatim.
+    #[error("{detail}")]
+    RedditAuth {
+        /// The user-facing guidance.
+        detail: String,
+    },
 }
 
 /// Options for [`CoreHandle::open_with`].
@@ -127,6 +150,39 @@ pub struct SaveOutcome {
     pub disposition: ExportDisposition,
 }
 
+/// Outcome of a single-URL save (the read-later clip path).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedUrl {
+    /// The stored (or already-present) article.
+    pub article: Article,
+    /// `false` when the URL was already in the library (it was
+    /// re-flagged read-later; nothing was refetched).
+    pub created: bool,
+    /// Whether full-text content was fetched and stored by this call —
+    /// `false` for an unreachable page (the link is saved bare) and for
+    /// an existing article.
+    pub hydrated: bool,
+}
+
+/// Outcome of a bulk note export: how many notes each disposition got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BulkSaveOutcome {
+    /// Notes written for the first time (`article.saved` each).
+    pub created: u64,
+    /// Existing notes whose managed region changed (`article.updated` each).
+    pub updated: u64,
+    /// Idempotency hits — already exported, byte-identical, no event.
+    pub unchanged: u64,
+}
+
+impl BulkSaveOutcome {
+    /// Articles the export walked in total.
+    #[must_use]
+    pub fn total(&self) -> u64 {
+        self.created + self.updated + self.unchanged
+    }
+}
+
 /// Outcome of an OPML import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OpmlImportOutcome {
@@ -162,6 +218,16 @@ pub struct CoreHandle {
     /// Per-feed refresh serialization (see [`CoreHandle::refresh_feed`]).
     /// Bounded by the subscription count; `remove_feed` drops entries.
     refresh_locks: Mutex<HashMap<FeedId, Arc<AsyncMutex<()>>>>,
+    /// Circuit breaker over enrichment calls (D8/D14): repeated provider
+    /// failures skip enrichment for a cool-down instead of stalling
+    /// every hydrate.
+    #[cfg(feature = "enrich-reddit")]
+    enrich_breaker: crate::enrich::Breaker,
+    /// BYO Reddit OAuth (D15): runtime credentials + cached bearer.
+    /// Loaded by the heads (keychain) after open; absent = the public
+    /// unauthenticated endpoints.
+    #[cfg(feature = "enrich-reddit")]
+    reddit_auth: crate::enrich::reddit_auth::TokenManager,
 }
 
 impl CoreHandle {
@@ -210,6 +276,10 @@ impl CoreHandle {
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
             refresh_locks: Mutex::new(HashMap::new()),
+            #[cfg(feature = "enrich-reddit")]
+            enrich_breaker: crate::enrich::Breaker::default(),
+            #[cfg(feature = "enrich-reddit")]
+            reddit_auth: crate::enrich::reddit_auth::TokenManager::default(),
         })
     }
 
@@ -229,6 +299,25 @@ impl CoreHandle {
     #[must_use]
     pub fn storage(&self) -> &Storage {
         &self.storage
+    }
+
+    /// Installs (or clears) the user's own Reddit API credentials (D15).
+    /// Runtime-only — persistence is the heads' concern (the keychain);
+    /// this never writes anything to disk. Clearing also drops any
+    /// cached token and resets the enrichment breaker (a rate limit hit
+    /// unauthenticated says nothing about the authenticated tier).
+    #[cfg(feature = "enrich-reddit")]
+    pub fn set_reddit_api(&self, config: Option<crate::enrich::reddit_auth::RedditApiConfig>) {
+        self.reddit_auth.set_config(config);
+        self.enrich_breaker.record_success();
+    }
+
+    /// Whether Reddit API credentials are installed, and under which
+    /// client id (never the secret).
+    #[cfg(feature = "enrich-reddit")]
+    #[must_use]
+    pub fn reddit_api_client_id(&self) -> Option<String> {
+        self.reddit_auth.client_id()
     }
 
     // ------------------------------------------------------------ feeds
@@ -287,6 +376,19 @@ impl CoreHandle {
     /// [`CoreError::NotFound`] for an unknown feed.
     pub fn set_feed_allow_private_network(&self, id: FeedId, allow: bool) -> Result<(), CoreError> {
         Ok(self.storage.set_feed_allow_private_network(id, allow)?)
+    }
+
+    /// Flips a feed's full-text mode: when on, every refresh hydrates the
+    /// feed's *new* articles from their source pages (readability-extract
+    /// through the policed client) — the upgrade for feeds that ship only
+    /// excerpts. DB-local, no event: how a feed's content is fetched is a
+    /// local reading preference, not part of the published contract.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::NotFound`] for an unknown feed.
+    pub fn set_feed_full_text(&self, id: FeedId, enabled: bool) -> Result<(), CoreError> {
+        Ok(self.storage.set_feed_full_text(id, enabled)?)
     }
 
     /// Replaces a feed's tags — the move-to-folder / re-tag path (folders
@@ -366,7 +468,7 @@ impl CoreHandle {
     /// [`CoreError::NotFound`] for an unknown feed; storage errors.
     pub async fn refresh_feed(&self, id: FeedId) -> Result<RefreshOutcome, CoreError> {
         let lock = self.refresh_lock(id);
-        let _serialized = lock.lock().await;
+        let serialized = lock.lock().await;
         let feed = self
             .storage
             .get_feed(id)?
@@ -388,6 +490,7 @@ impl CoreHandle {
             allow_private_network: feed.allow_private_network,
             etag: feed.etag.clone(),
             last_modified: feed.last_modified.clone(),
+            bearer: None,
         };
         let fetched = self.client.fetch(&request).await;
         let now = Timestamp::now();
@@ -406,6 +509,7 @@ impl CoreHandle {
         // path — error, 304, 410, unparseable body. Only a successfully
         // *parsed* 2xx adopts the response's validators (the sketch
         // clobbered them on any failure).
+        let mut hydrate_pending: Vec<ArticleId> = Vec::new();
         let outcome = match fetched {
             Err(err) => {
                 self.preserve_validators(id, &feed, now)?;
@@ -439,7 +543,12 @@ impl CoreHandle {
                         self.preserve_validators(id, &feed, now)?;
                         failed(Some(response.status), err.to_string())
                     }
-                    Ok(parsed) => self.ingest_parsed(id, &feed, &response, parsed, now)?,
+                    Ok(parsed) => {
+                        let (outcome, pending) =
+                            self.ingest_parsed(id, &feed, &response, parsed, now)?;
+                        hydrate_pending = pending;
+                        outcome
+                    }
                 }
             }
             Ok(response) => {
@@ -457,7 +566,40 @@ impl CoreHandle {
             articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
             duration_ms,
         })?;
+        // Full-text mode's refresh hook: hydrate the articles this refresh
+        // *inserted* (never the whole backlog) from their source pages,
+        // outside the per-feed lock. Best-effort per article — a dead page
+        // keeps its feed excerpt, and hydrate_article's never-clobber
+        // guard already protects feeds that ship full content.
+        drop(serialized);
+        self.hydrate_batch(hydrate_pending).await;
         Ok(outcome)
+    }
+
+    /// Hydrates the articles a refresh just inserted (full-text mode),
+    /// best-effort per article. A rate-limit error stops the whole batch
+    /// — every remaining hydrate would fail the same way; the articles
+    /// keep their feed excerpts and a later manual load-full picks them
+    /// up.
+    async fn hydrate_batch(&self, pending: Vec<ArticleId>) {
+        for article_id in pending {
+            match self.hydrate_article(article_id).await {
+                Ok(_) => {}
+                Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. }) => {
+                    // Deterministic for every remaining article in the
+                    // batch — stop now rather than grind through it.
+                    tracing::warn!("full-text hydrate blocked upstream; stopping the batch");
+                    break;
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        article = %article_id,
+                        %err,
+                        "full-text hydrate failed; keeping the feed excerpt"
+                    );
+                }
+            }
+        }
     }
 
     /// Stamps `last_fetched_at` while keeping the stored conditional-GET
@@ -479,7 +621,9 @@ impl CoreHandle {
 
     /// The happy path of a refresh: pipeline every entry, batch-upsert,
     /// fill in feed metadata, adopt permanent redirects and the response
-    /// validators.
+    /// validators. The second return value is the row ids the upsert
+    /// *inserted* — the full-text hydration queue (empty unless the feed
+    /// has full-text mode on).
     fn ingest_parsed(
         &self,
         id: FeedId,
@@ -487,13 +631,37 @@ impl CoreHandle {
         response: &crate::fetch::FetchResponse,
         parsed: crate::feeds::ParsedFeed,
         now: Timestamp,
-    ) -> Result<RefreshOutcome, CoreError> {
-        let articles = parsed
+    ) -> Result<(RefreshOutcome, Vec<ArticleId>), CoreError> {
+        let articles: Vec<NewArticle> = parsed
             .entries
             .into_iter()
             .map(|entry| ingest_entry(id, &feed.url, entry))
             .collect();
+        // Which entries are new, decided BEFORE the upsert (afterwards
+        // everything exists). Same-feed refreshes are serialized by the
+        // caller's per-feed lock, so this read-then-write cannot race.
+        let fresh_keys: Vec<String> = if feed.fetch_full_text {
+            articles
+                .iter()
+                .filter(|article| {
+                    self.storage
+                        .article_id_by_dedupe_key(Some(id), &article.dedupe_key)
+                        .ok()
+                        .flatten()
+                        .is_none()
+                })
+                .map(|article| article.dedupe_key.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let upserted = self.storage.upsert_articles(articles)?;
+        let mut hydrate_pending = Vec::with_capacity(fresh_keys.len());
+        for key in &fresh_keys {
+            if let Some(article_id) = self.storage.article_id_by_dedupe_key(Some(id), key)? {
+                hydrate_pending.push(article_id);
+            }
+        }
         self.storage.update_feed_metadata(
             id,
             parsed.meta.title,
@@ -513,14 +681,17 @@ impl CoreHandle {
             response.last_modified.clone(),
             now,
         )?;
-        Ok(RefreshOutcome {
-            feed_id: id,
-            status: FetchStatus::Ok,
-            http_status: Some(response.status),
-            new_articles: upserted.inserted,
-            updated_articles: upserted.updated,
-            error: None,
-        })
+        Ok((
+            RefreshOutcome {
+                feed_id: id,
+                status: FetchStatus::Ok,
+                http_status: Some(response.status),
+                new_articles: upserted.inserted,
+                updated_articles: upserted.updated,
+                error: None,
+            },
+            hydrate_pending,
+        ))
     }
 
     /// Refreshes every active feed, sequentially (the policed client's
@@ -587,6 +758,18 @@ impl CoreHandle {
                 .is_some_and(|feed| feed.allow_private_network),
             None => false,
         };
+        // Enrichment first (feature-gated): a source-specific provider
+        // beats generic readability when it recognizes the URL. A rate
+        // limit is a hard stop (no fallback fetch to the throttled
+        // host); any other enrichment failure falls through to the
+        // generic page fetch below.
+        #[cfg(feature = "enrich-reddit")]
+        if let Some(enriched) = self
+            .try_reddit_enrichment(id, &article, allow_private_network)
+            .await?
+        {
+            return Ok(enriched);
+        }
         let response = self
             .client
             .fetch(&FetchRequest {
@@ -615,6 +798,261 @@ impl CoreHandle {
         self.storage
             .get_article(id)?
             .ok_or(CoreError::NotFound { entity: "article" })
+    }
+
+    /// Saves a single URL as a feedless read-later article — the
+    /// GoodLinks-style clip path. The page is fetched through the policed
+    /// client (no private-network exemption — that flag belongs to feeds)
+    /// and readability-extracted, adopting the page's own title, byline,
+    /// language, publish time and lead image where declared. An
+    /// unreachable or unextractable page still saves the bare link
+    /// (`hydrated: false`) — a save must never lose the URL.
+    ///
+    /// Dedupe is by URL within the manual-save scope: re-saving a URL
+    /// (or importing it first) re-flags it read-later and applies any new
+    /// tags, without refetching. Emits `article.read_later.added` and
+    /// `article.tagged` per the state changes it actually makes.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::InvalidUrl`] for a non-http(s) input; storage or
+    /// emission errors. Fetch/extract failures are NOT errors (the bare
+    /// link is saved instead).
+    pub async fn save_url(&self, url: &str, tags: Vec<String>) -> Result<SavedUrl, CoreError> {
+        let canonical = url::Url::parse(url.trim())
+            .ok()
+            .filter(|parsed| matches!(parsed.scheme(), "http" | "https"))
+            .map(String::from)
+            .ok_or_else(|| CoreError::InvalidUrl {
+                url: url.to_owned(),
+            })?;
+        let key = crate::feeds::dedupe_key(None, Some(&canonical), &canonical, None);
+        if let Some(id) = self.storage.article_id_by_dedupe_key(None, &key)? {
+            let article = self.flag_saved_url(id, &tags)?;
+            return Ok(SavedUrl {
+                article,
+                created: false,
+                hydrated: false,
+            });
+        }
+
+        // Best-effort fetch + extract: the row below is written either way.
+        let page = match self
+            .client
+            .fetch(&FetchRequest {
+                url: canonical.clone(),
+                ..FetchRequest::default()
+            })
+            .await
+        {
+            Ok(response) if response.is_success() => {
+                let raw = String::from_utf8_lossy(&response.body);
+                content::process_page(&raw, &response.final_url).ok()
+            }
+            _ => None,
+        };
+        let hydrated = page.is_some();
+        let page = page.unwrap_or_default();
+        let (body, meta) = (page.content, page.meta);
+        // The page's declared image wins when it's a fetchable URL; else
+        // fall back to the first inline <img> of the sanitized body.
+        let lead_image = meta
+            .image
+            .as_deref()
+            .map(str::trim)
+            .filter(|src| src.starts_with("http://") || src.starts_with("https://"))
+            .map(ToOwned::to_owned)
+            .or_else(|| content::first_image(&body.html));
+        self.storage.upsert_articles(vec![NewArticle {
+            feed_id: None,
+            dedupe_key: key.clone(),
+            title: meta.title.unwrap_or_else(|| canonical.clone()),
+            source_url: canonical,
+            author: meta.byline,
+            published_at: meta
+                .published_time
+                .and_then(|raw| raw.parse::<Timestamp>().ok()),
+            lang: meta.lang,
+            word_count: hydrated.then_some(body.word_count),
+            content: ArticleContent {
+                html: body.html,
+                text: body.text,
+            },
+            source_updated_at: None,
+            lead_image,
+        }])?;
+        let id = self
+            .storage
+            .article_id_by_dedupe_key(None, &key)?
+            .ok_or(CoreError::NotFound {
+                entity: "saved article",
+            })?;
+        let article = self.flag_saved_url(id, &tags)?;
+        Ok(SavedUrl {
+            article,
+            created: true,
+            hydrated,
+        })
+    }
+
+    /// Flags a saved-URL row read-later and applies its tags (each staging
+    /// its event), flushing one emission; returns the fresh row.
+    fn flag_saved_url(&self, id: ArticleId, tags: &[String]) -> Result<Article, CoreError> {
+        self.storage.add_read_later(id)?;
+        for tag in tags {
+            self.storage.tag_article(id, tag)?;
+        }
+        self.emit()?;
+        self.storage
+            .get_article(id)?
+            .ok_or(CoreError::NotFound { entity: "article" })
+    }
+
+    /// The reddit enrichment attempt (D14/D15), split out of
+    /// [`Self::hydrate_article`]: `Ok(Some(_))` = enriched and stored;
+    /// `Ok(None)` = not a reddit post / soft failure, use the generic
+    /// path; `Err(RateLimited)` = hard stop, make no further request to
+    /// the throttled host. Provider output passes the SAME sanitize gate
+    /// as everything else. A 429 — from the token grant or the API call
+    /// — trips the breaker immediately, honoring `Retry-After`.
+    #[cfg(feature = "enrich-reddit")]
+    async fn try_reddit_enrichment(
+        &self,
+        id: ArticleId,
+        article: &Article,
+        allow_private_network: bool,
+    ) -> Result<Option<Article>, CoreError> {
+        use crate::enrich::{EnrichError, reddit};
+
+        if !reddit::is_reddit_post(&article.source_url) {
+            return Ok(None);
+        }
+        let rate_limited = |remaining: Option<std::time::Duration>| CoreError::RateLimited {
+            host: "reddit.com".to_owned(),
+            retry_after_secs: remaining.map_or(60, |d| d.as_secs().max(1)),
+        };
+        if !self.enrich_breaker.closed() {
+            return Err(rate_limited(self.enrich_breaker.open_remaining()));
+        }
+        // BYO OAuth (D15): trade the installed credentials for a bearer.
+        // A 429 from the token endpoint is a rate limit like any other;
+        // a failed grant (bad credentials) degrades to unauthenticated.
+        let bearer = match self.reddit_auth.bearer(&self.client).await {
+            Ok(bearer) => bearer,
+            Err(EnrichError::Http {
+                status: 429,
+                retry_after,
+            }) => {
+                self.enrich_breaker.trip(retry_after);
+                tracing::warn!("reddit token endpoint rate limit; enrichment breaker opened");
+                return Err(rate_limited(self.enrich_breaker.open_remaining()));
+            }
+            Err(err) => {
+                tracing::warn!(%err, "reddit token grant failed; using the public endpoint");
+                None
+            }
+        };
+        let api_origin = self.reddit_auth.api_origin();
+        let auth = match (bearer.as_deref(), api_origin.as_deref()) {
+            (Some(bearer), Some(api_origin)) => Some(reddit::PostAuth { bearer, api_origin }),
+            _ => None,
+        };
+        let authenticated = auth.is_some();
+        match reddit::fetch_post(
+            &self.client,
+            &article.source_url,
+            allow_private_network,
+            auth,
+        )
+        .await
+        {
+            Ok(enriched) => {
+                self.enrich_breaker.record_success();
+                self.store_enriched(id, &article.source_url, &enriched.html)
+            }
+            Err(EnrichError::Http {
+                status: 429,
+                retry_after,
+            }) => {
+                self.enrich_breaker.trip(retry_after);
+                tracing::warn!(
+                    article = %id,
+                    retry_after_secs = retry_after.map(|d| d.as_secs()),
+                    "reddit rate limit hit; enrichment breaker opened"
+                );
+                Err(rate_limited(self.enrich_breaker.open_remaining()))
+            }
+            Err(EnrichError::Http {
+                status: status @ (401 | 403),
+                ..
+            }) if authenticated => {
+                // A stale or revoked token: drop it so the next call
+                // re-grants, and tell the user — falling back to an HTML
+                // fetch of the same host would only produce junk.
+                self.reddit_auth.invalidate();
+                tracing::warn!(article = %id, status, "reddit bearer rejected; token dropped");
+                Err(CoreError::RedditAuth {
+                    detail: format!(
+                        "reddit rejected the stored API credentials (HTTP {status}) — \
+                         check the client id and secret, or re-create the app"
+                    ),
+                })
+            }
+            Err(EnrichError::Http {
+                status: status @ (401 | 403),
+                ..
+            }) => {
+                // Reddit's 2026 lockdown: anonymous .json requests are
+                // 403-blocked outright. Deterministic — no breaker, no
+                // fallback fetch; the guidance IS the answer.
+                tracing::warn!(article = %id, status, "anonymous reddit JSON refused");
+                Err(CoreError::RedditAuth {
+                    detail: format!(
+                        "reddit blocks anonymous full-post requests (HTTP {status}) — \
+                         add your own free Reddit API credentials to load full posts"
+                    ),
+                })
+            }
+            Err(err) => {
+                self.enrich_breaker.record_failure();
+                tracing::warn!(
+                    article = %id,
+                    %err,
+                    "reddit enrichment failed; falling back to the page fetch"
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// Stores a provider's enriched body. Provider output IS the main
+    /// content already — it only passes the sanitize gate (readability's
+    /// boilerplate extraction would drop the appended media figures).
+    /// The API is authoritative for its own posts, so it may replace
+    /// longer feed content — but never with nothing (`Ok(None)` sends
+    /// the caller down the generic path instead).
+    #[cfg(feature = "enrich-reddit")]
+    fn store_enriched(
+        &self,
+        id: ArticleId,
+        source_url: &str,
+        raw_html: &str,
+    ) -> Result<Option<Article>, CoreError> {
+        let html = content::sanitize(raw_html, Some(source_url));
+        let text = content::plain_text(&html);
+        let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
+        if text.trim().is_empty() && content::first_image(&html).is_none() {
+            return Ok(None);
+        }
+        self.storage.update_article_content(
+            id,
+            &ArticleContent { html, text },
+            Some(word_count),
+        )?;
+        self.storage
+            .get_article(id)?
+            .ok_or(CoreError::NotFound { entity: "article" })
+            .map(Some)
     }
 
     /// Full-text search (escaped FTS5 — user input is never raw MATCH).
@@ -899,6 +1337,55 @@ impl CoreHandle {
             checksum: outcome.checksum,
             disposition: outcome.disposition,
         })
+    }
+
+    /// Exports every article matching `filter` to a named destination —
+    /// the export-everything path ("my library as markdown"). Each note
+    /// goes through the same per-article pipeline as
+    /// [`Self::save_to_destination`] (frontmatter, managed region,
+    /// manifest idempotency, `article.saved`/`article.updated` events), so
+    /// re-running a bulk export only rewrites what actually changed.
+    /// `filter.before`/`limit` are pagination internals and are ignored.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::UnknownDestination`]; the first per-article
+    /// export/storage/emission error aborts the walk (already-written
+    /// notes stay — each save is atomic).
+    pub fn save_all_to_destination(
+        &self,
+        filter: &ListArticles,
+        destination: &DestinationName,
+    ) -> Result<BulkSaveOutcome, CoreError> {
+        // Fail on an unknown destination before walking anything.
+        if !self.lock_destinations().contains_key(destination) {
+            return Err(CoreError::UnknownDestination {
+                name: destination.to_string(),
+            });
+        }
+        let mut page_filter = filter.clone();
+        page_filter.before = None;
+        page_filter.limit = 200;
+        let mut outcome = BulkSaveOutcome::default();
+        loop {
+            let page = self.storage.list_articles(page_filter.clone())?;
+            let page_len = page.len();
+            for article in page {
+                page_filter.before = Some(article.id);
+                match self
+                    .save_to_destination(article.id, destination)?
+                    .disposition
+                {
+                    ExportDisposition::Created => outcome.created += 1,
+                    ExportDisposition::Updated => outcome.updated += 1,
+                    ExportDisposition::Unchanged => outcome.unchanged += 1,
+                }
+            }
+            if page_len < page_filter.limit as usize {
+                break;
+            }
+        }
+        Ok(outcome)
     }
 
     // ---------------------------------------------------------- imports

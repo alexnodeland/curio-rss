@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "Listing",
+    "data": {
+      "children": [
+        {
+          "kind": "t3",
+          "data": {
+            "title": "Trail photos from the ridge loop",
+            "author": "hiker",
+            "permalink": "/r/hiking/comments/xyz789/trail_photos_from_the_ridge_loop/",
+            "url": "https://www.reddit.com/gallery/xyz789",
+            "is_gallery": true,
+            "selftext_html": null,
+            "gallery_data": {
+              "items": [
+                { "media_id": "m1", "id": 1 },
+                { "media_id": "m2", "id": 2 }
+              ]
+            },
+            "media_metadata": {
+              "m2": {
+                "status": "valid",
+                "e": "Image",
+                "s": { "u": "https://i.redd.it/m2.jpg", "x": 4032, "y": 3024 }
+              },
+              "m1": {
+                "status": "valid",
+                "e": "Image",
+                "s": { "u": "https://i.redd.it/m1.jpg", "x": 4032, "y": 3024 }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "kind": "Listing",
+    "data": { "children": [] }
+  }
+]

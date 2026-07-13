@@ -39,6 +39,9 @@ pub struct FetchRequest {
     pub etag: Option<String>,
     /// `Last-Modified` from the last successful fetch (conditional GET).
     pub last_modified: Option<String>,
+    /// OAuth bearer token, sent as `Authorization: Bearer …` (the
+    /// authenticated enrichment path). Never logged.
+    pub bearer: Option<String>,
 }
 
 impl FetchRequest {
@@ -67,6 +70,9 @@ pub struct FetchResponse {
     pub etag: Option<String>,
     /// Response `Last-Modified`, for the next conditional GET.
     pub last_modified: Option<String>,
+    /// `Retry-After` (delta-seconds form only), when the server sent one —
+    /// how long a 429/503 asked us to back off.
+    pub retry_after: Option<std::time::Duration>,
     /// Response body. Read (and size-capped) only for 2xx responses;
     /// empty for 304 and error statuses.
     pub body: Vec<u8>,
@@ -149,6 +155,14 @@ pub enum FetchError {
         host: String,
         /// The offending resolved address.
         addr: IpAddr,
+    },
+    /// A POST answered with a redirect. Never followed: silently
+    /// re-POSTing credentials across hops is exactly the surprise the
+    /// policed client exists to prevent.
+    #[error("{url:?} answered a POST with a redirect — refusing to follow")]
+    RedirectNotAllowed {
+        /// The offending URL.
+        url: String,
     },
     /// The redirect cap was exceeded.
     #[error("too many redirects (limit {limit}) fetching {url:?}")]

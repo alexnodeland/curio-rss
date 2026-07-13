@@ -5,6 +5,7 @@ mod articles;
 mod feeds;
 mod init;
 mod inspect;
+mod reddit;
 mod transfer;
 
 use std::process::ExitCode;
@@ -36,10 +37,31 @@ fn dispatch(app: &mut App, command: Command) -> anyhow::Result<ExitCode> {
         }
         Command::Tag { id, tag } => articles::tag(app, &id, &tag, true),
         Command::Untag { id, tag } => articles::tag(app, &id, &tag, false),
-        Command::Save { id, dest } => transfer::save(app, &id, dest),
+        Command::Clip { url, tags } => articles::clip(app, &url, tags),
+        Command::Save {
+            id,
+            dest,
+            all,
+            read_later,
+            starred,
+            feed,
+            tag,
+        } => transfer::save(
+            app,
+            transfer::SaveRequest {
+                id,
+                dest,
+                all,
+                read_later,
+                starred,
+                feed,
+                tag,
+            },
+        ),
         Command::Dest(command) => transfer::dest(app, command),
         Command::Opml(command) => transfer::opml(app, command),
         Command::Import { file, from } => transfer::import(app, &file, from),
+        Command::Reddit(command) => reddit::run(app, command),
         Command::Events(command) => inspect::events(app, &command),
         Command::Doctor => inspect::doctor(app),
         Command::Search { query, limit } => articles::search(app, &query, limit),

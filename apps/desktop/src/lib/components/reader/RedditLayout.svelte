@@ -3,18 +3,36 @@
  * Reddit layout: a subreddit-branded post header carrying the RSS-native
  * structure of the item — subreddit, author, and the distinct comments vs.
  * link affordances parsed from the feed's own footer (`parseRedditPost`) —
- * over the feed-provided body with that boilerplate footer pruned. No
- * unauthenticated Reddit JSON, no fetch (D8): every field comes from data the
- * feed already sent. Outbound clicks route through the URL-scoped opener.
+ * over the feed-provided body with that boilerplate footer pruned. The
+ * layout itself does no fetching; "Load full post" delegates to the core's
+ * load-full path, which (with the `enrich-reddit` feature, D14) upgrades
+ * the body via the post's public JSON — full selftext, galleries, images.
+ * Outbound clicks route through the URL-scoped opener.
  */
 import Icon from '$components/common/Icon.svelte';
 import type { ArticleDto } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { parseRedditPost, stripRedditFooter, subredditOf } from '$lib/reader/view-mode';
+import { loadFullArticle } from '$lib/state/actions';
 import { openExternal } from '$lib/utils/external';
 import SanitizedHtml from './SanitizedHtml.svelte';
 
 let { article }: { article: ArticleDto } = $props();
+
+let loadingFull = $state(false);
+
+/** Upgrades the stub body to the full post (core-side enrichment). */
+async function loadFull(): Promise<void> {
+    if (loadingFull) {
+        return;
+    }
+    loadingFull = true;
+    try {
+        await loadFullArticle(article.id);
+    } finally {
+        loadingFull = false;
+    }
+}
 
 const subreddit = $derived(subredditOf(article.source_url));
 const post = $derived(parseRedditPost(article.content_html, article.source_url));
@@ -69,6 +87,15 @@ function linkHost(url: string): string {
             >
                 <Icon name="message" size={16} />
                 <span>{t('reader.reddit.openThread')}</span>
+            </button>
+            <button
+                class="post-action"
+                type="button"
+                disabled={loadingFull}
+                onclick={() => void loadFull()}
+            >
+                <Icon name="refresh" size={16} />
+                <span>{loadingFull ? t('reader.loadingFull') : t('reader.reddit.loadFull')}</span>
             </button>
             {#if post.isLinkPost && post.linkUrl !== null}
                 {@const url = post.linkUrl}

@@ -55,6 +55,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::feeds::set_feed_tags,
             commands::feeds::set_feed_title,
             commands::feeds::set_feed_metadata,
+            commands::feeds::set_feed_full_text,
             commands::feeds::reorder_feeds,
             commands::feeds::refresh_feed,
             commands::feeds::refresh_all,
@@ -63,6 +64,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::articles::list_articles,
             commands::articles::get_article,
             commands::articles::load_full_article,
+            commands::articles::save_url,
             commands::articles::get_article_state,
             commands::articles::get_article_tags,
             commands::articles::get_unread_counts,
@@ -85,6 +87,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::destinations::list_destinations,
             commands::destinations::remove_destination,
             commands::destinations::promote_article,
+            commands::destinations::promote_all,
             // opml
             commands::opml::import_opml,
             commands::opml::import_file,
@@ -92,6 +95,10 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             // theme yaml io
             commands::theme::export_text_file,
             commands::theme::read_text_file,
+            // reddit API credentials (D15; secret is write-only)
+            commands::reddit::set_reddit_api,
+            commands::reddit::clear_reddit_api,
+            commands::reddit::get_reddit_api_status,
             // settings / app
             commands::settings::get_setting,
             commands::settings::set_setting,
@@ -151,6 +158,9 @@ pub fn run() {
             logging::init(&profile.join("logs"));
             let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
             let core: commands::SharedCore = Arc::new(core);
+            // Optional Reddit API credentials from the OS keychain (D15) —
+            // best-effort; absence just means the unauthenticated tier.
+            commands::reddit::load_credentials_at_startup(&core);
             app.manage(Arc::clone(&core));
             app.manage(ipc_policy::PathRegistry::new());
             app.manage(image_cache::ImageCache::new(

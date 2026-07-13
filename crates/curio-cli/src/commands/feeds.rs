@@ -21,7 +21,27 @@ pub(crate) fn run(app: &mut App, command: FeedCommand) -> anyhow::Result<ExitCod
         } => add(app, url, tags, allow_private_network),
         FeedCommand::List => list(app),
         FeedCommand::Rm { feed } => remove(app, &feed),
+        FeedCommand::FullText { feed, mode } => full_text(app, &feed, mode.as_bool()),
     }
+}
+
+/// `curio feed full-text <feed> <on|off>` — flips per-feed full-text mode.
+fn full_text(app: &App, reference: &str, enabled: bool) -> anyhow::Result<ExitCode> {
+    let feed = resolve::feed_by_ref(&app.core, reference)?;
+    app.core.set_feed_full_text(feed.id, enabled)?;
+    if app.json {
+        emit_json(&serde_json::json!({
+            "feed": feed.url,
+            "fetch_full_text": enabled,
+        }))?;
+    } else {
+        println!(
+            "full-text {} for {}",
+            if enabled { "on" } else { "off" },
+            feed.url
+        );
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn add(

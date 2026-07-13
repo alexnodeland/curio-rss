@@ -39,3 +39,15 @@ lcov.info
 # System files
 .DS_Store
 Thumbs.db
+
+# The widely-copied macOS global-ignore rule for custom folder icons is written
+# `Icon?` — a glob whose `?` matches any one character. On macOS git runs with
+# core.ignorecase=true, so it also matches our `icons` directory (icon + s) and
+# silently swallows every new file added there. Re-include it explicitly: repo
+# .gitignore takes precedence over core.excludesFile.
+!apps/desktop/src-tauri/icons/
+
+# ...but `tauri icon` also emits mobile asset trees we don't ship (no mobile
+# target in tauri.conf.json). They were never tracked; keep it that way.
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/

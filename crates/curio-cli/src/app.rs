@@ -33,6 +33,7 @@ impl App {
         )
         .with_context(|| format!("opening profile {}", profile.display()))?;
         reconcile(&core, &config)?;
+        load_reddit_credentials(&core);
         Ok(Self {
             profile,
             config,
@@ -58,6 +59,25 @@ pub(crate) fn resolve_profile_dir(flag: Option<PathBuf>) -> anyhow::Result<PathB
         .context(
             "cannot determine the platform data directory — pass --profile or set CURIO_PROFILE",
         )
+}
+
+/// Loads the optional Reddit API credentials from the OS keychain into
+/// the runtime core (D15). Best-effort on purpose: a locked or missing
+/// keychain backend (headless Linux without secret-service) degrades to
+/// the unauthenticated tier with a warning, never a failed command.
+fn load_reddit_credentials(core: &CoreHandle) {
+    match curio_core::secrets::load_reddit_api() {
+        Ok(Some(secret)) => {
+            core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig::new(
+                secret.client_id,
+                secret.client_secret,
+            )));
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(%err, "keychain unavailable; reddit stays unauthenticated");
+        }
+    }
 }
 
 /// Applies curio.toml onto the engine: destinations are (re-)registered,

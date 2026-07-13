@@ -56,6 +56,17 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ulid = "1"
 url = "2"
+# OS keychain for the few real secrets Curio holds (D15: the user's own
+# Reddit API credentials). Pure-Rust on every platform: Security.framework
+# on macOS, wincred on Windows, zbus secret-service on Linux — no system
+# libraries at build time.
+keyring = { version = "3.6", default-features = false, features = [
+    "apple-native",
+    "windows-native",
+    "async-secret-service",
+    "crypto-rust",
+    "tokio",
+] }
 uuid = { version = "1", features = ["v7"] }
 
 # dev-only

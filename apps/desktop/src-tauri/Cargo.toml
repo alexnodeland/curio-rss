@@ -31,7 +31,7 @@ tauri-build = { version = "2", features = [] }
 # Local time for the quiet-hours window (WP14 notifications); already in the
 # workspace graph via curio-core, so no new licenses to triage.
 chrono = { workspace = true }
-curio-core = { workspace = true }
+curio-core = { workspace = true, features = ["enrich-reddit", "keychain"] }
 curio-types = { workspace = true }
 directories = { workspace = true }
 # HTML scan for feed autodiscovery + favicon (already in the workspace

@@ -19,13 +19,15 @@ import {
 } from './ipc-harness';
 
 function mountResponders(): Record<string, Responder> {
-    // The panels that prime on open: Data (destinations) and Advanced (doctor).
+    // The panels that prime on open: Data (destinations), Advanced
+    // (doctor), and Media & Privacy (the Reddit API status).
     return {
         list_destinations: [],
         db_stats: dbStatsFixture(),
         get_app_info: appInfoFixture(),
         get_setting: null,
         set_setting: null,
+        get_reddit_api_status: { configured: false, client_id: null },
     };
 }
 

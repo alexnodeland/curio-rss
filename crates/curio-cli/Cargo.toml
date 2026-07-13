@@ -19,7 +19,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
-curio-core = { workspace = true }
+curio-core = { workspace = true, features = ["enrich-reddit", "keychain"] }
 curio-types = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }

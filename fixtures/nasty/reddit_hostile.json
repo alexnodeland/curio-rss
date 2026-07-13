@@ -1,0 +1,25 @@
+[
+  {
+    "kind": "Listing",
+    "data": {
+      "children": [
+        {
+          "kind": "t3",
+          "data": {
+            "title": "Totally normal post",
+            "author": "attacker",
+            "permalink": "/r/pwn/comments/evil01/totally_normal_post/",
+            "url": "javascript:alert(1)",
+            "is_gallery": false,
+            "post_hint": "link",
+            "selftext_html": "<div class=\"md\"><p>hi</p><script>alert(1)</script><img src=\"https://cdn.example/x.png\" onerror=\"alert(2)\"><a href=\"javascript:alert(3)\">click</a></div>"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "kind": "Listing",
+    "data": { "children": [] }
+  }
+]

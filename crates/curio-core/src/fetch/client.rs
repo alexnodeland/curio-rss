@@ -8,7 +8,10 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use reqwest::header::{ACCEPT, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION};
+use reqwest::header::{
+    ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION,
+    RETRY_AFTER,
+};
 use url::{Host, Url};
 
 use super::{FetchError, FetchRequest, FetchResponse, policy};
@@ -97,17 +100,35 @@ impl Default for FetchConfig {
             // fingerprint (a hard 403) and the honest curio UA. So it — and
             // only it — gets the platform-native TLS stack (whose ClientHello
             // Reddit accepts, verified live: native-TLS + browser UA -> 200)
-            // plus a browser-class UA, a browser-ish Accept-Language, and a 2s
-            // politeness delay to stay clear of the unauthenticated rate limit.
-            // Disclosed in PRIVACY.md; every other host keeps rustls + the
-            // honest curio UA.
-            host_overrides: vec![HostOverride {
-                host_suffix: "reddit.com".to_owned(),
-                user_agent: Some(REDDIT_USER_AGENT.to_owned()),
-                extra_headers: vec![("accept-language".to_owned(), "en-US,en;q=0.9".to_owned())],
-                politeness_delay: Some(Duration::from_secs(2)),
-                use_native_tls: true,
-            }],
+            // plus a browser-class UA and a browser-ish Accept-Language.
+            // The 6.5s politeness delay keeps the request rate (~9/min)
+            // under Reddit's unauthenticated ~10/min limit — this paces the
+            // .rss fetches AND the enrich-reddit JSON calls, which share the
+            // host. Disclosed in PRIVACY.md; every other host keeps rustls +
+            // the honest curio UA.
+            host_overrides: vec![
+                // Authenticated API calls (BYO OAuth, D15) get their own,
+                // faster lane: the free tier allows 100 QPM per client, so
+                // 700ms (~85/min) leaves margin. Listed FIRST — overrides
+                // are first-match-wins and `reddit.com` would swallow it.
+                HostOverride {
+                    host_suffix: "oauth.reddit.com".to_owned(),
+                    user_agent: None,
+                    extra_headers: Vec::new(),
+                    politeness_delay: Some(Duration::from_millis(700)),
+                    use_native_tls: true,
+                },
+                HostOverride {
+                    host_suffix: "reddit.com".to_owned(),
+                    user_agent: Some(REDDIT_USER_AGENT.to_owned()),
+                    extra_headers: vec![(
+                        "accept-language".to_owned(),
+                        "en-US,en;q=0.9".to_owned(),
+                    )],
+                    politeness_delay: Some(Duration::from_millis(6500)),
+                    use_native_tls: true,
+                },
+            ],
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
@@ -205,6 +226,9 @@ impl PolicedClient {
             if let Some(last_modified) = &request.last_modified {
                 req = req.header(IF_MODIFIED_SINCE, last_modified);
             }
+            if let Some(bearer) = &request.bearer {
+                req = req.header(AUTHORIZATION, format!("Bearer {bearer}"));
+            }
             let response = req.send().await.map_err(|err| map_reqwest(&url, &err))?;
 
             let status = response.status().as_u16();
@@ -240,6 +264,11 @@ impl PolicedClient {
 
             let etag = header_string(&response, ETAG.as_str());
             let last_modified = header_string(&response, LAST_MODIFIED.as_str());
+            // Retry-After in its delta-seconds form (the shape rate limiters
+            // send); the rare HTTP-date form is ignored rather than parsed.
+            let retry_after = header_string(&response, RETRY_AFTER.as_str())
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .map(Duration::from_secs);
             let body = if response.status().is_success() {
                 self.read_capped(&url, response).await?
             } else {
@@ -251,9 +280,71 @@ impl PolicedClient {
                 permanent_redirect: hops > 0 && all_permanent,
                 etag,
                 last_modified,
+                retry_after,
                 body,
             });
         }
+    }
+
+    /// Performs one policed form POST — the OAuth token-grant shape:
+    /// HTTP Basic credentials plus an `application/x-www-form-urlencoded`
+    /// body, through the exact same validate → resolve → policy →
+    /// politeness pipeline as [`Self::fetch`]. Redirects are refused
+    /// ([`FetchError::RedirectNotAllowed`]) rather than followed.
+    ///
+    /// # Errors
+    ///
+    /// Any [`FetchError`], plus `RedirectNotAllowed` on a 3xx answer.
+    pub async fn post_form(
+        &self,
+        raw_url: &str,
+        basic_auth: (&str, &str),
+        form: &[(&str, &str)],
+    ) -> Result<FetchResponse, FetchError> {
+        let url = parse_and_screen(raw_url)?;
+        let pinned = self.resolve_and_check(&url, false).await?;
+        let host_override = self.override_for(&url);
+        self.be_polite(&url, host_override).await;
+
+        let user_agent = host_override
+            .and_then(|entry| entry.user_agent.as_deref())
+            .unwrap_or(self.config.user_agent.as_str());
+        let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
+        let client = self.build_hop_client(&url, pinned, user_agent, native_tls)?;
+        let mut req = client
+            .post(url.clone())
+            .basic_auth(basic_auth.0, Some(basic_auth.1))
+            .form(form);
+        if let Some(host_override) = host_override {
+            for (name, value) in &host_override.extra_headers {
+                req = req.header(name.as_str(), value.as_str());
+            }
+        }
+        let response = req.send().await.map_err(|err| map_reqwest(&url, &err))?;
+
+        let status = response.status().as_u16();
+        if matches!(status, 301 | 302 | 303 | 307 | 308) {
+            return Err(FetchError::RedirectNotAllowed {
+                url: url.to_string(),
+            });
+        }
+        let retry_after = header_string(&response, RETRY_AFTER.as_str())
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        let body = if response.status().is_success() {
+            self.read_capped(&url, response).await?
+        } else {
+            Vec::new()
+        };
+        Ok(FetchResponse {
+            status,
+            final_url: url.to_string(),
+            permanent_redirect: false,
+            etag: None,
+            last_modified: None,
+            retry_after,
+            body,
+        })
     }
 
     /// Resolves the URL's host (DNS first for domain names) and applies
@@ -501,15 +592,21 @@ mod tests {
         assert!(config.user_agent.starts_with("curio/"));
         assert!(config.trusted_addrs.is_empty());
         assert!(config.accept.contains("application/rss+xml"));
-        // Exactly one default override: reddit.com's browser UA + politeness.
-        assert_eq!(config.host_overrides.len(), 1);
-        let reddit = &config.host_overrides[0];
+        // Two default overrides, most-specific first (first match wins):
+        // the authenticated API lane, then the general reddit.com policy.
+        assert_eq!(config.host_overrides.len(), 2);
+        let oauth = &config.host_overrides[0];
+        assert_eq!(oauth.host_suffix, "oauth.reddit.com");
+        // ~85/min: under the authenticated 100 QPM free tier.
+        assert_eq!(oauth.politeness_delay, Some(Duration::from_millis(700)));
+        let reddit = &config.host_overrides[1];
         assert_eq!(reddit.host_suffix, "reddit.com");
-        assert_eq!(reddit.politeness_delay, Some(Duration::from_secs(2)));
+        // ~9/min: under Reddit's unauthenticated ~10/min rate limit.
+        assert_eq!(reddit.politeness_delay, Some(Duration::from_millis(6500)));
         assert_eq!(reddit.user_agent.as_deref(), Some(REDDIT_USER_AGENT));
         assert!(
-            reddit.use_native_tls,
-            "reddit.com must use the native TLS stack"
+            reddit.use_native_tls && oauth.use_native_tls,
+            "reddit hosts must use the native TLS stack"
         );
     }
 

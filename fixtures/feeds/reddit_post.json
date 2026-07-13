@@ -1,0 +1,36 @@
+[
+  {
+    "kind": "Listing",
+    "data": {
+      "children": [
+        {
+          "kind": "t3",
+          "data": {
+            "title": "How we sped up our Rust build times",
+            "author": "helpful_dev",
+            "permalink": "/r/rust/comments/abc123/how_we_sped_up_our_rust_build_times/",
+            "url": "https://www.reddit.com/r/rust/comments/abc123/how_we_sped_up_our_rust_build_times/",
+            "is_gallery": false,
+            "post_hint": "self",
+            "selftext_html": "<div class=\"md\"><p>We cut compile times in half by splitting crates along feature seams and enabling the parallel front end.</p><p>The full write-up with numbers and the exact cargo flags follows below.</p></div>",
+            "preview": {
+              "images": [
+                {
+                  "source": {
+                    "url": "https://preview.redd.it/buildchart.png",
+                    "width": 1200,
+                    "height": 630
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "kind": "Listing",
+    "data": { "children": [] }
+  }
+]

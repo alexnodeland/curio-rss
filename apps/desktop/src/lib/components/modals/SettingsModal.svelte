@@ -14,6 +14,7 @@ import ThemePicker from '$components/common/ThemePicker.svelte';
 import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
+import RedditApiPanel from '$components/modals/RedditApiPanel.svelte';
 import UpdatesPanel from '$components/modals/UpdatesPanel.svelte';
 import ReaderPreview from '$components/reader/ReaderPreview.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
@@ -295,6 +296,7 @@ function onKeydown(event: KeyboardEvent): void {
                         <span class="toggle-hint">{t('settings.allowRemoteFavicon.hint')}</span>
                     </span>
                 </label>
+                <RedditApiPanel />
             </div>
 
             <div

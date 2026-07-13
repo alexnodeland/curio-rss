@@ -178,3 +178,53 @@ wipe-and-reinstall reconciliation; `curio export --all` full-portability archive
 human-readable schema docs alongside JSON Schema artifacts; the `ipc_policy` path gate;
 config/data/cache platform-path split; event-sink rotation/cursor ergonomics; per-PR CI
 on one cheap Linux runner with the 3-OS Tauri matrix merge/nightly-gated.
+
+## D14. The enrich seam lands: Reddit JSON behind a cargo feature
+
+The post-v1 enrichment seam that D8 anticipated now exists: a `crates/curio-core/src/enrich/`
+module, one provider per cargo feature (first: `enrich-reddit`, enabled by both heads).
+The provider fetches a reddit post's public `.json?raw_json=1` through the **policed
+client**, builds raw HTML (full selftext, gallery images in declared order, image-post
+figures, external-link anchors), and hands it to the standard **sanitize gate** before
+storage — sanitize-at-ingest holds regardless of what an API returns (a hostile fixture
+in `fixtures/nasty/` proves it). Guardrails, exactly as D8 specified: a **circuit
+breaker** (5 consecutive failures → 10-minute cool-down) so a rate-limited API cannot
+stall refreshes; enrichment runs only on the load-full / full-text-hydrate path, never at
+plain feed ingest; every failure is soft (falls back to generic readability). Recognition
+is by URL path shape (`/r/<sub>/comments/<id>`), not host, so the whole path is
+hermetically testable against loopback fixtures. Rate limits are first-class: reddit.com
+is paced at ~9 requests/min (one 6.5s politeness slot shared by `.rss` and JSON fetches,
+disclosed in PRIVACY.md), a 429 trips the breaker *immediately* honoring `Retry-After`,
+never falls back to an HTML fetch of the same throttled host, surfaces as a user-facing
+`RateLimited` error, and stops a full-text hydration batch mid-run. D8's yt-dlp rules are untouched — a
+YouTube provider still requires the external pinned SHA256-verified binary design and
+remains a named seam.
+
+## D15. Fast Reddit: BYO OAuth, keychain-stored, opt-in only
+
+The unauthenticated Reddit JSON tier (~10 req/min) makes full-text hydration slow by
+necessity (D14 paces it at 6.5s/request). Reddit's Data API free tier — 100 queries/min
+per OAuth client, self-serve registration, non-commercial — is the sanctioned fast lane.
+**Resolved:** Curio supports *bring-your-own* credentials: the user registers their own
+free app at reddit.com/prefs/apps and hands Curio the client id + secret. Curio never
+ships a shared client id (no pooled rate limit, no embedded secret, no commercial-use
+ambiguity). Design rules:
+
+- **Opt-in only.** Without credentials everything keeps working unauthenticated at the
+  slow pacing — the authenticated path changes speed, never capability.
+- **Secrets live in the OS keychain** (macOS Keychain / Windows Credential Manager /
+  Linux secret-service) via the core `secrets` module behind the `keychain` cargo
+  feature. The core never reads the keychain on its own — heads load explicitly at
+  startup, so opening a profile can never pop an OS prompt and hermetic tests never
+  touch the real store (`CURIO_MOCK_KEYRING` swaps in the in-memory mock).
+- **The secret is write-only across every boundary**: IPC status returns only the client
+  id; the CLI reads the secret from stdin rather than argv; nothing ever echoes it.
+- **The token grant goes through the policed client** — a new form-POST path that
+  refuses redirects (never silently re-POST credentials across hops). Tokens are
+  application-only `client_credentials`, cached with a 60s expiry margin, invalidated on
+  401/403, re-granted on demand.
+- **Pacing:** `oauth.reddit.com` gets its own 700ms politeness lane (~85/min under the
+  100 QPM tier); the D14 breaker and Retry-After handling apply unchanged.
+
+Surfaces: `curio reddit login|status|logout`, and Settings → Media & Privacy in the
+desktop app. Disclosed in PRIVACY.md.

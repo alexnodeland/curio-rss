@@ -1,0 +1,28 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Curio">
+  <title>Curio</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4A38C8"/>
+      <stop offset="0.55" stop-color="#3A2AA0"/>
+      <stop offset="1" stop-color="#271B6E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- full-bleed tile: no baked shape, no margin. macOS 26 masks app icons to
+       the system squircle and adds its own highlight, so anything we bake in
+       here gets masked a second time and reads as a tile inside a tile. -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#tile)"/>
+
+  <!-- the Curio "C": a bold aperture ring opening to the right, drawn as a
+       stroked circle with a dashed gap centred on 3 o'clock -->
+  <circle cx="512" cy="512" r="292.0" fill="none" stroke="#F6F1E7" stroke-width="116.0"
+          stroke-linecap="round" stroke-dasharray="1265.0 570.0" stroke-dashoffset="285.0"/>
+
+  <!-- the RSS mark tucked inside the C's mouth: dot + two broadcast arcs
+       opening to the upper-right (this is a feed reader) -->
+  <g fill="none" stroke="#F4B23E" stroke-width="52.0" stroke-linecap="round">
+    <path d="M 556.0 646.0 A 104.0 104.0 0 0 0 452.0 542.0"/>
+    <path d="M 644.0 646.0 A 192.0 192.0 0 0 0 452.0 454.0"/>
+  </g>
+  <circle cx="452.0" cy="646.0" r="42.0" fill="#F4B23E"/>
+</svg>

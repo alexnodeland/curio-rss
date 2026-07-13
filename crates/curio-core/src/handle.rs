@@ -102,6 +102,14 @@ pub enum CoreError {
         /// Seconds until the breaker re-tries.
         retry_after_secs: u64,
     },
+    /// Reddit refused the request for auth reasons (missing, rejected,
+    /// or revoked credentials) — actionable by the user, so the detail
+    /// is surfaced verbatim.
+    #[error("{detail}")]
+    RedditAuth {
+        /// The user-facing guidance.
+        detail: String,
+    },
 }
 
 /// Options for [`CoreHandle::open_with`].
@@ -577,11 +585,10 @@ impl CoreHandle {
         for article_id in pending {
             match self.hydrate_article(article_id).await {
                 Ok(_) => {}
-                Err(CoreError::RateLimited { host, .. }) => {
-                    tracing::warn!(
-                        %host,
-                        "rate-limited during full-text hydrate; stopping the batch"
-                    );
+                Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. }) => {
+                    // Deterministic for every remaining article in the
+                    // batch — stop now rather than grind through it.
+                    tracing::warn!("full-text hydrate blocked upstream; stopping the batch");
                     break;
                 }
                 Err(err) => {
@@ -961,26 +968,7 @@ impl CoreHandle {
         {
             Ok(enriched) => {
                 self.enrich_breaker.record_success();
-                // Provider output IS the main content already — it only
-                // passes the sanitize gate (readability's boilerplate
-                // extraction would drop the appended media figures).
-                let html = content::sanitize(&enriched.html, Some(&article.source_url));
-                let text = content::plain_text(&html);
-                let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
-                // The API is authoritative for its own posts, so it may
-                // replace longer feed content — but never with nothing.
-                if text.trim().is_empty() && content::first_image(&html).is_none() {
-                    return Ok(None);
-                }
-                self.storage.update_article_content(
-                    id,
-                    &ArticleContent { html, text },
-                    Some(word_count),
-                )?;
-                self.storage
-                    .get_article(id)?
-                    .ok_or(CoreError::NotFound { entity: "article" })
-                    .map(Some)
+                self.store_enriched(id, &article.source_url, &enriched.html)
             }
             Err(EnrichError::Http {
                 status: 429,
@@ -999,11 +987,31 @@ impl CoreHandle {
                 ..
             }) if authenticated => {
                 // A stale or revoked token: drop it so the next call
-                // re-grants, and fall back to the public endpoint.
+                // re-grants, and tell the user — falling back to an HTML
+                // fetch of the same host would only produce junk.
                 self.reddit_auth.invalidate();
-                self.enrich_breaker.record_failure();
                 tracing::warn!(article = %id, status, "reddit bearer rejected; token dropped");
-                Ok(None)
+                Err(CoreError::RedditAuth {
+                    detail: format!(
+                        "reddit rejected the stored API credentials (HTTP {status}) — \
+                         check the client id and secret, or re-create the app"
+                    ),
+                })
+            }
+            Err(EnrichError::Http {
+                status: status @ (401 | 403),
+                ..
+            }) => {
+                // Reddit's 2026 lockdown: anonymous .json requests are
+                // 403-blocked outright. Deterministic — no breaker, no
+                // fallback fetch; the guidance IS the answer.
+                tracing::warn!(article = %id, status, "anonymous reddit JSON refused");
+                Err(CoreError::RedditAuth {
+                    detail: format!(
+                        "reddit blocks anonymous full-post requests (HTTP {status}) — \
+                         add your own free Reddit API credentials to load full posts"
+                    ),
+                })
             }
             Err(err) => {
                 self.enrich_breaker.record_failure();
@@ -1015,6 +1023,36 @@ impl CoreHandle {
                 Ok(None)
             }
         }
+    }
+
+    /// Stores a provider's enriched body. Provider output IS the main
+    /// content already — it only passes the sanitize gate (readability's
+    /// boilerplate extraction would drop the appended media figures).
+    /// The API is authoritative for its own posts, so it may replace
+    /// longer feed content — but never with nothing (`Ok(None)` sends
+    /// the caller down the generic path instead).
+    #[cfg(feature = "enrich-reddit")]
+    fn store_enriched(
+        &self,
+        id: ArticleId,
+        source_url: &str,
+        raw_html: &str,
+    ) -> Result<Option<Article>, CoreError> {
+        let html = content::sanitize(raw_html, Some(source_url));
+        let text = content::plain_text(&html);
+        let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
+        if text.trim().is_empty() && content::first_image(&html).is_none() {
+            return Ok(None);
+        }
+        self.storage.update_article_content(
+            id,
+            &ArticleContent { html, text },
+            Some(word_count),
+        )?;
+        self.storage
+            .get_article(id)?
+            .ok_or(CoreError::NotFound { entity: "article" })
+            .map(Some)
     }
 
     /// Full-text search (escaped FTS5 — user input is never raw MATCH).

@@ -1020,6 +1020,49 @@ async fn authenticated_reddit_enrichment_grants_once_and_sends_the_bearer() {
     assert!(core.reddit_api_client_id().is_none());
 }
 
+/// Reddit's 2026 lockdown 403-blocks anonymous .json requests. That is
+/// deterministic, so the answer is guidance (add credentials), not a
+/// junk fallback fetch of the same host's HTML shell.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn an_anonymous_reddit_403_asks_for_credentials_without_a_fallback_fetch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/locked1/title.json"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // The HTML fallback must never fire.
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/locked1/title/"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let mut article = manual_article("k1", "Reddit stub");
+    article.source_url = format!("{}/r/rust/comments/locked1/title/", server.uri());
+    core.storage().upsert_articles(vec![article]).unwrap();
+    let stored = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+
+    let err = core.hydrate_article(stored.id).await.unwrap_err();
+    assert!(
+        matches!(err, curio_core::CoreError::RedditAuth { .. }),
+        "{err:?}"
+    );
+    assert!(
+        err.to_string()
+            .contains("add your own free Reddit API credentials"),
+        "{err}"
+    );
+}
+
 /// A reddit 429 trips the breaker at once (honoring Retry-After), makes
 /// NO fallback fetch of the HTML page, and every hydrate while the
 /// breaker is open fails fast without touching the network — the

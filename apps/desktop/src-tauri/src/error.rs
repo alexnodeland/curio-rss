@@ -125,7 +125,7 @@ impl From<CoreError> for CommandError {
             CoreError::InvalidUrl { .. } => {
                 Self::user(ErrorCode::InvalidInput, error.to_string(), true)
             }
-            CoreError::RateLimited { .. } => {
+            CoreError::RateLimited { .. } | CoreError::RedditAuth { .. } => {
                 Self::user(ErrorCode::Network, error.to_string(), true)
             }
             CoreError::FeedParse(_) | CoreError::Opml(_) | CoreError::Import(_) => {

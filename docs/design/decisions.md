@@ -228,3 +228,9 @@ ambiguity). Design rules:
 
 Surfaces: `curio reddit login|status|logout`, and Settings → Media & Privacy in the
 desktop app. Disclosed in PRIVACY.md.
+
+**Live-verified constraint (2026-07):** Reddit's CDN now 403-blocks *anonymous* `.json`
+requests outright (www/old/api hosts, any User-Agent) — the unauthenticated tier
+effectively serves only `.rss`. So BYO OAuth is not merely the fast lane; it is the
+working path for full posts. An anonymous 403 surfaces as explicit guidance ("add your
+own free Reddit API credentials"), never as a fallback HTML fetch of the same host.

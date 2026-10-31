@@ -11,6 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
+mod common;
+
 use curio_core::CoreHandle;
 use curio_core::model::FeedStatus;
 use curio_core::storage::Storage;
@@ -29,7 +31,7 @@ const EXPECTED: &[(&str, i64)] = &[
 ];
 
 fn fixture(version: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    common::manifest_dir()
         .join("../../fixtures/db")
         .join(format!("{version}.db"))
 }

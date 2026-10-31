@@ -60,6 +60,11 @@ deny:
 boundary:
     cargo run -p xtask -- boundary
 
+# Supply-chain lint over .github/workflows: SHA-pinned actions, release gated
+# on CI, updater signing key in one build-free step, SHA256SUMS/SBOM/attestation
+workflows:
+    cargo run -p xtask -- workflows
+
 # The export test IS the generator:
 # Regenerate the committed TS bindings (apps/desktop/src/lib/bindings.ts)
 bindings:
@@ -148,5 +153,5 @@ blob-guard:
     echo "blob guard: OK — no object in history exceeds 1MB"
 
 # Everything CI runs, in CI order — green here means green there
-ci: fmt-check clippy test deny boundary bindings-check cov doc blob-guard frontend-bans desktop-lint desktop-npm-test
+ci: fmt-check clippy test deny boundary workflows bindings-check cov doc blob-guard frontend-bans desktop-lint desktop-npm-test
     @echo "ci suite green"

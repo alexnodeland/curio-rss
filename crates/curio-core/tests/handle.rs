@@ -1426,6 +1426,142 @@ async fn full_text_mode_hydrates_new_articles_at_refresh() {
     assert_eq!(after.word_count, article.word_count);
 }
 
+/// A page the readability scorer confidently extracts, longer than any
+/// feed stub.
+fn full_page(title: &str) -> String {
+    format!(
+        r"<html><body><article>
+        <h1>{title}</h1>
+        <p>The full body of the post that the feed only excerpted, with enough
+           genuine running prose that the readability scorer confidently keeps
+           this container as the main content of the fetched page.</p>
+        <p>A second paragraph makes the extraction unambiguous and pushes the
+           word count well past the one-line stub the feed shipped.</p>
+        </article></body></html>"
+    )
+}
+
+/// #130: a feed reusing one guid for three different posts stores three
+/// articles (not one, overwritten twice) and full-text mode hydrates each
+/// page exactly once — no duplicate hydrations queued for a shared key.
+#[tokio::test]
+async fn a_guid_reused_across_items_stores_each_and_hydrates_each_once() {
+    let server = MockServer::start().await;
+    let feed_xml = format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Reused</title><link>{0}</link>
+        <item><guid>same</guid><title>A</title><link>{0}/a</link><description>stub</description></item>
+        <item><guid>same</guid><title>B</title><link>{0}/b</link><description>stub</description></item>
+        <item><guid>same</guid><title>C</title><link>{0}/c</link><description>stub</description></item>
+        </channel></rss>"#,
+        server.uri()
+    );
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .mount(&server)
+        .await;
+    for post in ["a", "b", "c"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/{post}")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(full_page(post), "text/html"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    core.set_feed_full_text(feed.id, true).unwrap();
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(outcome.new_articles, 3);
+    let mut titles: Vec<String> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|article| article.title)
+        .collect();
+    titles.sort();
+    assert_eq!(titles, ["A", "B", "C"]);
+
+    // Stable across refreshes: the same three keys, nothing new or changed.
+    let second = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((second.new_articles, second.updated_articles), (0, 0));
+}
+
+/// #130: an item without a link is stored under the feed URL (the contract
+/// needs a source URI) but is never hydrated against it — not at refresh
+/// in full-text mode, and not on an explicit load-full.
+#[tokio::test]
+async fn a_link_less_item_is_never_hydrated_against_the_feed_url() {
+    let server = MockServer::start().await;
+    let feed_xml = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Link-less</title>
+        <item><guid>n1</guid><title>Note</title><description>The whole note.</description></item>
+        </channel></rss>"#;
+    // expect(1): only the refresh itself may fetch the feed URL.
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed_url = format!("{}/feed.xml", server.uri());
+    let feed = subscribe(&core, &feed_url);
+    core.set_feed_full_text(feed.id, true).unwrap();
+
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    assert_eq!(article.source_url, feed_url);
+    assert_eq!(article.content.text.trim(), "The whole note.");
+
+    let after = core.hydrate_article(article.id).await.unwrap();
+    assert_eq!(after.content, article.content, "nothing to load: unchanged");
+    server.verify().await;
+}
+
+/// #130: a stored article whose fetch lands on its feed's URL (e.g. a
+/// link-less entry stored under the feed's pre-redirect URL) keeps its
+/// body — the feed XML is never extracted as the article.
+#[tokio::test]
+async fn a_hydrate_that_lands_on_the_feed_url_changes_nothing() {
+    let server = MockServer::start().await;
+    let feed_url = format!("{}/feed.xml", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/old-feed.xml"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", feed_url.as_str()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(full_page("feed"), "text/html"))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &feed_url);
+    let mut stale = manual_article("guid:n1", "Note");
+    stale.feed_id = Some(feed.id);
+    stale.source_url = format!("{}/old-feed.xml", server.uri());
+    core.storage().upsert_articles(vec![stale]).unwrap();
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+
+    let after = core.hydrate_article(article.id).await.unwrap();
+    assert_eq!(after.content, article.content);
+}
+
 /// A feed that only ships an excerpt of one post whose source page lives
 /// at `post_path` on the mock server.
 fn excerpt_feed(server: &MockServer, post_path: &str) -> String {

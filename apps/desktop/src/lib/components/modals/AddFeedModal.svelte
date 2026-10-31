@@ -220,6 +220,7 @@ async function saveLink(): Promise<void> {
                 {/if}
                 <input
                     class="url-input"
+                    data-testid="add-feed-url"
                     type="text"
                     bind:this={urlInput}
                     bind:value={url}
@@ -349,7 +350,7 @@ async function saveLink(): Promise<void> {
         >
             {savingLink ? t('addFeed.savingLink') : t('addFeed.saveLink')}
         </button>
-        <button class="add-button" type="submit" form="add-feed-form" disabled={adding}>
+        <button class="add-button" data-testid="add-feed-submit" type="submit" form="add-feed-form" disabled={adding}>
             {adding ? t('addFeed.adding') : t('addFeed.add')}
         </button>
     {/snippet}

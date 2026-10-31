@@ -154,6 +154,7 @@ function publishedLabel(): string | null {
 <div
     id={articleOptionId(article.id)}
     class="article-row"
+    data-testid="article-row"
     class:selected
     class:compact
     class:unread={flags()?.read === false}

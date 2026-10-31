@@ -36,6 +36,8 @@ export class Query<T> {
 
     #fetcher: () => Promise<CommandResult<T>>;
     #generation = 0;
+    /** The newest refetch's promise (the one whose result will land). */
+    #latest: Promise<void> | null = null;
 
     constructor(key: string, fetcher: () => Promise<CommandResult<T>>, scope: QueryScope = {}) {
         this.key = key;
@@ -44,7 +46,33 @@ export class Query<T> {
     }
 
     /** Runs the fetcher; a newer concurrent refetch wins (last-write-wins). */
-    async refetch(): Promise<void> {
+    refetch(): Promise<void> {
+        const run = this.#run();
+        this.#latest = run;
+        return run;
+    }
+
+    /**
+     * Starts the first fetch unless one has already begun, and returns the
+     * newest fetch's promise — so the creation load and an early `whenLoaded`
+     * share one fetch instead of racing two.
+     */
+    start(): Promise<void> {
+        return this.#latest ?? this.refetch();
+    }
+
+    /**
+     * Resolves once a fetch has settled (`loaded`), starting one if none is in
+     * flight. A superseded refetch resolves without landing anything, so this
+     * keeps awaiting the newest one rather than trusting the first to finish.
+     */
+    async whenLoaded(): Promise<void> {
+        while (!this.loaded) {
+            await this.start();
+        }
+    }
+
+    async #run(): Promise<void> {
         this.#generation += 1;
         const generation = this.#generation;
         this.loading = true;
@@ -100,8 +128,10 @@ export function ensureQuery<T>(
         const created = new Query(key, fetcher, scope);
         registry.set(key, created as Query<unknown>);
         // Deferred a microtask so a fetcher may close over state its owner
-        // finishes constructing after `ensureQuery` returns.
-        queueMicrotask(() => void created.refetch());
+        // finishes constructing after `ensureQuery` returns. `start`, not
+        // `refetch`: a `whenLoaded` that already kicked the first fetch off is
+        // reused rather than superseded by a second IPC round-trip.
+        queueMicrotask(() => void created.start());
         return created;
     });
 }

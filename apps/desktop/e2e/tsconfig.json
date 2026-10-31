@@ -8,5 +8,5 @@
         "esModuleInterop": true,
         "skipLibCheck": true
     },
-    "include": ["wdio.conf.ts", "specs/**/*.ts"]
+    "include": ["wdio.conf.ts", "specs/**/*.ts", "support/**/*.ts"]
 }

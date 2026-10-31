@@ -175,7 +175,7 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
 {/if}
 
 <!-- eslint-disable-next-line svelte/no-at-html-tags -- the ONE sanctioned {@html} site: DOMPurify-wrapped, grep-gated (scripts/check-frontend-bans.sh) -->
-<div class="sanitized-content" bind:this={contentEl} use:interceptLinks>{@html clean}</div>
+<div class="sanitized-content" data-testid="reader-content" bind:this={contentEl} use:interceptLinks>{@html clean}</div>
 
 <style>
     /* Editorial reading rhythm. The article sets the font-family / size /

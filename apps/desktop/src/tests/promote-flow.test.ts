@@ -84,6 +84,25 @@ describe('promote flow', () => {
         expect(uiStore.toasts.at(-1)?.tone).toBe('success');
     });
 
+    it('the first p of a session waits for the registry and promotes to the sole destination', async () => {
+        // Nothing primed the registry (the panel never opened): `p` must load
+        // it before deciding, not treat "not loaded yet" as "no destination".
+        harness = installIpcHarness({
+            list_destinations: [{ name: 'vault', root: ROOT }],
+            get_setting: null,
+            promote_article: saveOutcomeFixture({ destination: 'vault', disposition: 'created' }),
+        });
+
+        selectionStore.selectedArticleId = 100;
+        await promoteSelected();
+        await flushIpc();
+
+        expect(uiStore.activeModal).toBeNull();
+        expect(harness.callsFor('promote_article')).toEqual([
+            { articleId: 100, destination: 'vault' },
+        ]);
+    });
+
     it('with no destination set, p opens the panel instead of promoting', async () => {
         harness = installIpcHarness({ list_destinations: [], get_setting: null });
         destinationsStore.prime();

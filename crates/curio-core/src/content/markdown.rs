@@ -6,11 +6,18 @@
 //! content at export time), but the skip list drops any script/style/
 //! embed remnant defensively anyway.
 //!
-//! Sectioning elements (`nav`, `header`, `footer`, `aside`) are *not*
-//! skipped: deciding what is page chrome is the ingest extractor's job,
-//! and by export time it has already removed it. What is left is content
-//! — a quote's `<footer>` attribution, an article's own header, an
-//! in-article callout — and converting it is the point (#128).
+//! `header`, `footer` and `aside` are *not* skipped: whether one of them
+//! is page chrome depends on where it sits in the page, and deciding that
+//! is the ingest pipeline's job. Both doors ([`super::process`] and
+//! [`super::process_full_page`]) drop the page-level ones before storage,
+//! so what reaches export is content — a quote's `<footer>` attribution,
+//! an article's or section's own header, an in-article callout — and
+//! converting it is the point (#128).
+//!
+//! `nav` is skipped wherever it sits: it is a block of links into the
+//! source site (breadcrumbs, a menu, an in-page table of contents whose
+//! `#anchors` mean nothing in a note), and articles stored before the
+//! full-page door stripped chrome may still carry it.
 
 use htmd::HtmlToMarkdown;
 
@@ -25,7 +32,8 @@ use super::ContentError;
 pub fn to_markdown(html: &str) -> Result<String, ContentError> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(vec![
-            "script", "style", "iframe", "object", "embed", "form", "noscript", "svg", "canvas",
+            "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg",
+            "canvas",
         ])
         .build();
     Ok(converter.convert(html)?.trim().to_owned())
@@ -74,6 +82,19 @@ mod tests {
         for kept in ["# Title", "Body.", "Callout.", "> Quote.", "— Author"] {
             assert!(md.contains(kept), "lost {kept:?}: {md}");
         }
+    }
+
+    #[test]
+    fn nav_is_never_exported() {
+        let md = to_markdown(
+            "<article><nav><a href=\"https://e.com/blog\">Blog</a> › \
+             <a href=\"https://e.com/tech\">Tech</a></nav>\
+             <header><h1>Title</h1></header><p>Body.</p></article>",
+        )
+        .unwrap();
+        assert!(!md.contains("Blog"), "breadcrumbs exported: {md}");
+        assert!(md.contains("# Title"), "{md}");
+        assert!(md.contains("Body."), "{md}");
     }
 
     #[test]

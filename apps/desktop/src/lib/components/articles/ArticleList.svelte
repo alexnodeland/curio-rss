@@ -1,5 +1,5 @@
 <script lang="ts" module>
-import type { ReadingDensity } from '$lib/state/ui.svelte';
+import { type ReadingDensity, prefsStore } from '$lib/state/prefs.svelte';
 
 /**
  * Fixed virtualizer row height in px per density. The row applies the same
@@ -30,7 +30,6 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
@@ -55,8 +54,8 @@ const list = $derived(articlesStore.current);
 const listError = $derived(list.error === null ? '' : commandErrorMessage(list.error));
 
 /** Row density → the fixed row height and the compact-layout flag. */
-const rowHeight = $derived(ROW_HEIGHTS[uiStore.readingDensity]);
-const compact = $derived(uiStore.readingDensity === 'compact');
+const rowHeight = $derived(ROW_HEIGHTS[prefsStore.readingDensity]);
+const compact = $derived(prefsStore.readingDensity === 'compact');
 
 /** The listbox's active option: the selected row, when one is selected. */
 const activeDescendantId = $derived(
@@ -169,7 +168,7 @@ $effect(() => {
  * fast scroll costs one mark per row, once.
  */
 function onScrollPast(firstVisibleIndex: number): void {
-    if (!uiStore.markOnScroll) {
+    if (!prefsStore.markOnScroll) {
         return;
     }
     const items = list.items;

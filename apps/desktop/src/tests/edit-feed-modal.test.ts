@@ -7,7 +7,7 @@
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -18,6 +18,7 @@ import {
     installIpcHarness,
     unreadCountsFixture,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 // jsdom has no layout engine; the health-section scroll is a no-op there.
 Element.prototype.scrollIntoView = vi.fn();
@@ -69,7 +70,7 @@ describe('EditFeedModal', () => {
         resetQueryCache();
         feedsStore.refreshing = false;
         feedsStore.refreshOutcomes = [];
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -86,7 +87,7 @@ describe('EditFeedModal', () => {
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
             'https://alpha.example/feed.xml',
         );
-        expect(uiStore.toasts.some((toast) => toast.message === 'Feed URL copied')).toBe(true);
+        expect(toastStore.toasts.some((toast) => toast.message === 'Feed URL copied')).toBe(true);
     });
 
     it('renames a feed through set_feed_title', async () => {
@@ -242,7 +243,7 @@ describe('EditFeedModal', () => {
         await fireEvent.click(getByText('Mark all read'));
         await flushIpc();
         expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: 1 }]);
-        expect(uiStore.toasts.some((toast) => toast.message === 'Marked 3 read')).toBe(true);
+        expect(toastStore.toasts.some((toast) => toast.message === 'Marked 3 read')).toBe(true);
     });
 
     it('unsubscribes only after a two-step confirm, then closes', async () => {

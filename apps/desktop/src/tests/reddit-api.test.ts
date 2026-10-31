@@ -4,10 +4,11 @@
  * id; removal returns to the unauthenticated state.
  */
 import RedditApiPanel from '$components/modals/RedditApiPanel.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, type Responder, flushIpc, installIpcHarness } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function base(overrides: Record<string, Responder> = {}): Record<string, Responder> {
     return {
@@ -23,7 +24,7 @@ describe('RedditApiPanel', () => {
 
     afterEach(() => {
         cleanup();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -45,7 +46,7 @@ describe('RedditApiPanel', () => {
         expect(getByText(/Connected — client id cid123/)).toBeTruthy();
         // The secret never renders anywhere after saving.
         expect(container.innerHTML).not.toContain('shh');
-        expect(uiStore.toasts.at(-1)?.tone).toBe('success');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('success');
     });
 
     it('save stays disabled until both fields are filled', async () => {

@@ -4,7 +4,7 @@
  * Autodiscovery: the typed URL is fetched once Rust-side (`discover_feeds`,
  * policed) and scanned for `<link rel="alternate">` feeds + a favicon.
  * Favicon precedence is same-origin only; the Google favicon service is an
- * opt-in fallback (`uiStore.allowRemoteFavicon`) applied here — nothing
+ * opt-in fallback (`prefsStore.allowRemoteFavicon`) applied here — nothing
  * reaches Google unless the user turned it on. Adding dedupes against
  * `get_feed_by_url` first, then subscribes through the feeds store.
  */
@@ -14,7 +14,8 @@ import { type DiscoveredFeedDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { HN_PRESETS, detectSource } from '$lib/utils/source-presets';
 
 let { onclose }: { onclose: () => void } = $props();
@@ -90,7 +91,7 @@ async function find(): Promise<void> {
     }
     const query = url.trim();
     if (query.length === 0) {
-        uiStore.showToast(t('addFeed.needUrl'), 'warning');
+        toastStore.showToast(t('addFeed.needUrl'), 'warning');
         return;
     }
     finding = true;
@@ -106,7 +107,7 @@ async function find(): Promise<void> {
         selectedUrl = candidates.length > 0 ? candidates[0].url : null;
         searched = true;
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         finding = false;
     }
@@ -115,7 +116,7 @@ async function find(): Promise<void> {
 function onFaviconFail(): void {
     // The same-origin favicon 404'd; fall back to Google's service only if
     // the user opted in (a privacy choice — see PRIVACY.md).
-    if (triedRemoteFavicon || !uiStore.allowRemoteFavicon) {
+    if (triedRemoteFavicon || !prefsStore.allowRemoteFavicon) {
         faviconSrc = null;
         return;
     }
@@ -138,7 +139,7 @@ async function add(): Promise<void> {
     }
     const target = targetUrl();
     if (target.length === 0) {
-        uiStore.showToast(t('addFeed.needUrl'), 'warning');
+        toastStore.showToast(t('addFeed.needUrl'), 'warning');
         return;
     }
     adding = true;
@@ -149,7 +150,7 @@ async function add(): Promise<void> {
             return;
         }
         if (existing.data !== null) {
-            uiStore.showToast(t('addFeed.already'), 'warning');
+            toastStore.showToast(t('addFeed.already'), 'warning');
             return;
         }
         // A recognized source suggests its folder when the user left tags empty.
@@ -162,13 +163,13 @@ async function add(): Promise<void> {
             toastCommandError(result.error);
             return;
         }
-        uiStore.showToast(
+        toastStore.showToast(
             t('addFeed.added', { title: result.data.title ?? result.data.url }),
             'success',
         );
         onclose();
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         adding = false;
     }
@@ -187,16 +188,16 @@ async function saveLink(): Promise<void> {
             return;
         }
         if (result.data.created && !result.data.hydrated) {
-            uiStore.showToast(t('addFeed.linkSavedBare'), 'warning');
+            toastStore.showToast(t('addFeed.linkSavedBare'), 'warning');
         } else {
-            uiStore.showToast(
+            toastStore.showToast(
                 t('addFeed.linkSaved', { title: result.data.article.title }),
                 'success',
             );
         }
         onclose();
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         savingLink = false;
     }
@@ -329,8 +330,8 @@ async function saveLink(): Promise<void> {
         <label class="favicon-optin">
             <input
                 type="checkbox"
-                checked={uiStore.allowRemoteFavicon}
-                onchange={(event) => void uiStore.setAllowRemoteFavicon(event.currentTarget.checked)}
+                checked={prefsStore.allowRemoteFavicon}
+                onchange={(event) => void prefsStore.setAllowRemoteFavicon(event.currentTarget.checked)}
             />
             <span>
                 <span class="optin-label">{t('addFeed.favicon.allowRemote')}</span>

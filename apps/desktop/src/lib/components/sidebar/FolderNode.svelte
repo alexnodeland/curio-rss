@@ -19,7 +19,8 @@ import { allFolderPaths } from '$lib/state/folder-ops';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import FeedItem from './FeedItem.svelte';
 import FolderNode from './FolderNode.svelte';
 
@@ -64,7 +65,7 @@ function commitRename(): void {
     // (irreversible). Refuse it and keep the old name — the tag rewrite that
     // renameFolder performs has no undo.
     if (newPath !== folder.path && allFolderPaths(feedsStore.feeds).includes(newPath)) {
-        uiStore.showToast(t('folder.renameCollision', { name }), 'error');
+        toastStore.showToast(t('folder.renameCollision', { name }), 'error');
         return;
     }
     void runCommand(() => feedsStore.renameFolder(folder.path, newPath));
@@ -95,7 +96,7 @@ async function deleteFolder(): Promise<void> {
     // toasts its own error via runCommand) — no more false "deleted" on failure.
     const result = await runCommand(() => feedsStore.deleteFolder(folder.path));
     if (result !== undefined) {
-        uiStore.showToast(t('folder.deleted', { name: folder.name }), 'info');
+        toastStore.showToast(t('folder.deleted', { name: folder.name }), 'info');
     }
 }
 
@@ -229,7 +230,7 @@ function onFolderDrop(event: DragEvent): void {
                         selected={selectionStore.selectedFeedId === feed.id}
                         siblings={folder.feeds.map((candidate) => candidate.id)}
                         onselect={(feedId) => selectionStore.selectFeed(feedId)}
-                        onedit={(feedId, section) => uiStore.openEditFeed(feedId, section)}
+                        onedit={(feedId, section) => layoutStore.openEditFeed(feedId, section)}
                     />
                 </li>
             {/each}

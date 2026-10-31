@@ -25,6 +25,13 @@ pub(crate) struct Cli {
     #[arg(long, global = true)]
     pub(crate) json: bool,
 
+    /// Open a profile on network or sync-managed storage anyway (NFS, SMB,
+    /// iCloud Drive, Dropbox, Syncthing…), which is refused by default:
+    /// SQLite's locking is unsafe there and sync clients can corrupt the
+    /// database. Setting `CURIO_ALLOW_NETWORK_FS=1` does the same.
+    #[arg(long, global = true)]
+    pub(crate) allow_network_fs: bool,
+
     #[command(subcommand)]
     pub(crate) command: Command,
 }

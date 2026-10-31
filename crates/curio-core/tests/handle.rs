@@ -34,6 +34,7 @@ fn open_core(profile: &std::path::Path) -> CoreHandle {
                 politeness_delay: Duration::ZERO,
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()
@@ -51,6 +52,7 @@ fn open_core_trusting_localhost(profile: &std::path::Path) -> CoreHandle {
                 trusted_addrs: std::iter::once(std::net::IpAddr::from([127, 0, 0, 1])).collect(),
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()
@@ -1995,4 +1997,122 @@ fn the_next_mutation_drains_a_staged_backlog() {
         events[1].event,
         EventPayload::ArticleTagged { .. }
     ));
+}
+
+/// #112: an events directory that cannot be opened no longer fails the
+/// profile open. The handle comes up with the backlog flag raised, a
+/// mutation commits with its intent staged, and once the directory is
+/// repaired the next drain opens the log and emits — the intent a
+/// previous session left staged first, in order.
+#[test]
+fn an_unopenable_events_dir_does_not_block_open() {
+    let profile = tempfile::tempdir().unwrap();
+    let (article, events_dir) = {
+        let core = open_core(profile.path());
+        core.storage()
+            .upsert_articles(vec![manual_article("k1", "One")])
+            .unwrap();
+        let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+        let events_dir = break_events_dir(profile.path());
+        // Left staged by this session: its flush fails.
+        assert!(core.set_starred(article, true).unwrap());
+        assert_eq!(core.pending_intent_count().unwrap(), 1);
+        (article, events_dir)
+    };
+
+    let core = open_core(profile.path());
+    assert!(core.has_pending_events(), "nothing could be flushed");
+    assert!(core.tag_article(article, "rust").unwrap());
+    assert_eq!(core.pending_intent_count().unwrap(), 2);
+    assert!(core.article_state(article).unwrap().starred);
+    core.flush_pending_events().unwrap_err();
+    core.sweep_event_retention().unwrap_err();
+
+    repair_events_dir(&events_dir);
+    assert_eq!(core.flush_pending_events().unwrap(), 2);
+    assert!(!core.has_pending_events());
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+    assert!(matches!(
+        events[1].event,
+        EventPayload::ArticleTagged { .. }
+    ));
+    // The log stays attached: later mutations emit as usual.
+    assert!(core.set_archived(article, true).unwrap());
+    assert!(!core.has_pending_events());
+    assert_eq!(read_all(&events_dir).unwrap().len(), 3);
+    assert_eq!(
+        core.sweep_event_retention().unwrap(),
+        Vec::<std::path::PathBuf>::new()
+    );
+}
+
+/// #112: a `.curio/` that cannot hold the events directory at all (a
+/// file squats it) still opens the profile; the gitignore and the log
+/// appear once it is fixed.
+#[test]
+fn an_unusable_state_dir_does_not_block_open() {
+    let profile = tempfile::tempdir().unwrap();
+    let state_dir = profile.path().join(".curio");
+    std::fs::write(&state_dir, b"not a directory").unwrap();
+
+    let core = open_core(profile.path());
+    assert!(core.has_pending_events());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    assert!(core.set_starred(article, true).unwrap());
+    assert_eq!(core.pending_intent_count().unwrap(), 1);
+
+    std::fs::remove_file(&state_dir).unwrap();
+    assert_eq!(core.flush_pending_events().unwrap(), 1);
+    let gitignore = std::fs::read_to_string(state_dir.join(".gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line == "events/"),
+        "{gitignore}"
+    );
+    assert_eq!(read_all(&state_dir.join("events")).unwrap().len(), 1);
+}
+
+/// #112: a profile on sync-managed storage is refused before anything is
+/// created, with a typed error naming the kind; the explicit override
+/// opens it.
+#[test]
+fn a_profile_on_sync_managed_storage_needs_the_override() {
+    use curio_core::CoreError;
+    use curio_core::storage::{NetworkFsKind, OpenError};
+
+    let synced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(synced.path().join(".stfolder")).unwrap();
+    let profile = synced.path().join("curio");
+
+    let err = CoreHandle::open(&profile).unwrap_err();
+    match &err {
+        CoreError::Open(OpenError::NetworkFs { path, kind }) => {
+            assert_eq!(*kind, NetworkFsKind::Syncthing);
+            assert_eq!(*path, profile.join("curio.db"));
+        }
+        other => panic!("expected NetworkFs, got {other:?}"),
+    }
+    let message = err.to_string();
+    assert!(message.contains("Syncthing"), "{message}");
+    assert!(message.contains("CURIO_ALLOW_NETWORK_FS"), "{message}");
+    assert!(!err.is_profile_busy());
+    assert!(!profile.exists(), "a refused open creates nothing");
+
+    let core = CoreHandle::open_with(
+        &profile,
+        CoreOptions {
+            allow_network_fs: true,
+            ..CoreOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(core.db_path().is_file());
+    assert!(!core.has_pending_events());
 }

@@ -484,7 +484,10 @@ export const es: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': 'No se pudo copiar el error',
     'recovery.title.profile': 'Curio no puede usar la carpeta de su perfil',
     'recovery.body.profile':
-        'Tu biblioteca está bien, pero Curio no pudo crear ni escribir allí sus demás archivos (como el registro de eventos). Comprueba que la carpeta del perfil y todo su contenido admitan escritura, y vuelve a intentarlo.',
+        'Curio no pudo crear ni abrir la carpeta de su perfil. Comprueba que la carpeta (y la que la contiene) admita escritura y que ningún archivo tenga su nombre, y vuelve a intentarlo. No se ha cambiado nada.',
+    'recovery.title.networkFs': 'Tu biblioteca está en una carpeta de red o sincronizada',
+    'recovery.body.networkFs':
+        'La base de datos de Curio puede dañarse en una carpeta compartida en red o en una carpeta que gestiona un servicio de sincronización (iCloud Drive, Dropbox…), así que Curio no la abrió. No se ha cambiado nada. Mueve la carpeta del perfil a un disco local y vuelve a intentarlo.',
     'recovery.action.update': 'Buscar actualizaciones',
     'recovery.update.current':
         'No hay ninguna actualización disponible. Instala la versión más reciente de Curio que actualizó esta biblioteca para seguir usándola.',

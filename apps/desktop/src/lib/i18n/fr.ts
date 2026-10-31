@@ -488,7 +488,10 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': 'Impossible de copier l’erreur',
     'recovery.title.profile': 'Curio ne peut pas utiliser le dossier de son profil',
     'recovery.body.profile':
-        'Votre bibliothèque est intacte, mais Curio n’a pas pu y créer ou écrire ses autres fichiers (comme le journal des événements). Vérifiez que le dossier du profil et tout son contenu sont accessibles en écriture, puis réessayez.',
+        'Curio n’a pas pu créer ni ouvrir le dossier de son profil. Vérifiez que ce dossier (et celui qui le contient) est accessible en écriture et qu’aucun fichier ne porte son nom, puis réessayez. Rien n’a été modifié.',
+    'recovery.title.networkFs': 'Votre bibliothèque est dans un dossier réseau ou synchronisé',
+    'recovery.body.networkFs':
+        'La base de données de Curio peut être endommagée sur un partage réseau ou dans un dossier géré par un service de synchronisation (iCloud Drive, Dropbox…) ; Curio ne l’a donc pas ouverte. Rien n’a été modifié. Déplacez le dossier du profil sur un disque local, puis réessayez.',
     'recovery.action.update': 'Rechercher des mises à jour',
     'recovery.update.current':
         'Aucune mise à jour n’est disponible. Installez la version plus récente de Curio qui a mis à niveau cette bibliothèque pour continuer à l’utiliser.',

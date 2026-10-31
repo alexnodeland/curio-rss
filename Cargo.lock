@@ -1079,6 +1079,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustix",
  "same-file",
  "scraper",
  "serde_json",

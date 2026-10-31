@@ -2,7 +2,10 @@
 //!
 //! Exists so the boundary rules are one definition shared by the `boundary`
 //! subcommand (what CI runs) and the canary self-tests in
-//! `tests/boundary_canary.rs` (the tripwire that keeps `deny.toml` honest).
+//! `tests/boundary_canary.rs` (the tripwire that keeps `deny.toml` honest),
+//! and so the `workflows` supply-chain lint is testable the same way.
+
+pub mod workflows;
 
 /// Crate names that must never appear in curio-core's dependency tree.
 /// Phase 4 moved the webview boundary: the desktop head

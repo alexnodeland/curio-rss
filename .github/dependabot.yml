@@ -1,0 +1,46 @@
+# Dependency update PRs, grouped so each ecosystem produces at most one
+# routine PR a week. Workflow actions are SHA-pinned (`just workflows`
+# enforces it); dependabot bumps the pin AND its trailing `# vX.Y.Z` comment
+# together. PR titles follow Conventional Commits (the squash-merge subject):
+# `ci(deps): …` for actions, `build(deps): …` for cargo/npm.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      # Patch + minor bumps ride together; majors get their own PR so CI
+      # isolates them. (A pre-1.0 crate's minor bump can break too — when the
+      # group PR goes red, CI's failing job names the culprit.)
+      cargo:
+        update-types: [patch, minor]
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directories:
+      - /apps/desktop
+      - /apps/desktop/e2e
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      npm:
+        update-types: [patch, minor]
+        patterns: ["*"]

@@ -10,6 +10,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Parses .github/workflows for the `workflows` lint (trusted repo files only).
+serde_yaml = { workspace = true }
 
 [lints]
 workspace = true

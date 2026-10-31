@@ -31,7 +31,7 @@ production feed).
 - [ ] **Keyboard-only session** — navigate feeds/articles and read one end-to-end with only the keyboard (`j`/`k`, `o`, `s`, `l`, `m`, `p`, `/`, `?`).
 - [ ] **Promote-to-destination** — press `p`, pick a temp destination, confirm a Markdown note with valid `curio.frontmatter.v1` frontmatter is written.
 
-- [ ] **Per-profile Reddit credentials (real Keychain)** — `curio --profile /tmp/a reddit login --client-id a` and `curio --profile /tmp/b reddit login --client-id b` (any secrets); Keychain Access shows two `Curio` items with accounts `reddit-api/<key>`, `reddit status` reports `a` / `b` per profile, and `reddit logout` on one leaves the other configured. Upgrading from 0.4.x: the old single `reddit-api` item is moved into the first profile opened and disappears from Keychain Access.
+- [ ] **Per-profile Reddit credentials (real Keychain)** — `curio --profile /tmp/a reddit login --client-id a` and `curio --profile /tmp/b reddit login --client-id b` (any secrets); Keychain Access shows two `Curio` items with accounts `reddit-api/<key>`, `reddit status` reports `a` / `b` per profile, and `reddit logout` on one leaves the other configured. Moving a profile (`mv /tmp/a /tmp/a2`) keeps its credentials. Upgrading from 0.4.x: the old single `reddit-api` item is copied into each profile that opens (both the CLI and the desktop app come up authenticated) and stays in Keychain Access until a `reddit logout`.
 
 ## Gatekeeper (unsigned) sanity
 

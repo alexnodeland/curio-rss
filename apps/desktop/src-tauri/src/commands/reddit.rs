@@ -120,6 +120,17 @@ mod tests {
     use crate::commands::testutil::temp_core;
     use crate::error::ErrorKind;
 
+    /// Drops `core` and reopens its profile the way the app launches:
+    /// open, then pull the keychain item.
+    fn restart(core: Arc<CoreHandle>) -> Arc<CoreHandle> {
+        let profile = core.profile_dir().to_path_buf();
+        // The test holds the only reference, so this closes the handle.
+        drop(core);
+        let fresh = CoreHandle::open(profile).unwrap();
+        load_credentials_at_startup(&fresh);
+        Arc::new(fresh)
+    }
+
     #[test]
     fn the_credential_round_trip_stays_secret_free_on_the_way_out() {
         curio_core::secrets::use_mock_store_for_tests();
@@ -131,28 +142,19 @@ mod tests {
         assert!(status.configured);
         assert_eq!(status.client_id.as_deref(), Some("cid123"));
 
-        // A restart-equivalent: the keychain item hydrates a fresh core
-        // on the same profile…
-        let fresh = CoreHandle::open(core.profile_dir()).unwrap();
-        load_credentials_at_startup(&fresh);
-        assert_eq!(fresh.reddit_api_client_id().as_deref(), Some("cid123"));
+        // A restart: the keychain item hydrates a fresh core on the same
+        // profile (the old handle is gone first — one handle per profile)…
+        let core = restart(core);
+        assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid123"));
 
         // …but never a core on another profile, which can hold its own.
         let (_dir2, other) = temp_core();
         load_credentials_at_startup(&other);
         assert!(other.reddit_api_client_id().is_none());
         set_reddit_api_impl(&other, "cid456", "hush").unwrap();
-        let (fresh, other_fresh) = (
-            CoreHandle::open(core.profile_dir()).unwrap(),
-            CoreHandle::open(other.profile_dir()).unwrap(),
-        );
-        load_credentials_at_startup(&fresh);
-        load_credentials_at_startup(&other_fresh);
-        assert_eq!(fresh.reddit_api_client_id().as_deref(), Some("cid123"));
-        assert_eq!(
-            other_fresh.reddit_api_client_id().as_deref(),
-            Some("cid456")
-        );
+        let (core, other) = (restart(core), restart(other));
+        assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid123"));
+        assert_eq!(other.reddit_api_client_id().as_deref(), Some("cid456"));
         clear_reddit_api_impl(&other).unwrap();
 
         let cleared = clear_reddit_api_impl(&core).unwrap();

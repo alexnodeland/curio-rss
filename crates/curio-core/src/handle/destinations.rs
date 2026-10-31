@@ -48,6 +48,37 @@ impl CoreHandle {
         Ok(())
     }
 
+    /// Re-applies a destination from a head's own configuration (the CLI's
+    /// `curio.toml`, on every invocation) without undoing the
+    /// missing-destination check — unlike [`Self::add_destination`],
+    /// which is the explicit "(re-)register this folder" act.
+    ///
+    /// When the registry already maps `name` to `root` and the destination
+    /// has exported, this is a no-op: the root is **not** recreated (a
+    /// vanished or unmounted vault must surface as
+    /// [`ExportError::DestinationMissing`](crate::export::ExportError::DestinationMissing)
+    /// on the next save) and the exported flag is kept. A new name, a
+    /// changed root, or a destination that has not exported yet is
+    /// registered exactly as [`Self::add_destination`] does.
+    ///
+    /// # Errors
+    ///
+    /// Filesystem or settings errors.
+    pub fn reconcile_destination(
+        &self,
+        name: DestinationName,
+        root: PathBuf,
+    ) -> Result<(), CoreError> {
+        let settled = {
+            let map = self.lock_destinations();
+            map.get(&name) == Some(&root) && self.lock_exported().contains(&name)
+        };
+        if settled {
+            return Ok(());
+        }
+        self.add_destination(name, root)
+    }
+
     /// Unregisters a named destination and persists the registry.
     /// Exported notes under the old root are untouched — removal only
     /// forgets the name (the event stream already told their story).
@@ -64,12 +95,15 @@ impl CoreHandle {
                 name: name.to_string(),
             });
         }
+        // Forgotten first, as in `add_destination`: should the registry
+        // persist below fail, the destination stays registered and merely
+        // skips the missing-destination check once.
+        self.forget_exported(name)?;
         let mut next = map.clone();
         next.remove(name);
         self.persist_destinations(&next)?;
         *map = next;
-        drop(map);
-        self.forget_exported(name)
+        Ok(())
     }
 
     /// The registered destinations.

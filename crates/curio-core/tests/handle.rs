@@ -855,6 +855,80 @@ fn an_exported_destination_that_vanished_is_destination_missing() {
     assert!(root.join(&saved.path).is_file());
 }
 
+/// A head re-applying its own configuration (the CLI's curio.toml, on
+/// every invocation) through `reconcile_destination` never undoes the
+/// missing-destination check: an unchanged, exported destination is left
+/// alone — root not recreated, flag kept — while a new name, a new root or
+/// a not-yet-exported destination registers as `add_destination` does.
+#[test]
+fn reconciling_an_exported_destination_never_recreates_it() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+    // Not registered yet: reconciling registers it and creates the root.
+    core.reconcile_destination(dest.clone(), root.clone())
+        .unwrap();
+    assert!(root.is_dir());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .iter()
+        .map(|a| a.id)
+        .collect();
+    core.save_to_destination(ids[0], &dest).unwrap();
+
+    std::fs::remove_dir_all(&root).unwrap();
+    drop(core);
+    let core = open_core(profile.path());
+    core.reconcile_destination(dest.clone(), root.clone())
+        .unwrap();
+    assert!(!root.exists(), "reconciling must not recreate the root");
+    assert!(matches!(
+        core.save_to_destination(ids[1], &dest).unwrap_err(),
+        curio_core::CoreError::Export(curio_core::export::ExportError::DestinationMissing { .. })
+    ));
+
+    // A changed root is a new destination: registered and started afresh.
+    let moved = parent.path().join("moved");
+    core.reconcile_destination(dest.clone(), moved.clone())
+        .unwrap();
+    assert_eq!(core.destinations()[0].root, moved);
+    let saved = core.save_to_destination(ids[1], &dest).unwrap();
+    assert!(moved.join(&saved.path).is_file());
+}
+
+/// Removing a destination clears its exported flag too: a destination
+/// later registered under the same name starts afresh.
+#[test]
+fn a_removed_then_re_added_destination_starts_afresh() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+    core.add_destination(dest.clone(), root.clone()).unwrap();
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let id = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    core.save_to_destination(id, &dest).unwrap();
+
+    core.remove_destination(&dest).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+    core.reconcile_destination(dest.clone(), root.clone())
+        .unwrap();
+    assert!(root.is_dir(), "a fresh registration creates its root");
+    core.save_to_destination(id, &dest).unwrap();
+}
+
 /// The exported-destinations record is facade-owned like the registry.
 #[test]
 fn the_facade_refuses_its_reserved_exported_destinations_setting() {

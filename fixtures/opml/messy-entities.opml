@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A hand-edited / legacy-exporter OPML: HTML entities and bare ampersands
+     that strict XML rejects, a duplicated attribute, a stray closing tag,
+     and two outlines no reader can use. Every usable feed must import. -->
+<opml version="1.0">
+  <head>
+    <title>Tom & Jerry's&nbsp;feeds</title>
+  </head>
+  <body>
+    <outline text="News&nbsp;&amp;&nbsp;Politics">
+      <outline type="rss" text="Caf&eacute; Society" xmlUrl="https://cafe.example/feed.xml"/>
+      <outline type="rss" text="R&D Weekly" xmlUrl="https://rnd.example/rss?a=1&b=2"/>
+      <outline type="rss" text="&bogus; Entity" xmlUrl="https://bogus.example/feed"/>
+    </outline>
+    <outline type="rss" text="Dup Attr" title="First" title="Second" xmlUrl="https://dup.example/feed"/>
+    <outline type="rss" text="Broken" xmlUrl=https://unquoted.example/feed/>
+    <outline type="rss" text="Calendar, not a feed" xmlUrl="webcal://calendar.example/events.ics"/>
+    </Outline>
+    <outline type="rss" text="Plain" xmlUrl="https://plain.example/atom.xml"/>
+  </body>
+</opml>

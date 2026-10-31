@@ -39,10 +39,12 @@ pub mod storage;
 
 pub use curio_types as types;
 pub use handle::{
-    BulkSaveOutcome, CoreError, CoreHandle, CoreOptions, ImportOutcome, OpmlImportOutcome,
-    RefreshOutcome, SaveOutcome, SavedUrl,
+    BulkSaveOutcome, CoreError, CoreHandle, CoreOptions, ImportOutcome, MAX_REJECTED_DETAILS,
+    OpmlImportOutcome, RefreshOutcome, SaveOutcome, SavedUrl,
 };
-pub use import::{ImportError, ImportKind, ImportSource, ImportedItem};
+pub use import::{
+    ImportError, ImportKind, ImportSource, ImportedItem, ParsedImport, RejectReason, Rejected,
+};
 
 #[cfg(test)]
 mod tests {

@@ -49,48 +49,100 @@ pub enum OpmlError {
     NotOpml,
 }
 
+/// A leniently parsed OPML document: the feeds it yields plus a reason for
+/// every outline that had to be dropped.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OpmlImport {
+    /// The feeds, in document order.
+    pub feeds: Vec<OpmlFeed>,
+    /// One human-readable reason per dropped outline (or per unreadable
+    /// document tail) — counted and reported, never fatal.
+    pub skipped: Vec<String>,
+}
+
 /// Parses an OPML document into its feeds, in document order.
 ///
-/// Tolerant by design: attribute names are matched case-insensitively
-/// (real exports disagree on `xmlUrl` vs `xmlurl`), folders without
-/// feeds are ignored, and non-outline elements are skipped.
+/// Shorthand for [`parse_opml`] that drops the skip reasons.
 ///
 /// # Errors
 ///
-/// [`OpmlError`] for malformed XML or a document with no `<opml>` root.
+/// As [`parse_opml`].
 pub fn import_opml(xml: &str) -> Result<Vec<OpmlFeed>, OpmlError> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    parse_opml(xml).map(|import| import.feeds)
+}
 
-    let mut feeds = Vec::new();
+/// Parses an OPML document into its feeds, in document order, reporting
+/// every outline it had to skip.
+///
+/// Tolerant by design, because real exports are messy: attribute names are
+/// matched case-insensitively (`xmlUrl` vs `xmlurl`), attribute values are
+/// unescaped leniently (HTML entities such as `&nbsp;` resolve, a bare `&`
+/// or an unknown entity is kept as raw text), a bare `&` in element text is
+/// allowed, mismatched or stray closing tags are tolerated, and folders
+/// without feeds and non-outline elements are ignored. An outline whose
+/// attributes cannot be read at all is skipped (and reported), not fatal;
+/// XML that breaks off after the `<opml>` root keeps every feed read up to
+/// that point and reports the rest as one skip.
+///
+/// # Errors
+///
+/// [`OpmlError`] for a document that never reaches an `<opml>` element —
+/// not XML at all, or not OPML.
+pub fn parse_opml(xml: &str) -> Result<OpmlImport, OpmlError> {
+    let mut reader = Reader::from_str(xml);
+    let config = reader.config_mut();
+    config.trim_text(true);
+    config.allow_dangling_amp = true;
+    config.allow_unmatched_ends = true;
+    config.check_end_names = false;
+
+    let mut import = OpmlImport::default();
     let mut folders: Vec<String> = Vec::new();
     let mut saw_opml = false;
 
     loop {
-        match reader.read_event()? {
+        let event = match reader.read_event() {
+            Ok(event) => event,
+            Err(error) if saw_opml => {
+                import.skipped.push(format!(
+                    "unreadable XML from byte {}: {error}",
+                    reader.error_position()
+                ));
+                break;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        match event {
             Event::Start(el) => {
                 let name = local_name(el.name().as_ref());
                 if name.eq_ignore_ascii_case("opml") {
                     saw_opml = true;
                 } else if name.eq_ignore_ascii_case("outline") {
-                    let outline = read_outline(&el, &folders)?;
-                    match outline {
-                        Outline::Feed(feed) => {
-                            feeds.push(feed);
-                            // A feed outline may still nest children;
-                            // it does not name a folder level.
-                            folders.push(String::new());
+                    // Every opened outline pushes exactly one level, so its
+                    // `</outline>` pops the right one. A feed (or a skipped
+                    // outline) names no folder: it pushes an empty level.
+                    let level = match read_outline(&el, &folders) {
+                        Ok(Outline::Folder(name)) => name,
+                        Ok(Outline::Feed(feed)) => {
+                            import.feeds.push(feed);
+                            String::new()
                         }
-                        Outline::Folder(name) => folders.push(name),
-                    }
+                        Err(reason) => {
+                            import.skipped.push(reason);
+                            String::new()
+                        }
+                    };
+                    folders.push(level);
                 }
             }
             Event::Empty(el) => {
                 let name = local_name(el.name().as_ref());
-                if name.eq_ignore_ascii_case("outline")
-                    && let Outline::Feed(feed) = read_outline(&el, &folders)?
-                {
-                    feeds.push(feed);
+                if name.eq_ignore_ascii_case("outline") {
+                    match read_outline(&el, &folders) {
+                        Ok(Outline::Feed(feed)) => import.feeds.push(feed),
+                        Ok(Outline::Folder(_)) => {}
+                        Err(reason) => import.skipped.push(reason),
+                    }
                 }
             }
             Event::End(el) => {
@@ -105,7 +157,7 @@ pub fn import_opml(xml: &str) -> Result<Vec<OpmlFeed>, OpmlError> {
     if !saw_opml {
         return Err(OpmlError::NotOpml);
     }
-    Ok(feeds)
+    Ok(import)
 }
 
 /// Renders feeds as a **nested** OPML 2.0 document: a feed's first tag is its
@@ -198,23 +250,32 @@ fn write_folder<W: std::io::Write>(
     Ok(())
 }
 
+/// How much of a skipped outline's raw tag a skip reason quotes.
+const SKIP_SNIPPET_CHARS: usize = 120;
+
 enum Outline {
     Feed(OpmlFeed),
     Folder(String),
 }
 
-fn read_outline(el: &BytesStart<'_>, folders: &[String]) -> Result<Outline, OpmlError> {
+/// Reads one `<outline>`. An `Err` carries the human-readable reason the
+/// outline was skipped: its attribute list could not be tokenized at all.
+fn read_outline(el: &BytesStart<'_>, folders: &[String]) -> Result<Outline, String> {
     let mut xml_url = None;
     let mut title = None;
     let mut text = None;
     let mut html_url = None;
     let mut category = None;
-    for attr in el.attributes() {
-        let attr = attr?;
+    // Duplicate attributes are tolerated (the last one wins); only an
+    // attribute list that cannot be tokenized skips the outline.
+    for attr in el.attributes().with_checks(false) {
+        let attr = attr.map_err(|error| {
+            let tag = String::from_utf8_lossy(el.as_ref());
+            let snippet: String = tag.chars().take(SKIP_SNIPPET_CHARS).collect();
+            format!("malformed outline <{snippet}>: {error}")
+        })?;
         let key = local_name(attr.key.as_ref());
-        let value = attr
-            .normalized_value(quick_xml::XmlVersion::Implicit1_0)?
-            .into_owned();
+        let value = super::entities::unescape_lenient(&String::from_utf8_lossy(&attr.value));
         if key.eq_ignore_ascii_case("xmlUrl") {
             xml_url = Some(value);
         } else if key.eq_ignore_ascii_case("title") {
@@ -368,6 +429,38 @@ mod tests {
         assert_eq!(feeds[0].xml_url, "https://lowercase-attr.example/feed.xml");
         assert_eq!(feeds[0].title, None);
         assert_eq!(feeds[1].title.as_deref(), Some("Title Only"));
+    }
+
+    #[test]
+    fn html_entities_bare_ampersands_and_stray_end_tags_are_tolerated() {
+        // Every line here aborted the whole import under a strict parser.
+        let xml = "<opml version=\"1.0\"><head><title>Tom & Jerry&nbsp;</title></head><body>\
+            <outline text=\"Caf&eacute; &amp; Co\"><outline text=\"A & B\" xmlUrl=\"https://a.example/?x=1&y=2\"/></outline>\
+            </Outline></body></opml>";
+        let import = parse_opml(xml).unwrap();
+        assert!(import.skipped.is_empty(), "{:?}", import.skipped);
+        assert_eq!(import.feeds.len(), 1);
+        assert_eq!(import.feeds[0].title.as_deref(), Some("A & B"));
+        assert_eq!(import.feeds[0].xml_url, "https://a.example/?x=1&y=2");
+        assert_eq!(import.feeds[0].tags, vec!["Café & Co"]);
+    }
+
+    #[test]
+    fn an_unreadable_outline_is_skipped_with_a_reason() {
+        let xml = r#"<opml><body>
+            <outline text="Folder"><outline xmlUrl=bare/><outline xmlUrl="https://b.example/"/></outline>
+            <outline xmlUrl="https://c.example/"/>
+        </body></opml>"#;
+        let import = parse_opml(xml).unwrap();
+        assert_eq!(import.skipped.len(), 1);
+        assert!(
+            import.skipped[0].starts_with("malformed outline <outline xmlUrl=bare"),
+            "{}",
+            import.skipped[0]
+        );
+        // The skip did not unbalance the folder stack.
+        assert_eq!(import.feeds[0].tags, vec!["Folder"]);
+        assert_eq!(import.feeds[1].tags, [] as [String; 0]);
     }
 
     #[test]

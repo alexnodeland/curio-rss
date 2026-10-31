@@ -32,6 +32,7 @@ csv = { workspace = true }
 curio-types = { workspace = true }
 dom_smoothie = { workspace = true }
 ego-tree = { workspace = true }
+encoding_rs = { workspace = true }
 feed-rs = { workspace = true }
 fs4 = { workspace = true }
 htmd = { workspace = true }

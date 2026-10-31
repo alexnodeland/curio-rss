@@ -86,7 +86,6 @@ saphyr-parser = "0.3"
 # Shortest round-trip float text for the frontmatter emitter (already in the
 # tree via serde_json).
 ryu = "1"
-serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", default-features = false, features = ["net", "time"] }

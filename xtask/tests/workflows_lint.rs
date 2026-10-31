@@ -151,7 +151,7 @@ fn the_real_sign_job_must_keep_its_environment() {
 fn the_real_dry_run_runs_outside_the_signing_environment() {
     let dir = workflows_dir();
     let release = std::fs::read_to_string(dir.join("release.yml")).expect("read release.yml");
-    let doc: serde_yaml::Value = serde_yaml::from_str(&release).expect("parse release.yml");
+    let doc = xtask::yaml::from_str(&release).expect("parse release.yml");
     let sign = &doc["jobs"]["sign"];
     assert_eq!(
         sign["environment"].as_str(),

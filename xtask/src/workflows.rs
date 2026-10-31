@@ -49,7 +49,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
-use serde_yaml::Value;
+use crate::yaml::{self, Value};
 
 /// Secret names (prefix match) that sign updates for every user. Each
 /// reference must sit in the single signing step's `env`.
@@ -171,7 +171,7 @@ pub fn lint(files: &[WorkflowFile<'_>]) -> Vec<String> {
     let mut out = Vec::new();
     let mut parsed = Vec::new();
     for file in files {
-        match serde_yaml::from_str::<Value>(file.source) {
+        match yaml::from_str(file.source) {
             Ok(doc) => parsed.push(Parsed {
                 name: file.name,
                 doc,
@@ -2348,7 +2348,7 @@ jobs:
 
     #[test]
     fn triggers_and_needs_accept_every_yaml_spelling() {
-        let doc = |src: &str| serde_yaml::from_str::<Value>(src).unwrap_or(Value::Null);
+        let doc = |src: &str| yaml::from_str(src).unwrap_or(Value::Null);
         assert!(triggers(&doc("on: workflow_call")).contains("workflow_call"));
         assert!(triggers(&doc("on: [push, workflow_call]")).contains("workflow_call"));
         assert!(triggers(&doc("on:\n  workflow_call:\n")).contains("workflow_call"));

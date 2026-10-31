@@ -104,6 +104,9 @@ export const config: WebdriverIO.Config = {
         process.env.CURIO_PROFILE = profile;
         process.env.CURIO_E2E_STUB = stub.base;
         process.env.CURIO_E2E_DEST = destination;
+        // Only `init` creates a profile; every other command refuses a
+        // directory that holds none.
+        await curio(profile, 'init');
         // W1: the CLI's explicit opt-in is the only way a loopback feed
         // becomes fetchable. Async exec (not spawnSync) so this process's
         // stub can answer the fetch while the CLI waits on it.

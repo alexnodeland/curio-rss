@@ -24,8 +24,8 @@ use chrono::NaiveDate;
 
 pub use emitter::EventEmitter;
 pub use fold::{FeedSubscription, FoldedState};
-pub use log::{DEFAULT_MAX_FILE_BYTES, EventLog, MIN_RETENTION_DAYS};
-pub use reader::read_all;
+pub use log::{DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_FILE_BYTES, EventLog, MIN_RETENTION_DAYS};
+pub use reader::{LenientRead, read_all, read_all_lenient};
 
 use crate::storage::StorageError;
 
@@ -47,6 +47,21 @@ pub enum EventLogError {
         line: u64,
         /// Parse-failure detail.
         message: String,
+    },
+    /// Another process sharing the profile (the desktop app or a CLI
+    /// run) held the events lock for the whole lock timeout. Transient:
+    /// retrying once it finishes succeeds, and nothing was lost — staged
+    /// intents stay staged until a drain gets the lock.
+    #[error(
+        "another Curio process kept this profile's event log locked for {waited_ms} ms ({}) — \
+         try again once it finishes",
+        path.display()
+    )]
+    ProfileLocked {
+        /// The lock file.
+        path: PathBuf,
+        /// How long the operation waited.
+        waited_ms: u64,
     },
 }
 

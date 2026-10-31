@@ -11,6 +11,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'app.tagline': 'Tu lectura, en tus notas',
     'app.loading': 'Cargando…',
     'app.error.internal': 'Algo salió mal. Reintentar puede ayudar.',
+    'app.error.profileBusy':
+        'Otro proceso de Curio (por ejemplo, una orden desde la línea de comandos) está usando este perfil ahora mismo. Vuelve a intentarlo en un momento.',
     'a11y.skipToContent': 'Saltar al contenido',
     'shell.feeds.loading': 'Cargando suscripciones…',
     'shell.feeds.empty': 'Aún no hay suscripciones',
@@ -335,6 +337,30 @@ export const es: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Base de datos: {path}',
     'doctor.check.integrity': 'Comprobación de integridad',
     'doctor.check.fts': 'Comprobación del índice de búsqueda',
+
+    'legacy.title': 'Bibliotecas de versiones anteriores',
+    'legacy.notice.moved':
+        'Tu biblioteca de una versión anterior de Curio se ha movido a {path}, donde también la abre la línea de comandos.',
+    'legacy.notice.openedInPlace':
+        'Tu biblioteca de una versión anterior de Curio aún no se ha podido mover, así que Curio la ha abierto donde está. Detalles: {where}.',
+    'legacy.notice.left':
+        'Queda una biblioteca de una versión anterior de Curio en {path}. Detalles: {where}.',
+    'legacy.detail.moved':
+        'Movida de {path} a la ubicación que comparten la app y la línea de comandos.',
+    'legacy.detail.openedInPlace':
+        'Por ahora Curio la ha abierto donde está, así que no falta nada; volverá a intentar moverla en el próximo inicio.',
+    'legacy.reason.defaultInUse':
+        '{path} se ha dejado donde está: la ubicación compartida ya contiene una biblioteca y dos bibliotecas nunca se fusionan. Exporta lo que necesites de la antigua con curio --profile y después elimínala.',
+    'legacy.reason.ambiguous':
+        '{path} se ha dejado donde está: existe más de una biblioteca antigua. Mueve a mano a {default} la que quieras conservar.',
+    'legacy.reason.inUse':
+        '{path} se ha dejado donde está: otro proceso de Curio la tiene abierta. Cierra ese proceso y reinicia Curio para moverla.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} se ha dejado donde está: {default} ya existe y no está vacía. Mueve allí la biblioteca antigua a mano.',
+    'legacy.reason.unreadable':
+        '{path} se ha dejado donde está: no se ha podido comprobar su base de datos ({detail}). Muévela a mano a {default}.',
+    'legacy.reason.moveFailed':
+        '{path} se ha dejado donde está: no se ha podido mover ({detail}). Muévela a mano a {default}.',
     'feedHealth.title': 'Estado del feed',
     'feedHealth.status': 'Estado',
     'feedHealth.pause': 'Pausar',

@@ -2,23 +2,28 @@
 /**
  * The database doctor: the health/maintenance commands (integrity checks,
  * vacuum, event-log retention sweep) plus the redacted, zero-telemetry
- * diagnostics bundle and the about-box facts. Every button is a thin call
- * to a health command; results surface as toasts, and the stats reload
- * after a vacuum.
+ * diagnostics bundle and the about-box facts, plus what startup did with a
+ * library from an earlier release. Every button is a thin call to a health
+ * command; results surface as toasts, and the stats reload after a vacuum.
  */
-import { type AppInfoDto, type DbStatsDto, commands } from '$lib/bindings';
+import { type AppInfoDto, type DbStatsDto, type LegacyProfileDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import type { CommandResult } from '$lib/state/query-cache.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
+import { legacyProfileDetail, loadLegacyProfiles } from '$lib/utils/legacy-profiles';
 
 let stats: DbStatsDto | null = $state(null);
 let info: AppInfoDto | null = $state(null);
+let legacy: LegacyProfileDto[] = $state([]);
 let running: string | null = $state(null);
 
 $effect(() => {
     void loadStats();
     void loadInfo();
+    void loadLegacyProfiles().then((outcomes) => {
+        legacy = outcomes;
+    });
 });
 
 async function loadStats(): Promise<void> {
@@ -127,6 +132,17 @@ async function diagnostics(): Promise<void> {
         </p>
     {/if}
 
+    {#if legacy.length > 0}
+        <section class="legacy" aria-labelledby="doctor-legacy-title">
+            <h4 id="doctor-legacy-title">{t('legacy.title')}</h4>
+            {#each legacy as outcome (outcome.path)}
+                <p class="legacy-item" class:left={outcome.status !== 'moved'}>
+                    {legacyProfileDetail(outcome)}
+                </p>
+            {/each}
+        </section>
+    {/if}
+
     <div class="doctor-actions">
         <button type="button" onclick={integrity} disabled={running !== null}>
             {running === 'integrity' ? t('doctor.running') : t('doctor.integrity')}
@@ -163,6 +179,35 @@ async function diagnostics(): Promise<void> {
         font-family: var(--font-mono);
         font-size: var(--text-xs);
         color: var(--fg-subtle);
+    }
+
+    .legacy {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding-top: var(--space-4);
+        margin-top: var(--space-2);
+        border-top: 1px solid var(--hairline);
+    }
+
+    h4 {
+        font-size: 0.6875rem;
+        font-weight: 650;
+        letter-spacing: var(--tracking-caps);
+        text-transform: uppercase;
+        color: var(--fg-subtle);
+    }
+
+    .legacy-item {
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        color: var(--fg-muted);
+        overflow-wrap: anywhere;
+    }
+
+    .legacy-item.left {
+        padding-left: var(--space-3);
+        border-left: 2px solid var(--warning);
     }
 
     .doctor-actions {

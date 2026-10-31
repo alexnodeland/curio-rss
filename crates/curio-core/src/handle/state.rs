@@ -18,7 +18,7 @@ impl CoreHandle {
         } else {
             self.storage.unstar_article(id)?
         };
-        self.emit_if(staged.is_some())
+        Ok(self.emit_if(staged.is_some()))
     }
 
     /// Add to / remove from read-later; emits `article.read_later.added`
@@ -33,7 +33,7 @@ impl CoreHandle {
         } else {
             self.storage.remove_read_later(id)?
         };
-        self.emit_if(staged.is_some())
+        Ok(self.emit_if(staged.is_some()))
     }
 
     /// Archive / unarchive; emits `article.archived` or the
@@ -48,7 +48,7 @@ impl CoreHandle {
         } else {
             self.storage.unarchive_article(id)?
         };
-        self.emit_if(staged.is_some())
+        Ok(self.emit_if(staged.is_some()))
     }
 
     /// Read/unread. DB-local: `curio.events.v1` defines no read event.
@@ -77,7 +77,7 @@ impl CoreHandle {
     /// [`CoreError::NotFound`] for an unknown article.
     pub fn record_opened(&self, id: ArticleId, dwell_ms: Option<u64>) -> Result<(), CoreError> {
         self.storage.record_opened(id, dwell_ms)?;
-        self.emit()?;
+        self.emit();
         Ok(())
     }
 
@@ -88,7 +88,7 @@ impl CoreHandle {
     /// [`CoreError::NotFound`] for an unknown article.
     pub fn tag_article(&self, id: ArticleId, tag: &str) -> Result<bool, CoreError> {
         let staged = self.storage.tag_article(id, tag)?;
-        self.emit_if(staged.is_some())
+        Ok(self.emit_if(staged.is_some()))
     }
 
     /// Untags an article; emits the `article.untagged` negation.
@@ -99,6 +99,6 @@ impl CoreHandle {
     /// [`CoreError::NotFound`] for an unknown article.
     pub fn untag_article(&self, id: ArticleId, tag: &str) -> Result<bool, CoreError> {
         let staged = self.storage.untag_article(id, tag)?;
-        self.emit_if(staged.is_some())
+        Ok(self.emit_if(staged.is_some()))
     }
 }

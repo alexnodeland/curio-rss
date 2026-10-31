@@ -10,6 +10,30 @@ import type { ArticleStateDto } from '$lib/bindings';
 
 let installed = false;
 
+/**
+ * `?legacy=<status>` (optionally `&inPlace=1`) previews a startup that met a
+ * library from an earlier release — the notice and the doctor panel.
+ */
+function devLegacyProfiles(): unknown[] {
+    const query = new URLSearchParams(window.location.search);
+    const status = query.get('legacy');
+    if (status === null) {
+        return [];
+    }
+    return [
+        {
+            path: '~/Library/Application Support/curio',
+            default_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
+            status,
+            detail:
+                status === 'move_failed' || status === 'unreadable'
+                    ? 'Cross-device link (os error 18)'
+                    : null,
+            opened_in_place: query.get('inPlace') === '1',
+        },
+    ];
+}
+
 export async function installDevMock(): Promise<void> {
     if (installed) return;
     if (!import.meta.env.DEV) return;
@@ -247,6 +271,8 @@ tokens:
                         db_schema_version: 5,
                         schema_supported: true,
                     };
+                case 'legacy_profiles':
+                    return devLegacyProfiles();
                 case 'db_stats':
                     return {
                         article_count: articles.length,

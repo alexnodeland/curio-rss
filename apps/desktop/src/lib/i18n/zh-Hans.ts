@@ -12,6 +12,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'app.tagline': '你的阅读，尽在你的笔记',
     'app.loading': '加载中…',
     'app.error.internal': '出了点问题。重试可能会有帮助。',
+    'app.error.profileBusy': '另一个 Curio 进程（例如命令行运行）正在使用此配置文件。请稍后重试。',
     'a11y.skipToContent': '跳到主要内容',
     'shell.feeds.loading': '正在加载订阅…',
     'shell.feeds.empty': '还没有订阅',
@@ -320,6 +321,27 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': '数据库：{path}',
     'doctor.check.integrity': '完整性检查',
     'doctor.check.fts': '搜索索引检查',
+
+    'legacy.title': '早期版本的资料库',
+    'legacy.notice.moved': '已将早期版本 Curio 的资料库移至 {path}，命令行也会打开这里。',
+    'legacy.notice.openedInPlace':
+        '早期版本 Curio 的资料库暂时无法移动，Curio 已在原位置打开它。详情见{where}。',
+    'legacy.notice.left': '早期版本 Curio 的资料库仍留在 {path}。详情见{where}。',
+    'legacy.detail.moved': '已从 {path} 移至应用与命令行共用的位置。',
+    'legacy.detail.openedInPlace':
+        'Curio 暂时在原位置打开了它，因此没有任何缺失；下次启动时会再次尝试移动。',
+    'legacy.reason.defaultInUse':
+        '{path} 保留在原处：共用位置已有一个资料库，两个资料库永远不会自动合并。请用 curio --profile 从旧资料库导出所需内容，然后将其删除。',
+    'legacy.reason.ambiguous':
+        '{path} 保留在原处：存在多个旧资料库。请手动将要保留的那个移至 {default}。',
+    'legacy.reason.inUse':
+        '{path} 保留在原处：另一个 Curio 进程正在使用它。请退出该进程，然后重启 Curio 以移动它。',
+    'legacy.reason.defaultNotEmpty':
+        '{path} 保留在原处：{default} 已存在且不为空。请手动将旧资料库移到那里。',
+    'legacy.reason.unreadable':
+        '{path} 保留在原处：无法检查其数据库（{detail}）。请手动将其移至 {default}。',
+    'legacy.reason.moveFailed':
+        '{path} 保留在原处：移动失败（{detail}）。请手动将其移至 {default}。',
     'feedHealth.title': '订阅源健康状况',
     'feedHealth.status': '状态',
     'feedHealth.pause': '暂停',

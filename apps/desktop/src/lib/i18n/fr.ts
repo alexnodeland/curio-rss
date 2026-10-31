@@ -340,6 +340,30 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Base de données : {path}',
     'doctor.check.integrity': 'Vérification de l’intégrité',
     'doctor.check.fts': 'Vérification de l’index de recherche',
+
+    'legacy.title': 'Bibliothèques des versions précédentes',
+    'legacy.notice.moved':
+        'Votre bibliothèque d’une version précédente de Curio a été déplacée vers {path}, où la ligne de commande l’ouvre aussi.',
+    'legacy.notice.openedInPlace':
+        'Votre bibliothèque d’une version précédente de Curio n’a pas encore pu être déplacée : Curio l’a donc ouverte là où elle se trouve. Détails : {where}.',
+    'legacy.notice.left':
+        'Une bibliothèque d’une version précédente de Curio est restée dans {path}. Détails : {where}.',
+    'legacy.detail.moved':
+        'Déplacée de {path} vers l’emplacement partagé par l’app et la ligne de commande.',
+    'legacy.detail.openedInPlace':
+        'Curio l’a ouverte là où elle se trouve pour l’instant, rien ne manque donc ; le déplacement sera retenté au prochain démarrage.',
+    'legacy.reason.defaultInUse':
+        '{path} est resté en place : l’emplacement partagé contient déjà une bibliothèque, et deux bibliothèques ne sont jamais fusionnées. Exportez ce dont vous avez besoin de l’ancienne avec curio --profile, puis supprimez-la.',
+    'legacy.reason.ambiguous':
+        '{path} est resté en place : il existe plus d’une ancienne bibliothèque. Déplacez à la main celle à conserver vers {default}.',
+    'legacy.reason.inUse':
+        '{path} est resté en place : un autre processus Curio l’a ouverte. Quittez ce processus, puis redémarrez Curio pour la déplacer.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} est resté en place : {default} existe déjà et n’est pas vide. Déplacez-y l’ancienne bibliothèque à la main.',
+    'legacy.reason.unreadable':
+        '{path} est resté en place : sa base de données n’a pas pu être vérifiée ({detail}). Déplacez-la à la main vers {default}.',
+    'legacy.reason.moveFailed':
+        '{path} est resté en place : le déplacement a échoué ({detail}). Déplacez-la à la main vers {default}.',
     'feedHealth.title': 'État des flux',
     'feedHealth.status': 'État',
     'feedHealth.pause': 'Suspendre',

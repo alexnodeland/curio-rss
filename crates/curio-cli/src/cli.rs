@@ -14,7 +14,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(name = "curio", version, propagate_version = true)]
 pub(crate) struct Cli {
     /// Profile directory (config, database, event log). Defaults to the
-    /// platform data dir, e.g. ~/.local/share/curio.
+    /// profile the desktop app opens: ~/Library/Application
+    /// Support/io.github.alexnodeland.curio on macOS, ~/.local/share/curio
+    /// on Linux, %LOCALAPPDATA%\alexnodeland\curio\data on Windows.
     #[arg(long, global = true, env = "CURIO_PROFILE", value_name = "DIR")]
     pub(crate) profile: Option<PathBuf>,
 

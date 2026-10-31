@@ -324,6 +324,12 @@ export const commands = {
 	 */
 	sweepEventRetention: () => typedError<string[], CommandError>(__TAURI_INVOKE("sweep_event_retention")),
 	/**
+	 *  What startup did with profiles an earlier release kept outside the
+	 *  shared default (moved, or left where it is and why) — the startup
+	 *  notice and the doctor panel. Empty when there were none.
+	 */
+	legacyProfiles: () => typedError<LegacyProfileDto[], CommandError>(__TAURI_INVOKE("legacy_profiles")),
+	/**
 	 *  The local path of a cached copy of `url`, fetched through the policed
 	 *  client on a miss. The frontend serves it via the `asset:` protocol —
 	 *  this is how images load without opening the CSP to `https:`.
@@ -711,6 +717,51 @@ export type ImportSourceDto =
 "instapaper_csv" | 
 /**  Readwise Reader CSV export. */
 "readwise_csv";
+
+/**
+ *  What startup did with a profile an earlier release kept outside the
+ *  shared default location ([`curio_core::paths::adopt_legacy_profiles`]):
+ *  the startup notice and the doctor panel render it.
+ */
+export type LegacyProfileDto = {
+	/**
+	 *  The legacy profile's directory — where it was, when moved (display
+	 *  only).
+	 */
+	path: string,
+	/**  The default profile shared with the CLI (display only). */
+	default_dir: string,
+	/**  Moved, or why it was left where it is. */
+	status: LegacyProfileStatusDto,
+	/**
+	 *  The OS / database error behind `unreadable` and `move_failed`
+	 *  (engine English, display only); `null` otherwise.
+	 */
+	detail: string | null,
+	/**
+	 *  `true` when this session opened it where it is, because a fresh
+	 *  default would have stranded it (see
+	 *  [`curio_core::paths::in_place_fallback`]).
+	 */
+	opened_in_place: boolean,
+};
+
+/**  Mirror of [`curio_core::paths::LegacyProfile`]'s outcome. */
+export type LegacyProfileStatusDto = 
+/**  Moved into the shared default location. */
+"moved" | 
+/**  The default already holds a library; never merged. */
+"default_in_use" | 
+/**  More than one legacy profile exists. */
+"ambiguous" | 
+/**  Another process has it open. */
+"in_use" | 
+/**  The default directory exists and is not empty. */
+"default_not_empty" | 
+/**  Its database could not be checked. */
+"unreadable" | 
+/**  The move failed. */
+"move_failed";
 
 /**
  *  Mirror of [`ListArticles`] — filters are backend-owned; the head never

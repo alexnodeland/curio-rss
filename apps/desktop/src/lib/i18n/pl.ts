@@ -340,6 +340,30 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Baza danych: {path}',
     'doctor.check.integrity': 'Kontrola integralności',
     'doctor.check.fts': 'Kontrola indeksu wyszukiwania',
+
+    'legacy.title': 'Biblioteki z wcześniejszych wersji',
+    'legacy.notice.moved':
+        'Biblioteka z wcześniejszej wersji Curio została przeniesiona do {path}, gdzie otwiera ją też wiersz poleceń.',
+    'legacy.notice.openedInPlace':
+        'Biblioteki z wcześniejszej wersji Curio nie udało się jeszcze przenieść, więc Curio otworzyło ją w dotychczasowym miejscu. Szczegóły: {where}.',
+    'legacy.notice.left':
+        'Biblioteka z wcześniejszej wersji Curio pozostała w {path}. Szczegóły: {where}.',
+    'legacy.detail.moved':
+        'Przeniesiono z {path} do miejsca wspólnego dla aplikacji i wiersza poleceń.',
+    'legacy.detail.openedInPlace':
+        'Na razie Curio otworzyło ją w dotychczasowym miejscu, więc niczego nie brakuje; przy następnym uruchomieniu spróbuje ją przenieść ponownie.',
+    'legacy.reason.defaultInUse':
+        '{path} pozostawiono na miejscu: we wspólnym miejscu jest już biblioteka, a dwóch bibliotek nigdy się nie scala. Wyeksportuj potrzebne dane ze starej za pomocą curio --profile, a potem ją usuń.',
+    'legacy.reason.ambiguous':
+        '{path} pozostawiono na miejscu: istnieje więcej niż jedna stara biblioteka. Przenieś ręcznie do {default} tę, którą chcesz zachować.',
+    'legacy.reason.inUse':
+        '{path} pozostawiono na miejscu: inny proces Curio ma ją otwartą. Zamknij ten proces, a potem uruchom Curio ponownie, aby ją przenieść.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} pozostawiono na miejscu: {default} już istnieje i nie jest pusty. Przenieś tam starą bibliotekę ręcznie.',
+    'legacy.reason.unreadable':
+        '{path} pozostawiono na miejscu: nie udało się sprawdzić jej bazy danych ({detail}). Przenieś ją ręcznie do {default}.',
+    'legacy.reason.moveFailed':
+        '{path} pozostawiono na miejscu: przeniesienie się nie powiodło ({detail}). Przenieś ją ręcznie do {default}.',
     'feedHealth.title': 'Kondycja kanału',
     'feedHealth.status': 'Status',
     'feedHealth.pause': 'Wstrzymaj',

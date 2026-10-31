@@ -23,6 +23,7 @@ import {
     fetchRecordFixture,
     importOutcomeFixture,
     installIpcHarness,
+    legacyProfileFixture,
     opmlImportOutcomeFixture,
     pathTokenFixture,
     refreshOutcomeFixture,
@@ -153,6 +154,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     vacuumDb: { args: [], response: null },
     dbStats: { args: [], response: dbStatsFixture() },
     sweepEventRetention: { args: [], response: ['2026-03-01.jsonl'] },
+    legacyProfiles: { args: [], response: [legacyProfileFixture()] },
     getCachedImage: {
         args: ['https://example.org/img.png'],
         response: '/cache/curio/images/abc123',

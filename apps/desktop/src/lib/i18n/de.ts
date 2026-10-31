@@ -338,6 +338,30 @@ export const de: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Datenbank: {path}',
     'doctor.check.integrity': 'Integritätsprüfung',
     'doctor.check.fts': 'Suchindexprüfung',
+
+    'legacy.title': 'Bibliotheken aus früheren Versionen',
+    'legacy.notice.moved':
+        'Die Bibliothek aus einer früheren Curio-Version wurde nach {path} verschoben, wo auch die Kommandozeile sie öffnet.',
+    'legacy.notice.openedInPlace':
+        'Die Bibliothek aus einer früheren Curio-Version konnte noch nicht verschoben werden und wurde daher an ihrem bisherigen Ort geöffnet. Details: {where}.',
+    'legacy.notice.left':
+        'Eine Bibliothek aus einer früheren Curio-Version liegt noch unter {path}. Details: {where}.',
+    'legacy.detail.moved':
+        'Von {path} an den gemeinsamen Ort von App und Kommandozeile verschoben.',
+    'legacy.detail.openedInPlace':
+        'Curio hat sie vorerst an ihrem Ort geöffnet, es fehlt also nichts; beim nächsten Start wird das Verschieben erneut versucht.',
+    'legacy.reason.defaultInUse':
+        '{path} wurde nicht verschoben: Am gemeinsamen Ort liegt bereits eine Bibliothek, und zwei Bibliotheken werden nie zusammengeführt. Das Benötigte mit curio --profile aus der alten exportieren und sie danach entfernen.',
+    'legacy.reason.ambiguous':
+        '{path} wurde nicht verschoben: Es gibt mehr als eine alte Bibliothek. Die zu behaltende von Hand nach {default} verschieben.',
+    'legacy.reason.inUse':
+        '{path} wurde nicht verschoben: Ein anderer Curio-Prozess hat sie geöffnet. Diesen Prozess beenden und Curio neu starten, um sie zu verschieben.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} wurde nicht verschoben: {default} existiert bereits und ist nicht leer. Die alte Bibliothek von Hand dorthin verschieben.',
+    'legacy.reason.unreadable':
+        '{path} wurde nicht verschoben: Ihre Datenbank konnte nicht geprüft werden ({detail}). Sie von Hand nach {default} verschieben.',
+    'legacy.reason.moveFailed':
+        '{path} wurde nicht verschoben: Das Verschieben ist fehlgeschlagen ({detail}). Sie von Hand nach {default} verschieben.',
     'feedHealth.title': 'Feed-Zustand',
     'feedHealth.status': 'Status',
     'feedHealth.pause': 'Pausieren',

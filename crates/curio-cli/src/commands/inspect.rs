@@ -1,5 +1,6 @@
 //! Introspection: `curio events tail` and `curio doctor`.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use curio_core::CoreHandle;
@@ -77,7 +78,7 @@ struct DoctorView {
 pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
     let core = &app.core;
     let mut checks = vec![
-        Check::ok("profile", app.profile.display().to_string()),
+        Check::ok("profile", profile_detail(app)),
         schema_check(core),
         Check::from_result(
             "db-integrity",
@@ -96,6 +97,9 @@ pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
         intents_check(core),
         dead_intents_check(core),
     ];
+    if app.is_default_profile {
+        checks.push(legacy_check(&curio_core::paths::legacy_profile_dirs()));
+    }
     match core.count_articles() {
         Ok(count) => checks.push(Check::ok("articles", format!("{count} stored"))),
         Err(err) => checks.push(Check::from_result("articles", Err(err.to_string()))),
@@ -115,6 +119,39 @@ pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// The resolved profile path, and whether the desktop app shares it.
+fn profile_detail(app: &App) -> String {
+    let whose = if app.is_default_profile {
+        "the default, shared with the desktop app"
+    } else {
+        "set by --profile / CURIO_PROFILE"
+    };
+    format!("{} ({whose})", app.profile.display())
+}
+
+/// Profiles an earlier release left at a legacy location are libraries
+/// the default profile does not see; each one fails the check until it is
+/// moved or removed.
+fn legacy_check(legacy: &[PathBuf]) -> Check {
+    let left: Vec<String> = legacy
+        .iter()
+        .filter(|dir| curio_core::paths::is_profile(dir))
+        .map(|dir| dir.display().to_string())
+        .collect();
+    Check::from_result(
+        "legacy-profile",
+        if left.is_empty() {
+            Ok("no profile left at a pre-0.5 location".to_owned())
+        } else {
+            Err(format!(
+                "unused profile(s) from an earlier release: {} — open with --profile to export \
+                 what you need, then remove",
+                left.join(", ")
+            ))
+        },
+    )
 }
 
 fn schema_check(core: &CoreHandle) -> Check {
@@ -185,4 +222,27 @@ fn dead_intents_check(core: &CoreHandle) -> Check {
             Err(err) => Err(err.to_string()),
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn a_leftover_legacy_profile_fails_the_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        let empty = tmp.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let clean = legacy_check(&[empty.clone(), tmp.path().join("absent")]);
+        assert!(clean.ok, "{}", clean.detail);
+
+        let old = tmp.path().join("old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join(curio_core::paths::DB_FILE), b"").unwrap();
+        let dirty = legacy_check(&[empty, old.clone()]);
+        assert!(!dirty.ok);
+        assert!(dirty.detail.contains(&old.display().to_string()));
+    }
 }

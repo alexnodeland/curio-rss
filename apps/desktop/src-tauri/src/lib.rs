@@ -112,6 +112,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::health::vacuum_db,
             commands::health::db_stats,
             commands::health::sweep_event_retention,
+            commands::health::legacy_profiles,
             // platform
             commands::platform::get_cached_image,
             commands::platform::copy_diagnostics_bundle,
@@ -159,9 +160,27 @@ pub fn run() {
             // and this closure — nothing here depends on that).
             create_main_window(app)?;
 
-            let profile = paths::profile_dir()?;
+            // The one-time move of a pre-0.5 profile (the old CLI location,
+            // or Roaming `AppData` on Windows) onto the default shared with the
+            // CLI — before logging, which would create the default dir. A
+            // library it cannot move yet is opened where it is, never
+            // stranded behind a fresh empty default.
+            let paths::StartupProfile {
+                dir: profile,
+                outcomes,
+                legacy,
+            } = paths::startup_profile(
+                paths::profile_dir()?,
+                &curio_core::paths::legacy_profile_dirs(),
+                curio_core::paths::legacy_desktop_profile_dir().as_deref(),
+            );
             // Rotating logs + panic hook first, so anything below is captured.
             logging::init(&profile.join("logs"));
+            for notice in &outcomes {
+                tracing::warn!(%notice, "legacy profile");
+            }
+            // Served to the startup notice and the doctor panel.
+            app.manage(legacy);
             let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
             let core: commands::SharedCore = Arc::new(core);
             // Optional Reddit API credentials from the OS keychain (D15) —

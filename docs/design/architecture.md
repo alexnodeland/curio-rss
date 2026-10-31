@@ -249,7 +249,8 @@ disagrees with it, the contract wins.
 
 ## What v1 is honest about
 
-No sync of any kind: single-machine desktop + CLI over one SQLite file. What crosses
+No sync of any kind: single-machine desktop + CLI over one SQLite file (both heads
+resolve the default profile through `curio_core::paths`, so they open the same one). What crosses
 devices is exactly the promoted vault (via whatever syncs it — git, Syncthing) and the
 event stream. The two credible future answers — the server head and GReader/Fever client
 mode — are named seams, not v1 commitments; file-based journal merge (per-device

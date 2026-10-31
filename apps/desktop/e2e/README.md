@@ -40,8 +40,9 @@ No test hooks live in the app. Before the app boots, the launcher:
   `/seed.xml` (three items, one of them `fixtures/html/xss-corpus.html`) and
   `/added.xml` (`fixtures/feeds/rss2.xml`), counting every request;
 - seeds a throwaway `CURIO_PROFILE` through the **real `curio` CLI**:
-  `feed add <stub>/seed.xml --allow-private-network` (the explicit W1 opt-in),
-  `dest add notes <tmp>`, `fetch`.
+  `init` (only `init` creates a profile — every other command refuses a
+  directory without one), `feed add <stub>/seed.xml --allow-private-network`
+  (the explicit W1 opt-in), `dest add notes <tmp>`, `fetch`.
 
 The app inherits `CURIO_PROFILE` through tauri-driver. It is built with
 `e2e/tauri.e2e.conf.json`, which points the startup update check at a dead

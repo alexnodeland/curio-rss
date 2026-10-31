@@ -198,6 +198,38 @@ rename. Export is idempotent on `(curio_id, checksum)`:
   you wrote outside the markers survives byte-for-byte
 - unchanged → `unchanged`, writes nothing, emits nothing
 
+The manifest is a file in your folder, so Curio never trusts it alone:
+
+- **A note is only rewritten for the article it belongs to** — the
+  note's own frontmatter `curio_id` decides. If the manifest was lost,
+  reset or restored from an old commit, a second "Weekly links" article
+  gets `curio/weekly-links-<id-prefix>.md` instead of taking over the first
+  one's note, and a file of your own at a slug path is never touched.
+  An article whose own note is already there is reconciled onto it and
+  reported as `updated` (never a second `created`).
+- **One export per destination at a time**, across threads and processes
+  (the CLI next to the desktop app): exports queue on an advisory lock,
+  `.curio/manifest.lock` (gitignored, never deleted — it holds no data).
+  An `unchanged` export writes nothing and takes no lock, so it works on
+  a read-only folder too; on a network or FUSE mount without advisory
+  locks Curio warns and serializes within its own process only.
+- **A vanished vault is refused, not recreated.** If the destination
+  folder is gone — or, once it has been exported to, its `.curio/` folder
+  is — `save` fails with "destination folder … is missing" instead of
+  re-exporting everything into an empty folder at the old path. Every
+  command re-applies `curio.toml`'s destinations, but that never
+  recreates such a folder. Reconnect the drive, or run `curio dest add
+  <name> <path>` again (new or same path) to start the destination
+  afresh; changing a destination's path in `curio.toml` does the same.
+- **Sync-tool conflict copies** of the manifest (`manifest (conflicted
+  copy).json`, iCloud's `manifest 2.json`, Syncthing's
+  `manifest.sync-conflict-….json`, OneDrive's `manifest-HOSTNAME.json`)
+  are merged back on the next export — union of the entries, the newest
+  `exported_at` wins — and then removed. If the union gives one note path
+  to two articles, the note's own `curio_id` keeps its entry; the other
+  article gets a path of its own on its next export. Other files in
+  `.curio/` (a `manifest.backup.json` of your own) are never touched.
+
 ## Events
 
 ```sh

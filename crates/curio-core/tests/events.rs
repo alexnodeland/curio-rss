@@ -491,6 +491,82 @@ fn a_corrupt_intent_row_is_quarantined_instead_of_blocking_open() {
     assert_ne!(error, "", "the decode error is recorded");
 }
 
+/// `event_intents.id` is a reusable rowid (the table empties after every
+/// drain), so two bad rows quarantined in separate drains can carry the
+/// same original id. Both dead rows must survive — neither overwrites the
+/// other.
+#[test]
+fn quarantines_across_drains_never_overwrite_each_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("curio.db");
+    let storage = Storage::open(&db).unwrap();
+    let side = rusqlite::Connection::open(&db).unwrap();
+    let mut original_ids = Vec::new();
+    for (event_id, json) in [("bad1", "{\"first\": "), ("bad2", "{\"second\": ")] {
+        side.execute(
+            "INSERT INTO event_intents (event_id, ts, envelope_json) \
+             VALUES (?1, '2026-07-01T00:00:00Z', ?2)",
+            [event_id, json],
+        )
+        .unwrap();
+        original_ids.push(side.last_insert_rowid());
+        assert_eq!(
+            storage.pending_intents().unwrap().len(),
+            0,
+            "quarantined, not returned"
+        );
+        assert_eq!(storage.pending_intent_count().unwrap(), 0);
+    }
+    assert_eq!(
+        original_ids[0], original_ids[1],
+        "the emptied table hands out the same rowid again"
+    );
+    assert_eq!(storage.quarantined_intent_count().unwrap(), 2);
+    let dead: Vec<(i64, String, String)> = side
+        .prepare(
+            "SELECT intent_id, event_id, envelope_json FROM event_intents_dead ORDER BY dead_id",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        dead,
+        [
+            (
+                original_ids[0],
+                "bad1".to_owned(),
+                "{\"first\": ".to_owned()
+            ),
+            (
+                original_ids[1],
+                "bad2".to_owned(),
+                "{\"second\": ".to_owned()
+            ),
+        ]
+    );
+}
+
+/// The doctor's staged-intent count is a pure read: it counts an
+/// undecodable row without quarantining it.
+#[test]
+fn pending_intent_count_counts_without_quarantining() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("curio.db");
+    let storage = Storage::open(&db).unwrap();
+    let side = rusqlite::Connection::open(&db).unwrap();
+    side.execute(
+        "INSERT INTO event_intents (event_id, ts, envelope_json) \
+         VALUES ('bad', '2026-07-01T00:00:00Z', 'not json')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(storage.pending_intent_count().unwrap(), 1);
+    assert_eq!(storage.pending_intent_count().unwrap(), 1);
+    assert_eq!(storage.quarantined_intent_count().unwrap(), 0);
+}
+
 /// Crash window B: the append + fsync happened but the process died before
 /// the intent was deleted. Replay appends a duplicate line — and the
 /// consumer-side `event_id` dedupe makes that harmless.

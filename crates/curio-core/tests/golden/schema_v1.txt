@@ -89,7 +89,8 @@ CREATE TABLE event_intents (
 
 -- table event_intents_dead
 CREATE TABLE event_intents_dead (
-    id             INTEGER PRIMARY KEY,
+    dead_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    intent_id      INTEGER NOT NULL,
     event_id       TEXT NOT NULL,
     ts             TEXT NOT NULL,
     envelope_json  TEXT NOT NULL,
@@ -132,6 +133,9 @@ CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 ) WITHOUT ROWID
+
+-- table sqlite_sequence
+CREATE TABLE sqlite_sequence(name,seq)
 
 -- table tags
 CREATE TABLE tags (

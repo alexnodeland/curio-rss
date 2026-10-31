@@ -62,11 +62,16 @@ impl CoreHandle {
     /// flushed to the JSONL log. Zero in a healthy profile: every
     /// operation flushes before it returns, and `open` replays leftovers.
     ///
+    /// A pure read (the doctor probe): it counts every staged row, an
+    /// undecodable one included, and never quarantines — that only
+    /// happens when intents are drained.
+    ///
     /// # Errors
     ///
     /// Storage errors.
     pub fn pending_intent_count(&self) -> Result<usize, CoreError> {
-        Ok(self.storage.pending_intents()?.len())
+        let count = self.storage.pending_intent_count()?;
+        Ok(usize::try_from(count).unwrap_or(usize::MAX))
     }
 
     /// How many staged event intents were quarantined because their

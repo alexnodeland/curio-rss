@@ -12,7 +12,9 @@ impl Storage {
     /// returned: it is moved, verbatim and with the decode error, to the
     /// `event_intents_dead` table and logged at `warn`. One bad row must
     /// not block every later event — nor the open-time replay, which
-    /// would otherwise keep the whole profile from opening.
+    /// would otherwise keep the whole profile from opening. That move is a
+    /// write (through the writer thread), so this is a drain step, not a
+    /// probe — read-only callers want [`Storage::pending_intent_count`].
     ///
     /// # Errors
     ///
@@ -45,6 +47,21 @@ impl Storage {
         Ok(pending)
     }
 
+    /// How many intent rows are staged, decodable or not. A pure read —
+    /// unlike [`Storage::pending_intents`] it never quarantines, so a
+    /// diagnostic probe can call it without writing to the database.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn pending_intent_count(&self) -> Result<u64, StorageError> {
+        self.read(|conn| {
+            let n: i64 =
+                conn.query_row("SELECT COUNT(*) FROM event_intents", [], |row| row.get(0))?;
+            Ok(u64::try_from(n).unwrap_or_default())
+        })
+    }
+
     /// How many intents have been quarantined into `event_intents_dead`
     /// (a doctor-surface signal: non-zero means events were lost from the
     /// log and the rows are kept for diagnosis).
@@ -73,8 +90,8 @@ impl Storage {
                     "quarantined an undecodable event intent into event_intents_dead"
                 );
                 tx.prepare_cached(
-                    "INSERT OR REPLACE INTO event_intents_dead \
-                     (id, event_id, ts, envelope_json, error, quarantined_at) \
+                    "INSERT INTO event_intents_dead \
+                     (intent_id, event_id, ts, envelope_json, error, quarantined_at) \
                      SELECT id, event_id, ts, envelope_json, ?2, ?3 \
                      FROM event_intents WHERE id = ?1",
                 )?

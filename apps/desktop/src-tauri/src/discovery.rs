@@ -503,8 +503,8 @@ mod tests {
 
     #[test]
     fn a_lossy_replacement_char_at_the_sniff_window_does_not_panic() {
-        // Invalid UTF-8 around byte SNIFF_WINDOW decodes to U+FFFD (3 bytes),
-        // which shifts the multi-byte char across the cut.
+        // Each invalid byte decodes to its own U+FFFD (3 bytes); the first
+        // starts at byte SNIFF_WINDOW - 1, so it straddles the cut.
         let mut body = b"<html><head><title>".to_vec();
         body.resize(SNIFF_WINDOW - 1, b'x');
         body.extend_from_slice(&[0xff, 0xfe, 0xfd]);
@@ -521,10 +521,24 @@ mod tests {
             <link rel="alternate" type="application/atom+xml" title="フィード 📰" href="/atom.xml">
             </head><body>"#,
         );
+        let paragraph = "<p>こんにちは世界、今日はいい天気ですね。🍣🍜🗻✨👍🏽👨‍👩‍👧</p>";
+        while html.len() + paragraph.len() < SNIFF_WINDOW - 8 {
+            html.push_str(paragraph);
+        }
+        // Pad so a 4-byte emoji starts at byte SNIFF_WINDOW - 1, straddling
+        // the sniff cut, then keep filling past 4 KB.
+        html.push_str("<p>");
+        html.push_str(&"a".repeat(SNIFF_WINDOW - 1 - html.len()));
+        html.push_str("🎌</p>");
         while html.len() < 4 * 1024 + 512 {
-            html.push_str("<p>こんにちは世界、今日はいい天気ですね。🍣🍜🗻✨👍🏽👨‍👩‍👧</p>");
+            html.push_str(paragraph);
         }
         html.push_str("</body></html>");
+        assert!(
+            !html.is_char_boundary(SNIFF_WINDOW),
+            "fixture precondition: the cut falls inside a char"
+        );
+        assert!(!looks_like_feed(&html));
         let out = extract(html.as_bytes(), "https://blog.test/ja/");
         assert_eq!(
             out.feeds,
@@ -544,6 +558,10 @@ mod tests {
             feed.push_str("<entry><title>記事のタイトル 🍣👍🏽</title></entry>");
         }
         feed.push_str("</feed>");
+        assert!(
+            !feed.is_char_boundary(SNIFF_WINDOW),
+            "fixture precondition: the cut falls inside a char"
+        );
         assert!(looks_like_feed(&feed));
         let out = extract(feed.as_bytes(), "https://blog.test/atom.xml");
         assert_eq!(out.feeds.len(), 1);

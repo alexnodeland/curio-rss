@@ -116,6 +116,10 @@ jobs:
 
   smoke:
     name: e2e smoke (${{ matrix.name }})
+    # A HARD gate: all five scenarios run (none skipped) and a failure fails
+    # the job. The harness (apps/desktop/e2e) owns its whole world — a
+    # throwaway CURIO_PROFILE seeded through the real `curio` CLI and a
+    # 127.0.0.1 feed stub — so it never touches the real network.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -123,6 +127,10 @@ jobs:
         include:
           - { name: linux, os: ubuntu-22.04 }
           - { name: windows, os: windows-latest }
+    env:
+      # Pinned: the WebDriver proxy is part of the gate, so a new release
+      # must not change it underneath us. Bump deliberately.
+      TAURI_DRIVER_VERSION: 2.1.0
     steps:
       - uses: actions/checkout@v4
         with:
@@ -133,7 +141,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            apps/desktop/e2e/package-lock.json
       - name: Install Linux webview deps + WebKitWebDriver
         if: runner.os == 'Linux'
         run: |
@@ -141,24 +151,68 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
             librsvg2-dev webkit2gtk-driver xvfb
-      - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
-      - name: Build the app under test (debug)
+      - name: Pick the msedgedriver that matches WebView2
+        if: runner.os == 'Windows'
+        shell: pwsh
+        # tauri-driver drives WebView2 through msedgedriver, which must match
+        # the installed WebView2 runtime exactly. Use the image's copy when it
+        # matches, else fetch that exact build from Microsoft.
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $webview = (Get-ItemProperty -Path $key).pv
+          $bundled = Join-Path $env:EDGEWEBDRIVER 'msedgedriver.exe'
+          $driverVersion = ''
+          if (Test-Path $bundled) {
+            $driverVersion = ((& $bundled --version) -split ' ')[3]
+          }
+          Write-Host "WebView2 runtime $webview; image msedgedriver '$driverVersion'"
+          if ($driverVersion -eq $webview) {
+            $driver = $bundled
+          } else {
+            $dir = Join-Path $env:RUNNER_TEMP 'msedgedriver'
+            $zip = "$dir.zip"
+            Invoke-WebRequest "https://msedgedriver.microsoft.com/$webview/edgedriver_win64.zip" -OutFile $zip
+            Expand-Archive $zip -DestinationPath $dir -Force
+            $driver = Join-Path $dir 'msedgedriver.exe'
+          }
+          "TAURI_NATIVE_DRIVER=$driver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install tauri-driver ${{ env.TAURI_DRIVER_VERSION }}
+        run: cargo install tauri-driver --locked --version ${{ env.TAURI_DRIVER_VERSION }}
+      - name: Build the app + CLI under test (debug)
         working-directory: apps/desktop
+        # `tauri build` (not plain cargo) so the frontend is embedded instead
+        # of the dev server URL; e2e/tauri.e2e.conf.json points the startup
+        # update check at a dead loopback endpoint, keeping the run hermetic.
+        # The CLI seeds the throwaway profile before the app boots.
+        shell: bash
         run: |
           npm ci
-          npm run build
-          cargo build --manifest-path src-tauri/Cargo.toml
-      - name: Install e2e harness deps
+          npm run tauri build -- --debug --no-bundle \
+            --config "$GITHUB_WORKSPACE/apps/desktop/e2e/tauri.e2e.conf.json"
+          cargo build --locked -p curio-cli
+      - name: Install + type-check the e2e harness
         working-directory: apps/desktop/e2e
-        run: npm install
+        run: |
+          npm ci
+          npm run typecheck
       - name: Run the WebdriverIO smoke suite
         working-directory: apps/desktop/e2e
-        # Skeleton: the 5 scenarios are wired but several are `.skip` pending
-        # test-harness selectors, so this stays informational until the suite
-        # is filled in. Flip to a hard gate once the scenarios are live.
-        continue-on-error: true
-        run: xvfb-run --auto-servernum npm test
+        shell: bash
+        env:
+          CURIO_E2E_SHOTS: ${{ runner.temp }}/e2e-failures
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run --auto-servernum npm test
+          else
+            npm test
+          fi
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failures-${{ matrix.name }}
+          path: ${{ runner.temp }}/e2e-failures
+          if-no-files-found: ignore
 
   bench:
     name: cold-start bench (@50k fixture)

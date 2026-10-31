@@ -11,7 +11,8 @@ GitHub release). macOS correctness is signed off by hand via
 
 ## 0. Preconditions
 
-- `main` is green on CI and on the latest nightly `bundle` + `bench` runs.
+- `main` is green on CI and on the latest nightly `bundle` + `smoke` + `bench` runs
+  (the smoke is a hard gate: all five Linux/Windows scenarios, none skipped).
 - No open release blockers; `CHANGELOG` drafted.
 
 ## 1. Version bump

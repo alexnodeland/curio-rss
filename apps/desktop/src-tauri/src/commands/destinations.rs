@@ -144,7 +144,7 @@ mod tests {
         assert!(root.is_dir(), "registration creates the root");
 
         remove_destination_impl(&core, "vault").unwrap();
-        assert!(list_destinations_impl(&core).is_empty());
+        assert_eq!(list_destinations_impl(&core).len(), 0);
         let error = remove_destination_impl(&core, "vault").unwrap_err();
         assert_eq!(error.code, ErrorCode::UnknownDestination);
     }

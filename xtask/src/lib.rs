@@ -46,7 +46,7 @@ mod tests {
     fn ignores_clean_trees_and_lookalike_prefixes() {
         // `taos`/`wryneck` share a prefix but are not `<banned>-` family.
         let tree = "curio-core v0.1.0\nserde v1.0.0\ntaos v0.1.0\nwryneck v0.1.0\n";
-        assert!(banned_crates_in_tree(tree).is_empty());
-        assert!(banned_crates_in_tree("").is_empty());
+        assert_eq!(banned_crates_in_tree(tree), Vec::<String>::new());
+        assert_eq!(banned_crates_in_tree(""), Vec::<String>::new());
     }
 }

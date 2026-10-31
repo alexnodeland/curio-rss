@@ -48,6 +48,58 @@ Conventional Commits, enforced by the commit-msg hook:
 `type(scope): description` — types `feat fix docs style refactor perf test
 chore ci build revert`. Small, logical commits.
 
+## Working agreement (trunk-based)
+
+- `main` is always releasable. Every change lands as a short-lived branch →
+  PR (mirroring `.github/PULL_REQUEST_TEMPLATE.md`) → green CI on the merging
+  commit → **squash-merge**. Never commit on or push to `main`. The
+  **`ship-pr`** skill is the procedure.
+- Before pushing, run the gates for what you touched — the **`gates`** skill
+  maps paths to `just` recipes. `just ci` is the full gate.
+- UI changes are validated by looking at them: the **`visual-check`** skill
+  runs the frontend against the dev mock IPC and screenshots it with
+  Playwright, light + dark.
+- Feature PRs never edit `CHANGELOG.md` (the `release` skill writes it from
+  merged history); they do update user-facing docs when behaviour changes.
+- Out-of-scope problems you notice become new issues, not drive-by edits.
+- Improvement work is tracked in the sweep epic (#110); issues carry `P1`/
+  `P2`/`P3` and cite the code they're about.
+
+## Skills
+
+| Skill | Use for |
+|---|---|
+| `gates` | which local checks a change needs before push |
+| `ship-pr` | branch → PR → CI loop → sync with main → squash-merge |
+| `visual-check` | screenshot-driven validation of desktop UI changes |
+| `contract-change` | anything touching `schemas/`, frontmatter keys, event types, the manifest |
+| `add-source` | a new feed format / site layout / enrichment provider in curio-core |
+| `release` | version bump, changelog, tag |
+
+## Cloud sessions and hooks
+
+`.claude/settings.json` wires four hooks (scripts in `.claude/hooks/`):
+
+- **SessionStart** (`session-start.sh`, web sessions only): installs the
+  webview system packages, Rust components, `just`/`cargo-deny`/
+  `cargo-llvm-cov`, lefthook, the desktop npm deps (skipped when manifests are
+  unchanged), and the git hooks — so `just ci` works from the first prompt.
+  It tracks the latest stable Rust (CI floats on stable, and new clippy lints
+  land with each release), exports `CARGO_TARGET_DIR=<checkout>/target` so
+  git worktrees share one build dir, and builds with line-table-only
+  debuginfo so the workspace fits the session's disk allowance.
+- **PreToolUse Bash** (`guard-bash.sh`): blocks `--no-verify`, plain
+  `--force` pushes, pushes to `main`, and commits on `main`.
+- **PreToolUse Edit/Write** (`guard-edit.sh`): blocks hand edits to the
+  generated `bindings.ts`, and edits to published `schemas/*.vN.json` unless
+  `schemas/CHANGELOG.md` already carries the pending entry (contract-change
+  skill order).
+- **PostToolUse Edit/Write** (`format-on-edit.sh`): rustfmt / biome-format the
+  edited file so fmt gates never fail on whitespace.
+
+If a hook blocks you, it is telling you the house rule — follow the message,
+don't work around it.
+
 ## Boundary rules (binding)
 
 - **`curio-core` never depends on tauri** (or wry/tao/any webview). Enforced

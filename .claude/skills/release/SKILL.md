@@ -14,7 +14,10 @@ matrix, SHA256SUMS + minisign + SBOM) lands in Phase 1 of
 2. **Version bump**: single source of truth is `[workspace.package] version`
    in the root `Cargo.toml` (crates inherit it). Bump it in its own commit:
    `chore(release): v0.X.Y`. Follow semver; while pre-1.0, breaking changes
-   bump the minor.
+   bump the minor. The mirrors move in the same commit: `tauri.conf.json`,
+   `apps/desktop/package.json` **and** `apps/desktop/package-lock.json`
+   (run `npm install --package-lock-only` under `apps/desktop` — a stale
+   lock version makes every `npm install` dirty the tree), `Cargo.lock`.
 3. **Contract check**: if `schemas/` changed since the last tag, verify
    `schemas/CHANGELOG.md` records it and no vN file was edited in place
    (`git diff <last-tag> -- schemas/`).

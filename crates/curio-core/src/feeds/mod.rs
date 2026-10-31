@@ -15,6 +15,7 @@
 //! attribute (which import also reads), so an import/export cycle is
 //! lossless after one normalization.
 
+mod image;
 mod opml;
 mod parse;
 

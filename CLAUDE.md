@@ -40,7 +40,11 @@ the 1MB blob guard, and the frontend gates (`just frontend-bans` greps,
 `just desktop-lint` = biome + eslint + svelte-check at zero warnings,
 `just desktop-npm-test` = vitest + mockIPC with a 70% floor on the
 state/util layer; they need `npm install` under apps/desktop once) — and
-must be green before any commit lands. Hooks are lefthook (`just setup`
+must be green before any commit lands. Two CI jobs have no `just ci` twin:
+`test-cross-os` (engine + CLI tests on macOS and Windows, CI-only) and
+`msrv` (every crate built on its declared `rust-version`; locally `just
+msrv`, opt-in because it downloads toolchains — run it when a dependency,
+`Cargo.lock` or a `rust-version` changes). Hooks are lefthook (`just setup`
 installs them; they cover fmt/clippy + the frontend lint/bans on commit
 and tests on push — the full gate is `just ci`).
 

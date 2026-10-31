@@ -60,10 +60,10 @@ pub(crate) fn article_by_prefix(core: &CoreHandle, fragment: &str) -> anyhow::Re
 /// Resolves a feed reference — numeric row id, exact URL, or a unique
 /// URL/title substring — to exactly one subscription.
 pub(crate) fn feed_by_ref(core: &CoreHandle, reference: &str) -> anyhow::Result<Feed> {
-    if let Ok(id) = reference.parse::<i64>() {
-        if let Some(feed) = core.get_feed(FeedId(id))? {
-            return Ok(feed);
-        }
+    if let Ok(id) = reference.parse::<i64>()
+        && let Some(feed) = core.get_feed(FeedId(id))?
+    {
+        return Ok(feed);
     }
     let feeds = core.list_feeds()?;
     if let Some(feed) = feeds.iter().find(|f| f.url == reference) {

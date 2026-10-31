@@ -9,7 +9,10 @@
 # Signing is intentionally OFF, permanently: distribution is an unsigned
 # Homebrew cask (Apple enrollment skipped, Windows deferred —
 # docs/design/decisions.md). The build passes NO signing env, so tauri never
-# attempts codesign; the app runs via right-click → Open / xattr.
+# attempts codesign; the app runs via right-click → Open / xattr. The Tauri
+# *updater* artifacts (minisign-signed .tar.gz/.sig) are release.yml's job
+# alone — it holds the key — so nightly turns them off via
+# src-tauri/tauri.nightly.conf.json instead of failing at the signing step.
 name: nightly
 
 on:
@@ -36,10 +39,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x64, os: ubuntu-22.04 }
-          - { name: macos-arm64, os: macos-14 }
-          - { name: macos-x64, os: macos-13 }
-          - { name: windows-x64, os: windows-latest }
+          - { name: linux-x64, os: ubuntu-22.04, bundle: target/release/bundle }
+          # One universal (arm64 + x64) build on Apple silicon — the exact
+          # path release.yml ships. The Intel `macos-13` image is retired
+          # (its leg queued for 24h, then was cancelled, every night), and
+          # lipo-ing both arches on one runner needs no Intel host at all.
+          - name: macos-universal
+            os: macos-14
+            targets: x86_64-apple-darwin,aarch64-apple-darwin
+            args: --target universal-apple-darwin
+            bundle: target/universal-apple-darwin/release/bundle
+          - { name: windows-x64, os: windows-latest, bundle: target/release/bundle }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -47,6 +57,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+          targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "."
@@ -72,22 +83,37 @@ jobs:
         # produces an unsigned artifact instead of trying (and failing) to
         # `security import` a certificate. Distribution is the unsigned
         # Homebrew cask; the app is run via right-click → Open / xattr.
-        run: npm run tauri build
+        # tauri.conf.json sets `createUpdaterArtifacts` (with the updater
+        # pubkey) for release.yml, and without TAURI_SIGNING_PRIVATE_KEY the
+        # CLI fails AFTER bundling ("A public key has been found, but no
+        # private key") — so the merged nightly config turns the updater
+        # artifacts off. It is a file, not inline JSON, so no shell's quoting
+        # can mangle it; the path is absolute so it does not depend on which
+        # directory the CLI resolves it against. bash on every OS (Windows
+        # defaults to pwsh), so the `--` forwarding behaves the same on all
+        # three.
+        shell: bash
+        run: |
+          npm run tauri build -- \
+            --config "$GITHUB_WORKSPACE/apps/desktop/src-tauri/tauri.nightly.conf.json" \
+            ${{ matrix.args }}
       - name: Upload the bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: curio-${{ matrix.name }}
           # src-tauri is a workspace member, so cargo/tauri emit to the
-          # workspace-root target/, not a crate-local one.
+          # workspace-root target/ (target/<triple>/ for a --target build),
+          # not a crate-local one.
           path: |
-            target/release/bundle/**/*.dmg
-            target/release/bundle/**/*.app
-            target/release/bundle/**/*.AppImage
-            target/release/bundle/**/*.deb
-            target/release/bundle/**/*.rpm
-            target/release/bundle/**/*.msi
-            target/release/bundle/**/*.exe
-          if-no-files-found: warn
+            ${{ matrix.bundle }}/**/*.dmg
+            ${{ matrix.bundle }}/**/*.app
+            ${{ matrix.bundle }}/**/*.AppImage
+            ${{ matrix.bundle }}/**/*.deb
+            ${{ matrix.bundle }}/**/*.rpm
+            ${{ matrix.bundle }}/**/*.msi
+            ${{ matrix.bundle }}/**/*.exe
+          # A bundle job that uploads nothing is a failed job, not a warning.
+          if-no-files-found: error
 
   smoke:
     name: e2e smoke (${{ matrix.name }})

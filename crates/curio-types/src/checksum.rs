@@ -81,8 +81,9 @@ impl FromStr for Checksum {
             return Err(ParseChecksumError::BadLength(hex.chars().count()));
         }
         let mut bytes = [0u8; 32];
-        for (i, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
-            bytes[i] = (hex_value(pair[0])? << 4) | hex_value(pair[1])?;
+        let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+        for (byte, &[hi, lo]) in bytes.iter_mut().zip(pairs) {
+            *byte = (hex_value(hi)? << 4) | hex_value(lo)?;
         }
         Ok(Self(bytes))
     }

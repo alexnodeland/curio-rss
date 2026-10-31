@@ -7,8 +7,10 @@ PRs are welcome; coordinate before starting anything large.
 
 > **CI:** every push and PR runs the fast gate (`.github/workflows/ci.yml`);
 > `just ci` runs the same suite locally (including the blob guard), so nothing
-> lands without it being green. The heavy tier (3-OS bundles, e2e smoke,
-> cold-start bench) runs on merge and nightly (`nightly.yml`).
+> lands without it being green. Two of its jobs have no `just ci` twin: the
+> engine + CLI tests on macOS and Windows (`test-cross-os`), and the MSRV
+> check (`msrv`, locally `just msrv`). The heavy tier (3-OS bundles, e2e
+> smoke, cold-start bench) runs nightly and on demand (`nightly.yml`).
 
 Everything goes through [`just`](https://github.com/casey/just) — run `just`
 with no arguments to list the recipes.
@@ -20,11 +22,17 @@ just setup     # installs git hooks (lefthook) and checks required tools
 just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, workflows, bindings-check, cov, doc, blob-guard, frontend gates
 ```
 
-Required: stable Rust (see `rust-version` in `Cargo.toml`),
+Required: stable Rust — CI floats on the latest stable. The declared
+minimums are real and CI-enforced (the `msrv` job builds each crate on
+exactly its `rust-version`; `just msrv` runs the same check locally):
+**1.88** for the headless engine crates and the CLI (`Cargo.toml`), **1.93**
+for the desktop head (`apps/desktop/src-tauri/Cargo.toml`, set by tauri +
+specta). Raising either is a deliberate change to that `rust-version`, never
+a side effect of a new dependency or language feature. Also required:
 [lefthook](https://github.com/evilmartians/lefthook),
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny),
 [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) (`just cov`,
-part of `just ci`).
+part of `just ci`), and [jq](https://jqlang.org) for `just msrv`.
 Not required for engine work: Node or npm — every crate except the desktop
 head builds and tests fully headless. Phase 4 brought `apps/desktop/src-tauri`
 (the `curio-desktop` head) into the workspace, so `--workspace` gates compile

@@ -323,6 +323,25 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': '資料庫：{path}',
     'doctor.check.integrity': '完整性檢查',
     'doctor.check.fts': '搜尋索引檢查',
+
+    'legacy.title': '舊版本嘅資料庫',
+    'legacy.notice.moved': '已經將舊版本 Curio 嘅資料庫搬去 {path}，命令列都會開呢度。',
+    'legacy.notice.openedInPlace':
+        '舊版本 Curio 嘅資料庫暫時搬唔到，所以 Curio 喺原位打開咗佢。詳情睇{where}。',
+    'legacy.notice.left': '舊版本 Curio 嘅資料庫仲留喺 {path}。詳情睇{where}。',
+    'legacy.detail.moved': '已經由 {path} 搬去 App 同命令列共用嘅位置。',
+    'legacy.detail.openedInPlace': 'Curio 暫時喺原位打開咗佢，所以乜都冇少；下次啟動會再試搬。',
+    'legacy.reason.defaultInUse':
+        '{path} 留咗喺原處：共用位置已經有一個資料庫，兩個資料庫永遠唔會自動合併。請用 curio --profile 由舊資料庫匯出你要嘅內容，然後刪除佢。',
+    'legacy.reason.ambiguous':
+        '{path} 留咗喺原處：有多過一個舊資料庫。請自己將想保留嗰個搬去 {default}。',
+    'legacy.reason.inUse':
+        '{path} 留咗喺原處：另一個 Curio 程序打開緊佢。請關閉嗰個程序，然後重新開 Curio 嚟搬佢。',
+    'legacy.reason.defaultNotEmpty':
+        '{path} 留咗喺原處：{default} 已經存在而且唔係空嘅。請自己將舊資料庫搬過去。',
+    'legacy.reason.unreadable':
+        '{path} 留咗喺原處：檢查唔到佢嘅資料庫（{detail}）。請自己將佢搬去 {default}。',
+    'legacy.reason.moveFailed': '{path} 留咗喺原處：搬唔到（{detail}）。請自己將佢搬去 {default}。',
     'feedHealth.title': '訂閱源狀況',
     'feedHealth.status': '狀態',
     'feedHealth.pause': '暫停',

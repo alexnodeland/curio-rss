@@ -110,6 +110,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::health::vacuum_db,
             commands::health::db_stats,
             commands::health::sweep_event_retention,
+            commands::health::legacy_profiles,
             // platform
             commands::platform::get_cached_image,
             commands::platform::copy_diagnostics_bundle,
@@ -162,25 +163,58 @@ pub fn run() {
         .on_menu_event(menu::on_event)
         .setup(move |app| {
             builder.mount_events(app);
-            let profile = paths::profile_dir();
-            // Rotating logs + panic hook first, so anything below is captured
-            // (including why the profile would not open).
-            if let Ok(profile) = &profile {
-                logging::init(&profile.join("logs"));
-            }
             // Managed before the window exists: the frontend's first call
             // asks the gate whether to show the reader or the recovery screen.
             app.manage(startup::StartupGate::default());
+            // Before the profile is touched, so the window exists whatever
+            // happens next (tauri itself would have built a `create: true`
+            // window slightly earlier, ahead of its asset setup and this
+            // closure — nothing here depends on that). A window that cannot
+            // be built leaves nothing to show a recovery screen in: that one
+            // failure still ends the process.
+            create_main_window(app).inspect_err(|error| {
+                tracing::error!("could not create the main window: {error}");
+            })?;
+
+            // The one-time move of a pre-0.5 profile (the old CLI location,
+            // or Roaming `AppData` on Windows) onto the default shared with the
+            // CLI — before logging, which would create the default dir. A
+            // library it cannot move yet is opened where it is, never
+            // stranded behind a fresh empty default. No home directory at
+            // all goes to the recovery screen below.
+            let profile = paths::profile_dir().map(|default| {
+                let paths::StartupProfile {
+                    dir,
+                    outcomes,
+                    legacy,
+                } = paths::startup_profile(
+                    default,
+                    &curio_core::paths::legacy_profile_dirs(),
+                    curio_core::paths::legacy_desktop_profile_dir().as_deref(),
+                );
+                // Rotating logs + panic hook first, so anything below is
+                // captured (including why the profile would not open).
+                logging::init(&dir.join("logs"));
+                for notice in &outcomes {
+                    tracing::warn!(%notice, "legacy profile");
+                }
+                (dir, legacy)
+            });
+            // Served to the startup notice and the doctor panel.
+            let profile = match profile {
+                Ok((dir, legacy)) => {
+                    app.manage(legacy);
+                    Ok(dir)
+                }
+                Err(error) => {
+                    app.manage(paths::LegacyProfiles::default());
+                    Err(error)
+                }
+            };
             app.manage(ipc_policy::PathRegistry::new());
             app.manage(discovery::Discovery::new(PolicedClient::new(
                 FetchConfig::default(),
             )));
-            // Before the core opens, so the window exists whatever happens
-            // next. A window that cannot be built leaves nothing to show a
-            // recovery screen in: that one failure still ends the process.
-            create_main_window(app).inspect_err(|error| {
-                tracing::error!("could not create the main window: {error}");
-            })?;
 
             // Phase 1 (open) then phase 2 (install); a failure at either goes
             // to the recovery screen, already logged.

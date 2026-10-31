@@ -61,6 +61,18 @@ directory, never your real one.
 - [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
 - [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
 
+## Shared default profile (real macOS only — CI can't point the app at a temp `~/Library`)
+
+Use a throwaway macOS user account, or move your real
+`~/Library/Application Support/io.github.alexnodeland.curio` and
+`~/Library/Application Support/curio` aside first.
+
+- [ ] **One library** — with no `CURIO_PROFILE`, `curio clip <local-url>` then launch the app: the clip is in Read Later. `curio doctor` reports the profile as `~/Library/Application Support/io.github.alexnodeland.curio (the default, shared with the desktop app)`.
+- [ ] **Legacy CLI profile is adopted** — with only an old-CLI profile at `~/Library/Application Support/curio` (made with `curio --profile ~/Library/Application\ Support/curio init` + one `clip`), the first `curio list` (or app launch) prints/logs "moved the profile…", and the clip is visible in the app.
+- [ ] **Legacy profile never merged** — with both directories holding a `curio.db`, every `curio` command warns about the old one, `curio doctor` fails `legacy-profile`, the app shows a "left at…" notice (and the reason under Settings › Advanced), and neither directory is modified.
+- [ ] **A legacy library last used by the app still moves** — quit a pre-0.5 app that used the old location (it leaves `curio.db-wal` behind), then start the new CLI or app: the library moves, and its last writes are there.
+- [ ] **An open legacy library is never stranded** — with an old-location library held open by a running pre-0.5 `curio` (e.g. a long `fetch`), `curio list` warns "another curio process has it open" and exits 1 without creating the shared directory; the new app opens the old library in place and says so. After the old process quits, the next start moves it.
+
 ## Gatekeeper (unsigned) sanity
 
 - [ ] Fresh-install path works: right-click → Open (or `xattr -dr com.apple.quarantine`) launches the app.

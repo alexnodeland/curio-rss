@@ -18,7 +18,10 @@ name = "curio-desktop"
 description = "Curio's desktop head: a thin Tauri shell over the curio-core engine"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# Higher than the workspace floor: specta (tauri-specta's type exporter)
+# uses `fmt::from_fn`, stable only since 1.93 — above the 1.90 tauri itself
+# declares. Checked by CI's `msrv` job (scripts/check-msrv.sh).
+rust-version = "1.93"
 license.workspace = true
 repository.workspace = true
 authors.workspace = true

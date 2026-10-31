@@ -144,8 +144,8 @@ Bring your library over in one step (**Settings → Data → Import**):
 ## Command-line interface
 
 Curio also ships a CLI over the same engine. From a clone,
-`cargo install --path crates/curio-cli` (or run via `cargo run -p
-curio-cli --`). Then:
+`cargo install --path crates/curio-cli` (Rust 1.88 or newer; or run via
+`cargo run -p curio-cli --`). Then:
 
 ```sh
 curio init                                  # scaffold the profile: curio.toml, curio.db, events log

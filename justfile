@@ -56,6 +56,11 @@ doc:
 deny:
     cargo deny check
 
+# Opt-in (downloads one toolchain per declared version; CI's `msrv` job runs it):
+# Build every crate on exactly its Cargo.toml rust-version
+msrv:
+    bash scripts/check-msrv.sh
+
 # Defense in depth: assert curio-core's dependency tree is webview-free
 boundary:
     cargo run -p xtask -- boundary

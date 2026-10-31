@@ -6,7 +6,8 @@ fetch policy, sanitize-at-ingest pipeline, SQLite store, event log, and
 export machinery all live in the core and behave identically under any
 future head.
 
-- Install: `cargo install --path crates/curio-cli`
+- Install: `cargo install --path crates/curio-cli` (Rust 1.88 or newer —
+  the declared `rust-version`, enforced by CI's `msrv` job)
 - **`--json` is a global flag** — pass it before or after any subcommand to
   get exactly one JSON document on stdout (read commands return their data;
   write commands return the changed/unchanged result). Parse, don't scrape.

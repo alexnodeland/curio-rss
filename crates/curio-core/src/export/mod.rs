@@ -25,11 +25,14 @@
 
 mod manifest;
 mod note;
+mod slug;
 
 pub use manifest::{load_manifest, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
 
 use std::path::{Component, Path, PathBuf};
+
+use slug::slugify;
 
 use curio_types::{ArticleFrontmatter, Checksum, CurioId, Destination, ManifestEntry, Timestamp};
 use sha2::{Digest as _, Sha256};
@@ -229,9 +232,15 @@ pub fn stage_export_note(
     };
 
     let abs_path = contained_path(&destination.root, &rel_path)?;
-    let note_exists = abs_path.is_file();
+    let old = read_existing_note(&abs_path)?;
 
-    if disposition == ExportDisposition::Unchanged && note_exists {
+    // The idempotency hit trusts the manifest only while the note on disk
+    // is still a note: a blank file (power loss under a pre-fsync write,
+    // a sync tool truncating it) falls through and is rewritten fresh,
+    // and a non-blank one that no longer parses surfaces as NoteParse
+    // instead of being silently reported as exported.
+    if let (ExportDisposition::Unchanged, Some(old)) = (disposition, &old) {
+        note::parse_note(old, &abs_path)?;
         return Ok(StagedExport {
             outcome: ExportOutcome {
                 path: rel_path,
@@ -244,11 +253,9 @@ pub fn stage_export_note(
 
     // Build the note: fresh, or a managed-region/machine-key replacement
     // that preserves user content byte-for-byte.
-    let content = if note_exists {
-        let old = read_file(&abs_path)?;
-        note::replace_managed(&old, &frontmatter(input, checksum), body, &abs_path)?
-    } else {
-        render_note(&frontmatter(input, checksum), body)?
+    let content = match &old {
+        Some(old) => note::replace_managed(old, &frontmatter(input, checksum), body, &abs_path)?,
+        None => render_note(&frontmatter(input, checksum), body)?,
     };
 
     // Contract write ordering: note first…
@@ -327,30 +334,6 @@ fn unique_note_path(manifest: &curio_types::ManifestV1, input: &ExportInput) -> 
     }
 }
 
-fn slugify(title: &str, curio_id: &CurioId) -> String {
-    let mut slug = String::new();
-    let mut pending_dash = false;
-    for c in title.chars().flat_map(char::to_lowercase) {
-        if c.is_alphanumeric() {
-            if pending_dash && !slug.is_empty() {
-                slug.push('-');
-            }
-            pending_dash = false;
-            slug.push(c);
-            if slug.chars().count() >= 80 {
-                break;
-            }
-        } else {
-            pending_dash = true;
-        }
-    }
-    if slug.is_empty() {
-        curio_id.to_string()
-    } else {
-        slug
-    }
-}
-
 /// Joins a relative note path under the root, refusing traversal. This
 /// is the lexical half of containment; [`write_atomic`] adds the
 /// realpath half (symlinked intermediate directories cannot redirect a
@@ -368,11 +351,21 @@ fn contained_path(root: &Path, rel: &str) -> Result<PathBuf, ExportError> {
     Ok(root.join(rel_path))
 }
 
-fn read_file(path: &Path) -> Result<String, ExportError> {
-    std::fs::read_to_string(path).map_err(|source| ExportError::Io {
+/// The note currently at `path`, or `None` when there is nothing worth
+/// preserving: no file, or a *blank* one — empty, whitespace-only, or the
+/// NUL fill some filesystems leave after a crash mid-write. A blank note
+/// carries none of the user's bytes, so it is rewritten fresh rather than
+/// refused as unparseable.
+fn read_existing_note(path: &Path) -> Result<Option<String>, ExportError> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path).map_err(|source| ExportError::Io {
         path: path.to_path_buf(),
         source,
-    })
+    })?;
+    let blank = content.chars().all(|c| c == '\0' || c.is_whitespace());
+    Ok((!blank).then_some(content))
 }
 
 /// Temp-file + atomic-rename write in the target's own directory,
@@ -382,6 +375,15 @@ fn read_file(path: &Path) -> Result<String, ExportError> {
 /// intermediate directory planted inside the destination cannot redirect
 /// the write elsewhere. (The final component is not followed either:
 /// `rename` replaces a symlink itself rather than writing through it.)
+///
+/// Durable, not just atomic: the temp file is `fsync`ed before the
+/// rename and the directory after it (plus the directory's own parent
+/// when this call created it), so after a power loss the target holds
+/// the old bytes or the new ones, never the zero-length file a
+/// journaled rename of unflushed data can leave behind. That is what
+/// makes the contract's note-then-manifest ordering hold across a
+/// crash. Any failure removes the temp file, so no `.curio-tmp-*`
+/// stray is left for a sync tool to pick up.
 pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
     let io_err = |source| ExportError::Io {
         path: path.to_path_buf(),
@@ -390,6 +392,7 @@ pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
     let dir = path.parent().ok_or_else(|| ExportError::Containment {
         path: path.display().to_string(),
     })?;
+    let created_dir = !dir.is_dir();
     std::fs::create_dir_all(dir).map_err(io_err)?;
     let canonical_root = root.canonicalize().map_err(|source| ExportError::Io {
         path: root.to_path_buf(),
@@ -406,11 +409,68 @@ pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
         .map(|n| n.to_string_lossy())
         .unwrap_or_default();
     let tmp = dir.join(format!(".{file_name}.curio-tmp-{}", std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(|source| ExportError::Io {
-        path: tmp.clone(),
-        source,
-    })?;
-    std::fs::rename(&tmp, path).map_err(io_err)
+    if let Err(source) = write_synced(&tmp, bytes) {
+        discard_temp(&tmp);
+        return Err(ExportError::Io { path: tmp, source });
+    }
+    if let Err(source) = std::fs::rename(&tmp, path) {
+        discard_temp(&tmp);
+        return Err(io_err(source));
+    }
+    sync_dir(dir).map_err(io_err)?;
+    if created_dir && let Some(parent) = dir.parent() {
+        sync_dir(parent).map_err(io_err)?;
+    }
+    Ok(())
+}
+
+/// Writes `bytes` to a new file at `path` and flushes them to stable
+/// storage before returning.
+fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// Best-effort removal of a temp file after a failed write: the
+/// original error is what the caller reports, so a failed cleanup is
+/// only logged.
+fn discard_temp(tmp: &Path) {
+    if let Err(err) = std::fs::remove_file(tmp)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(path = %tmp.display(), %err, "could not remove export temp file");
+    }
+}
+
+/// Flushes a directory's entries (the rename that just landed) to
+/// stable storage. Filesystems that cannot `fsync` a directory (some
+/// network and FUSE mounts answer `EINVAL`) are tolerated: they offer
+/// no stronger guarantee to wait for. On Windows a directory cannot be
+/// opened as a file and NTFS journals the rename itself, so this is a
+/// no-op there.
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        match std::fs::File::open(dir).and_then(|handle| handle.sync_all()) {
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
+                ) =>
+            {
+                tracing::debug!(dir = %dir.display(), %err, "directory fsync unsupported");
+                Ok(())
+            }
+            other => other,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -428,14 +488,82 @@ mod tests {
         );
     }
 
+    /// Names of every `.curio-tmp-*` stray left in `dir`.
+    fn temp_strays(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".curio-tmp-"))
+            .collect()
+    }
+
     #[test]
-    fn slugify_is_boring_and_safe() {
-        let id = CurioId::new();
-        assert_eq!(slugify("Hello, World!", &id), "hello-world");
-        assert_eq!(slugify("../../etc/passwd", &id), "etc-passwd");
-        assert_eq!(slugify("Ünïcode Tîtle", &id), "ünïcode-tîtle");
-        assert_eq!(slugify("", &id), id.to_string());
-        assert_eq!(slugify("!!!", &id), id.to_string());
+    fn write_atomic_creates_parents_and_lands_the_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("curio").join("note.md");
+        write_atomic(root.path(), &target, b"first").unwrap();
+        write_atomic(root.path(), &target, b"second").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"second");
+        assert_eq!(
+            temp_strays(&root.path().join("curio")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// Injected rename failure: a directory squats on the target name, so
+    /// the temp file is fully written and synced but `rename` refuses
+    /// (EISDIR on unix, access denied on Windows). The error must name
+    /// the target and the temp file must be gone.
+    #[test]
+    fn a_failed_rename_leaves_no_temp_file() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("curio");
+        let target = dir.join("note.md");
+        std::fs::create_dir_all(target.join("occupied")).unwrap();
+
+        let err = write_atomic(root.path(), &target, b"bytes").unwrap_err();
+        assert!(
+            matches!(&err, ExportError::Io { path, .. } if *path == target),
+            "{err}"
+        );
+        assert_eq!(temp_strays(&dir), Vec::<String>::new());
+        assert!(
+            target.join("occupied").is_dir(),
+            "the squatter is untouched"
+        );
+    }
+
+    /// Injected temp-write failure: the temp name itself is occupied by a
+    /// directory, so creating the file fails. The error names the temp
+    /// path, and the cleanup (which cannot remove a directory with
+    /// `remove_file`) is best-effort rather than masking the real error.
+    #[test]
+    fn a_failed_temp_write_reports_the_temp_path() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("curio");
+        let target = dir.join("note.md");
+        let tmp = dir.join(format!(".note.md.curio-tmp-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let err = write_atomic(root.path(), &target, b"bytes").unwrap_err();
+        assert!(
+            matches!(&err, ExportError::Io { path, .. } if *path == tmp),
+            "{err}"
+        );
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn blank_notes_read_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.md");
+        assert_eq!(read_existing_note(&path).unwrap(), None);
+        for blank in ["", " \n\t", "\0\0\0\0"] {
+            std::fs::write(&path, blank).unwrap();
+            assert_eq!(read_existing_note(&path).unwrap(), None, "{blank:?}");
+        }
+        std::fs::write(&path, "x").unwrap();
+        assert_eq!(read_existing_note(&path).unwrap().as_deref(), Some("x"));
     }
 
     #[test]

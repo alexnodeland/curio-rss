@@ -140,6 +140,26 @@ pub fn split_note(content: &str, path: &Path) -> Result<NoteParts, ExportError> 
     })
 }
 
+/// Splits an existing note and parses its frontmatter as
+/// `curio.frontmatter.v1` — the full check that a file on disk is still a
+/// note Curio can account for.
+///
+/// # Errors
+///
+/// [`ExportError::NoteParse`] when the note does not split (see
+/// [`split_note`]) or its frontmatter does not parse.
+pub(crate) fn parse_note(
+    content: &str,
+    path: &Path,
+) -> Result<(NoteParts, ArticleFrontmatter), ExportError> {
+    let parts = split_note(content, path)?;
+    let frontmatter = serde_yaml::from_str(&parts.yaml).map_err(|err| ExportError::NoteParse {
+        path: path.to_path_buf(),
+        message: format!("frontmatter does not parse as curio.frontmatter.v1: {err}"),
+    })?;
+    Ok((parts, frontmatter))
+}
+
 /// Rewrites an existing note: new machine keys + new region body, user
 /// bytes and unknown frontmatter keys preserved.
 ///
@@ -153,12 +173,7 @@ pub fn replace_managed(
     body: &str,
     path: &Path,
 ) -> Result<String, ExportError> {
-    let parts = split_note(existing, path)?;
-    let old: ArticleFrontmatter =
-        serde_yaml::from_str(&parts.yaml).map_err(|err| ExportError::NoteParse {
-            path: path.to_path_buf(),
-            message: format!("frontmatter does not parse as curio.frontmatter.v1: {err}"),
-        })?;
+    let (parts, old) = parse_note(existing, path)?;
     let mut merged = fresh.clone();
     merged.extra = old.extra; // unknown keys are the user's — keep them
     let yaml = serde_yaml::to_string(&merged)?;

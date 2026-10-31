@@ -1067,6 +1067,7 @@ dependencies = [
  "ego-tree",
  "feed-rs",
  "htmd",
+ "icu_normalizer",
  "insta",
  "keyring",
  "proptest",

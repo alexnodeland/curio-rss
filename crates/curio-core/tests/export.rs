@@ -350,3 +350,151 @@ fn hostile_titles_cannot_escape_the_destination() {
     assert_eq!(outcome.path, "curio/etc-passwd.md");
     assert!(dir.path().join(&outcome.path).is_file());
 }
+
+/// Every `.curio-tmp-*` stray anywhere under the destination.
+fn temp_strays(root: &Path) -> Vec<String> {
+    let mut strays = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.contains(".curio-tmp-") {
+                strays.push(name);
+            } else if entry.file_type().unwrap().is_dir() {
+                dirs.push(entry.path());
+            }
+        }
+    }
+    strays
+}
+
+/// A power loss under the old fsync-less write could leave the note
+/// zero-length (or NUL-filled) while the manifest already recorded its
+/// checksum; the idempotency fast path must not take that on trust.
+#[test]
+fn a_note_truncated_to_zero_bytes_is_repaired_on_re_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+    let article = input(id, "Truncated", "# Body\n\nkept");
+
+    let first = export_note(&dest, &article).unwrap();
+    let note_path = dir.path().join(&first.path);
+    let original = std::fs::read_to_string(&note_path).unwrap();
+
+    for blank in ["", "\0\0\0\0\0\0\0\0"] {
+        std::fs::write(&note_path, blank).unwrap();
+        let again = export_note(&dest, &article).unwrap();
+        assert_eq!(
+            again.disposition,
+            ExportDisposition::Unchanged,
+            "a repair is not a new event"
+        );
+        assert_eq!(again.path, first.path);
+        assert_eq!(
+            std::fs::read_to_string(&note_path).unwrap(),
+            original,
+            "{blank:?} must be rewritten to the exported note"
+        );
+    }
+
+    // A blank note is rewritten fresh (not refused as unparseable) when
+    // the content changed meanwhile, too.
+    std::fs::write(&note_path, "").unwrap();
+    let updated = export_note(&dest, &input(id, "Truncated", "revised")).unwrap();
+    assert_eq!(updated.disposition, ExportDisposition::Updated);
+    assert!(
+        std::fs::read_to_string(&note_path)
+            .unwrap()
+            .contains("revised")
+    );
+}
+
+/// A non-blank note that no longer parses carries bytes Curio cannot
+/// account for: the fast path reports it instead of claiming the export
+/// is intact, and never rewrites it.
+#[test]
+fn an_unparseable_note_is_reported_not_silently_skipped() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let article = input(CurioId::new(), "Garbled", "body");
+
+    let first = export_note(&dest, &article).unwrap();
+    let note_path = dir.path().join(&first.path);
+    std::fs::write(&note_path, "my own notes, markers gone\n").unwrap();
+
+    let err = export_note(&dest, &article).unwrap_err();
+    assert!(
+        matches!(err, curio_core::export::ExportError::NoteParse { .. }),
+        "{err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&note_path).unwrap(),
+        "my own notes, markers gone\n"
+    );
+}
+
+/// Injected rename failure through the public export path: a directory
+/// squats on the note's name. The export fails, leaves no temp file for
+/// a sync tool to pick up, and never records the note in the manifest.
+#[test]
+fn a_failed_note_rename_leaves_no_temp_file_and_no_manifest_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    std::fs::create_dir_all(dir.path().join("curio/squatted.md/inside")).unwrap();
+
+    let err = export_note(&dest, &input(CurioId::new(), "Squatted", "body")).unwrap_err();
+    assert!(
+        matches!(err, curio_core::export::ExportError::Io { .. }),
+        "{err}"
+    );
+    let strays = temp_strays(dir.path());
+    assert_eq!(strays, Vec::<String>::new());
+    assert_eq!(load_manifest(dir.path()).unwrap().notes.len(), 0);
+}
+
+/// NFC and NFD spellings of one title name the same file on APFS/HFS+,
+/// so they must map to the same slug: the second article then takes the
+/// deduplicated path instead of overwriting the first one's note.
+#[test]
+fn nfc_and_nfd_titles_share_a_slug_so_neither_overwrites_the_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let nfc = export_note(&dest, &input(CurioId::new(), "Caf\u{e9}", "first")).unwrap();
+    let nfd = export_note(&dest, &input(CurioId::new(), "Cafe\u{301}", "second")).unwrap();
+
+    assert_eq!(nfc.path, "curio/caf\u{e9}.md");
+    assert_ne!(nfd.path, nfc.path);
+    assert!(nfd.path.starts_with("curio/caf\u{e9}-"), "{}", nfd.path);
+    let first = std::fs::read_to_string(dir.path().join(&nfc.path)).unwrap();
+    assert!(first.contains("first") && !first.contains("second"));
+}
+
+#[test]
+fn long_cjk_titles_fit_name_max_even_with_the_dedup_suffix() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let title = "長い題名".repeat(50); // 200 chars, 600 bytes
+    let a = export_note(&dest, &input(CurioId::new(), &title, "a")).unwrap();
+    let b = export_note(&dest, &input(CurioId::new(), &title, "b")).unwrap();
+    for outcome in [&a, &b] {
+        let name = outcome.path.strip_prefix("curio/").unwrap();
+        assert!(name.len() <= 255, "{} bytes: {name}", name.len());
+        assert!(dir.path().join(&outcome.path).is_file());
+    }
+    assert_ne!(a.path, b.path);
+}
+
+#[test]
+fn windows_reserved_titles_never_produce_a_device_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    for title in ["CON", "nul", "Com1", "LPT9"] {
+        let outcome = export_note(&dest, &input(CurioId::new(), title, "body")).unwrap();
+        assert_eq!(
+            outcome.path,
+            format!("curio/{}-note.md", title.to_lowercase())
+        );
+    }
+}

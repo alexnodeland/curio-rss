@@ -43,7 +43,9 @@ production feed).
 this is verification, not manual assembly.
 
 - [ ] The draft `vX.Y.Z` release has `Curio-universal.dmg` attached (it backs `releases/latest/download/Curio-universal.dmg`).
+- [ ] The draft also carries `SHA256SUMS`, the `*.cdx.json` SBOMs and `Curio-provenance.sigstore.json`; `shasum -a 256 -c SHA256SUMS --ignore-missing` and `gh attestation verify Curio-universal.dmg --repo alexnodeland/curio-rss` both pass on the downloaded DMG.
 - [ ] Publish the draft, then `brew update && brew install --cask alexnodeland/tap/curio` installs it on a clean machine.
+- [ ] **In-app update** — on a machine running the *previous* release, Settings → Check for updates finds `vX.Y.Z`, installs it (the signature on the CI-tarred `Curio.app.tar.gz` verifies), relaunches, and the app reports the new version. (The updater archive is signed in its own CI job since #174; this is the end-to-end proof the signature and archive layout are right.)
 - [ ] `docs/release/runbook.md` steps all completed.
 
 ## Acceptance (Phase 4 gate)

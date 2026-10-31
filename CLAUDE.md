@@ -31,8 +31,10 @@ contract.
 
 All dev operations go through `just` (run bare to list recipes). `just ci`
 runs exactly what CI runs — fmt-check, clippy `-D warnings`, tests,
-cargo-deny, boundary check, the bindings drift check (`just
-bindings-check`, CI's ipc-contract job), the **85% region-coverage floor
+cargo-deny, boundary check, the workflow supply-chain lint (`just
+workflows`: SHA-pinned actions, release gated on CI, signing key isolated),
+the bindings drift check (`just bindings-check`, CI's ipc-contract job),
+the **85% region-coverage floor
 on curio-core** (a ratchet — see CONTRIBUTING.md), rustdoc `-D warnings`,
 the 1MB blob guard, and the frontend gates (`just frontend-bans` greps,
 `just desktop-lint` = biome + eslint + svelte-check at zero warnings,

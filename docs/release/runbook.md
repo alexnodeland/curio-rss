@@ -23,12 +23,39 @@ GitHub release). macOS correctness is signed off by hand via
 ## 2. Tag → automated draft release
 
 Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
-it builds the unsigned macOS **universal** DMG (arm64 + x64 in one, on a single
-Apple-silicon runner — avoids the scarce Intel-runner queue), renames it to the
-cask's stable name (`Curio-universal.dmg`), and creates a **draft** GitHub
-release with it attached and the CHANGELOG section + unsigned banner as the
-notes. Nothing is public — and `brew` sees nothing — until you publish the
-draft in §5.
+
+1. **`gate`** re-runs the whole CI suite (`ci.yml`, called as a reusable
+   workflow) on the tagged commit. Every other job `needs` it, so a tag on a
+   commit with red CI produces **no** draft release.
+2. **`build`** builds the macOS **universal** DMG (arm64 + x64 in one, on a
+   single Apple-silicon runner — avoids the scarce Intel-runner queue) with
+   **no secrets at all**: Apple notarization is skipped and the updater
+   archive (`Curio.app.tar.gz`) is tarred unsigned.
+3. **`sign`** is the only job that sees `TAURI_SIGNING_PRIVATE_KEY`, in one
+   step that runs nothing but the prebuilt `tauri signer sign` (installed with
+   `npm ci --ignore-scripts` from the lockfile — no build scripts, no vite
+   plugins, no npm lifecycle scripts). It writes the updater manifest
+   `latest.json`.
+4. **`sbom`** writes CycloneDX SBOMs: the Rust graph per darwin arch and the
+   npm lockfile.
+5. **`release`** writes `SHA256SUMS` over every asset, mints a build-provenance
+   attestation for them (`actions/attest-build-provenance`), and creates a
+   **draft** GitHub release with the DMG (under the cask's stable name,
+   `Curio-universal.dmg`), the updater archive + `.sig`, `latest.json`,
+   `SHA256SUMS`, the SBOMs and the attestation bundle attached, and the
+   CHANGELOG section + unsigned banner as the notes.
+
+Nothing is public — and neither `brew` nor the in-app updater sees anything —
+until you publish the draft in §5. `cargo run -p xtask -- workflows` (`just
+workflows`, a CI job) fails the build if this shape regresses: an unpinned
+action, a job that skips the gate, the signing key in a second step, or a
+missing checksum/SBOM/attestation asset.
+
+**Dry run first (recommended).** Actions → `release` → **Run workflow** on
+`main` runs all of the above except the publish steps: it signs with a
+throwaway key generated on the runner, mints no attestation, drafts no
+release, and uploads the would-be assets as the `release-dry-run` run
+artifact. Use it after any change to `release.yml`, or before tagging.
 
 ```sh
 git checkout main && git pull
@@ -37,7 +64,15 @@ git push origin vX.Y.Z          # → release.yml drafts the release
 ```
 
 - [ ] `release.yml` run for the tag is green and a **draft** `vX.Y.Z` release
-      exists with `Curio-universal.dmg` attached.
+      exists with `Curio-universal.dmg`, `Curio.app.tar.gz(.sig)`,
+      `latest.json`, `SHA256SUMS`, the three `*.cdx.json` SBOMs and
+      `Curio-provenance.sigstore.json` attached.
+- [ ] Download the DMG + `SHA256SUMS` and verify both:
+      `shasum -a 256 -c SHA256SUMS --ignore-missing` and
+      `gh attestation verify Curio-universal.dmg --repo alexnodeland/curio-rss`.
+- [ ] `tar -tzf Curio.app.tar.gz | head` lists `Curio.app/…` entries (the
+      updater strips that first path component on install) and no `._*`
+      AppleDouble files.
 
 ## 3. (Optional) other-platform bundles
 

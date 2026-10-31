@@ -41,3 +41,23 @@ which are design commitments and CI-gated, are documented in
 
 Reports demonstrating a bypass of any of the above are exactly what this
 policy is for.
+
+## Verifying a release
+
+Every release after v0.4.0 is built by
+[`release.yml`](.github/workflows/release.yml) only after the full CI suite
+passes on the tagged commit, and carries:
+
+- **`SHA256SUMS`** — checksums of every asset:
+  `shasum -a 256 -c SHA256SUMS --ignore-missing` in the download folder.
+- **A build-provenance attestation** (SLSA, signed through Sigstore), stored
+  in the repository and attached as `Curio-provenance.sigstore.json`:
+  `gh attestation verify Curio-universal.dmg --repo alexnodeland/curio-rss`.
+- **CycloneDX SBOMs** — `Curio-rust-<arch>.cdx.json` (the Rust dependency
+  graph of the app, per macOS architecture) and `Curio-npm.cdx.json` (the
+  frontend's npm lockfile).
+- **A minisign signature** on the updater archive (`Curio.app.tar.gz.sig`),
+  which the in-app updater checks against the public key compiled into the
+  app before installing anything. The private key is used in exactly one CI
+  step, which runs no build scripts; `cargo run -p xtask -- workflows` fails
+  the build if that ever changes.

@@ -56,6 +56,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 6,
         sql: include_str!("migrations/0006_feed_full_text.sql"),
     },
+    Migration {
+        version: 7,
+        sql: include_str!("migrations/0007_event_intents_dead.sql"),
+    },
 ];
 
 /// The schema version this build writes and expects.

@@ -86,6 +86,16 @@ CREATE TABLE event_intents (
     envelope_json TEXT NOT NULL
 )
 
+-- table event_intents_dead
+CREATE TABLE event_intents_dead (
+    id             INTEGER PRIMARY KEY,
+    event_id       TEXT NOT NULL,
+    ts             TEXT NOT NULL,
+    envelope_json  TEXT NOT NULL,
+    error          TEXT NOT NULL,
+    quarantined_at TEXT NOT NULL
+)
+
 -- table feeds
 CREATE TABLE feeds (
     id                    INTEGER PRIMARY KEY,

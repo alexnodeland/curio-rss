@@ -69,6 +69,18 @@ impl CoreHandle {
         Ok(self.storage.pending_intents()?.len())
     }
 
+    /// How many staged event intents were quarantined because their
+    /// envelope no longer decoded. Zero in a healthy profile; anything
+    /// else means those events never reached the JSONL log (the raw rows
+    /// are kept in the database's `event_intents_dead` table).
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn quarantined_intent_count(&self) -> Result<u64, CoreError> {
+        Ok(self.storage.quarantined_intent_count()?)
+    }
+
     /// Deletes event-log files older than the retention window (≥ 90
     /// days — the `curio.events.v1` floor), measured from today (UTC).
     /// Returns the removed paths.

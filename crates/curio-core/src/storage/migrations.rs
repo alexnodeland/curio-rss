@@ -58,7 +58,11 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 7,
-        sql: include_str!("migrations/0007_event_intents_dead.sql"),
+        sql: include_str!("migrations/0007_article_content_origin.sql"),
+    },
+    Migration {
+        version: 8,
+        sql: include_str!("migrations/0008_event_intents_dead.sql"),
     },
 ];
 

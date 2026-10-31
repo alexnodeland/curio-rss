@@ -110,6 +110,12 @@ defense-in-depth, not the primary defense.
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
+- Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
+  (`feed | manual | full_text | enriched`) records where the stored body came from; a
+  refresh upsert replaces only `feed`/`manual` bodies (hydrated or enriched text is never
+  reverted to the excerpt), skips rows already holding the incoming values (no
+  `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
+  `content_text` actually differ.
 - Network-filesystem guard (planned, #112): refuses to open the DB on
   Syncthing/iCloud/NFS-class mounts without an explicit override flag.
 

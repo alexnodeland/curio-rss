@@ -6,7 +6,6 @@
  * mounted panels fire on open. Roving-focus assertions follow menu.test.ts.
  */
 import SettingsModal from '$components/modals/SettingsModal.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -17,6 +16,7 @@ import {
     flushIpc,
     installIpcHarness,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function mountResponders(): Record<string, Responder> {
     // The panels that prime on open: Data (destinations), Advanced
@@ -44,7 +44,7 @@ describe('SettingsModal — tablist', () => {
 
     afterEach(() => {
         cleanup();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });

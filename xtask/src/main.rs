@@ -6,11 +6,11 @@
 //!   defense; this is defense in depth, and it is what CI runs.
 //! - `workflows` — the supply-chain lint over `.github/workflows`: SHA-pinned
 //!   actions, the release gated on CI, the updater signing key confined to
-//!   one build-free step, checksums/SBOM/attestation on the draft release,
+//!   one build-free step of a job in the `updater-signing` environment,
+//!   checksums/SBOM/attestation on the draft release,
 //!   no retired runner images, and a nightly that runs on the PRs editing it
 //!   (see `xtask::workflows`).
 
-use std::path::Path;
 use std::process::{Command, ExitCode};
 
 use xtask::banned_crates_in_tree;
@@ -37,7 +37,16 @@ fn usage() {
 }
 
 fn workflows() -> ExitCode {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
+    // The repo root comes from the run-time CARGO_MANIFEST_DIR: a binary
+    // reused from another worktree's shared target dir must lint this
+    // worktree's workflows, not that one's (issue #183).
+    let dir = match xtask::paths::repo_root() {
+        Ok(root) => root.join(".github/workflows"),
+        Err(err) => {
+            eprintln!("xtask workflows: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match xtask::workflows::lint_dir(&dir) {
         Ok(violations) if violations.is_empty() => {
             println!(

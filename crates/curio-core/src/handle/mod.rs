@@ -38,7 +38,7 @@ mod refresh;
 mod settings;
 mod state;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
@@ -104,7 +104,8 @@ pub enum CoreError {
         name: String,
     },
     /// The settings key is owned by the facade (the `"destinations"`
-    /// registry) and cannot be read or written as a raw value.
+    /// registry, `"destinations.exported"`) and cannot be read or
+    /// written as a raw value.
     #[error("the {key:?} settings key is facade-owned — use the destination operations")]
     ReservedSettingKey {
         /// The refused key.
@@ -159,7 +160,8 @@ pub struct RefreshOutcome {
     pub http_status: Option<u16>,
     /// Articles inserted by this refresh.
     pub new_articles: u64,
-    /// Existing articles refreshed by this refresh.
+    /// Existing articles this refresh actually changed (identical
+    /// re-listed entries are not counted).
     pub updated_articles: u64,
     /// Error detail for [`FetchStatus::Error`].
     pub error: Option<String>,
@@ -244,6 +246,10 @@ pub struct CoreHandle {
     emitter: Mutex<EventEmitter>,
     client: PolicedClient,
     destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
+    /// Destinations that completed an export since they were
+    /// (re-)registered: their root and `.curio/` marker must still exist
+    /// (see [`CoreHandle::save_to_destination`]).
+    exported_destinations: RwLock<BTreeSet<DestinationName>>,
     /// Per-feed refresh serialization (see [`CoreHandle::refresh_feed`]).
     /// Bounded by the subscription count; `remove_feed` drops entries.
     refresh_locks: Mutex<HashMap<FeedId, Arc<AsyncMutex<()>>>>,
@@ -300,12 +306,14 @@ impl CoreHandle {
         }
         let emitter = EventEmitter::new(Arc::clone(&storage), log)?;
         let destinations = destinations::load_destinations(&storage)?;
+        let exported_destinations = destinations::load_exported(&storage)?;
         Ok(Self {
             profile_dir,
             storage,
             emitter: Mutex::new(emitter),
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
+            exported_destinations: RwLock::new(exported_destinations),
             refresh_locks: Mutex::new(HashMap::new()),
             #[cfg(feature = "enrich-reddit")]
             enrich_breaker: crate::enrich::Breaker::default(),

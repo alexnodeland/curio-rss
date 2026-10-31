@@ -19,10 +19,11 @@ import {
 } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
     type IpcHarness,
@@ -36,6 +37,7 @@ import {
     rejectWith,
     unreadCountsFixture,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 describe('actions — toggles', () => {
     let harness: IpcHarness | null = null;
@@ -44,7 +46,7 @@ describe('actions — toggles', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -93,16 +95,16 @@ describe('actions — toggles', () => {
         });
         await toggleStar(7);
         expect(harness.callsFor('set_starred')).toHaveLength(0);
-        expect(uiStore.toasts).toHaveLength(1);
-        expect(uiStore.toasts[0]?.message).toBe('no such article');
-        expect(uiStore.toasts[0]?.tone).toBe('error');
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.message).toBe('no such article');
+        expect(toastStore.toasts[0]?.tone).toBe('error');
     });
 
     it('a thrown (non-contract) failure becomes the generic internal toast', async () => {
         harness = installIpcHarness({}); // no responder → the harness throws
         await toggleStar(7);
-        expect(uiStore.toasts).toHaveLength(1);
-        expect(uiStore.toasts[0]?.message).toBe('Something went wrong. Retrying may help.');
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.message).toBe('Something went wrong. Retrying may help.');
     });
 
     it('openInBrowser refuses non-http(s) URLs outright — no open, no event', async () => {
@@ -122,7 +124,7 @@ describe('actions — views and shortcut routing', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         searchStore.reset();
         feedsStore.reset();
         harness?.teardown();
@@ -150,7 +152,7 @@ describe('actions — views and shortcut routing', () => {
         await goToNextUnread();
 
         expect(selectionStore.selectedArticleId).toBe(100);
-        expect(uiStore.toasts.some((toast) => toast.message === 'No more unread')).toBe(true);
+        expect(toastStore.toasts.some((toast) => toast.message === 'No more unread')).toBe(true);
     });
 
     it('goToNextUnread hops to the next feed with unread when the scope is dry', async () => {
@@ -274,7 +276,7 @@ describe('actions — views and shortcut routing', () => {
     it('routeMenuAction runs a shortcut id through the action layer', () => {
         harness = installIpcHarness({});
         routeMenuAction('app.settings');
-        expect(uiStore.activeModal).toBe('settings');
+        expect(layoutStore.activeModal).toBe('settings');
         routeMenuAction('view.starred');
         expect(activeView(articlesStore.filters)).toBe('starred');
     });
@@ -291,7 +293,7 @@ describe('actions — views and shortcut routing', () => {
         harness = installIpcHarness({});
         routeMenuAction('copy');
         routeMenuAction('quit');
-        expect(uiStore.activeModal).toBeNull();
+        expect(layoutStore.activeModal).toBeNull();
         expect(harness.calls).toHaveLength(0);
     });
 });
@@ -300,7 +302,7 @@ describe('actions — importFromFile', () => {
     let harness: IpcHarness | null = null;
 
     afterEach(() => {
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -318,8 +320,8 @@ describe('actions — importFromFile', () => {
         await importFromFile('opml');
 
         expect(harness.callsFor('import_file')).toEqual([{ pathToken: 'tok-1', source: 'opml' }]);
-        expect(uiStore.toasts).toHaveLength(1);
-        expect(uiStore.toasts[0]?.tone).toBe('success');
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.tone).toBe('success');
     });
 
     it('a cancelled picker toasts politely and never imports', async () => {
@@ -327,8 +329,8 @@ describe('actions — importFromFile', () => {
         await importFromFile('opml');
 
         expect(harness.callsFor('import_file')).toHaveLength(0);
-        expect(uiStore.toasts).toHaveLength(1);
-        expect(uiStore.toasts[0]?.tone).toBe('info');
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.tone).toBe('info');
     });
 
     it('a picker failure surfaces an error toast and never imports', async () => {
@@ -339,7 +341,7 @@ describe('actions — importFromFile', () => {
         await importFromFile('opml');
 
         expect(harness.callsFor('import_file')).toHaveLength(0);
-        expect(uiStore.toasts).toHaveLength(1);
-        expect(uiStore.toasts[0]?.tone).toBe('error');
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.tone).toBe('error');
     });
 });

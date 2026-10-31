@@ -4,7 +4,7 @@
  * and a Custom group for user-authored themes. Each swatch previews its own
  * colors by scoping `data-theme` locally (custom swatches resolve against the
  * injected `[data-theme="custom-<id>"]` rule). Selection writes through
- * `uiStore.setThemePreference`. Import/export go through the tauri-specta
+ * `themeStore.setThemePreference`. Import/export go through the tauri-specta
  * commands with the same PathToken discipline OPML uses — a raw path never
  * crosses IPC. Imported values are validated (see `theme-format`) before they
  * ever become a stylesheet rule.
@@ -14,7 +14,13 @@ import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { type MenuItem, menuStore } from '$lib/state/menu.svelte';
-import { THEMES, type CustomThemeId, type ThemePreference, uiStore } from '$lib/state/ui.svelte';
+import {
+    type CustomThemeId,
+    THEMES,
+    type ThemePreference,
+    themeStore,
+} from '$lib/state/theme.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import {
     type CustomTheme,
     contrastFailures,
@@ -29,7 +35,7 @@ const OPTIONS: readonly { id: ThemePreference; name: string }[] = [
 ];
 
 function pick(id: ThemePreference): void {
-    void uiStore.setThemePreference(id);
+    void themeStore.setThemePreference(id);
 }
 
 function customId(theme: CustomTheme): CustomThemeId {
@@ -38,8 +44,8 @@ function customId(theme: CustomTheme): CustomThemeId {
 
 /** Metadata + live token values of the currently applied theme. */
 function activeThemeExport(): CustomTheme {
-    const resolved = uiStore.resolvedTheme;
-    const custom = uiStore.customThemes.find((theme) => customId(theme) === resolved);
+    const resolved = themeStore.resolvedTheme;
+    const custom = themeStore.customThemes.find((theme) => customId(theme) === resolved);
     const tokens = readComputedTokens(document.documentElement);
     if (custom !== undefined) {
         return { ...custom, tokens };
@@ -62,7 +68,7 @@ async function writeThemeFile(theme: CustomTheme): Promise<void> {
             return;
         }
         if (picked.data === null) {
-            uiStore.showToast(t('opml.cancelled'), 'info');
+            toastStore.showToast(t('opml.cancelled'), 'info');
             return;
         }
         const result = await commands.exportTextFile(picked.data.token, yaml);
@@ -70,9 +76,9 @@ async function writeThemeFile(theme: CustomTheme): Promise<void> {
             toastCommandError(result.error);
             return;
         }
-        uiStore.showToast(t('theme.exported'), 'success');
+        toastStore.showToast(t('theme.exported'), 'success');
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
@@ -83,7 +89,7 @@ function exportCurrent(): void {
 function uniqueThemeId(base: string): string {
     let n = 2;
     let candidate = `${base}-${n}`;
-    while (uiStore.hasCustomTheme(candidate)) {
+    while (themeStore.hasCustomTheme(candidate)) {
         n += 1;
         candidate = `${base}-${n}`;
     }
@@ -98,7 +104,7 @@ async function importTheme(): Promise<void> {
             return;
         }
         if (picked.data === null) {
-            uiStore.showToast(t('opml.cancelled'), 'info');
+            toastStore.showToast(t('opml.cancelled'), 'info');
             return;
         }
         const read = await commands.readTextFile(picked.data.token);
@@ -108,28 +114,28 @@ async function importTheme(): Promise<void> {
         }
         const parsed = parseTheme(read.data);
         if (!parsed.ok) {
-            uiStore.showToast(t('theme.importFailed', { error: parsed.error }), 'error', 6000);
+            toastStore.showToast(t('theme.importFailed', { error: parsed.error }), 'error', 6000);
             return;
         }
         let theme = parsed.theme;
-        if (uiStore.hasCustomTheme(theme.id)) {
+        if (themeStore.hasCustomTheme(theme.id)) {
             const id = uniqueThemeId(theme.id);
             theme = { ...theme, id };
-            uiStore.showToast(t('theme.renamedOnImport', { id }), 'info');
+            toastStore.showToast(t('theme.renamedOnImport', { id }), 'info');
         }
-        await uiStore.addCustomTheme(theme);
-        await uiStore.setThemePreference(customId(theme));
-        uiStore.showToast(t('theme.imported', { name: theme.name }), 'success');
+        await themeStore.addCustomTheme(theme);
+        await themeStore.setThemePreference(customId(theme));
+        toastStore.showToast(t('theme.imported', { name: theme.name }), 'success');
 
         const failures = contrastFailures(theme);
         if (failures.length > 0) {
             const pairs = failures
                 .map((failure) => `--${failure.fg}/--${failure.bg} ${failure.ratio.toFixed(2)}`)
                 .join(', ');
-            uiStore.showToast(t('theme.contrastWarning', { pairs }), 'warning', 8000);
+            toastStore.showToast(t('theme.contrastWarning', { pairs }), 'warning', 8000);
         }
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
@@ -141,7 +147,7 @@ function openCustomMenu(theme: CustomTheme, event: MouseEvent): void {
             id: 'delete',
             label: t('theme.delete'),
             danger: true,
-            onSelect: () => void uiStore.removeCustomTheme(theme.id),
+            onSelect: () => void themeStore.removeCustomTheme(theme.id),
         },
     ];
     menuStore.openBelow(items, event.currentTarget as HTMLElement, t('theme.customActions'));
@@ -150,7 +156,7 @@ function openCustomMenu(theme: CustomTheme, event: MouseEvent): void {
 
 <div class="theme-grid" role="group" aria-label={t('settings.theme')}>
     {#each OPTIONS as option (option.id)}
-        {@const active = uiStore.themePreference === option.id}
+        {@const active = themeStore.themePreference === option.id}
         <button
             class="swatch"
             class:active
@@ -182,11 +188,11 @@ function openCustomMenu(theme: CustomTheme, event: MouseEvent): void {
         </div>
     </div>
 
-    {#if uiStore.customThemes.length > 0}
+    {#if themeStore.customThemes.length > 0}
         <div class="theme-grid" role="group" aria-label={t('settings.customThemes')}>
-            {#each uiStore.customThemes as theme (theme.id)}
+            {#each themeStore.customThemes as theme (theme.id)}
                 {@const id = customId(theme)}
-                {@const active = uiStore.themePreference === id}
+                {@const active = themeStore.themePreference === id}
                 <div class="custom-swatch">
                     <button
                         class="swatch"

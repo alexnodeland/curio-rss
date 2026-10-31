@@ -14,9 +14,12 @@ use serde_json::Value;
 /// The RSS fixture every test feeds through the real HTTP path.
 pub const RSS: &str = include_str!("../../../../fixtures/feeds/rss2.xml");
 
-/// Repo root (two levels up from the crate).
+/// Repo root (two levels up from the crate), resolved at run time from the
+/// `CARGO_MANIFEST_DIR` cargo sets for every test process — never the
+/// compile-time `env!` form, which a test binary reused from another
+/// worktree's shared target dir would carry stale (issue #183).
 pub fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .unwrap()

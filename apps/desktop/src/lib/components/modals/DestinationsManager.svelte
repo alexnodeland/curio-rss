@@ -10,7 +10,7 @@ import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { destinationsStore } from '$lib/state/destinations.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 
 let draftName = $state('');
 let pickedToken: string | null = $state(null);
@@ -31,7 +31,7 @@ async function chooseFolder(): Promise<void> {
             pickedPath = result.data.path;
         }
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
@@ -41,7 +41,7 @@ async function add(): Promise<void> {
     }
     const name = draftName.trim();
     if (name.length === 0 || pickedToken === null) {
-        uiStore.showToast(t('destinations.needNameAndFolder'), 'warning');
+        toastStore.showToast(t('destinations.needNameAndFolder'), 'warning');
         return;
     }
     adding = true;
@@ -55,7 +55,7 @@ async function add(): Promise<void> {
         pickedToken = null;
         pickedPath = null;
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         adding = false;
     }
@@ -68,7 +68,7 @@ async function remove(name: string): Promise<void> {
             toastCommandError(result.error);
         }
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
@@ -79,7 +79,7 @@ async function makeDefault(name: string): Promise<void> {
             toastCommandError(result.error);
         }
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
@@ -100,7 +100,7 @@ async function exportAll(name: string): Promise<void> {
             return;
         }
         const written = result.data.created + result.data.updated;
-        uiStore.showToast(
+        toastStore.showToast(
             t('destinations.exportAll.done', {
                 written,
                 unchanged: result.data.unchanged,
@@ -108,7 +108,7 @@ async function exportAll(name: string): Promise<void> {
             'success',
         );
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         exportingTo = null;
     }

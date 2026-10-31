@@ -35,6 +35,7 @@ ego-tree = { workspace = true }
 feed-rs = { workspace = true }
 fs4 = { workspace = true }
 htmd = { workspace = true }
+icu_normalizer = { workspace = true }
 keyring = { workspace = true, optional = true }
 quick-xml = { workspace = true }
 regex = { workspace = true }

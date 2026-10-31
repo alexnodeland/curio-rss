@@ -47,6 +47,9 @@ feed-rs = "2"
 # export lock. std's File::lock needs Rust 1.89; the engine MSRV is 1.88.
 fs4 = { version = "1", default-features = false, features = ["sync"] }
 htmd = "0.5"
+# NFC for note filenames. Already in the graph via url → idna; the
+# baked-data feature only, no UTF-16 iterators.
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 # OS error codes only (ENOLCK & co.): telling "this filesystem has no advisory
 # locks" from a real lock failure in the export lock. Already in the tree.
 libc = "0.2"

@@ -218,7 +218,30 @@ rename. Export is idempotent on `(curio_id, checksum)`:
 - content changed since → `updated`, emits `article.updated`, replaces
   only the frontmatter machine keys and the managed region — everything
   you wrote outside the markers survives byte-for-byte
-- unchanged → `unchanged`, writes nothing, emits nothing
+- unchanged → `unchanged`, writes nothing, emits nothing; if the note on
+  disk is blank (emptied by a crash or a sync tool) it is quietly
+  rewritten, and if it no longer parses as a Curio note (frontmatter or
+  markers edited away, or bytes that are not even UTF-8) the save fails
+  with a parse error instead of claiming it is intact
+
+Bulk saves (`curio save --all --dest vault`, or a filter such as
+`--read-later`) run every article through the same steps and stop at the
+first one that fails — including a note that no longer parses, even if
+its content has not changed. Notes saved before it stay saved; repair or
+delete the offending note and re-run (already-exported notes come back
+`unchanged`).
+
+Notes land at `curio/<slug>.md`, where the slug is the title lowercased,
+NFC-normalized and dash-separated, capped at 100 bytes so the name fits
+every filesystem's 255-byte limit even with a dedup suffix
+(`<slug>-<id prefix>.md` when another article already owns the name — in
+the manifest, or because the note already on disk there belongs to a
+different `curio_id`). Titles that would be a Windows device name (`con`,
+`nul`, `com1`, …) get a `-note` suffix. Every write is flushed to disk
+(`fsync` on the file and its directory) before the manifest records it,
+and a failed write leaves no temp file behind. On filesystems that cannot
+flush at all (some network shares, exFAT, FUSE mounts) the flush is
+skipped rather than failing the save.
 
 The manifest is a file in your folder, so Curio never trusts it alone:
 
@@ -226,7 +249,9 @@ The manifest is a file in your folder, so Curio never trusts it alone:
   note's own frontmatter `curio_id` decides. If the manifest was lost,
   reset or restored from an old commit, a second "Weekly links" article
   gets `curio/weekly-links-<id-prefix>.md` instead of taking over the first
-  one's note, and a file of your own at a slug path is never touched.
+  one's note, and a file of your own at a slug path is never touched
+  (a blank one — empty or whitespace only — holds nothing to keep, so it
+  counts as free).
   An article whose own note is already there is reconciled onto it and
   reported as `updated` (never a second `created`).
 - **One export per destination at a time**, across threads and processes

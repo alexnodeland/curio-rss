@@ -309,10 +309,10 @@ events-log parseability, the events `.gitignore` scaffold, staged
 event intents (a non-empty set means emission was interrupted — a crash,
 or a flush that failed on a full disk or an unwritable events directory;
 the change itself is already stored, and the next command, or the next
-open, replays the staged events into the log), and quarantined intents (`dead-intents`: staged
-rows whose envelope no longer decoded — they are moved to `curio.db`'s
-`event_intents_dead` table so they stop blocking every open and emit,
-and their events never reached the log).
+open, replays the staged events into the log), and quarantined intents
+(`dead-intents`: staged rows whose envelope no longer decoded — they are
+moved to `curio.db`'s `event_intents_dead` table so they stop blocking
+every open and emit, and their events never reached the log).
 
 ## Upgrades and backups
 

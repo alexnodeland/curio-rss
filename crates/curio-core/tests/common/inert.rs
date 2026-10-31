@@ -1,9 +1,11 @@
 //! The inertness audit (D6): the one definition of "stored content is
-//! clean", shared by the XSS golden, the nasty corpus and the proptests.
+//! clean", shared by the XSS golden, the nasty corpus, the proptests and
+//! the `fuzz/` targets.
 //!
 //! Included per binary with `#[path = "common/inert.rs"] mod inert;` rather
 //! than through `common/mod.rs`, so suites that never audit content do not
-//! carry it as dead code.
+//! carry it as dead code. Depends on nothing but `scraper` and std, so the
+//! out-of-workspace fuzz crate can include it the same way.
 
 /// Elements that must never survive sanitization: script hosts, embedded
 /// documents, forms, styling and document-level metadata.

@@ -87,6 +87,17 @@ CREATE TABLE event_intents (
     envelope_json TEXT NOT NULL
 )
 
+-- table event_intents_dead
+CREATE TABLE event_intents_dead (
+    dead_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    intent_id      INTEGER NOT NULL,
+    event_id       TEXT NOT NULL,
+    ts             TEXT NOT NULL,
+    envelope_json  TEXT NOT NULL,
+    error          TEXT NOT NULL,
+    quarantined_at TEXT NOT NULL
+)
+
 -- table feeds
 CREATE TABLE feeds (
     id                    INTEGER PRIMARY KEY,
@@ -122,6 +133,9 @@ CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 ) WITHOUT ROWID
+
+-- table sqlite_sequence
+CREATE TABLE sqlite_sequence(name,seq)
 
 -- table tags
 CREATE TABLE tags (

@@ -32,5 +32,9 @@ exactly this:
    `release-dry-run` artifact before tagging.
 6. **Tag**: annotated tag `vX.Y.Z` on the release commit. Human pushes tags
    — agents never push.
+   Once the tag exists, a follow-up PR adds its migration fixture:
+   generate `fixtures/db/vX.Y.Z.db` from a checkout of the tag (recipe in
+   `fixtures/db/generate.rs`) and add a case to
+   `crates/curio-core/tests/migration_fixtures.rs`.
 7. **Never** publish to crates.io, sign, or upload artifacts without the
    maintainer explicitly asking, per repo policy (BDFL: Alex).

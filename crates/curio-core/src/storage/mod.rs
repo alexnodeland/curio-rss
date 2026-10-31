@@ -11,7 +11,9 @@
 //! Schema lives in the private `migrations` module; every query goes through
 //! the typed repo functions in the private `repo` module.
 
+mod backup;
 mod migrations;
+mod open;
 mod pool;
 mod repo;
 mod writer;
@@ -20,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
+pub use open::OpenError;
 pub use repo::{ListArticles, PendingIntent, UpsertOutcome};
 
 use pool::ReadPool;
@@ -38,14 +41,6 @@ pub enum StorageError {
     /// accept commands.
     #[error("the storage writer thread is gone")]
     WriterGone,
-    /// The database was written by a newer build of Curio.
-    #[error("database schema version {found} is newer than this build supports ({supported})")]
-    SchemaTooNew {
-        /// The `user_version` found in the database.
-        found: i64,
-        /// The highest version this build knows.
-        supported: i64,
-    },
     /// The database refused to enter WAL mode.
     #[error("could not enable WAL journal mode (got {mode:?})")]
     WalUnavailable {
@@ -100,15 +95,20 @@ pub struct Storage {
 
 impl Storage {
     /// Opens (creating if absent) the database at `path`, applies pending
-    /// migrations, and spins up the writer thread plus a read pool of
-    /// [`DEFAULT_READ_POOL_SIZE`] connections.
+    /// migrations — after writing a pre-migration backup next to the file
+    /// (`curio.db.pre-v{N}.bak`; it and the highest-numbered other are kept) — and spins up the
+    /// writer thread plus a read pool of [`DEFAULT_READ_POOL_SIZE`]
+    /// connections.
     ///
     /// # Errors
     ///
-    /// Returns an error if the database cannot be opened or created, WAL
-    /// mode cannot be enabled, a migration fails, or the database was
-    /// written by a newer build.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
+    /// A typed [`OpenError`]: [`OpenError::Corrupt`] for a file that is
+    /// not a (healthy) `SQLite` database, [`OpenError::TooNew`] for one
+    /// written by a newer build, [`OpenError::Locked`] when another
+    /// process holds it, [`OpenError::Io`] for OS-level failures,
+    /// [`OpenError::Backup`] / [`OpenError::MigrationFailed`] for a
+    /// refused or rolled-back upgrade.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, OpenError> {
         Self::open_with_pool_size(path, DEFAULT_READ_POOL_SIZE)
     }
 
@@ -120,13 +120,24 @@ impl Storage {
     pub fn open_with_pool_size(
         path: impl AsRef<Path>,
         read_pool_size: usize,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<Self, OpenError> {
         let path = path.as_ref().to_path_buf();
-        let mut conn = Connection::open(&path)?;
-        configure_write_connection(&conn)?;
-        migrations::apply(&mut conn)?;
+        let classify = open::classifier(&path);
+        let mut conn = Connection::open(&path).map_err(|e| classify(e.into()))?;
+        // Before the first statement, so a lock held elsewhere is waited
+        // out (then reported as `OpenError::Locked`) rather than failing
+        // at once.
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| classify(e.into()))?;
+        // The first statement that reads the file header — a garbage file
+        // fails here with SQLITE_NOTADB (→ `Corrupt`) — and a pure read: a
+        // too-new database is refused before the WAL switch below could
+        // rewrite its header or create sidecar files.
+        migrations::refuse_too_new(&conn, &path)?;
+        configure_write_connection(&conn).map_err(&classify)?;
+        migrations::apply(&mut conn, &path)?;
         let writer = WriterHandle::spawn(conn);
-        let pool = ReadPool::open(&path, read_pool_size.max(1))?;
+        let pool = ReadPool::open(&path, read_pool_size.max(1)).map_err(classify)?;
         Ok(Self { writer, pool, path })
     }
 
@@ -253,7 +264,6 @@ fn configure_write_connection(conn: &Connection) -> Result<(), StorageError> {
     if !mode.eq_ignore_ascii_case("wal") {
         return Err(StorageError::WalUnavailable { mode });
     }
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     Ok(())

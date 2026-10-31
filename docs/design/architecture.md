@@ -99,8 +99,15 @@ defense-in-depth, not the primary defense.
   async-over-sync is handled, so the blocking-in-async bug class cannot recur in head code.
 - Articles get an `INTEGER PRIMARY KEY` rowid alias with **UUIDv7** as a unique column —
   stable FTS5 external-content mapping and insert locality at 100k rows.
-- Numbered embedded migrations: transactional, forward-only, automatic pre-migration
-  backup; tested against fixture DBs from every released version.
+- Numbered embedded migrations: forward-only, and the whole pending set runs in **one**
+  `IMMEDIATE` transaction (a failing step leaves the file at its old version, never
+  half-way). An existing database is first snapshotted with `VACUUM INTO` to
+  `curio.db.pre-vN.bak` (that one plus the highest-numbered other kept) — no backup, no migration. Upgrade-tested
+  against fixture DBs written by every released version (`fixtures/db/`).
+- Opening is typed: `OpenError` separates corrupt / too-new / locked / IO / failed-backup /
+  failed-migration so heads act on the class instead of parsing `SQLite` messages. A
+  staged event intent whose envelope no longer decodes is quarantined to
+  `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
 - Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
@@ -109,8 +116,8 @@ defense-in-depth, not the primary defense.
   reverted to the excerpt), skips rows already holding the incoming values (no
   `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
   `content_text` actually differ.
-- Network-filesystem guard: refuses to open the DB on Syncthing/iCloud/NFS-class mounts
-  without an explicit override flag.
+- Network-filesystem guard (planned, #112): refuses to open the DB on
+  Syncthing/iCloud/NFS-class mounts without an explicit override flag.
 
 ### `events/` — event-sourced article state
 

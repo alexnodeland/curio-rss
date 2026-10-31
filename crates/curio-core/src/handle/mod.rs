@@ -53,11 +53,15 @@ use crate::feeds::{FeedParseError, OpmlError};
 use crate::fetch::{FetchConfig, FetchError, PolicedClient};
 use crate::import::ImportError;
 use crate::model::{Article, FeedId, FetchStatus};
-use crate::storage::{Storage, StorageError};
+use crate::storage::{OpenError, Storage, StorageError};
 
 /// Facade-level errors: every engine subsystem, plus facade concerns.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// The profile database could not be opened — typed so heads can act
+    /// on the class (corrupt, too new, locked, IO, failed upgrade).
+    #[error(transparent)]
+    Open(#[from] OpenError),
     /// Storage failed.
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -277,7 +281,9 @@ impl CoreHandle {
     ///
     /// # Errors
     ///
-    /// [`CoreError`] on filesystem, storage or event-log failures.
+    /// [`CoreError::Open`] when the database cannot be opened (match the
+    /// inner [`OpenError`] for the failure class); other [`CoreError`]s
+    /// on filesystem, storage or event-log failures.
     pub fn open_with(
         profile_dir: impl AsRef<Path>,
         options: CoreOptions,

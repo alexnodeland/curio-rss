@@ -38,7 +38,7 @@ const MUTANTS_PER_SEED: u64 = 24;
 const MIN_INPUTS: usize = 500;
 
 /// Nesting depth of the deep-HTML extreme (see `structural_variants`).
-const DEEP_HTML_LEVELS: usize = 400;
+const DEEP_HTML_LEVELS: usize = 250;
 
 /// What an input is pinned to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,9 +443,13 @@ fn byte_variants() -> Vec<Input> {
 
 /// Size and shape extremes, generated so nothing large is committed.
 fn structural_variants() -> Vec<Input> {
+    // feed-rs walks XML iteratively, so deep *XML* is safe far past this
+    // (to 65_535 levels, where quick-xml's u16 namespace-depth counter
+    // overflows — issue #246).
     let deep_xml = format!("{}{}", "<x>".repeat(5_000), "</x>".repeat(5_000));
-    // Capped below htmd's recursion limit: ~1000 levels overflow a 2 MB
-    // stack in `to_markdown` and abort the process (issue #244 — raise this
+    // Deep *HTML* is capped well below htmd's recursion limit: ~1000 levels
+    // overflow a 2 MB stack in `to_markdown` (debug build) and abort the
+    // process, and a 1 MB stack overflows at ~600 (issue #244 — raise this
     // to 10_000 with that fix).
     let deep_html_body = format!(
         "{}deep{}",

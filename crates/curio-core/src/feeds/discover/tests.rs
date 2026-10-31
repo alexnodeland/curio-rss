@@ -148,7 +148,11 @@ async fn probing_never_leaves_the_origin_or_exceeds_the_cap() {
     assert!(out.feeds.is_empty(), "nothing on this origin is a feed");
     let paths = requested(&server).await;
     assert_eq!(paths.first().map(String::as_str), Some("/"));
-    assert_eq!(paths.len() - 1, MAX_PROBES, "probes are capped: {paths:?}");
+    assert_eq!(
+        paths.len() - 1,
+        MAX_PROBES as usize,
+        "probes are capped: {paths:?}"
+    );
     assert!(
         requested(&elsewhere).await.is_empty(),
         "a cross-origin anchor is never probed"
@@ -185,6 +189,149 @@ async fn a_probe_redirected_off_the_origin_is_discarded() {
 
     let out = discover_at(&server, "/").await;
     assert!(out.feeds.is_empty(), "an off-origin landing is not offered");
+    assert!(
+        requested(&elsewhere).await.is_empty(),
+        "the off-origin redirect target is never requested"
+    );
+    // The page, the refused `/feed`, then the remaining common paths: the
+    // refusal cost one request, so probing goes on within the budget.
+    let mut expected = vec!["/".to_owned()];
+    expected.extend(COMMON_PATHS.iter().map(|p| (*p).to_owned()));
+    assert_eq!(requested(&server).await, expected);
+}
+
+#[tokio::test]
+async fn redirect_hops_count_against_the_probe_budget() {
+    let server = MockServer::start().await;
+    serve(&server, "/", "<html></html>").await;
+    // `/feed` starts a long same-origin redirect chain.
+    Mock::given(method("GET"))
+        .and(path("/feed"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/hop-1"))
+        .mount(&server)
+        .await;
+    for hop in 1..20 {
+        Mock::given(method("GET"))
+            .and(path(format!("/hop-{hop}")))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("location", format!("/hop-{}", hop + 1)),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let out = discover_at(&server, "/").await;
+    assert_eq!(out.feeds, Vec::new());
+    let paths = requested(&server).await;
+    assert_eq!(
+        paths.len() - 1,
+        MAX_PROBES as usize,
+        "every hop is a request against the cap: {paths:?}"
+    );
+    assert_eq!(paths[1], "/feed");
+}
+
+#[tokio::test]
+async fn a_same_origin_probe_redirect_is_followed_within_the_budget() {
+    let server = MockServer::start().await;
+    serve(&server, "/", "<html></html>").await;
+    // WordPress-style: `/feed` 301s to `/feed/`.
+    Mock::given(method("GET"))
+        .and(path("/feed"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", "/feed/"))
+        .mount(&server)
+        .await;
+    serve(&server, "/feed/", rss()).await;
+
+    let out = discover_at(&server, "/").await;
+    assert_eq!(
+        out.feeds,
+        vec![DiscoveredFeed {
+            url: format!("{}/feed/", server.uri()),
+            title: Some("Example Blog".into()),
+        }]
+    );
+    assert_eq!(requested(&server).await, vec!["/", "/feed", "/feed/"]);
+}
+
+#[tokio::test]
+async fn the_deadline_stops_discovery_and_keeps_what_validated() {
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        "/",
+        r#"<link rel="alternate" type="application/rss+xml" title="Main" href="/main.xml">
+           <link rel="alternate" type="application/rss+xml" title="Slow" href="/slow.xml">
+           <link rel="alternate" type="application/rss+xml" title="Late" href="/late.xml">"#,
+    )
+    .await;
+    serve(&server, "/main.xml", rss()).await;
+    serve(&server, "/late.xml", rss()).await;
+    Mock::given(method("GET"))
+        .and(path("/slow.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(rss())
+                .set_delay(Duration::from_secs(10)),
+        )
+        .mount(&server)
+        .await;
+
+    let started = std::time::Instant::now();
+    let out = discover(
+        &client(),
+        &format!("{}/", server.uri()),
+        DiscoverOptions {
+            deadline: Some(Duration::from_millis(500)),
+            ..DiscoverOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the budget cut the slow candidate short"
+    );
+    assert_eq!(
+        out.feeds,
+        vec![DiscoveredFeed {
+            url: format!("{}/main.xml", server.uri()),
+            title: Some("Example Blog".into()),
+        }],
+        "what validated before the deadline is kept"
+    );
+    assert_eq!(
+        requested(&server).await,
+        vec!["/", "/main.xml", "/slow.xml"],
+        "nothing is fetched once the budget is spent"
+    );
+}
+
+#[tokio::test]
+async fn a_page_slower_than_the_deadline_is_a_timeout_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("<html></html>")
+                .set_delay(Duration::from_secs(10)),
+        )
+        .mount(&server)
+        .await;
+    let error = discover(
+        &client(),
+        &format!("{}/", server.uri()),
+        DiscoverOptions {
+            deadline: Some(Duration::from_millis(300)),
+            ..DiscoverOptions::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, DiscoverError::TimedOut { .. }), "{error}");
+    assert!(error.to_string().contains("time budget"));
+    assert!(!error.is_input_error());
 }
 
 #[tokio::test]
@@ -202,6 +349,51 @@ async fn a_dead_declared_feed_falls_back_to_probing() {
     assert_eq!(out.feeds.len(), 1);
     assert_eq!(out.feeds[0].url, format!("{}/feed", server.uri()));
     assert_eq!(requested(&server).await, vec!["/", "/old.rss", "/feed"]);
+}
+
+#[tokio::test]
+async fn an_unreachable_declared_feed_falls_back_to_probing() {
+    let server = MockServer::start().await;
+    // Port 1 on loopback: nothing listens, so the connect fails outright.
+    serve(
+        &server,
+        "/",
+        r#"<link rel="alternate" type="application/rss+xml" href="http://127.0.0.1:1/feed.xml">"#,
+    )
+    .await;
+    serve(&server, "/feed", rss()).await;
+
+    let out = discover_at(&server, "/").await;
+    assert_eq!(out.feeds.len(), 1);
+    assert_eq!(out.feeds[0].url, format!("{}/feed", server.uri()));
+}
+
+#[tokio::test]
+async fn an_unreachable_probe_spends_the_rest_of_the_budget() {
+    let server = MockServer::start().await;
+    // A same-origin anchor whose fetch fails outright: its body is over
+    // the client's size cap (the page itself is under it).
+    serve(&server, "/", r#"<a href="/huge/feed/">feed</a>"#).await;
+    serve(&server, "/huge/feed/", "x".repeat(64)).await;
+    let client = PolicedClient::new(FetchConfig {
+        politeness_delay: Duration::ZERO,
+        trusted_addrs: HashSet::from([IpAddr::V4(Ipv4Addr::LOCALHOST)]),
+        max_body_bytes: 40,
+        ..FetchConfig::default()
+    });
+    let out = discover(
+        &client,
+        &format!("{}/", server.uri()),
+        DiscoverOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.feeds, Vec::new());
+    assert_eq!(
+        requested(&server).await,
+        vec!["/", "/huge/feed/"],
+        "an error of unknown cost is charged the whole remaining budget"
+    );
 }
 
 #[tokio::test]
@@ -275,6 +467,40 @@ async fn a_url_that_is_a_feed_returns_itself_with_its_title() {
         vec!["/feed.xml"],
         "one fetch, no probes"
     );
+}
+
+#[tokio::test]
+async fn a_feed_url_behind_a_temporary_redirect_is_kept_as_typed() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/go"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/signed/feed.xml"))
+        .mount(&server)
+        .await;
+    serve(&server, "/signed/feed.xml", rss()).await;
+    let out = discover_at(&server, "/go").await;
+    assert_eq!(
+        out.feeds,
+        vec![DiscoveredFeed {
+            url: format!("{}/go", server.uri()),
+            title: Some("Example Blog".into()),
+        }],
+        "a temporary target is never what gets subscribed"
+    );
+}
+
+#[tokio::test]
+async fn a_feed_url_behind_a_permanent_redirect_reports_the_target() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/old.xml"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", "/feed.xml"))
+        .mount(&server)
+        .await;
+    serve(&server, "/feed.xml", rss()).await;
+    let out = discover_at(&server, "/old.xml").await;
+    assert_eq!(out.feeds.len(), 1);
+    assert_eq!(out.feeds[0].url, format!("{}/feed.xml", server.uri()));
 }
 
 #[tokio::test]
@@ -384,6 +610,7 @@ async fn the_private_network_guard_applies_unless_explicitly_waived() {
         &url,
         DiscoverOptions {
             allow_private_network: true,
+            ..DiscoverOptions::default()
         },
     )
     .await
@@ -422,6 +649,9 @@ fn input_normalization() {
         "https://",
         "http:// /",
         "a b c",
+        "user:secret@example.test",
+        "https://user@example.test/feed",
+        "mailto:a@example.test",
     ];
     for input in bad {
         assert!(

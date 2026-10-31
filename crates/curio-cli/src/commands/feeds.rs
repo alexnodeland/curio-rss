@@ -75,6 +75,7 @@ fn resolve_feed_url(
         input,
         DiscoverOptions {
             allow_private_network,
+            ..DiscoverOptions::default()
         },
     ))?;
     let mut urls = discovery.feeds.into_iter().map(|feed| feed.url);

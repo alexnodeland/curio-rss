@@ -42,7 +42,9 @@ classes of request the app can make; there are no others:
 2. **Feed discovery and favicons.** *Add feed* (and `curio feed add`)
    fetches the page you typed to discover its feeds, then fetches each
    candidate feed once to check it parses. If the page declares no feed, it
-   tries at most six common feed paths **on the same site**. For reddit,
+   tries at most six requests for common feed paths, **all on the same
+   site** — a guessed path that redirects elsewhere is dropped without
+   following it. For reddit,
    GitHub, YouTube, Mastodon and Substack URLs it may request the site's own
    feed URL directly instead of the page. It reads the page's declared icon
    (or the site's own `/favicon.ico`) — **same-origin only**. The **Google favicon service is never contacted

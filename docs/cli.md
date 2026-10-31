@@ -200,23 +200,29 @@ curio feed rm example.com          # by id, exact URL, or unique substring
 
 `feed add` never subscribes to something a refresh could not parse. It
 takes whatever you typed — a feed URL, a site or page URL, or a bare
-domain (given `https://`; a legacy `feed://` link works too) — and
+domain (given `https://`; a legacy `feed://` link works too; a URL with a
+`user:password@` part is refused) — and
 autodiscovers the feed before subscribing:
 
 1. **Known sites, no scraping.** reddit `/r/<sub>` and `/user/<name>`,
    GitHub `<owner>/<repo>` (its releases feed), YouTube playlists and
    `/channel/UC…` pages, Mastodon `@user` profiles and Substack
    publications map straight to their feed URL.
-2. **The page itself.** If the URL is a feed, that's it. Otherwise its
+2. **The page itself.** If the URL is a feed, that's it — subscribed as
+   typed, or at its new address only when it has moved permanently (a
+   temporary redirect's target is never stored). Otherwise its
    declared `<link rel="alternate">` feeds count — RSS, Atom and JSON Feed
    only; oEmbed and REST-API alternates are ignored, and comment feeds are
    dropped when the page also declares its main feed.
 3. **Probing**, only when nothing is declared: feed-shaped links on the
    page, then `/feed`, `/feed.xml`, `/index.xml`, `/rss.xml`, `/atom.xml`
-   and `/rss` — at most six requests, all on the page's own origin.
+   and `/rss` — at most six requests in total (redirect hops count), all
+   on the page's own origin: a probe that redirects to another site is
+   dropped without that site ever being contacted.
 
 Every candidate is fetched and parsed before it is offered; the first one
-is subscribed (the others are listed). A page with no feed is refused with
+is subscribed (the others are listed). Discovery as a whole gives up after
+45 seconds, keeping whatever validated by then. A page with no feed is refused with
 a hint — `--no-validate` subscribes the URL as given, without fetching it.
 `--allow-private-network` also lets discovery reach the private address,
 and is recorded under the feed URL actually subscribed.

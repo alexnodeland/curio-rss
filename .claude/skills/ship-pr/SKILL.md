@@ -1,6 +1,6 @@
 ---
 name: ship-pr
-description: Land a change trunk-based — short-lived branch off main, small green commits, PR from the template, wait for CI and fix in a loop, sync with main, squash-merge. Use whenever work is ready to leave the local machine, or when asked to open, babysit, or merge a PR.
+description: Land a change trunk-based — short-lived branch off main, small green commits, PR from the template, wait for CI and fix in a loop, rebase onto main (force-with-lease), squash-merge. Use whenever work is ready to leave the local machine, or when asked to open, babysit, or merge a PR.
 ---
 
 # Ship a PR (trunk-based)
@@ -46,8 +46,8 @@ otherwise `Part of #N` and list what remains.
 ## 5. CI loop
 
 Poll the PR's check runs (≈3 min per run). On red: read the failing job's
-log, reproduce locally, fix the cause, push a new commit (no force-push
-needed). Repeat until every required check is green. Never re-run CI blindly,
+log, reproduce locally, fix the cause, push a new commit (a plain push is
+enough for fix-ups; reserve the lease push for rebases). Repeat until every required check is green. Never re-run CI blindly,
 never push empty commits, never disable a check.
 
 A PR that touches the nightly's plumbing (the `pull_request.paths` list in
@@ -59,12 +59,27 @@ commit is green too.
 
 ## 6. Merge
 
-1. If `main` moved: `git fetch origin main && git merge origin/main -m
-   "chore(sync): merge origin/main into <branch>"` (the commit-msg hook
-   rejects git's default "Merge remote-tracking branch…" message; the
-   squash-merge flattens it, so `main` stays linear and no force-push is
-   needed), resolve conflicts, re-run the gates for the touched paths, push,
-   and wait for CI to go green again on the updated head.
+1. If the target (`main`, or the base of a stacked PR) moved, rebase the
+   feature branch onto it and force-push **with a lease**:
+
+   ```sh
+   git fetch origin main
+   git rebase origin/main            # resolve conflicts commit by commit
+   # re-run the gates for the touched paths
+   git push --force-with-lease --force-if-includes origin <branch>
+   ```
+
+   Then wait for CI to go green again on the rebased head. The lease
+   refuses the push if someone else updated the branch since your last
+   fetch; `--force-if-includes` additionally refuses if you never
+   integrated what the remote has. Force-pushing is only ever for your own
+   short-lived feature branch: never `main`, and never plain `--force`
+   (the Bash guard hook blocks both).
+   Fallback if a rebase is impractical (e.g. a long conflict chain on a
+   branch others build on): `git merge origin/main -m "chore(sync): merge
+   origin/main into <branch>"` — the commit-msg hook rejects git's default
+   merge message — then a normal push. The squash-merge keeps `main`
+   linear either way.
 2. Squash-merge with the PR title as the commit title (history reads as one
    conventional commit per PR, `(#NNN)` suffix).
 3. Confirm the linked issue closed; delete the branch.

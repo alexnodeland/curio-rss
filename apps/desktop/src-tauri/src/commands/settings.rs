@@ -1,9 +1,10 @@
 //! Settings K/V + app info.
 //!
 //! UI preferences ride the same store under namespaced keys (`ui.theme`,
-//! `ui.typography`, …) — no separate prefs commands. The facade-reserved
-//! `"destinations"` key is refused in both directions: that registry is
-//! owned by `add_destination`/`remove_destination`.
+//! `ui.typography`, …) — no separate prefs commands. The core facade
+//! refuses its reserved `"destinations"` key in both directions (that
+//! registry is owned by `add_destination`/`remove_destination`); the
+//! refusal surfaces here as an `InvalidInput` user error.
 
 use std::sync::Arc;
 
@@ -14,9 +15,6 @@ use tauri::State;
 use super::{SharedCore, run_blocking};
 use crate::dto::AppInfoDto;
 use crate::error::CommandError;
-
-/// The settings key owned by the core facade (its destination registry).
-const RESERVED_KEY: &str = "destinations";
 
 /// Reads a setting.
 #[tauri::command]
@@ -51,30 +49,19 @@ pub async fn get_app_info(core: State<'_, SharedCore>) -> Result<AppInfoDto, Com
 
 // ------------------------------------------------------------------ impls
 
-fn reject_reserved(key: &str) -> Result<(), CommandError> {
-    if key == RESERVED_KEY {
-        return Err(CommandError::invalid_input(
-            "the \"destinations\" settings key is facade-owned — use the destination commands",
-        ));
-    }
-    Ok(())
-}
-
 fn get_setting_impl(core: &CoreHandle, key: &str) -> Result<Option<String>, CommandError> {
-    reject_reserved(key)?;
-    Ok(core.storage().get_setting(key)?)
+    Ok(core.get_setting(key)?)
 }
 
 fn set_setting_impl(core: &CoreHandle, key: &str, value: &str) -> Result<(), CommandError> {
-    reject_reserved(key)?;
-    Ok(core.storage().set_setting(key, value)?)
+    Ok(core.set_setting(key, value)?)
 }
 
 fn get_app_info_impl(core: &CoreHandle) -> Result<AppInfoDto, CommandError> {
     Ok(AppInfoDto {
         version: CoreHandle::version().to_owned(),
         profile_dir: core.profile_dir().display().to_string(),
-        db_schema_version: core.storage().db_schema_version()?,
+        db_schema_version: core.db_schema_version()?,
         schema_supported: Storage::schema_version(),
     })
 }

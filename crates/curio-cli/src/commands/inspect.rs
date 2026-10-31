@@ -2,6 +2,7 @@
 
 use std::process::ExitCode;
 
+use curio_core::CoreHandle;
 use curio_core::events::read_all;
 use curio_core::storage::Storage;
 use serde::Serialize;
@@ -74,29 +75,27 @@ struct DoctorView {
 /// Health probes over the three durable surfaces: the database, the FTS
 /// index, and the events log.
 pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
-    let storage = app.core.storage();
+    let core = &app.core;
     let mut checks = vec![
         Check::ok("profile", app.profile.display().to_string()),
-        schema_check(storage),
+        schema_check(core),
         Check::from_result(
             "db-integrity",
-            storage
-                .integrity_check()
+            core.integrity_check()
                 .map(|()| "PRAGMA integrity_check ok".to_owned())
                 .map_err(|err| err.to_string()),
         ),
         Check::from_result(
             "fts-sync",
-            storage
-                .fts_integrity_check()
+            core.fts_integrity_check()
                 .map(|()| "FTS5 index matches the articles table".to_owned())
                 .map_err(|err| err.to_string()),
         ),
         events_check(app),
         gitignore_check(app),
-        intents_check(storage),
+        intents_check(core),
     ];
-    match storage.count_articles() {
+    match core.count_articles() {
         Ok(count) => checks.push(Check::ok("articles", format!("{count} stored"))),
         Err(err) => checks.push(Check::from_result("articles", Err(err.to_string()))),
     }
@@ -117,10 +116,10 @@ pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
     })
 }
 
-fn schema_check(storage: &Storage) -> Check {
+fn schema_check(core: &CoreHandle) -> Check {
     Check::from_result(
         "schema",
-        match storage.db_schema_version() {
+        match core.db_schema_version() {
             Ok(found) if found == Storage::schema_version() => Ok(format!("v{found}")),
             Ok(found) => Err(format!(
                 "database at v{found}, this build expects v{}",
@@ -160,15 +159,12 @@ fn gitignore_check(app: &App) -> Check {
 
 /// Staged-but-unflushed event intents mean a crash interrupted emission;
 /// the next open replays them, so a healthy handle shows zero.
-fn intents_check(storage: &Storage) -> Check {
+fn intents_check(core: &CoreHandle) -> Check {
     Check::from_result(
         "event-intents",
-        match storage.pending_intents() {
-            Ok(pending) if pending.is_empty() => Ok("no staged intents".to_owned()),
-            Ok(pending) => Err(format!(
-                "{} staged intent(s) not yet flushed",
-                pending.len()
-            )),
+        match core.pending_intent_count() {
+            Ok(0) => Ok("no staged intents".to_owned()),
+            Ok(pending) => Err(format!("{pending} staged intent(s) not yet flushed")),
             Err(err) => Err(err.to_string()),
         },
     )

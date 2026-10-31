@@ -26,7 +26,7 @@ with no arguments to list the recipes.
 git clone https://github.com/alexnodeland/curio-rss   # post-publication
 cd curio-rss
 just setup     # installs git hooks (lefthook) and checks required tools
-just ci        # everything CI runs: fmt, clippy, tests, deny, boundary, workflows, bindings-check, cov, doc, blob-guard, frontend gates
+just ci        # everything CI runs: fmt, clippy, check-prod, tests, deny, boundary, workflows, bindings-check, cov, doc, blob-guard, frontend gates
 ```
 
 Required: stable Rust — CI floats on the latest stable. The declared

@@ -58,22 +58,22 @@ pub async fn sweep_event_retention(
 // ------------------------------------------------------------------ impls
 
 fn integrity_check_impl(core: &CoreHandle) -> Result<(), CommandError> {
-    Ok(core.storage().integrity_check()?)
+    Ok(core.integrity_check()?)
 }
 
 fn fts_integrity_check_impl(core: &CoreHandle) -> Result<(), CommandError> {
-    Ok(core.storage().fts_integrity_check()?)
+    Ok(core.fts_integrity_check()?)
 }
 
 fn vacuum_db_impl(core: &CoreHandle) -> Result<(), CommandError> {
-    Ok(core.storage().vacuum()?)
+    Ok(core.vacuum()?)
 }
 
 fn db_stats_impl(core: &CoreHandle) -> Result<DbStatsDto, CommandError> {
     Ok(DbStatsDto {
-        article_count: core.storage().count_articles()?,
-        schema_version: core.storage().db_schema_version()?,
-        db_path: core.storage().path().display().to_string(),
+        article_count: core.count_articles()?,
+        schema_version: core.db_schema_version()?,
+        db_path: core.db_path().display().to_string(),
     })
 }
 

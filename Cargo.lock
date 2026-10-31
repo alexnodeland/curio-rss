@@ -1061,6 +1061,7 @@ dependencies = [
  "ammonia",
  "chrono",
  "csv",
+ "curio-core",
  "curio-types",
  "dom_smoothie",
  "ego-tree",

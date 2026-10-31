@@ -250,6 +250,7 @@ export function opmlImportOutcomeFixture(
     return {
         added: 2,
         skipped: 1,
+        invalid: 0,
         ...overrides,
     };
 }
@@ -258,8 +259,11 @@ export function importOutcomeFixture(overrides: Partial<ImportOutcomeDto> = {}):
     return {
         feeds_added: 2,
         feeds_skipped: 1,
+        feeds_invalid: 0,
         articles_added: 0,
         articles_skipped: 0,
+        articles_invalid: 0,
+        rejected: [],
         ...overrides,
     };
 }

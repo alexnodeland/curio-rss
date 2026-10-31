@@ -329,6 +329,8 @@ export const en = {
     'import.running': 'Importing…',
     'import.done':
         'Imported {feeds, plural, one {# feed} other {# feeds}} and {articles, plural, one {# article} other {# articles}}, skipped {skipped, plural, other {#}}',
+    'import.doneWithInvalid':
+        'Imported {feeds, plural, one {# feed} other {# feeds}} and {articles, plural, one {# article} other {# articles}}, skipped {skipped, plural, other {#}}; ignored {invalid, plural, one {# invalid entry} other {# invalid entries}}',
     'import.hint':
         'OPML brings in feed subscriptions; Pocket, Instapaper and Readwise CSVs bring in saved articles as read-later items with their tags.',
 

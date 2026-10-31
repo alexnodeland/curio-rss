@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Context as _, anyhow};
-use curio_core::export::ExportDisposition;
+use curio_core::export::{ExportDisposition, write_file_atomic};
+use curio_core::import::read_import_file;
+use curio_core::{ImportKind, RejectReason, Rejected};
 use curio_types::DestinationName;
 use serde::Serialize;
 
@@ -191,33 +193,91 @@ pub(crate) fn dest(app: &mut App, command: DestCommand) -> anyhow::Result<ExitCo
 struct OpmlImportView {
     added: usize,
     skipped: usize,
+    /// Outlines dropped as unreadable or with an unusable URL.
+    invalid: usize,
 }
 
 #[derive(Debug, Serialize)]
 struct ImportView {
     feeds_added: usize,
     feeds_skipped: usize,
+    feeds_invalid: usize,
     articles_added: usize,
     articles_skipped: usize,
+    articles_invalid: usize,
+    /// Why rows were dropped (capped; the counters stay exact).
+    rejected: Vec<RejectedView>,
+}
+
+/// One dropped import row, for `--json`.
+#[derive(Debug, Serialize)]
+struct RejectedView {
+    /// `feed` / `article`.
+    kind: &'static str,
+    /// `malformed` / `invalid_url` / `unsupported_scheme`.
+    reason: &'static str,
+    detail: String,
+}
+
+impl From<&Rejected> for RejectedView {
+    fn from(rejected: &Rejected) -> Self {
+        Self {
+            kind: match rejected.kind {
+                ImportKind::Feed => "feed",
+                ImportKind::Article => "article",
+            },
+            reason: reason_label(rejected.reason),
+            detail: rejected.detail.clone(),
+        }
+    }
+}
+
+fn reason_label(reason: RejectReason) -> &'static str {
+    match reason {
+        RejectReason::Malformed => "malformed",
+        RejectReason::InvalidUrl => "invalid_url",
+        RejectReason::UnsupportedScheme => "unsupported_scheme",
+    }
+}
+
+/// Reads an import file the way every head does: size-capped, with its
+/// encoding detected (Latin-1 OPML, UTF-16 CSV, ...).
+fn read_import(file: &Path) -> anyhow::Result<String> {
+    read_import_file(file).with_context(|| format!("reading {}", file.display()))
+}
+
+/// Prints each dropped row to stderr, so stdout stays the summary.
+fn warn_rejected(rejected: &[Rejected]) {
+    for row in rejected {
+        eprintln!(
+            "skipped invalid entry ({}): {}",
+            reason_label(row.reason).replace('_', " "),
+            row.detail
+        );
+    }
 }
 
 pub(crate) fn import(app: &App, file: &Path, format: ImportFormat) -> anyhow::Result<ExitCode> {
-    let content =
-        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let content = read_import(file)?;
     let outcome = app.core.import_file(format.into(), &content)?;
     if app.json {
         emit_json(&ImportView {
             feeds_added: outcome.feeds_added,
             feeds_skipped: outcome.feeds_skipped,
+            feeds_invalid: outcome.feeds_invalid,
             articles_added: outcome.articles_added,
             articles_skipped: outcome.articles_skipped,
+            articles_invalid: outcome.articles_invalid,
+            rejected: outcome.rejected.iter().map(RejectedView::from).collect(),
         })?;
     } else {
+        warn_rejected(&outcome.rejected);
         println!(
-            "imported {} feed(s) and {} article(s); skipped {} already present",
+            "imported {} feed(s) and {} article(s); skipped {} already present, {} invalid",
             outcome.feeds_added,
             outcome.articles_added,
-            outcome.feeds_skipped + outcome.articles_skipped
+            outcome.feeds_skipped + outcome.articles_skipped,
+            outcome.feeds_invalid + outcome.articles_invalid
         );
     }
     Ok(ExitCode::SUCCESS)
@@ -226,18 +286,18 @@ pub(crate) fn import(app: &App, file: &Path, format: ImportFormat) -> anyhow::Re
 pub(crate) fn opml(app: &App, command: OpmlCommand) -> anyhow::Result<ExitCode> {
     match command {
         OpmlCommand::Import { file } => {
-            let xml = std::fs::read_to_string(&file)
-                .with_context(|| format!("reading {}", file.display()))?;
+            let xml = read_import(&file)?;
             let outcome = app.core.import_opml(&xml)?;
             if app.json {
                 emit_json(&OpmlImportView {
                     added: outcome.added,
                     skipped: outcome.skipped,
+                    invalid: outcome.invalid,
                 })?;
             } else {
                 println!(
-                    "imported {} feed(s), skipped {} already subscribed",
-                    outcome.added, outcome.skipped
+                    "imported {} feed(s), skipped {} already subscribed, {} invalid",
+                    outcome.added, outcome.skipped, outcome.invalid
                 );
             }
         }
@@ -246,7 +306,7 @@ pub(crate) fn opml(app: &App, command: OpmlCommand) -> anyhow::Result<ExitCode> 
             if file.as_os_str() == "-" {
                 print!("{xml}");
             } else {
-                std::fs::write(&file, &xml)
+                write_file_atomic(&file, xml.as_bytes())
                     .with_context(|| format!("writing {}", file.display()))?;
                 if app.json {
                     emit_json(&serde_json::json!({ "file": file.display().to_string() }))?;

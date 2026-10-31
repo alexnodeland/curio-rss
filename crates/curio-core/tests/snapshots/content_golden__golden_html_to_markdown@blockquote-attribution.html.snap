@@ -1,0 +1,16 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/blockquote-attribution.html
+---
+The standard way to attribute a quotation puts a footer inside the quote:
+
+> Simplicity is prerequisite for reliability.
+> 
+> — Edsger W. Dijkstra
+
+![a punch card](https://example.com/images/punch-card.jpg)
+
+A program, before version control.
+
+Both the attribution and the caption belong to the post.

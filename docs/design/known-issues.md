@@ -60,7 +60,7 @@ consumer implementation.
 
 - **FIXED (Phase 4 / desktop WP1a): concurrent refreshes of one feed
   raced on conditional-GET validators**
-  (`handle.rs::preserve_validators`): an error-path preserve wrote back
+  (`handle/refresh.rs::preserve_validators`): an error-path preserve wrote back
   the pre-fetch etag/last-modified snapshot and could clobber fresher
   validators a parallel successful refresh had just stored (bounded
   consequence: one wasted full-body 200 or a missed 304). The named

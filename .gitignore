@@ -51,3 +51,6 @@ Thumbs.db
 # target in tauri.conf.json). They were never tracked; keep it that way.
 apps/desktop/src-tauri/icons/android/
 apps/desktop/src-tauri/icons/ios/
+
+# Claude Code agent worktrees (isolated checkouts created by subagents/workflows)
+.claude/worktrees/

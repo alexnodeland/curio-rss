@@ -3,9 +3,11 @@
 //! Exists so the boundary rules are one definition shared by the `boundary`
 //! subcommand (what CI runs) and the canary self-tests in
 //! `tests/boundary_canary.rs` (the tripwire that keeps `deny.toml` honest),
-//! so the `workflows` supply-chain lint is testable the same way, and so
-//! the compile-time-path guard (`paths`, issue #183) has one scanner.
+//! so the `workflows` supply-chain lint and the nightly's `bench-output`
+//! check are testable the same way, and so the compile-time-path guard
+//! (`paths`, issue #183) has one scanner.
 
+pub mod bench;
 pub mod paths;
 pub mod workflows;
 

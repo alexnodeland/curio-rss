@@ -90,10 +90,10 @@ fn reconcile(core: &CoreHandle, config: &ProfileConfig) -> anyhow::Result<()> {
         core.add_destination(name, root.clone())?;
     }
     for (url, overrides) in &config.feeds {
-        if let Some(feed) = core.storage().get_feed_by_url(url)? {
-            if feed.allow_private_network != overrides.allow_private_network {
-                core.set_feed_allow_private_network(feed.id, overrides.allow_private_network)?;
-            }
+        if let Some(feed) = core.storage().get_feed_by_url(url)?
+            && feed.allow_private_network != overrides.allow_private_network
+        {
+            core.set_feed_allow_private_network(feed.id, overrides.allow_private_network)?;
         }
     }
     Ok(())

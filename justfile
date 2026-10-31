@@ -17,6 +17,7 @@ setup:
     lefthook install
     @command -v cargo-deny >/dev/null || echo "warning: cargo-deny not found — install with: cargo install cargo-deny"
     @command -v cargo-llvm-cov >/dev/null || echo "warning: cargo-llvm-cov not found (needed by `just cov`, part of `just ci`) — install with: cargo install cargo-llvm-cov"
+    @command -v jq >/dev/null || echo "warning: jq not found (needed by `just msrv`) — install it from your package manager"
     @echo "setup complete — run 'just ci' to verify the workspace"
 
 # Build the workspace
@@ -55,6 +56,11 @@ doc:
 # Supply-chain gate: advisories, license allowlist, webview ban
 deny:
     cargo deny check
+
+# Opt-in (downloads one toolchain per declared version; CI's `msrv` job runs it):
+# Build every crate on exactly its Cargo.toml rust-version
+msrv:
+    bash scripts/check-msrv.sh
 
 # Defense in depth: assert curio-core's dependency tree is webview-free
 boundary:

@@ -1,0 +1,22 @@
+# Line endings: every text file is LF in the index AND in the working tree, on
+# every OS. Without this, git's autocrlf (on by default on Windows runners and
+# many Windows dev machines) checks text out as CRLF, and anything embedded or
+# compared byte-for-byte drifts: the migration SQL pulled in with include_str!,
+# the schema golden, content/export snapshots, fixtures, and the generated
+# bindings.ts drift check. Binary detection stays automatic (text=auto).
+* text=auto eol=lf
+
+# Binary assets, declared so a heuristic never guesses wrong.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.db   binary
+*.gz   binary
+*.zip  binary

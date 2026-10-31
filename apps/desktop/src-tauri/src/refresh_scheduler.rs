@@ -155,15 +155,15 @@ mod tests {
     #[test]
     fn a_zero_interval_is_never_due() {
         assert!(!refresh_due(0, Duration::from_secs(0)));
-        assert!(!refresh_due(0, Duration::from_secs(60 * 60 * 24)));
+        assert!(!refresh_due(0, Duration::from_hours(24)));
     }
 
     #[test]
     fn a_refresh_is_due_only_once_the_interval_has_elapsed() {
         // 30-minute interval: not due at 29 minutes, due at exactly 30.
-        assert!(!refresh_due(30, Duration::from_secs(29 * 60)));
-        assert!(refresh_due(30, Duration::from_secs(30 * 60)));
-        assert!(refresh_due(30, Duration::from_secs(31 * 60)));
+        assert!(!refresh_due(30, Duration::from_mins(29)));
+        assert!(refresh_due(30, Duration::from_mins(30)));
+        assert!(refresh_due(30, Duration::from_mins(31)));
     }
 
     #[test]

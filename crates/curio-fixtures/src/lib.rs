@@ -229,7 +229,7 @@ fn insert_article(
         &published, // saved_at == published for reproducibility
     ))?;
     // A deterministic slice of state so unread counts and filters have signal.
-    if n % 3 == 0 || n % 7 == 0 {
+    if n.is_multiple_of(3) || n.is_multiple_of(7) {
         tx.prepare_cached(
             "INSERT INTO article_state \
              (article_id, is_read, is_starred, is_read_later, is_archived, updated_at) \
@@ -237,10 +237,10 @@ fn insert_article(
         )?
         .execute((
             id,
-            i64::from(n % 3 == 0),
-            i64::from(n % 7 == 0),
-            i64::from(n % 11 == 0),
-            i64::from(n % 23 == 0),
+            i64::from(n.is_multiple_of(3)),
+            i64::from(n.is_multiple_of(7)),
+            i64::from(n.is_multiple_of(11)),
+            i64::from(n.is_multiple_of(23)),
             &published,
         ))?;
     }

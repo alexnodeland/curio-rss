@@ -54,10 +54,20 @@ All state lives in one profile directory:
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
 | `.curio/.gitignore` | scaffolded so the events log is never committed |
 
-The default location is the platform data directory —
-`~/.local/share/curio` on Linux (XDG-respecting: `XDG_DATA_HOME` wins),
-`~/Library/Application Support/curio` on macOS. Override per invocation
-with `--profile DIR` or persistently with `CURIO_PROFILE=DIR`.
+The default profile is **shared with the desktop app** — the CLI and the
+app open the same database, so `curio clip <url>` shows up in the reader
+and a cron job sees the reader's library:
+
+| Platform | Default profile |
+|----------|-----------------|
+| macOS | `~/Library/Application Support/io.github.alexnodeland.curio` |
+| Linux | `~/.local/share/curio` (XDG-respecting: `XDG_DATA_HOME` wins) |
+| Windows | `%LOCALAPPDATA%\alexnodeland\curio\data` |
+
+Override per invocation with `--profile DIR` or persistently with
+`CURIO_PROFILE=DIR` (the desktop app honours `CURIO_PROFILE` too).
+`curio doctor` prints the resolved path and whether it is the shared
+default.
 
 ```sh
 curio init                 # scaffold the default profile
@@ -65,6 +75,20 @@ curio --profile /tmp/p init  # or an explicit one (great for testing)
 ```
 
 `init` is idempotent: re-running never clobbers an existing `curio.toml`.
+It is also the only command that creates a profile: every other command
+refuses a directory without a `curio.db` (exit 1, with a "run `curio
+init`" hint), so a mistyped `--profile` can't silently show an empty
+library.
+
+**Upgrading from 0.4 or earlier.** Older CLIs used
+`~/Library/Application Support/curio` on macOS (and the Windows app kept
+its library in Roaming AppData). The first run of either head on the
+default profile moves a lone old profile into the shared location. If both
+locations already hold a library — or the old one looks open in another
+process — nothing is moved or merged: every command prints a warning and
+`curio doctor` fails its `legacy-profile` check until you reconcile by
+hand (open the old one with `--profile` to export what you need, then
+remove it).
 
 ## `curio.toml`
 

@@ -31,6 +31,16 @@ production feed).
 - [ ] **Keyboard-only session** — navigate feeds/articles and read one end-to-end with only the keyboard (`j`/`k`, `o`, `s`, `l`, `m`, `p`, `/`, `?`).
 - [ ] **Promote-to-destination** — press `p`, pick a temp destination, confirm a Markdown note with valid `curio.frontmatter.v1` frontmatter is written.
 
+## Shared default profile (real macOS only — CI can't point the app at a temp `~/Library`)
+
+Use a throwaway macOS user account, or move your real
+`~/Library/Application Support/io.github.alexnodeland.curio` and
+`~/Library/Application Support/curio` aside first.
+
+- [ ] **One library** — with no `CURIO_PROFILE`, `curio clip <local-url>` then launch the app: the clip is in Read Later. `curio doctor` reports the profile as `~/Library/Application Support/io.github.alexnodeland.curio (the default, shared with the desktop app)`.
+- [ ] **Legacy CLI profile is adopted** — with only an old-CLI profile at `~/Library/Application Support/curio` (made with `curio --profile ~/Library/Application\ Support/curio init` + one `clip`), the first `curio list` (or app launch) prints/logs "moved the profile…", and the clip is visible in the app.
+- [ ] **Legacy profile never merged** — with both directories holding a `curio.db`, every `curio` command warns about the old one, `curio doctor` fails `legacy-profile`, and neither directory is modified.
+
 ## Gatekeeper (unsigned) sanity
 
 - [ ] Fresh-install path works: right-click → Open (or `xattr -dr com.apple.quarantine`) launches the app.

@@ -211,7 +211,7 @@ jobs:
           fi
       - name: Upload failure screenshots
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-failures-${{ matrix.name }}
           path: ${{ runner.temp }}/e2e-failures

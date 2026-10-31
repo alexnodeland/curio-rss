@@ -296,10 +296,34 @@ jobs:
         # parser consumes; the fixture is generated inside the bench harness.
         # `mkdir -p` guarantees the external-data-json-path parent exists on the
         # first run, before any cache entry has been created.
+        #
+        # Criterion keeps NO state here (issue #185): the tracker below owns
+        # the trailing baseline, so criterion's own comparison is noise — and
+        # it broke the job. Criterion compares against any
+        # `<id>/base/` directory it finds under its home, which defaults to
+        # `target/criterion` — restored by rust-cache, here without the
+        # `sample.json` inside. Criterion then printed
+        # `Criterion.rs ERROR: … base/sample.json …` between `test <id> ... `
+        # and `bench:`, splitting the one line the tracker parses, and the
+        # job died with "No benchmark result was found". So: a fresh, per-job
+        # CRITERION_HOME that no cache restores, and `--discard-baseline` so
+        # nothing is written for one to restore later. `pipefail` keeps a
+        # crashed bench red through `tee`.
+        env:
+          CRITERION_HOME: ${{ runner.temp }}/criterion
         run: |
+          set -o pipefail
           mkdir -p ./.bench-cache
-          cargo bench -p curio-fixtures --bench cold_start -- --output-format bencher \
+          cargo bench -p curio-fixtures --bench cold_start -- \
+            --output-format bencher --noplot --discard-baseline \
             | tee bench-output.txt
+      # Fail with the actual cause (a criterion error line, no parseable
+      # result, the cold-start id missing) instead of the tracker's bare
+      # "No benchmark result was found" — same line rule as its `cargo` parser.
+      - name: Check the bench output is trackable
+        run: >-
+          cargo run -p xtask -- bench-output bench-output.txt
+          --expect cold_start/open_and_first_page_50k
       - name: Track against the trailing baseline (alert at 130%)
         uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:

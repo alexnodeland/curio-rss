@@ -58,6 +58,9 @@ quick-xml = "0.41"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
+# Safe statfs(2) (Unix) for the network-filesystem guard. Already in the tree
+# via fs4 and tempfile.
+rustix = { version = "1.1", features = ["fs"] }
 # File identity (dev/inode, volume/file index) for the events lock: notices a
 # lock file deleted and re-created under a long-lived handle. Already in the
 # graph via walkdir.

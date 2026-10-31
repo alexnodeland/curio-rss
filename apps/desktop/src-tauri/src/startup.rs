@@ -2,8 +2,9 @@
 //!
 //! A bundled app has no visible stderr, so a profile that will not open
 //! (a corrupt `curio.db`, a schema written by a newer build, a lock held
-//! by another process, an unwritable data dir, a failed upgrade) must
-//! never end in `exit(1)`. Instead:
+//! by another process, an unwritable data dir, a failed upgrade, a
+//! profile on network or sync-managed storage) must never end in
+//! `exit(1)`. Instead:
 //!
 //! 1. **Open** — [`boot`] resolves the profile and opens the core. On
 //!    failure it logs the cause with `tracing::error!` (so it lands in
@@ -24,7 +25,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use curio_core::fetch::{FetchConfig, PolicedClient};
-use curio_core::storage::{OpenError, PreMigrationBackup, pre_migration_backups};
+use curio_core::storage::{
+    ALLOW_NETWORK_FS_ENV, OpenError, PreMigrationBackup, network_fs_override_from_env,
+    pre_migration_backups,
+};
 use curio_core::{CoreError, CoreHandle, CoreOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager as _};
@@ -60,11 +64,19 @@ pub enum StartupFailureClass {
     /// The OS refused a read or write of the database file (permissions,
     /// disk full, read-only media).
     Io,
-    /// The database is fine, but the rest of the profile is not usable:
-    /// the profile folder, its event log or its `.gitignore` could not be
-    /// created, read or written. Replacing the database cannot help, so
-    /// recovery only offers to retry once the cause is fixed.
+    /// The database is not what failed: the profile folder itself could
+    /// not be created (its parent is read-only, or a file has its name).
+    /// Replacing the database cannot help, so recovery only offers to
+    /// retry once the cause is fixed. (An event log that cannot be opened
+    /// does not fail startup: the library opens with its events staged.)
     Profile,
+    /// The profile sits on network or sync-managed storage (an SMB/NFS
+    /// share, iCloud Drive, Dropbox, Syncthing…), where the database can
+    /// be corrupted, so the open was refused before touching anything.
+    /// The database is healthy and stays put: recovery only offers to
+    /// retry, after the profile has moved to a local disk or the user has
+    /// set the override variable.
+    NetworkFs,
     /// The schema upgrade (or its pre-migration backup) failed and was
     /// rolled back.
     Upgrade,
@@ -88,23 +100,30 @@ impl StartupFailureClass {
                 OpenError::Locked { .. } => Self::Locked,
                 OpenError::Io { .. } => Self::Io,
                 OpenError::Backup { .. } | OpenError::MigrationFailed { .. } => Self::Upgrade,
+                OpenError::NetworkFs { .. } => Self::NetworkFs,
                 // `Storage`, and any class a later core adds.
                 _ => Self::Other,
             },
-            // Raised outside `Storage::open` — creating the profile folder,
-            // opening the event log, scaffolding `.gitignore`: the
-            // database itself is not the cause.
+            // Raised outside `Storage::open` — creating the profile folder:
+            // the database itself is not the cause. The open no longer
+            // fails on an unusable event log (only on contention for its
+            // lock, sorted as `Locked` above), but an events error is
+            // still a profile problem, never a reason to replace the
+            // database.
             CoreError::Io { .. } | CoreError::Events(_) => Self::Profile,
             _ => Self::Other,
         }
     }
 
     /// Whether recovery may move the database aside. Never while another
-    /// process holds it, never when the database is not what failed, and
-    /// never without a profile.
+    /// process holds it, never when the database is not what failed (the
+    /// profile folder, or where it lives), and never without a profile.
     #[must_use]
     pub fn may_replace_database(self) -> bool {
-        !matches!(self, Self::Locked | Self::Profile | Self::NoProfile)
+        !matches!(
+            self,
+            Self::Locked | Self::Profile | Self::NetworkFs | Self::NoProfile
+        )
     }
 }
 
@@ -206,12 +225,21 @@ pub fn boot(profile: Result<PathBuf, CommandError>) -> Result<CoreHandle, Startu
 }
 
 /// Opens the core over `profile`, logging and classifying any failure.
+/// A profile on network or sync-managed storage is refused unless the
+/// user set [`ALLOW_NETWORK_FS_ENV`] (a desktop app takes no flags, so the
+/// variable is the explicit choice). An app started from Finder or the
+/// Dock only sees it when it was set for the launch (`open --env`, or
+/// `launchctl setenv` before launching).
 ///
 /// # Errors
 ///
 /// A [`StartupFailure`] carrying the failure class.
 pub fn open_profile(profile: &Path) -> Result<CoreHandle, StartupFailure> {
-    CoreHandle::open_with(profile, CoreOptions::default()).map_err(|error| {
+    let options = CoreOptions {
+        allow_network_fs: network_fs_override_from_env(),
+        ..CoreOptions::default()
+    };
+    CoreHandle::open_with(profile, options).map_err(|error| {
         let failure = StartupFailure {
             class: StartupFailureClass::of(&error),
             message: error.to_string(),
@@ -382,10 +410,18 @@ fn recover_with(
     if action != RecoveryAction::Retry
         && let Some(class) = class.filter(|class| !class.may_replace_database())
     {
-        let reason = if class == StartupFailureClass::Locked {
-            "the database is in use by another copy of Curio; quit it and try again"
-        } else {
-            "the database is not what failed, so it is left in place; fix the cause and try again"
+        let reason = match class {
+            StartupFailureClass::Locked => {
+                "the database is in use by another copy of Curio; quit it and try again".to_owned()
+            }
+            StartupFailureClass::NetworkFs => format!(
+                "the database is fine, but its folder is on network or sync-managed storage, so it \
+                 is left in place; move the profile to a local disk (or set \
+                 {ALLOW_NETWORK_FS_ENV}=1) and try again"
+            ),
+            _ => "the database is not what failed, so it is left in place; fix the cause and try \
+                  again"
+                .to_owned(),
         };
         return Err(CommandError::user(ErrorCode::Storage, reason, true));
     }
@@ -629,7 +665,7 @@ mod tests {
 
     use super::*;
     use curio_core::model::NewFeed;
-    use curio_core::storage::Storage;
+    use curio_core::storage::{NetworkFsKind, Storage};
 
     const GARBAGE: &[u8] = b"definitely not sqlite, just long enough to have a header";
 
@@ -740,6 +776,13 @@ mod tests {
         };
         assert_eq!(StartupFailureClass::of(&io), StartupFailureClass::Profile);
         assert_eq!(
+            class(OpenError::NetworkFs {
+                path: "/Volumes/share/curio/curio.db".into(),
+                kind: NetworkFsKind::Smb,
+            }),
+            StartupFailureClass::NetworkFs
+        );
+        assert_eq!(
             class(OpenError::Io {
                 path: "curio.db".into(),
                 source: rusqlite::Error::SqliteFailure(
@@ -764,6 +807,7 @@ mod tests {
         );
         assert!(!StartupFailureClass::Locked.may_replace_database());
         assert!(!StartupFailureClass::Profile.may_replace_database());
+        assert!(!StartupFailureClass::NetworkFs.may_replace_database());
         assert!(StartupFailureClass::Corrupt.may_replace_database());
         assert!(StartupFailureClass::Io.may_replace_database());
     }
@@ -917,48 +961,62 @@ mod tests {
         }
     }
 
-    /// `profile` holds a healthy database (one feed) and an event log the
-    /// core cannot open: `.curio/events` is a file, not a folder.
-    fn unusable_events_profile() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let profile = dir.path().join("profile");
-        let core = CoreHandle::open(&profile).unwrap();
+    /// `profile` holds a healthy database with one feed.
+    fn profile_with_a_feed(profile: &Path, options: CoreOptions) {
+        let core = CoreHandle::open_with(profile, options).unwrap();
         core.add_feed(NewFeed {
             url: "https://example.test/feed.xml".into(),
             title: Some("Kept".into()),
             tags: Vec::new(),
         })
         .unwrap();
-        drop(core);
+    }
+
+    /// Refuses Restore and Start fresh with a recoverable error whose
+    /// message contains `reason`.
+    fn assert_only_retry_is_allowed(gate: &StartupGate, reason: &str) {
+        for action in [RecoveryAction::RestoreBackup, RecoveryAction::StartFresh] {
+            let error = recover(gate, action).unwrap_err();
+            assert!(error.recoverable);
+            assert!(error.message.contains(reason), "{}", error.message);
+        }
+    }
+
+    #[test]
+    fn an_unusable_event_log_opens_the_library_with_its_events_staged() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join("profile");
+        profile_with_a_feed(&profile, CoreOptions::default());
+        // `.curio/events` is a file, not a folder: the log cannot open.
         let events = profile.join(".curio").join("events");
         if events.exists() {
             std::fs::remove_dir_all(&events).unwrap();
         }
         std::fs::write(&events, b"not a folder").unwrap();
-        (dir, profile)
+
+        // Not a startup failure: the database is fine, so the library
+        // opens and the events wait, staged, until the log is usable.
+        let core = boot(Ok(profile.clone())).unwrap();
+        assert!(core.has_pending_events());
+        let feeds = core.list_feeds().unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].title.as_deref(), Some("Kept"));
+        assert!(!profile.join(SET_ASIDE_DIR).exists());
     }
 
     #[test]
-    fn an_unusable_event_log_only_offers_retry_and_never_moves_the_database() {
-        let (_dir, profile) = unusable_events_profile();
-        // Even with a backup on disk, Restore is not offered.
-        write_backup_with_a_feed(&profile);
+    fn a_profile_folder_that_cannot_be_created_only_offers_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file has the profile folder's name.
+        let profile = dir.path().join("profile");
+        std::fs::write(&profile, b"not a folder").unwrap();
         let gate = gate_for(&profile);
         let shown = gate.current().unwrap().unwrap();
         assert_eq!(shown.class, StartupFailureClass::Profile);
         assert_eq!(shown.backup, None);
 
-        for action in [RecoveryAction::RestoreBackup, RecoveryAction::StartFresh] {
-            let error = recover(&gate, action).unwrap_err();
-            assert!(error.recoverable);
-            assert!(
-                error.message.contains("not what failed"),
-                "{}",
-                error.message
-            );
-        }
-        assert!(!profile.join(SET_ASIDE_DIR).exists());
-        assert!(profile.join(DB_FILE).is_file(), "the database stays put");
+        assert_only_retry_is_allowed(&gate, "not what failed");
+        assert_eq!(std::fs::read(&profile).unwrap(), b"not a folder");
 
         // Still broken: Retry reports it again, and moves nothing.
         let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
@@ -966,8 +1024,52 @@ mod tests {
             recovery.outcome.failure.unwrap().class,
             StartupFailureClass::Profile
         );
-        // Fixed: Retry opens the same library, data intact.
-        std::fs::remove_file(profile.join(".curio").join("events")).unwrap();
+        // Fixed: Retry creates the profile and opens it.
+        std::fs::remove_file(&profile).unwrap();
+        let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
+        assert_eq!(recovery.core.unwrap().list_feeds().unwrap().len(), 0);
+        assert_eq!(gate.current().unwrap(), None);
+    }
+
+    #[test]
+    fn a_profile_on_sync_managed_storage_only_offers_retry_and_never_moves_the_database() {
+        let synced = tempfile::tempdir().unwrap();
+        let marker = synced.path().join(".stfolder");
+        std::fs::create_dir(&marker).unwrap();
+        let profile = synced.path().join("curio");
+        // A healthy library someone put there with the override set.
+        profile_with_a_feed(
+            &profile,
+            CoreOptions {
+                allow_network_fs: true,
+                ..CoreOptions::default()
+            },
+        );
+        // Even with a backup on disk, Restore is not offered.
+        write_backup_with_a_feed(&profile);
+        let gate = gate_for(&profile);
+        let shown = gate.current().unwrap().unwrap();
+        assert_eq!(shown.class, StartupFailureClass::NetworkFs);
+        assert_eq!(shown.backup, None);
+        assert!(shown.message.contains("Syncthing"), "{}", shown.message);
+        assert!(
+            shown.message.contains(ALLOW_NETWORK_FS_ENV),
+            "{}",
+            shown.message
+        );
+
+        assert_only_retry_is_allowed(&gate, "local disk");
+        assert!(!profile.join(SET_ASIDE_DIR).exists());
+        assert!(profile.join(DB_FILE).is_file(), "the database stays put");
+
+        // Still there: Retry is refused again, and moves nothing.
+        let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
+        assert_eq!(
+            recovery.outcome.failure.unwrap().class,
+            StartupFailureClass::NetworkFs
+        );
+        // No longer synced: Retry opens the same library, data intact.
+        std::fs::remove_dir(&marker).unwrap();
         let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
         let feeds = recovery.core.unwrap().list_feeds().unwrap();
         assert_eq!(feeds.len(), 1);

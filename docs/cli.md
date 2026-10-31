@@ -87,6 +87,32 @@ Override per invocation with `--profile DIR` or persistently with
 `curio doctor` prints the resolved path and whether it is the shared
 default.
 
+A profile on network or sync-managed storage is refused before anything
+is created or opened: NFS, SMB/CIFS, AFP and WebDAV mounts, iCloud Drive
+(`~/Library/Mobile Documents`), the macOS cloud-sync folders under
+`~/Library/CloudStorage` (Dropbox, OneDrive, Google Drive…), a Dropbox
+folder, a Syncthing folder, or a Windows `\\server\share` path. SQLite's
+locking is unsafe there and sync clients copy the database without its
+write-ahead log, which corrupts it. Move the profile to a local disk, or
+pass the global `--allow-network-fs` flag (or set
+`CURIO_ALLOW_NETWORK_FS=1`) to open it anyway. A mapped Windows drive
+letter is not recognised.
+
+The desktop app applies the same guard: a refused profile opens on the
+recovery screen, which only offers Try again (the database is healthy, so
+it never offers to replace it). The app reads `CURIO_ALLOW_NETWORK_FS` as
+its override, but an app started from Finder or the Dock does not inherit
+your shell's environment, so set the variable for the launch itself:
+
+```sh
+open --env CURIO_ALLOW_NETWORK_FS=1 -a Curio   # this launch only
+launchctl setenv CURIO_ALLOW_NETWORK_FS 1      # every app launched until you log out
+```
+
+Quit Curio first: a running app keeps the environment it started with. On
+Linux and Windows, set the variable in the environment the app is started
+from.
+
 ```sh
 curio init                 # scaffold the default profile
 curio --profile /tmp/p init  # or an explicit one (great for testing)
@@ -362,7 +388,9 @@ events-log parseability, the events `.gitignore` scaffold, staged
 event intents (a non-empty set means emission was interrupted — a crash,
 or a flush that failed on a full disk or an unwritable events directory;
 the change itself is already stored, and the next command, or the next
-open, replays the staged events into the log), and quarantined intents
+open, replays the staged events into the log — an events directory that
+cannot be opened at all does not stop the profile from opening, it only
+keeps the events staged until it is writable again), and quarantined intents
 (`dead-intents`: staged rows whose envelope no longer decoded — they are
 moved to `curio.db`'s `event_intents_dead` table so they stop blocking
 every open and emit, and their events never reached the log).

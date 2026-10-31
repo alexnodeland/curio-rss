@@ -57,9 +57,17 @@ directory, never your real one.
 - [ ] **Start fresh** — on that screen, Start fresh → confirm: the app opens into an empty reader after "Open Curio", and the garbage file sits untouched in `set-aside/<timestamp>/curio.db`.
 - [ ] **Restore backup** — with a profile from the previous release (so the upgrade wrote `curio.db.pre-vN.bak`), corrupt `curio.db` again and relaunch: "Restore backup" is offered, and restoring brings back the feeds.
 - [ ] **Too-new DB** — `sqlite3 "$CURIO_PROFILE/curio.db" 'PRAGMA user_version = 999'`: the screen says the database is from a newer Curio and leads with Check for updates (which reports no newer version, or installs one).
-- [ ] **Unwritable event log** — on a healthy profile, `chmod 000 "$CURIO_PROFILE/.curio/events"` and relaunch: the screen says Curio can't use its profile folder and offers only Try again (no Restore, no Start fresh); `chmod 755` it, Try again, and the library opens with its feeds.
+- [ ] **Unwritable event log is not a startup failure** — on a healthy profile, `chmod 000 "$CURIO_PROFILE/.curio/events"` and relaunch: the library opens with its feeds, no recovery screen. Star an article and quit: `curio --profile "$CURIO_PROFILE" doctor` reports the star as a staged intent. `chmod 755` it, relaunch, and the star event is in the log.
+- [ ] **Profile folder can't be created** — `export CURIO_PROFILE="$(mktemp -d)/blocked" && touch "$CURIO_PROFILE"`, launch with `--env`: the screen says Curio can't use its profile folder and offers only Try again (no Restore, no Start fresh); `rm "$CURIO_PROFILE"`, Try again, and an empty library opens.
 - [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
 - [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
+
+## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
+
+- [ ] **iCloud Drive refused (CLI)** — `curio --profile ~/Library/Mobile\ Documents/com~apple~CloudDocs/curio-test init` fails with "is on iCloud Drive" and creates nothing. With `--allow-network-fs` (or `CURIO_ALLOW_NETWORK_FS=1`) it opens.
+- [ ] **iCloud Drive refused (app)** — `open --env CURIO_PROFILE="$HOME/Library/Mobile Documents/com~apple~CloudDocs/curio-test" -a Curio` (`open -a` alone does not pass the variable on): the window opens on "Your library is on a network or synced folder", offering only Try again (no Restore, no Start fresh, even with a backup there), and the error details name `CURIO_ALLOW_NETWORK_FS`. Quit, then relaunch with `--env CURIO_ALLOW_NETWORK_FS=1` added: the library opens. Delete the folder afterwards.
+- [ ] **SMB share refused** — mount any SMB share in Finder (`⌘K`, `smb://…`), then `curio --profile /Volumes/<share>/curio-test init` fails with "is on an SMB/CIFS network share"; the override opens it.
+- [ ] **Local disk unaffected** — the default profile and `CURIO_PROFILE=$(mktemp -d)` open with no warning.
 
 ## Shared default profile (real macOS only — CI can't point the app at a temp `~/Library`)
 

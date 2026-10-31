@@ -487,7 +487,10 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': 'Nie udało się skopiować błędu',
     'recovery.title.profile': 'Curio nie może korzystać z folderu profilu',
     'recovery.body.profile':
-        'Twoja biblioteka jest w porządku, ale Curio nie mogło utworzyć ani zapisać tam pozostałych plików (np. dziennika zdarzeń). Upewnij się, że folder profilu i cała jego zawartość są zapisywalne, i spróbuj ponownie.',
+        'Curio nie mogło utworzyć ani otworzyć folderu profilu. Upewnij się, że ten folder (i folder, w którym się znajduje) jest zapisywalny i że żaden plik nie ma jego nazwy, i spróbuj ponownie. Nic nie zostało zmienione.',
+    'recovery.title.networkFs': 'Twoja biblioteka jest w folderze sieciowym lub synchronizowanym',
+    'recovery.body.networkFs':
+        'Baza danych Curio może ulec uszkodzeniu w udziale sieciowym lub w folderze zarządzanym przez usługę synchronizacji (iCloud Drive, Dropbox…), dlatego Curio jej nie otworzyło. Nic nie zostało zmienione. Przenieś folder profilu na dysk lokalny i spróbuj ponownie.',
     'recovery.action.update': 'Sprawdź aktualizacje',
     'recovery.update.current':
         'Brak dostępnej aktualizacji. Zainstaluj nowszą wersję Curio, która zaktualizowała tę bibliotekę, aby dalej z niej korzystać.',

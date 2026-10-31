@@ -486,7 +486,10 @@ export const de: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': 'Fehler konnte nicht kopiert werden',
     'recovery.title.profile': 'Curio kann seinen Profilordner nicht verwenden',
     'recovery.body.profile':
-        'Deine Bibliothek ist in Ordnung, aber Curio konnte seine übrigen Dateien dort (etwa das Ereignisprotokoll) nicht anlegen oder schreiben. Prüfe, ob der Profilordner und alles darin beschreibbar ist, und versuche es dann erneut.',
+        'Curio konnte seinen Profilordner nicht anlegen oder öffnen. Prüfe, ob der Ordner (und der Ordner, in dem er liegt) beschreibbar ist und keine Datei denselben Namen trägt, und versuche es dann erneut. Es wurde nichts verändert.',
+    'recovery.title.networkFs': 'Deine Bibliothek liegt in einem Netzwerk- oder Sync-Ordner',
+    'recovery.body.networkFs':
+        'Auf einer Netzwerkfreigabe oder in einem Ordner, den ein Sync-Dienst verwaltet (iCloud Drive, Dropbox…), kann die Datenbank von Curio beschädigt werden, deshalb hat Curio sie nicht geöffnet. Es wurde nichts verändert. Verschiebe den Profilordner auf einen lokalen Datenträger und versuche es dann erneut.',
     'recovery.action.update': 'Nach Updates suchen',
     'recovery.update.current':
         'Es ist kein Update verfügbar. Installiere die neuere Curio-Version, die diese Bibliothek aktualisiert hat, um sie weiter zu verwenden.',

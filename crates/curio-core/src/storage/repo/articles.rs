@@ -3,7 +3,7 @@
 
 use super::rows::{
     RawArticle, article_by_id, article_cols_prefixed, fts_match_expr, list_articles_query,
-    raw_article, scoped_dedupe_key,
+    parse_ts, raw_article, scoped_dedupe_key,
 };
 use super::{ARTICLE_COLS, ListArticles, UpsertOutcome, begin_write};
 use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, NewArticle};
@@ -51,6 +51,14 @@ impl Storage {
     ///   written at all (no `modified_at` bump, no FTS reindex), so
     ///   [`UpsertOutcome::updated`] counts rows that *actually changed*.
     ///
+    /// A `published_at` later than the article's first-seen time
+    /// (`saved_at`; *now* for an insert) is clamped to it: nothing is
+    /// published after Curio first saw it, and a bogus future date would
+    /// otherwise reach the reader and the exported `published` frontmatter
+    /// as-is. Clamping to the stored
+    /// `saved_at` — not to the current time — keeps the stored value stable,
+    /// so re-ingesting the same future date is still a no-op.
+    ///
     /// # Errors
     ///
     /// Database errors; the whole batch rolls back on failure.
@@ -61,18 +69,27 @@ impl Storage {
         self.write(move |conn| {
             let tx = begin_write(conn)?;
             let mut outcome = UpsertOutcome::default();
-            let now = Timestamp::now().to_string();
+            let now_ts = Timestamp::now();
+            let now = now_ts.to_string();
             for article in articles {
                 let dedupe_key = scoped_dedupe_key(article.feed_id, &article.dedupe_key);
-                let existing: Option<(i64, String)> = tx
+                let existing: Option<(i64, String, String)> = tx
                     .prepare_cached(
-                        "SELECT id, content_origin FROM articles WHERE dedupe_key = ?1",
+                        "SELECT id, content_origin, saved_at FROM articles WHERE dedupe_key = ?1",
                     )?
-                    .query_row([&dedupe_key], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .query_row([&dedupe_key], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })
                     .optional()?;
-                let published_at = article.published_at.map(|t| t.to_string());
+                let first_seen = match &existing {
+                    Some((_, _, saved_at)) => parse_ts("articles.saved_at", saved_at)?,
+                    None => now_ts,
+                };
+                let published_at = article
+                    .published_at
+                    .map(|published| published.min(first_seen).to_string());
                 let source_updated_at = article.source_updated_at.map(|t| t.to_string());
-                if let Some((id, origin)) = existing {
+                if let Some((id, origin, _)) = existing {
                     let replaceable = origin == ContentOrigin::Feed.as_str()
                         || origin == ContentOrigin::Manual.as_str();
                     let changed = if replaceable {

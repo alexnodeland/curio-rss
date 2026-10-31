@@ -66,14 +66,25 @@ environment (or selects it under any condition other than the key step's own
 
 ### The `updater-signing` environment (one-time setup)
 
-The updater signing key signs every update every user installs, so it is
-**not** a repository secret: it lives only as a secret of the GitHub
-environment `updater-signing`, which admits `v*` tags alone and waits for a
-maintainer's approval. A workflow on any branch — even one with write access
-that references `secrets.TAURI_SIGNING_PRIVATE_KEY` — reads it as empty, and
-nothing is signed until a human approves the run. `release.yml` selects the
-environment only on a tag push (on the `workflow_dispatch` dry run the name is
-empty, i.e. no environment, so the dry run is not held at the tag-only rule).
+The updater signing key signs every update every user installs, so once the
+setup below is done it is **not** a repository secret: it lives only as a
+secret of the GitHub environment `updater-signing`, which admits `v*` tags
+alone and waits for a maintainer's approval. A workflow on any branch — even
+one with write access that references `secrets.TAURI_SIGNING_PRIVATE_KEY` —
+then reads it as empty, and a sign job nobody approved never starts.
+`release.yml` selects the environment only on a tag push (on the
+`workflow_dispatch` dry run the name is empty, i.e. no environment, so the dry
+run is not held at the tag-only rule).
+
+**Order matters.** Do steps 1–4 **before the next `v*` tag is pushed** —
+ideally before the `release.yml` that references the environment merges.
+GitHub silently auto-creates an environment that a job references but that
+does not exist yet, and creates it with **no** protection rules: a tag cut in
+that window would deploy to an unprotected `updater-signing` and sign with the
+still-present repository secret, unapproved. If `updater-signing` already
+exists when you start (auto-created, or from an earlier attempt), open it and
+check its protection rules and deployment tag rule against steps 2–3 before
+you tag. Step 5 comes last, after the environment holds the secrets.
 
 Setup (repository admin, in the GitHub web UI):
 

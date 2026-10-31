@@ -23,10 +23,11 @@
 # prebuilt `tauri signer sign` binary — no build.rs, no vite plugin, no npm
 # lifecycle script ever runs with the key in its environment. The build job
 # turns `createUpdaterArtifacts` off and tars Curio.app itself (byte-for-byte
-# what tauri's bundler would archive: `Curio.app/` at the root). The key is an
-# environment secret of `updater-signing` (tag-restricted, reviewer-gated), not
-# a repository secret, so the sign job waits for a maintainer's approval on
-# every tag and no other ref can read it.
+# what tauri's bundler would archive: `Curio.app/` at the root). The key is
+# meant to be an environment secret of `updater-signing` (tag-restricted,
+# reviewer-gated), not a repository secret — the runbook's one-time setup
+# (docs/release/runbook.md §2) moves it there — so the sign job waits for a
+# maintainer's approval on every tag and no other ref can read it.
 #
 # Dry run: `workflow_dispatch` runs everything except the publish steps — the
 # signing step is replaced by one that signs with a throwaway key generated on
@@ -159,10 +160,11 @@ jobs:
     name: sign the updater archive
     needs: build
     runs-on: ubuntu-latest
-    # The signing secrets exist ONLY as secrets of the `updater-signing`
-    # environment (issue #187), whose deployment rule admits `v*` tags alone
-    # and which waits for a required reviewer: a workflow on any other ref —
-    # or one nobody approved — reads the key as empty. The environment is
+    # The signing secrets are to exist ONLY as secrets of the
+    # `updater-signing` environment (issue #187; the runbook setup moves them
+    # there), whose deployment rule admits `v*` tags alone and which waits for
+    # a required reviewer: a workflow on any other ref reads the key as empty,
+    # and a deployment nobody approved never runs. The environment is
     # selected under exactly the real key step's `if:`; on the
     # `workflow_dispatch` dry run the name is '' (= no environment), so the
     # dry run is not held at a tag-only rule it can never pass. Setup is in

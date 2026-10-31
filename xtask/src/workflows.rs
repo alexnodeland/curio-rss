@@ -21,7 +21,8 @@
 //!    (`BASH_ENV`, `NODE_OPTIONS`, …). No `secrets: inherit` or
 //!    `toJSON(secrets)` anywhere (both hand every secret onward). The
 //!    signing job deploys to the `updater-signing` environment (issue #187)
-//!    — the only place the key is stored, tag-restricted and reviewer-gated —
+//!    — the only place the key is to be stored, tag-restricted and
+//!    reviewer-gated —
 //!    whenever the key step runs: unconditionally, or (in a workflow that a
 //!    `workflow_dispatch` dry run also triggers) under exactly the key step's
 //!    own `if:`, so the dry run is never held at the tag-only rule.
@@ -47,9 +48,10 @@ use serde_yaml::Value;
 /// reference must sit in the single signing step's `env`.
 pub const SIGNING_SECRETS: &[&str] = &["TAURI_SIGNING_PRIVATE_KEY"];
 
-/// The GitHub environment holding the updater signing secrets. Its
-/// deployment rule admits only `v*` tags and it requires a reviewer, so a
-/// workflow on any other ref, or one nobody approved, reads the key as empty.
+/// The GitHub environment meant to hold the updater signing secrets (once
+/// the runbook's one-time setup moves them there). Its deployment rule
+/// admits only `v*` tags and it requires a reviewer, so a job on any other
+/// ref cannot deploy to it, and one nobody approved never starts.
 pub const SIGNING_ENVIRONMENT: &str = "updater-signing";
 
 /// Commands that compile or run project code. None may appear in the
@@ -572,6 +574,12 @@ fn signing_step_is_minimal(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
 /// meaning "no environment" — where `<cond>` is exactly the key step's
 /// `if:`, so the dry run is not held at a rule it can never pass and the
 /// real key step never runs outside the environment.
+///
+/// `&&` binds tighter than `||` in GitHub expressions, so a `<cond>` with a
+/// top-level `||` must be parenthesised: `${{ A || B && 'updater-signing' ||
+/// '' }}` reads as `A || (B && …)` and evaluates to `true` (not the
+/// environment's name) whenever `A` holds. Such a `<cond>` is flagged;
+/// `(A || B)` is accepted.
 fn signing_environment(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
     let Some(job) = wf
         .doc
@@ -591,7 +599,7 @@ fn signing_environment(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
             "{label} holds the signing key but declares no `environment:` — the key lives only in the `{SIGNING_ENVIRONMENT}` environment (tag-restricted, reviewer-gated)"
         )];
     };
-    let compact = without_whitespace(declared);
+    let compact = compact_expression(declared);
     if compact == SIGNING_ENVIRONMENT {
         let dry_run_triggers = triggers(&wf.doc).iter().any(|t| t != "push");
         return if dry_run_triggers {
@@ -611,30 +619,106 @@ fn signing_environment(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
             "{label} deploys to `{declared}`, not `{SIGNING_ENVIRONMENT}` — the environment that holds the signing key"
         )];
     };
+    let unwrapped = without_outer_parens(condition);
+    if unwrapped == condition && has_top_level_or(condition) {
+        return vec![format!(
+            "{label} selects `{SIGNING_ENVIRONMENT}` under `{condition}`, whose top-level `||` binds looser than `&&` — the job would deploy to `true` (or nowhere) while the key step runs; parenthesise it: `${{{{ ({condition}) && '{SIGNING_ENVIRONMENT}' || '' }}}}`"
+        )];
+    }
     let key_step_if = steps(job)
         .get(at.step)
         .and_then(|step| step.get("if"))
         .and_then(Value::as_str)
         .map(|text| {
-            let compact = without_whitespace(text);
-            compact
+            let compact = compact_expression(text);
+            let bare = compact
                 .strip_prefix("${{")
                 .and_then(|rest| rest.strip_suffix("}}"))
-                .map_or_else(|| compact.clone(), str::to_owned)
+                .unwrap_or(&compact);
+            without_outer_parens(bare).to_owned()
         });
-    if key_step_if.as_deref() == Some(condition) {
+    if key_step_if.as_deref() == Some(unwrapped) {
         Vec::new()
     } else {
         vec![format!(
-            "{label} selects `{SIGNING_ENVIRONMENT}` only when `{condition}`, but the key step runs on `{}` — the key step must never run outside the environment",
+            "{label} selects `{SIGNING_ENVIRONMENT}` only when `{unwrapped}`, but the key step runs on `{}` — the key step must never run outside the environment",
             key_step_if.as_deref().unwrap_or("every event")
         )]
     }
 }
 
-/// `text` with every whitespace character removed.
-fn without_whitespace(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
+/// A GitHub expression with the whitespace outside its `'…'` string
+/// literals removed (inside one it is significant: `'a b'` is not `'ab'`).
+/// A `''` escape inside a literal flips the quote state twice, so it needs
+/// no special case.
+fn compact_expression(text: &str) -> String {
+    let mut quoted = false;
+    text.chars()
+        .filter(|c| {
+            if *c == '\'' {
+                quoted = !quoted;
+            }
+            quoted || !c.is_whitespace()
+        })
+        .collect()
+}
+
+/// Walk `expr` (a compacted GitHub expression) outside its string literals,
+/// calling `visit` with each byte offset, character and the parenthesis
+/// depth before that character. Stops as soon as `visit` returns `true`, and
+/// returns whether it did.
+fn scan_expression(expr: &str, mut visit: impl FnMut(usize, char, usize) -> bool) -> bool {
+    let mut quoted = false;
+    let mut depth = 0_usize;
+    for (offset, c) in expr.char_indices() {
+        if c == '\'' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted {
+            continue;
+        }
+        if visit(offset, c, depth) {
+            return true;
+        }
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Does `expr` contain an `||` outside every parenthesis and string literal?
+fn has_top_level_or(expr: &str) -> bool {
+    let mut after_pipe = false;
+    scan_expression(expr, |_, c, depth| {
+        let pipe = depth == 0 && c == '|';
+        let hit = pipe && after_pipe;
+        after_pipe = pipe && !after_pipe;
+        hit
+    })
+}
+
+/// `expr` without the parentheses that wrap all of it (`((a||b))` →
+/// `a||b`). `(a)&&(b)` comes back as is: its first `(` closes before the end.
+fn without_outer_parens(expr: &str) -> &str {
+    let mut current = expr;
+    while let Some(inner) = current
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let last = current.len() - 1;
+        let closes_early = scan_expression(current, |offset, c, depth| {
+            c == ')' && depth == 1 && offset < last
+        });
+        if closes_early {
+            break;
+        }
+        current = inner;
+    }
+    current
 }
 
 /// The entries of a job's or step's `env:` mapping.
@@ -1691,6 +1775,77 @@ jobs:
             ),
             "not `updater-signing`",
         );
+    }
+
+    /// `&&` binds tighter than `||`: a key-step condition with a top-level
+    /// `||` must be parenthesised in the environment expression, or the job
+    /// deploys to `true` while the real key step runs.
+    #[test]
+    fn a_top_level_or_in_the_environment_condition_must_be_parenthesised() {
+        let either = "github.event_name == 'push' || github.event_name == 'release'";
+        let unparenthesised = format!("${{{{ {either} && 'updater-signing' || '' }}}}");
+        assert_flags(
+            &run(CI, &with_dry_run(&unparenthesised, Some(either))),
+            "whose top-level `||` binds looser than `&&`",
+        );
+        let parenthesised = format!("${{{{ ({either}) && 'updater-signing' || '' }}}}");
+        assert_eq!(
+            run(CI, &with_dry_run(&parenthesised, Some(either))),
+            Vec::<String>::new()
+        );
+        // The key step's own `if:` may carry the same parentheses.
+        assert_eq!(
+            run(
+                CI,
+                &with_dry_run(&parenthesised, Some(&format!("(({either}))")))
+            ),
+            Vec::<String>::new()
+        );
+        // An `||` inside parentheses or a string literal is not top-level.
+        let nested = "github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_type == 'branch')";
+        assert_eq!(
+            run(
+                CI,
+                &with_dry_run(
+                    &format!("${{{{ {nested} && 'updater-signing' || '' }}}}"),
+                    Some(nested)
+                )
+            ),
+            Vec::<String>::new()
+        );
+        let literal = "github.ref_name != 'a || b'";
+        assert_eq!(
+            run(
+                CI,
+                &with_dry_run(
+                    &format!("${{{{ {literal} && 'updater-signing' || '' }}}}"),
+                    Some(literal)
+                )
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn expression_helpers_respect_literals_and_parentheses() {
+        // Whitespace inside a string literal is significant.
+        assert_eq!(compact_expression("a == 'x y'"), "a=='x y'");
+        assert_ne!(
+            compact_expression("a == 'x y'"),
+            compact_expression("a == 'xy'")
+        );
+        assert_eq!(compact_expression("a == 'it''s  b'"), "a=='it''s  b'");
+
+        assert!(has_top_level_or("a||b"));
+        assert!(has_top_level_or("(a)||(b)"));
+        assert!(!has_top_level_or("(a||b)"));
+        assert!(!has_top_level_or("a&&'x||y'"));
+        assert!(!has_top_level_or("a&&b"));
+
+        assert_eq!(without_outer_parens("((a||b))"), "a||b");
+        assert_eq!(without_outer_parens("(a)&&(b)"), "(a)&&(b)");
+        assert_eq!(without_outer_parens("(a==')')"), "a==')'");
+        assert_eq!(without_outer_parens("a"), "a");
     }
 
     #[test]

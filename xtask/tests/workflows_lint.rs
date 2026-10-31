@@ -138,9 +138,12 @@ fn the_real_sign_job_must_keep_its_environment() {
     );
 }
 
-/// The real dry run (`workflow_dispatch`) selects no environment and never
-/// runs the real key step: the environment name is empty off a tag push, and
-/// the key step and the throwaway-key step split on the same condition.
+/// Pins the committed sign job's text: its environment expression names
+/// `updater-signing` only on a tag push (empty, i.e. no environment,
+/// otherwise), and the key step and the throwaway-key step split on that same
+/// condition. A pin, not a proof — the lint rule itself is exercised in
+/// `xtask/src/workflows.rs`, and that GitHub really runs the dispatch dry run
+/// with no environment is checked by the post-merge dry run (runbook §2).
 #[test]
 fn the_real_dry_run_runs_outside_the_signing_environment() {
     let dir = workflows_dir();

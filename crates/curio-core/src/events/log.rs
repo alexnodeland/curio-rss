@@ -132,29 +132,30 @@ impl EventLog {
         Ok(())
     }
 
-    /// Undoes a part-written line: truncates the current file back to its
-    /// last known size (always a whole-line boundary), fsyncs it — so the
-    /// whole lines appended before the failure stay flushable — and closes
-    /// it. If that fails too, closing is still enough for the torn bytes
-    /// (the reopen runs `heal_torn_tail`, which cuts back to the last
-    /// newline), and `flush` refuses until the reopen.
+    /// Undoes a part-written line: closes the current file, truncates it
+    /// back to its last known size (always a whole-line boundary) and
+    /// fsyncs it — so the whole lines appended before the failure stay
+    /// flushable. If that fails too, closing is still enough for the torn
+    /// bytes (the reopen runs `heal_torn_tail`, which cuts back to the
+    /// last newline), and `flush` refuses until the reopen.
     fn roll_back_failed_append(&mut self) {
         let Some(current) = self.current.take() else {
             return;
         };
-        let rolled_back = current
-            .file
-            .set_len(current.bytes)
-            .and_then(|()| current.file.sync_all());
+        let OpenFile {
+            path, file, bytes, ..
+        } = current;
+        drop(file);
+        let rolled_back = truncate_and_sync(&path, bytes);
         self.unsynced_close = rolled_back.is_err();
         match rolled_back {
             Ok(()) => tracing::warn!(
-                path = %current.path.display(),
-                bytes = current.bytes,
+                path = %path.display(),
+                bytes,
                 "event-log append failed; rolled the file back to its last whole line"
             ),
             Err(err) => tracing::warn!(
-                path = %current.path.display(),
+                path = %path.display(),
                 error = %err,
                 "event-log append failed and the rollback truncate/fsync failed; \
                  the torn tail heals when the file is reopened"
@@ -291,6 +292,16 @@ impl EventLog {
         });
         Ok(())
     }
+}
+
+/// Truncates `path` to `len` bytes and fsyncs it, through a fresh
+/// write handle: the log's own handle is append-only, which on Windows
+/// lacks the write-data access a truncate needs (`set_len` on it fails
+/// with access denied), so the rollback can't reuse it.
+fn truncate_and_sync(path: &Path, len: u64) -> std::io::Result<()> {
+    let file = OpenOptions::new().write(true).open(path)?;
+    file.set_len(len)?;
+    file.sync_all()
 }
 
 /// Writes one serialized line. `short_write` is the test-only fault

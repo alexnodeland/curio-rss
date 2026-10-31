@@ -55,8 +55,9 @@ The OSS production layer **before** features, releasing from the first alpha.
 - PR gate suite on one cheap Linux runner: fmt, clippy `-D warnings`, nextest, MSRV,
   frontend lints, and the **ipc-contract job** (regenerate tauri-specta bindings, diff —
   the single highest-value gate); cargo-deny enforced; SHA-pinned actions.
-- Merge/nightly (not per-PR): 3-OS `tauri build` matrix, security scanners, criterion vs
-  stored baseline (future public benchmark page).
+- Nightly (not per-PR — except PRs that touch the nightly's own plumbing, which run it
+  before merging): 3-OS `tauri build` matrix, security scanners, criterion vs stored
+  baseline (future public benchmark page).
 - Release pipeline live from v0.1.0-alpha.1: draft releases, human-gated publish, single
   version source, SHA256SUMS + minisign + SBOM + provenance on every release.
 - Test substrate before feature code: deterministic seeded fixture generator (1000 feeds /

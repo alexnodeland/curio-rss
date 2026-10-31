@@ -153,8 +153,10 @@ pub fn run() {
         .on_menu_event(menu::on_event)
         .setup(move |app| {
             builder.mount_events(app);
-            // First, as tauri would for a `create: true` window, so startup
-            // ordering is unchanged.
+            // Before anything else in setup, so the window still exists by the
+            // time the code below runs (tauri itself would have built a
+            // `create: true` window slightly earlier, ahead of its asset setup
+            // and this closure — nothing here depends on that).
             create_main_window(app)?;
 
             let profile = paths::profile_dir()?;

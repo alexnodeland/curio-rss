@@ -50,6 +50,13 @@ log, reproduce locally, fix the cause, push a new commit (no force-push
 needed). Repeat until every required check is green. Never re-run CI blindly,
 never push empty commits, never disable a check.
 
+A PR that touches the nightly's plumbing (the `pull_request.paths` list in
+`.github/workflows/nightly.yml`) also runs the nightly — the 3-OS bundles and
+the Linux + Windows e2e smoke. Those checks are **not** required by branch
+protection (a path-filtered workflow can't be), so the merge button won't
+wait for them: you must. Don't merge until every nightly leg on the head
+commit is green too.
+
 ## 6. Merge
 
 1. If `main` moved: `git fetch origin main && git merge origin/main -m

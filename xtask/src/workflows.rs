@@ -26,8 +26,9 @@
 //! 5. **A nightly that runs** (issue #175). No job anywhere targets a retired
 //!    runner image (such a leg queues until GitHub cancels it a day later —
 //!    what `macos-13` did every night). `nightly.yml` keeps its schedule, is
-//!    also triggered by PRs that edit it (a path-filtered `pull_request`, so
-//!    a broken nightly is caught before merge, not the next morning), sets no
+//!    also triggered by PRs that edit it or the main-window creation its
+//!    Windows smoke depends on (a path-filtered `pull_request`, so a broken
+//!    nightly is caught before merge, not the next morning), sets no
 //!    `continue-on-error` (it is a hard gate), and its unconditional
 //!    artifact uploads fail on an empty bundle and cover Linux + Windows.
 
@@ -88,6 +89,16 @@ pub const RETIRED_RUNNERS: &[&str] = &[
     "ubuntu-20.04",
     "windows-2016",
     "windows-2019",
+];
+
+/// Files whose edits must trigger the nightly on their PR (its
+/// `pull_request.paths` must cover each): the workflow itself, and the
+/// main-window creation that forwards the `WebView2` automation flags in a
+/// Windows debug build — without them every Windows smoke session fails.
+pub const NIGHTLY_PR_PATHS: &[&str] = &[
+    ".github/workflows/nightly.yml",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src-tauri/src/browser_args.rs",
 ];
 
 /// One workflow file: its file name (e.g. `release.yml`) and raw text.
@@ -663,9 +674,11 @@ fn release_assets(release: &Parsed<'_>) -> Vec<String> {
 
 // ── 5. a nightly that runs ─────────────────────────────────────────────────
 
-/// The runner labels a job can land on: a literal `runs-on`, and every
-/// `os` / `runs-on` value in its matrix (where `runs-on: ${{ matrix.os }}`
-/// takes them from).
+/// The runner labels a job can land on: a literal `runs-on` (a string, a
+/// list, or the `labels` of its `{ group, labels }` form), and every `os` /
+/// `runs-on` value in its matrix (where `runs-on: ${{ matrix.os }}` takes
+/// them from) — except under `matrix.exclude`, which names the legs that do
+/// *not* run.
 fn runner_labels(job: &Value) -> Vec<&str> {
     let mut found = Vec::new();
     for key in ["runs-on", "strategy"] {
@@ -676,11 +689,18 @@ fn runner_labels(job: &Value) -> Vec<&str> {
     found
         .into_iter()
         .filter(|(path, _)| {
+            if path.iter().any(|segment| segment == "exclude") {
+                return false;
+            }
             // `os: [a, b]` / `runs-on: [self-hosted, x]` end in an index.
             path.iter()
                 .rev()
                 .find(|segment| !segment.bytes().all(|b| b.is_ascii_digit()))
-                .is_some_and(|key| key == "os" || key == "runs-on")
+                .is_some_and(|key| {
+                    key == "os"
+                        || key == "runs-on"
+                        || (key == "labels" && path.first().is_some_and(|k| k == "runs-on"))
+                })
         })
         .map(|(_, label)| label)
         .collect()
@@ -716,7 +736,6 @@ fn nightly_tier(nightly: &Parsed<'_>) -> Vec<String> {
         ));
     }
 
-    let self_path = format!(".github/workflows/{NIGHTLY_WORKFLOW}");
     if on.contains("pull_request") {
         let paths: Vec<&str> = nightly
             .doc
@@ -730,10 +749,14 @@ fn nightly_tier(nightly: &Parsed<'_>) -> Vec<String> {
             out.push(format!(
                 "{name}: `pull_request` has no `paths` filter — the 3-OS matrix would run on every PR"
             ));
-        } else if !paths.contains(&self_path.as_str()) {
-            out.push(format!(
-                "{name}: `pull_request.paths` does not list `{self_path}` — an edit to the nightly would merge without ever running"
-            ));
+        } else {
+            for required in NIGHTLY_PR_PATHS {
+                if !paths_filter_covers(&paths, required) {
+                    out.push(format!(
+                        "{name}: `pull_request.paths` does not cover `{required}` — an edit to it would merge without the nightly ever running"
+                    ));
+                }
+            }
         }
     } else {
         out.push(format!(
@@ -785,6 +808,40 @@ fn nightly_tier(nightly: &Parsed<'_>) -> Vec<String> {
         }
     }
     out
+}
+
+/// Does a `pull_request.paths` filter trigger on `path`? GitHub's rule: the
+/// last pattern that matches decides, and a `!pattern` excludes.
+fn paths_filter_covers(patterns: &[&str], path: &str) -> bool {
+    patterns
+        .iter()
+        .fold(false, |covered, pattern| match pattern.strip_prefix('!') {
+            Some(negated) if glob_matches(negated.as_bytes(), path.as_bytes()) => false,
+            Some(_) => covered,
+            None => covered || glob_matches(pattern.as_bytes(), path.as_bytes()),
+        })
+}
+
+/// GitHub filter-pattern glob: `**` matches anything (`/` included), `*`
+/// anything but `/`, `?` one character but `/`; every other byte is literal.
+fn glob_matches(pattern: &[u8], path: &[u8]) -> bool {
+    match pattern {
+        [] => path.is_empty(),
+        [b'*', b'*', rest @ ..] => {
+            // `**/x` also matches a bare `x` at this level.
+            let rest_after_slash = rest.strip_prefix(b"/").unwrap_or(rest);
+            (0..=path.len()).any(|skip| glob_matches(rest, &path[skip..]))
+                || glob_matches(rest_after_slash, path)
+        }
+        [b'*', rest @ ..] => {
+            let segment = path.iter().position(|&b| b == b'/').unwrap_or(path.len());
+            (0..=segment).any(|skip| glob_matches(rest, &path[skip..]))
+        }
+        [b'?', rest @ ..] => {
+            matches!(path.first(), Some(&b) if b != b'/') && glob_matches(rest, &path[1..])
+        }
+        [literal, rest @ ..] => path.first() == Some(literal) && glob_matches(rest, &path[1..]),
+    }
 }
 
 // ── YAML helpers ───────────────────────────────────────────────────────────
@@ -918,6 +975,8 @@ jobs:
   pull_request:
     paths:
       - .github/workflows/nightly.yml
+      - apps/desktop/src-tauri/src/lib.rs
+      - apps/desktop/src-tauri/src/browser_args.rs
       - apps/desktop/e2e/**
 jobs:
   bundle:
@@ -992,6 +1051,53 @@ jobs:
         // A matrix *name* that merely looks like a label is not a runner.
         let named = NIGHTLY.replace("name: macos-universal", "name: macos-13");
         assert!(!run_nightly(&named).iter().any(|v| v.contains("retired")));
+        // Excluding a retired image is the opposite of running on it.
+        let excluded = NIGHTLY.replace(
+            "        os: [ubuntu-22.04, windows-latest]\n",
+            "        os: [ubuntu-22.04, windows-latest]\n        exclude:\n          - os: macos-13\n",
+        );
+        assert!(!run_nightly(&excluded).iter().any(|v| v.contains("retired")));
+        // The `{ group, labels }` form of `runs-on` names runners too.
+        let grouped = CI.replace(
+            "runs-on: ubuntu-latest",
+            "runs-on:\n      group: big\n      labels: [ubuntu-20.04]",
+        );
+        assert_flags(
+            &run(&grouped, RELEASE),
+            "ci.yml: job `test` runs on `ubuntu-20.04`",
+        );
+    }
+
+    #[test]
+    fn path_filter_globs_follow_github_semantics() {
+        let lib = "apps/desktop/src-tauri/src/lib.rs";
+        assert!(paths_filter_covers(&[lib], lib));
+        assert!(paths_filter_covers(
+            &["apps/desktop/src-tauri/src/*.rs"],
+            lib
+        ));
+        assert!(paths_filter_covers(&["apps/**"], lib));
+        assert!(paths_filter_covers(&["**/lib.rs"], lib));
+        assert!(paths_filter_covers(&["**/lib.?s"], lib));
+        assert!(paths_filter_covers(
+            &[".github/workflows/**"],
+            ".github/workflows/nightly.yml"
+        ));
+        // `*` and `?` stop at a `/`.
+        assert!(!paths_filter_covers(&["apps/*.rs"], lib));
+        assert!(!paths_filter_covers(&["apps?desktop/**"], lib));
+        // The last matching pattern decides; `!` excludes.
+        assert!(!paths_filter_covers(&["apps/**", "!**/lib.rs"], lib));
+        assert!(paths_filter_covers(
+            &["apps/**", "!**/lib.rs", "**/src/lib.rs"],
+            lib
+        ));
+        assert!(paths_filter_covers(&["!**/main.rs", "apps/**"], lib));
+        assert!(!paths_filter_covers(&[], lib));
+        assert!(!paths_filter_covers(
+            &["apps/desktop/src-tauri/src/lib.rsx"],
+            lib
+        ));
     }
 
     #[test]
@@ -1000,7 +1106,7 @@ jobs:
         assert_flags(&run_nightly(&unscheduled), "no `schedule` trigger");
 
         let no_pr = NIGHTLY.replace(
-            "  pull_request:\n    paths:\n      - .github/workflows/nightly.yml\n      - apps/desktop/e2e/**\n",
+            "  pull_request:\n    paths:\n      - .github/workflows/nightly.yml\n      - apps/desktop/src-tauri/src/lib.rs\n      - apps/desktop/src-tauri/src/browser_args.rs\n      - apps/desktop/e2e/**\n",
             "",
         );
         assert_flags(
@@ -1009,7 +1115,7 @@ jobs:
         );
 
         let unfiltered = NIGHTLY.replace(
-            "    paths:\n      - .github/workflows/nightly.yml\n      - apps/desktop/e2e/**\n",
+            "    paths:\n      - .github/workflows/nightly.yml\n      - apps/desktop/src-tauri/src/lib.rs\n      - apps/desktop/src-tauri/src/browser_args.rs\n      - apps/desktop/e2e/**\n",
             "",
         );
         assert_flags(&run_nightly(&unfiltered), "has no `paths` filter");
@@ -1017,7 +1123,33 @@ jobs:
         let not_self = NIGHTLY.replace("      - .github/workflows/nightly.yml\n", "");
         assert_flags(
             &run_nightly(&not_self),
-            "does not list `.github/workflows/nightly.yml`",
+            "does not cover `.github/workflows/nightly.yml`",
+        );
+        // An equivalent glob covers it just as well.
+        let glob = NIGHTLY.replace(
+            "      - .github/workflows/nightly.yml\n",
+            "      - .github/workflows/**\n",
+        );
+        assert!(
+            !run_nightly(&glob)
+                .iter()
+                .any(|v| v.contains("does not cover"))
+        );
+
+        // Main-window creation (the WebView2 automation flags) must also run
+        // the nightly, so a refactor that drops them can't merge unrun.
+        let no_window = NIGHTLY.replace(
+            "      - apps/desktop/src-tauri/src/lib.rs\n      - apps/desktop/src-tauri/src/browser_args.rs\n",
+            "",
+        );
+        let violations = run_nightly(&no_window);
+        assert_flags(
+            &violations,
+            "does not cover `apps/desktop/src-tauri/src/lib.rs`",
+        );
+        assert_flags(
+            &violations,
+            "does not cover `apps/desktop/src-tauri/src/browser_args.rs`",
         );
     }
 

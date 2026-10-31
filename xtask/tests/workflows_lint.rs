@@ -161,8 +161,22 @@ fn assert_flagged(violations: &[String], needle: &str) {
 fn the_real_nightly_validates_its_own_edits() {
     assert_flagged(
         &lint_nightly_edit("      - .github/workflows/nightly.yml\n", ""),
-        "does not list `.github/workflows/nightly.yml`",
+        "does not cover `.github/workflows/nightly.yml`",
     );
+}
+
+/// The real nightly also runs on a PR that edits main-window creation — the
+/// code that hands `WebView2` its automation flags on Windows (without them
+/// every Windows smoke session dies).
+#[test]
+fn the_real_nightly_validates_main_window_edits() {
+    for file in ["lib.rs", "browser_args.rs"] {
+        let line = format!("      - apps/desktop/src-tauri/src/{file}\n");
+        assert_flagged(
+            &lint_nightly_edit(&line, ""),
+            &format!("does not cover `apps/desktop/src-tauri/src/{file}`"),
+        );
+    }
 }
 
 /// Putting the retired Intel image back (its leg queued 24h, then was

@@ -13,7 +13,11 @@ PRs are welcome; coordinate before starting anything large.
 > smoke, cold-start bench) runs nightly and on demand (`nightly.yml`) — and
 > on any PR that touches its own plumbing (`nightly.yml`, the tauri configs,
 > `apps/desktop/src-tauri/Cargo.toml`, the desktop npm manifests, the e2e
-> harness), whose bundle + smoke legs must then be green before it merges.
+> harness, main-window creation in `src-tauri/src/lib.rs` +
+> `browser_args.rs`). Its bundle + smoke legs must then be green before it
+> merges — a rule the shipper and the reviewer enforce, not branch
+> protection: a path-filtered workflow can't be a required check (on every
+> other PR it never runs, so the check would stay Pending forever).
 
 Everything goes through [`just`](https://github.com/casey/just) — run `just`
 with no arguments to list the recipes.

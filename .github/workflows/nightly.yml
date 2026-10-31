@@ -28,18 +28,30 @@ on:
   # ...plus the PRs that can break the nightly itself: a change to its own
   # plumbing runs bundle + smoke BEFORE it merges instead of turning up red
   # the next morning. That is this file, the tauri configs the bundle merges,
-  # the e2e harness, and the desktop npm + crate manifests (`tauri build`
+  # the e2e harness, the desktop npm + crate manifests (`tauri build`
   # refuses to bundle when a tauri npm plugin and its crate disagree on
-  # version). Every nightly break fixed so far — the retired macos-13 image,
-  # the updater signing step, the plugin-updater mismatch — was such a change.
-  # A Cargo.lock-only bump is left to the schedule (it rides most PRs).
-  # `just workflows` (xtask) requires this file to stay on the list.
+  # version), and the main-window creation the Windows smoke depends on
+  # (src-tauri/src/lib.rs builds the window and, in a Windows debug build,
+  # forwards the WebView2 automation flags from browser_args.rs — drop that
+  # and every Windows session dies on "DevToolsActivePort file doesn't
+  # exist"). Every nightly break fixed so far — the retired macos-13 image,
+  # the updater signing step, the plugin-updater mismatch, the WebView2
+  # flags — was such a change. A Cargo.lock-only bump is left to the
+  # schedule (it rides most PRs). `just workflows` (xtask) requires this
+  # file, lib.rs and browser_args.rs to stay covered by the list.
+  #
+  # These PR runs are NOT a required status check — a path-filtered workflow
+  # can't be one (on a PR it skips, a required check would sit Pending
+  # forever). Waiting for its bundle + smoke legs before merging is the
+  # shipper's job (the ship-pr skill) and the reviewer's.
   pull_request:
     paths:
       - .github/workflows/nightly.yml
       - apps/desktop/src-tauri/tauri.conf.json
       - apps/desktop/src-tauri/tauri.nightly.conf.json
       - apps/desktop/src-tauri/Cargo.toml
+      - apps/desktop/src-tauri/src/lib.rs
+      - apps/desktop/src-tauri/src/browser_args.rs
       - apps/desktop/e2e/**
       - apps/desktop/package.json
       - apps/desktop/package-lock.json

@@ -119,7 +119,9 @@ export const config: WebdriverIO.Config = {
         // A red run keeps the app's own log next to the screenshots (the
         // nightly uploads both). A session that never starts produces no
         // screenshot, so the log — or its absence, meaning the app never
-        // reached its setup hook — is the only clue to what went wrong.
+        // initialised logging (setup or main-window creation failed, and the
+        // error went to the app's stderr) — is the only clue to what went
+        // wrong.
         if (exitCode !== 0) {
             const logs = join(scratch, 'profile', 'logs');
             const keep = join(failureShots, 'app-logs');
@@ -129,7 +131,7 @@ export const config: WebdriverIO.Config = {
             } else {
                 writeFileSync(
                     join(failureShots, 'app-logs-missing.txt'),
-                    `no ${logs}: the app never reached its setup hook\n`,
+                    `no ${logs}: the app never initialised logging (setup or window creation failed; see its stderr)\n`,
                 );
             }
         }

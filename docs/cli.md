@@ -115,11 +115,16 @@ curio fetch                 # refresh every active feed
 curio fetch example.com     # or just one
 ```
 
-`fetch` reports per-feed status and new/updated article counts. The
+`fetch` reports per-feed status and new/updated article counts —
+"updated" counts only entries that actually changed; a feed re-listing
+identical items reports `0 updated` and rewrites no articles. The
 engine does conditional GET (ETag/Last-Modified preserved on every error
 path), honors permanent redirects, auto-pauses a feed forever on HTTP 410,
 and stores only sanitized content — raw feed HTML never reaches the
-database.
+database. An article whose full text was loaded (load-full, a feed's
+full-text mode, or Reddit enrichment) keeps that body: later refreshes of
+a feed still listing the item update its title and metadata, never revert
+it to the feed's excerpt.
 
 ```sh
 curio opml import subscriptions.opml   # folders become tags; known URLs skipped

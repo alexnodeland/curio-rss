@@ -56,7 +56,8 @@ CREATE TABLE articles (
     saved_at          TEXT    NOT NULL,
     source_updated_at TEXT,
     modified_at       TEXT    NOT NULL
-, lead_image TEXT)
+, lead_image TEXT, content_origin TEXT NOT NULL DEFAULT 'feed'
+    CHECK (content_origin IN ('feed', 'manual', 'full_text', 'enriched')))
 
 -- table articles_fts
 CREATE VIRTUAL TABLE articles_fts USING fts5(
@@ -141,7 +142,9 @@ CREATE TRIGGER articles_fts_ai AFTER INSERT ON articles BEGIN
 END
 
 -- trigger articles_fts_au
-CREATE TRIGGER articles_fts_au AFTER UPDATE OF title, content_text ON articles BEGIN
+CREATE TRIGGER articles_fts_au AFTER UPDATE OF title, content_text ON articles
+WHEN old.title IS NOT new.title OR old.content_text IS NOT new.content_text
+BEGIN
     INSERT INTO articles_fts(articles_fts, rowid, title, content_text)
     VALUES ('delete', old.id, old.title, old.content_text);
     INSERT INTO articles_fts(rowid, title, content_text)

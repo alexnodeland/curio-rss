@@ -50,7 +50,8 @@ fn begin_write(conn: &mut Connection) -> Result<Transaction<'_>, StorageError> {
 pub struct UpsertOutcome {
     /// Articles that did not exist and were inserted.
     pub inserted: u64,
-    /// Articles that existed (by dedupe key) and were refreshed.
+    /// Articles that existed (by dedupe key) and actually changed — a
+    /// re-ingest of identical values writes nothing and is not counted.
     pub updated: u64,
 }
 

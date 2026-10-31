@@ -15,8 +15,11 @@
 //!
 //! The operation surface is one `impl CoreHandle` block per concern:
 //! `feeds`, `refresh`, `articles`, `state`, `destinations`, `imports`
-//! and `maintenance`. This file holds the shared types, `open`, and the
-//! emission helpers every mutation ends with.
+//! and `maintenance`. This file holds the shared types, `open` /
+//! `open_with`, the accessors (`version`, `profile_dir`, and the raw
+//! `storage()` escape hatch that #178 is closing), the `enrich-reddit`
+//! API-credential setters (`set_reddit_api`, `reddit_api_client_id`),
+//! and the emission helpers every mutation ends with.
 
 mod articles;
 mod destinations;

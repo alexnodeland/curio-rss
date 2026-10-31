@@ -25,7 +25,7 @@ use chrono::NaiveDate;
 pub use emitter::EventEmitter;
 pub use fold::{FeedSubscription, FoldedState};
 pub use log::{DEFAULT_MAX_FILE_BYTES, EventLog, MIN_RETENTION_DAYS};
-pub use reader::read_all;
+pub use reader::{LenientRead, read_all, read_all_lenient};
 
 use crate::storage::StorageError;
 

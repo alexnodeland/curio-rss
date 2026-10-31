@@ -130,7 +130,9 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   `curio.db.pre-vN.bak` (that one plus the highest-numbered other kept) — no backup, no migration. Upgrade-tested
   against fixture DBs written by every released version (`fixtures/db/`).
 - Opening is typed: `OpenError` separates corrupt / too-new / locked / IO / failed-backup /
-  failed-migration so heads act on the class instead of parsing `SQLite` messages. A
+  failed-migration so heads act on the class instead of parsing `SQLite` messages (the
+  desktop head starts in two phases and shows a recovery screen per class: retry, restore
+  the newest openable backup, or start fresh, moving the database aside, never deleting). A
   staged event intent whose envelope no longer decodes is quarantined to
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts

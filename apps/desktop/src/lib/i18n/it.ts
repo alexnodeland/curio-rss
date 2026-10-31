@@ -439,4 +439,57 @@ export const it: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Guida alle scorciatoie da tastiera',
     'shortcut.addFeed': 'Aggiungi un feed',
     'shortcut.settings': 'Apri impostazioni',
+
+    'recovery.title.corrupt': 'Curio non riesce a leggere il suo database',
+    'recovery.title.tooNew': 'Questo database viene da un Curio più recente',
+    'recovery.title.locked': 'Un’altra copia di Curio sta usando il database',
+    'recovery.title.io': 'Curio non riesce ad accedere ai suoi dati',
+    'recovery.title.upgrade': 'Curio non è riuscito ad aggiornare il suo database',
+    'recovery.title.noProfile': 'Curio non ha dove conservare i suoi dati',
+    'recovery.title.other': 'Curio non è riuscito ad aprire la tua libreria',
+    'recovery.body.corrupt':
+        'Il file del database è danneggiato o non è un database di Curio. Non è stato modificato.',
+    'recovery.body.tooNew':
+        'Una versione più recente di Curio lo ha aggiornato. Installa l’ultimo Curio per continuare a usarlo.',
+    'recovery.body.locked': 'Chiudi l’altra copia di Curio, poi riprova.',
+    'recovery.body.io':
+        'Il sistema ha rifiutato di leggere o scrivere i file di Curio. Verifica che il disco abbia spazio libero e che la cartella del profilo sia scrivibile, poi riprova.',
+    'recovery.body.upgrade':
+        'L’aggiornamento è stato annullato, quindi la tua libreria è com’era. Riprova tra un momento.',
+    'recovery.body.noProfile':
+        'Il sistema non indica alcuna cartella personale, quindi non c’è dove conservare la tua libreria.',
+    'recovery.body.other':
+        'Qualcosa di imprevisto ha impedito di aprire la tua libreria. Non è stato eliminato nulla.',
+    'recovery.backup': 'Backup di prima dell’ultimo aggiornamento: {name}',
+    'recovery.safety':
+        'Ripristinare o ricominciare da zero sposta prima il database attuale in una cartella messa da parte nel tuo profilo. Non viene eliminato nulla.',
+    'recovery.details': 'Dettagli dell’errore',
+    'recovery.profile': 'Profilo: {path}',
+    'recovery.action.retry': 'Riprova',
+    'recovery.action.restore': 'Ripristina backup',
+    'recovery.action.fresh': 'Ricomincia da zero',
+    'recovery.action.reveal': 'Mostra cartella del profilo',
+    'recovery.action.copy': 'Copia errore',
+    'recovery.action.quit': 'Esci',
+    'recovery.action.open': 'Apri Curio',
+    'recovery.action.cancel': 'Annulla',
+    'recovery.working': 'In corso…',
+    'recovery.confirm.restore':
+        'Sostituire il database attuale con il backup? Ciò che è stato aggiunto da quell’aggiornamento resta nella copia messa da parte, non nella tua libreria.',
+    'recovery.confirm.fresh':
+        'Ricominciare con una libreria vuota? I tuoi feed e articoli restano nella copia del database messa da parte.',
+    'recovery.stillFailing': 'Non ha risolto il problema.',
+    'recovery.copied': 'Errore copiato negli appunti',
+    'recovery.copyFailed': 'Impossibile copiare l’errore',
+    'recovery.title.profile': 'Curio non riesce a usare la cartella del profilo',
+    'recovery.body.profile':
+        'La tua libreria è a posto, ma Curio non è riuscito a creare o scrivere lì gli altri suoi file (come il registro degli eventi). Verifica che la cartella del profilo e tutto il suo contenuto siano scrivibili, poi riprova.',
+    'recovery.action.update': 'Cerca aggiornamenti',
+    'recovery.update.current':
+        'Nessun aggiornamento disponibile. Installa la versione più recente di Curio che ha aggiornato questa libreria per continuare a usarla.',
+    'recovery.update.failed':
+        'Impossibile cercare aggiornamenti. Controlla la connessione e riprova.',
+    'recovery.recovered.title': 'Curio è pronto',
+    'recovery.recovered.body': 'La tua libreria si è aperta.',
+    'recovery.recovered.setAside': 'Il database precedente è stato spostato in {path}.',
 };

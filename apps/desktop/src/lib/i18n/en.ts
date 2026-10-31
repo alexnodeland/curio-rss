@@ -434,4 +434,49 @@ export const en = {
     'shortcut.help': 'Keyboard shortcut help',
     'shortcut.addFeed': 'Add a feed',
     'shortcut.settings': 'Open settings',
+
+    'recovery.title.corrupt': 'Curio can’t read its database',
+    'recovery.title.tooNew': 'This database is from a newer Curio',
+    'recovery.title.locked': 'Another copy of Curio is using the database',
+    'recovery.title.io': 'Curio can’t access its data',
+    'recovery.title.upgrade': 'Curio couldn’t upgrade its database',
+    'recovery.title.noProfile': 'Curio has nowhere to keep its data',
+    'recovery.title.other': 'Curio couldn’t open your library',
+    'recovery.body.corrupt':
+        'The database file is damaged or isn’t a Curio database. It hasn’t been changed.',
+    'recovery.body.tooNew':
+        'A newer version of Curio has upgraded it. Install the latest Curio to keep using it.',
+    'recovery.body.locked': 'Quit the other copy of Curio, then try again.',
+    'recovery.body.io':
+        'The system refused to read or write Curio’s files. Make sure the disk has free space and the profile folder is writable, then try again.',
+    'recovery.body.upgrade':
+        'The upgrade was rolled back, so your library is as it was. Try again in a moment.',
+    'recovery.body.noProfile':
+        'The system reports no home folder, so there is nowhere to keep your library.',
+    'recovery.body.other':
+        'Something unexpected stopped your library from opening. Nothing has been deleted.',
+    'recovery.backup': 'Backup from before the last upgrade: {name}',
+    'recovery.safety':
+        'Restoring or starting fresh first moves the current database into a set-aside folder in your profile. Nothing is deleted.',
+    'recovery.details': 'Error details',
+    'recovery.profile': 'Profile: {path}',
+    'recovery.action.retry': 'Try again',
+    'recovery.action.restore': 'Restore backup',
+    'recovery.action.fresh': 'Start fresh',
+    'recovery.action.reveal': 'Show profile folder',
+    'recovery.action.copy': 'Copy error',
+    'recovery.action.quit': 'Quit',
+    'recovery.action.open': 'Open Curio',
+    'recovery.action.cancel': 'Cancel',
+    'recovery.working': 'Working…',
+    'recovery.confirm.restore':
+        'Replace the current database with the backup? Anything added since that upgrade stays in the set-aside copy, not in your library.',
+    'recovery.confirm.fresh':
+        'Start with an empty library? Your feeds and articles stay in the set-aside copy of the database.',
+    'recovery.stillFailing': 'That didn’t fix it.',
+    'recovery.copied': 'Error copied to the clipboard',
+    'recovery.copyFailed': 'Couldn’t copy the error',
+    'recovery.recovered.title': 'Curio is ready',
+    'recovery.recovered.body': 'Your library opened.',
+    'recovery.recovered.setAside': 'The previous database was moved to {path}.',
 } as const;

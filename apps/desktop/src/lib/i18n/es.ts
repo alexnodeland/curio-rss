@@ -415,4 +415,48 @@ export const es: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Ayuda de atajos de teclado',
     'shortcut.addFeed': 'Añadir un feed',
     'shortcut.settings': 'Abrir ajustes',
+
+    'recovery.title.corrupt': 'Curio no puede leer su base de datos',
+    'recovery.title.tooNew': 'Esta base de datos es de un Curio más reciente',
+    'recovery.title.locked': 'Otra copia de Curio está usando la base de datos',
+    'recovery.title.io': 'Curio no puede acceder a sus datos',
+    'recovery.title.upgrade': 'Curio no pudo actualizar su base de datos',
+    'recovery.title.noProfile': 'Curio no tiene dónde guardar sus datos',
+    'recovery.title.other': 'Curio no pudo abrir tu biblioteca',
+    'recovery.body.corrupt':
+        'El archivo de la base de datos está dañado o no es una base de datos de Curio. No se ha modificado.',
+    'recovery.body.tooNew':
+        'Una versión más reciente de Curio la actualizó. Instala el Curio más reciente para seguir usándola.',
+    'recovery.body.locked': 'Cierra la otra copia de Curio y vuelve a intentarlo.',
+    'recovery.body.io':
+        'El sistema no permitió leer ni escribir los archivos de Curio. Comprueba que el disco tenga espacio libre y que la carpeta del perfil admita escritura, y vuelve a intentarlo.',
+    'recovery.body.upgrade':
+        'La actualización se revirtió, así que tu biblioteca está como estaba. Vuelve a intentarlo en un momento.',
+    'recovery.body.noProfile':
+        'El sistema no indica ninguna carpeta personal, así que no hay dónde guardar tu biblioteca.',
+    'recovery.body.other': 'Algo inesperado impidió abrir tu biblioteca. No se ha eliminado nada.',
+    'recovery.backup': 'Copia de seguridad de antes de la última actualización: {name}',
+    'recovery.safety':
+        'Restaurar o empezar de cero primero mueve la base de datos actual a una carpeta aparte dentro de tu perfil. No se elimina nada.',
+    'recovery.details': 'Detalles del error',
+    'recovery.profile': 'Perfil: {path}',
+    'recovery.action.retry': 'Volver a intentar',
+    'recovery.action.restore': 'Restaurar copia',
+    'recovery.action.fresh': 'Empezar de cero',
+    'recovery.action.reveal': 'Mostrar carpeta del perfil',
+    'recovery.action.copy': 'Copiar error',
+    'recovery.action.quit': 'Salir',
+    'recovery.action.open': 'Abrir Curio',
+    'recovery.action.cancel': 'Cancelar',
+    'recovery.working': 'Trabajando…',
+    'recovery.confirm.restore':
+        '¿Sustituir la base de datos actual por la copia? Lo añadido desde esa actualización queda en la copia apartada, no en tu biblioteca.',
+    'recovery.confirm.fresh':
+        '¿Empezar con una biblioteca vacía? Tus feeds y artículos quedan en la copia apartada de la base de datos.',
+    'recovery.stillFailing': 'Eso no lo ha solucionado.',
+    'recovery.copied': 'Error copiado al portapapeles',
+    'recovery.copyFailed': 'No se pudo copiar el error',
+    'recovery.recovered.title': 'Curio está listo',
+    'recovery.recovered.body': 'Tu biblioteca se abrió.',
+    'recovery.recovered.setAside': 'La base de datos anterior se movió a {path}.',
 };

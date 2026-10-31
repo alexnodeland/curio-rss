@@ -417,4 +417,49 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Pomoc dotycząca skrótów klawiszowych',
     'shortcut.addFeed': 'Dodaj kanał',
     'shortcut.settings': 'Otwórz ustawienia',
+
+    'recovery.title.corrupt': 'Curio nie może odczytać swojej bazy danych',
+    'recovery.title.tooNew': 'Ta baza danych pochodzi z nowszego Curio',
+    'recovery.title.locked': 'Inna kopia Curio używa bazy danych',
+    'recovery.title.io': 'Curio nie ma dostępu do swoich danych',
+    'recovery.title.upgrade': 'Curio nie udało się zaktualizować bazy danych',
+    'recovery.title.noProfile': 'Curio nie ma gdzie przechowywać danych',
+    'recovery.title.other': 'Curio nie udało się otworzyć Twojej biblioteki',
+    'recovery.body.corrupt':
+        'Plik bazy danych jest uszkodzony albo nie jest bazą Curio. Nie został zmieniony.',
+    'recovery.body.tooNew':
+        'Nowsza wersja Curio ją zaktualizowała. Zainstaluj najnowsze Curio, aby dalej z niej korzystać.',
+    'recovery.body.locked': 'Zamknij drugą kopię Curio i spróbuj ponownie.',
+    'recovery.body.io':
+        'System odmówił odczytu lub zapisu plików Curio. Upewnij się, że na dysku jest wolne miejsce, a folder profilu jest zapisywalny, i spróbuj ponownie.',
+    'recovery.body.upgrade':
+        'Aktualizacja została wycofana, więc biblioteka jest taka jak wcześniej. Spróbuj ponownie za chwilę.',
+    'recovery.body.noProfile':
+        'System nie zgłasza folderu domowego, więc nie ma gdzie przechowywać Twojej biblioteki.',
+    'recovery.body.other':
+        'Coś nieoczekiwanego uniemożliwiło otwarcie Twojej biblioteki. Nic nie zostało usunięte.',
+    'recovery.backup': 'Kopia zapasowa sprzed ostatniej aktualizacji: {name}',
+    'recovery.safety':
+        'Przywrócenie lub rozpoczęcie od nowa najpierw przenosi bieżącą bazę danych do odłożonego folderu w Twoim profilu. Nic nie jest usuwane.',
+    'recovery.details': 'Szczegóły błędu',
+    'recovery.profile': 'Profil: {path}',
+    'recovery.action.retry': 'Spróbuj ponownie',
+    'recovery.action.restore': 'Przywróć kopię',
+    'recovery.action.fresh': 'Zacznij od nowa',
+    'recovery.action.reveal': 'Pokaż folder profilu',
+    'recovery.action.copy': 'Kopiuj błąd',
+    'recovery.action.quit': 'Zakończ',
+    'recovery.action.open': 'Otwórz Curio',
+    'recovery.action.cancel': 'Anuluj',
+    'recovery.working': 'Trwa…',
+    'recovery.confirm.restore':
+        'Zastąpić bieżącą bazę danych kopią? To, co dodano od tej aktualizacji, zostanie w odłożonej kopii, nie w Twojej bibliotece.',
+    'recovery.confirm.fresh':
+        'Zacząć z pustą biblioteką? Twoje kanały i artykuły zostaną w odłożonej kopii bazy danych.',
+    'recovery.stillFailing': 'To nie rozwiązało problemu.',
+    'recovery.copied': 'Skopiowano błąd do schowka',
+    'recovery.copyFailed': 'Nie udało się skopiować błędu',
+    'recovery.recovered.title': 'Curio jest gotowe',
+    'recovery.recovered.body': 'Twoja biblioteka została otwarta.',
+    'recovery.recovered.setAside': 'Poprzednia baza danych została przeniesiona do {path}.',
 };

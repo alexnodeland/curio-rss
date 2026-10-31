@@ -19,7 +19,9 @@ import UpdatesPanel from '$components/modals/UpdatesPanel.svelte';
 import ReaderPreview from '$components/reader/ReaderPreview.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
 import { LOCALES, type LocaleId, type MessageKey, localeStore, t } from '$lib/i18n';
-import { REFRESH_INTERVAL_OPTIONS, type ReadingDensity, uiStore } from '$lib/state/ui.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
+import { REFRESH_INTERVAL_OPTIONS, type ReadingDensity, prefsStore } from '$lib/state/prefs.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 
 let { onclose }: { onclose: () => void } = $props();
 
@@ -163,9 +165,9 @@ function onKeydown(event: KeyboardEvent): void {
                         <span class="field-label">{t('settings.refreshInterval')}</span>
                         <select
                             class="field-select"
-                            value={String(uiStore.refreshIntervalMinutes)}
+                            value={String(prefsStore.refreshIntervalMinutes)}
                             onchange={(event) =>
-                                void uiStore.setRefreshIntervalMinutes(
+                                void prefsStore.setRefreshIntervalMinutes(
                                     Number(event.currentTarget.value),
                                 )}
                         >
@@ -180,9 +182,9 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.refreshOnLaunch}
+                        checked={prefsStore.refreshOnLaunch}
                         onchange={(event) =>
-                            void uiStore.setRefreshOnLaunch(event.currentTarget.checked)}
+                            void prefsStore.setRefreshOnLaunch(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.refreshOnLaunch')}</span>
@@ -216,9 +218,9 @@ function onKeydown(event: KeyboardEvent): void {
                         <span class="field-label">{t('settings.density')}</span>
                         <select
                             class="field-select"
-                            value={uiStore.readingDensity}
+                            value={prefsStore.readingDensity}
                             onchange={(event) =>
-                                void uiStore.setReadingDensity(
+                                void prefsStore.setReadingDensity(
                                     event.currentTarget.value as ReadingDensity,
                                 )}
                         >
@@ -232,8 +234,8 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.markOnScroll}
-                        onchange={(event) => void uiStore.setMarkOnScroll(event.currentTarget.checked)}
+                        checked={prefsStore.markOnScroll}
+                        onchange={(event) => void prefsStore.setMarkOnScroll(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.markOnScroll')}</span>
@@ -243,9 +245,9 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.isHomeLayout('youtube')}
+                        checked={layoutStore.isHomeLayout('youtube')}
                         onchange={(event) =>
-                            void uiStore.setHomeLayout('youtube', event.currentTarget.checked)}
+                            void layoutStore.setHomeLayout('youtube', event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.homeYoutube')}</span>
@@ -255,9 +257,9 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.isHomeLayout('reddit')}
+                        checked={layoutStore.isHomeLayout('reddit')}
                         onchange={(event) =>
-                            void uiStore.setHomeLayout('reddit', event.currentTarget.checked)}
+                            void layoutStore.setHomeLayout('reddit', event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.homeReddit')}</span>
@@ -276,8 +278,8 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.mediaPrefetch}
-                        onchange={(event) => void uiStore.setMediaPrefetch(event.currentTarget.checked)}
+                        checked={prefsStore.mediaPrefetch}
+                        onchange={(event) => void prefsStore.setMediaPrefetch(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.media.prefetch')}</span>
@@ -287,9 +289,9 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.allowRemoteFavicon}
+                        checked={prefsStore.allowRemoteFavicon}
                         onchange={(event) =>
-                            void uiStore.setAllowRemoteFavicon(event.currentTarget.checked)}
+                            void prefsStore.setAllowRemoteFavicon(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.allowRemoteFavicon')}</span>
@@ -309,12 +311,12 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.notifyEnabled}
+                        checked={prefsStore.notifyEnabled}
                         onchange={async (event) => {
                             const on = event.currentTarget.checked;
-                            const granted = await uiStore.setNotifyEnabled(on);
+                            const granted = await prefsStore.setNotifyEnabled(on);
                             if (on && !granted) {
-                                uiStore.showToast(t('settings.notify.blocked'), 'warning');
+                                toastStore.showToast(t('settings.notify.blocked'), 'warning');
                             }
                         }}
                     />
@@ -326,10 +328,10 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.notifyNewArticles}
-                        disabled={!uiStore.notifyEnabled}
+                        checked={prefsStore.notifyNewArticles}
+                        disabled={!prefsStore.notifyEnabled}
                         onchange={(event) =>
-                            void uiStore.setNotifyNewArticles(event.currentTarget.checked)}
+                            void prefsStore.setNotifyNewArticles(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.notify.newArticles')}</span>
@@ -338,9 +340,9 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.notifyErrors}
-                        disabled={!uiStore.notifyEnabled}
-                        onchange={(event) => void uiStore.setNotifyErrors(event.currentTarget.checked)}
+                        checked={prefsStore.notifyErrors}
+                        disabled={!prefsStore.notifyEnabled}
+                        onchange={(event) => void prefsStore.setNotifyErrors(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.notify.errors')}</span>
@@ -349,10 +351,10 @@ function onKeydown(event: KeyboardEvent): void {
                 <label class="toggle">
                     <input
                         type="checkbox"
-                        checked={uiStore.notifyFeedDead}
-                        disabled={!uiStore.notifyEnabled}
+                        checked={prefsStore.notifyFeedDead}
+                        disabled={!prefsStore.notifyEnabled}
                         onchange={(event) =>
-                            void uiStore.setNotifyFeedDead(event.currentTarget.checked)}
+                            void prefsStore.setNotifyFeedDead(event.currentTarget.checked)}
                     />
                     <span class="toggle-text">
                         <span class="toggle-label">{t('settings.notify.feedDead')}</span>
@@ -364,10 +366,10 @@ function onKeydown(event: KeyboardEvent): void {
                         <input
                             type="time"
                             class="field-select"
-                            value={uiStore.notifyQuietStart}
-                            disabled={!uiStore.notifyEnabled}
+                            value={prefsStore.notifyQuietStart}
+                            disabled={!prefsStore.notifyEnabled}
                             onchange={(event) =>
-                                void uiStore.setNotifyQuietStart(event.currentTarget.value)}
+                                void prefsStore.setNotifyQuietStart(event.currentTarget.value)}
                         />
                     </label>
                     <label class="field">
@@ -375,10 +377,10 @@ function onKeydown(event: KeyboardEvent): void {
                         <input
                             type="time"
                             class="field-select"
-                            value={uiStore.notifyQuietEnd}
-                            disabled={!uiStore.notifyEnabled}
+                            value={prefsStore.notifyQuietEnd}
+                            disabled={!prefsStore.notifyEnabled}
                             onchange={(event) =>
-                                void uiStore.setNotifyQuietEnd(event.currentTarget.value)}
+                                void prefsStore.setNotifyQuietEnd(event.currentTarget.value)}
                         />
                     </label>
                     <span class="toggle-hint">{t('settings.notify.quietHours.hint')}</span>

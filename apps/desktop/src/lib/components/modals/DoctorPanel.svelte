@@ -10,7 +10,7 @@ import { type AppInfoDto, type DbStatsDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import type { CommandResult } from '$lib/state/query-cache.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 
 let stats: DbStatsDto | null = $state(null);
 let info: AppInfoDto | null = $state(null);
@@ -49,10 +49,10 @@ async function run(
             toastCommandError(result.error);
             return;
         }
-        uiStore.showToast(success, 'success');
+        toastStore.showToast(success, 'success');
         await after?.();
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         running = null;
     }
@@ -86,9 +86,9 @@ async function sweep(): Promise<void> {
             toastCommandError(result.error);
             return;
         }
-        uiStore.showToast(t('doctor.swept', { count: result.data.length }), 'success');
+        toastStore.showToast(t('doctor.swept', { count: result.data.length }), 'success');
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         running = null;
     }
@@ -102,9 +102,9 @@ async function diagnostics(): Promise<void> {
             toastCommandError(result.error);
             return;
         }
-        uiStore.showToast(t('doctor.diagnosticsReady', { path: result.data.path }), 'success');
+        toastStore.showToast(t('doctor.diagnosticsReady', { path: result.data.path }), 'success');
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         running = null;
     }

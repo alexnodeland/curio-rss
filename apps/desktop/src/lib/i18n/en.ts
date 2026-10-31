@@ -478,6 +478,13 @@ export const en = {
     'recovery.stillFailing': 'That didn’t fix it.',
     'recovery.copied': 'Error copied to the clipboard',
     'recovery.copyFailed': 'Couldn’t copy the error',
+    'recovery.title.profile': 'Curio can’t use its profile folder',
+    'recovery.body.profile':
+        'Your library is fine, but Curio couldn’t create or write its other files there (such as the event log). Make sure the profile folder and everything in it is writable, then try again.',
+    'recovery.action.update': 'Check for updates',
+    'recovery.update.current':
+        'No update is available. Install the newer Curio that upgraded this library to keep using it.',
+    'recovery.update.failed': 'Couldn’t check for updates. Check your connection and try again.',
     'recovery.recovered.title': 'Curio is ready',
     'recovery.recovered.body': 'Your library opened.',
     'recovery.recovered.setAside': 'The previous database was moved to {path}.',

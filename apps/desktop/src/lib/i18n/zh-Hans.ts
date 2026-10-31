@@ -434,6 +434,12 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': '问题仍未解决。',
     'recovery.copied': '错误已复制到剪贴板',
     'recovery.copyFailed': '无法复制错误',
+    'recovery.title.profile': 'Curio 无法使用它的个人资料文件夹',
+    'recovery.body.profile':
+        '你的资料库没有问题，但 Curio 无法在那里创建或写入其他文件（例如事件日志）。请确认个人资料文件夹及其中所有内容都可写入，然后重试。',
+    'recovery.action.update': '检查更新',
+    'recovery.update.current': '没有可用的更新。请安装升级了这个资料库的新版 Curio 以继续使用。',
+    'recovery.update.failed': '无法检查更新。请检查网络连接，然后重试。',
     'recovery.recovered.title': 'Curio 已就绪',
     'recovery.recovered.body': '你的资料库已打开。',
     'recovery.recovered.setAside': '之前的数据库已移到 {path}。',

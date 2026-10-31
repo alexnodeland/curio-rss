@@ -437,6 +437,12 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': '咁都仲未搞掂。',
     'recovery.copied': '已經將錯誤複製到剪貼簿',
     'recovery.copyFailed': '複製唔到個錯誤',
+    'recovery.title.profile': 'Curio 用唔到佢嘅個人檔案資料夾',
+    'recovery.body.profile':
+        '你嘅資料庫冇事，不過 Curio 喺嗰度建立或者寫入唔到其他檔案（例如事件記錄）。睇吓個人檔案資料夾同入面所有嘢寫唔寫得入，然後再試。',
+    'recovery.action.update': '檢查更新',
+    'recovery.update.current': '冇可用嘅更新。裝返升級咗呢個資料庫嘅新版 Curio 就可以繼續用。',
+    'recovery.update.failed': '檢查唔到更新。睇吓網絡連線，然後再試。',
     'recovery.recovered.title': 'Curio 準備好喇',
     'recovery.recovered.body': '你嘅資料庫開咗喇。',
     'recovery.recovered.setAside': '之前嘅資料庫已經搬咗去 {path}。',

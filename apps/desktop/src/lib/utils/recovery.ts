@@ -8,8 +8,11 @@
 import type { StartupFailureClass, StartupFailureDto } from '$lib/bindings';
 import type { MessageKey } from '$lib/i18n';
 
-/** An action that re-opens the profile, possibly after changing it. */
-export type RecoveryAction = 'retry' | 'restore' | 'fresh';
+/**
+ * A recovery-screen action: re-open the profile (possibly after changing it),
+ * or — for a database a newer Curio wrote — look for that newer Curio.
+ */
+export type RecoveryAction = 'retry' | 'restore' | 'fresh' | 'update';
 
 export interface RecoveryPlan {
     /** The recommended action, drawn as the primary button. */
@@ -18,19 +21,28 @@ export interface RecoveryPlan {
     secondary: RecoveryAction[];
 }
 
-/** Classes where Curio may move the database aside (mirrors the backend). */
+/**
+ * Classes where Curio may move the database aside (mirrors the backend's
+ * `may_replace_database`): never while another process holds it, never when
+ * the database is not what failed, never without a profile.
+ */
 function mayReplace(failureClass: StartupFailureClass): boolean {
-    return failureClass !== 'locked' && failureClass !== 'no_profile';
+    return !['locked', 'profile', 'no_profile'].includes(failureClass);
 }
 
 /**
- * The actions a failure offers, most useful first. Restoring needs a backup
- * this build can open; a retry only helps where the cause can go away on its
- * own (a lock, an IO refusal, a failed upgrade, the unknown).
+ * The actions a failure offers, most useful first. A too-new database is
+ * best fixed by updating Curio — lossless, unlike restoring a backup from
+ * before the newer build's upgrade. Restoring needs a backup this build can
+ * open; a retry only helps where the cause can go away (a lock, a refused
+ * read or write, a failed upgrade, the unknown).
  */
 export function recoveryPlan(failure: StartupFailureDto): RecoveryPlan {
     const actions: RecoveryAction[] = [];
-    const retryHelps = ['locked', 'io', 'upgrade', 'other'].includes(failure.class);
+    if (failure.class === 'too_new') {
+        actions.push('update');
+    }
+    const retryHelps = ['locked', 'io', 'profile', 'upgrade', 'other'].includes(failure.class);
     if (retryHelps) {
         actions.push('retry');
     }
@@ -39,11 +51,6 @@ export function recoveryPlan(failure: StartupFailureDto): RecoveryPlan {
             actions.push('restore');
         }
         actions.push('fresh');
-    }
-    // A too-new database without a backup is best fixed by updating Curio:
-    // starting fresh stays available, but is not the recommendation.
-    if (failure.class === 'too_new' && failure.backup === null) {
-        return { primary: null, secondary: actions };
     }
     const [primary = null, ...secondary] = actions;
     return { primary, secondary };
@@ -54,6 +61,7 @@ const TITLES: Record<StartupFailureClass, MessageKey> = {
     too_new: 'recovery.title.tooNew',
     locked: 'recovery.title.locked',
     io: 'recovery.title.io',
+    profile: 'recovery.title.profile',
     upgrade: 'recovery.title.upgrade',
     no_profile: 'recovery.title.noProfile',
     other: 'recovery.title.other',
@@ -64,6 +72,7 @@ const BODIES: Record<StartupFailureClass, MessageKey> = {
     too_new: 'recovery.body.tooNew',
     locked: 'recovery.body.locked',
     io: 'recovery.body.io',
+    profile: 'recovery.body.profile',
     upgrade: 'recovery.body.upgrade',
     no_profile: 'recovery.body.noProfile',
     other: 'recovery.body.other',
@@ -84,10 +93,15 @@ export function fileName(path: string): string {
 
 /**
  * The plain-text report "Copy error" puts on the clipboard. Deliberately not
- * localized: it is pasted into bug reports.
+ * localized: it is pasted into bug reports. Leads with the running version —
+ * the first thing a too-new or failed-upgrade report needs.
  */
 export function failureReport(failure: StartupFailureDto): string {
-    const lines = [`Curio could not start (${failure.class})`, '', failure.message];
+    const lines = [
+        `Curio ${failure.app_version} could not start (${failure.class})`,
+        '',
+        failure.message,
+    ];
     if (failure.profile_dir !== null || failure.backup !== null) {
         lines.push('');
     }

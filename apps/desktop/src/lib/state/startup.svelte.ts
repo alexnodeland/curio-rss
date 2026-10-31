@@ -10,6 +10,7 @@ import type { CommandResult } from '$lib/state/query-cache.svelte';
 import { copyText } from '$lib/utils/clipboard';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { type RecoveryAction, failureReport } from '$lib/utils/recovery';
+import { checkForUpdate, installAndRelaunch } from '$lib/utils/updates';
 
 /** A one-line status under the recovery actions. */
 export interface RecoveryNotice {
@@ -17,7 +18,10 @@ export interface RecoveryNotice {
     text: string;
 }
 
-const RUNNERS: Record<RecoveryAction, () => Promise<CommandResult<RecoveryOutcomeDto>>> = {
+/** The actions that re-open the profile through a backend command. */
+type ReopenAction = Exclude<RecoveryAction, 'update'>;
+
+const RUNNERS: Record<ReopenAction, () => Promise<CommandResult<RecoveryOutcomeDto>>> = {
     retry: () => commands.retryStartup(),
     restore: () => commands.restoreStartupBackup(),
     fresh: () => commands.startFreshProfile(),
@@ -55,6 +59,36 @@ class StartupStore {
         this.busy = action;
         this.notice = null;
         try {
+            if (action === 'update') {
+                await this.#update();
+            } else {
+                await this.#reopen(action);
+            }
+        } finally {
+            this.busy = null;
+        }
+    }
+
+    /**
+     * Looks for the newer Curio a too-new database needs, and installs it
+     * (which relaunches the app). The updater plugin needs no core, so this
+     * works on the recovery screen; outside the packaged app it throws.
+     */
+    async #update(): Promise<void> {
+        try {
+            const update = await checkForUpdate();
+            if (update === null) {
+                this.notice = { kind: 'info', text: t('recovery.update.current') };
+                return;
+            }
+            await installAndRelaunch(update);
+        } catch {
+            this.notice = { kind: 'error', text: t('recovery.update.failed') };
+        }
+    }
+
+    async #reopen(action: ReopenAction): Promise<void> {
+        try {
             const result = await RUNNERS[action]();
             if (result.status === 'error') {
                 this.notice = { kind: 'error', text: commandErrorMessage(result.error) };
@@ -71,8 +105,6 @@ class StartupStore {
             this.notice = { kind: 'error', text: `${t('recovery.stillFailing')}${moved}` };
         } catch {
             this.notice = { kind: 'error', text: t('app.error.internal') };
-        } finally {
-            this.busy = null;
         }
     }
 

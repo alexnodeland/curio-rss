@@ -18,6 +18,7 @@ const DEV_STARTUP_MESSAGES: Record<StartupFailureClass, string> = {
         'database schema version 8 is newer than this build supports (7) — update Curio to open it',
     locked: `${DEV_PROFILE}/curio.db is locked by another process — close other copies of Curio and retry`,
     io: `cannot open ${DEV_PROFILE}/curio.db: unable to open database file`,
+    profile: 'event log io: Permission denied (os error 13)',
     upgrade:
         'migrating the database from schema v6 to v7 failed and was rolled back: sqlite error: disk I/O error',
     no_profile: 'the platform reports no home directory — cannot resolve profile/cache paths',
@@ -32,12 +33,17 @@ function devStartupFailure(): StartupFailureDto | null {
         return null;
     }
     const hasProfile = requested !== 'no_profile';
-    const hasBackup = hasProfile && requested !== 'locked' && params.get('backup') !== '0';
+    const hasBackup =
+        hasProfile &&
+        requested !== 'locked' &&
+        requested !== 'profile' &&
+        params.get('backup') !== '0';
     return {
         class: requested,
         message: DEV_STARTUP_MESSAGES[requested],
         profile_dir: hasProfile ? DEV_PROFILE : null,
         backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
+        app_version: '0.4.0',
     };
 }
 

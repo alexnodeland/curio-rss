@@ -41,9 +41,25 @@ export function localeDir(id: string): 'ltr' | 'rtl' {
 }
 
 /**
+ * Chinese written in Traditional script — `zh-Hant*`, or a region that writes
+ * it (Hong Kong, Macau, Taiwan) unless the tag names Simplified script. The
+ * shipped Traditional-script catalog is `yue`; `zh-Hans` (Simplified) would
+ * be the wrong script.
+ */
+function isTraditionalChinese(subtags: readonly string[]): boolean {
+    const rest = subtags.slice(1);
+    return (
+        subtags[0] === 'zh' &&
+        !rest.includes('hans') &&
+        rest.some((subtag) => ['hant', 'hk', 'mo', 'tw'].includes(subtag))
+    );
+}
+
+/**
  * The first shipped locale matching a BCP 47 preference list (e.g.
- * `navigator.languages`): an exact id first, then the base language
- * (`de-AT` → `de`, `zh-CN` → `zh-Hans`). `null` when none ships.
+ * `navigator.languages`): an exact id first, then the script (`zh-HK`,
+ * `zh-Hant-TW` → `yue`, the Traditional-script catalog), then the base
+ * language (`de-AT` → `de`, `zh-CN` → `zh-Hans`). `null` when none ships.
  */
 export function matchLocale(languages: readonly string[]): LocaleId | null {
     for (const tag of languages) {
@@ -51,6 +67,9 @@ export function matchLocale(languages: readonly string[]): LocaleId | null {
         const exact = LOCALES.find((locale) => locale.id.toLowerCase() === lower);
         if (exact) {
             return exact.id;
+        }
+        if (isTraditionalChinese(lower.split('-'))) {
+            return 'yue';
         }
         const base = lower.split('-')[0];
         const byBase = LOCALES.find((locale) => locale.id.toLowerCase().split('-')[0] === base);

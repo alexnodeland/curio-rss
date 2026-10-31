@@ -458,6 +458,14 @@ export const es: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': 'Eso no lo ha solucionado.',
     'recovery.copied': 'Error copiado al portapapeles',
     'recovery.copyFailed': 'No se pudo copiar el error',
+    'recovery.title.profile': 'Curio no puede usar la carpeta de su perfil',
+    'recovery.body.profile':
+        'Tu biblioteca está bien, pero Curio no pudo crear ni escribir allí sus demás archivos (como el registro de eventos). Comprueba que la carpeta del perfil y todo su contenido admitan escritura, y vuelve a intentarlo.',
+    'recovery.action.update': 'Buscar actualizaciones',
+    'recovery.update.current':
+        'No hay ninguna actualización disponible. Instala la versión más reciente de Curio que actualizó esta biblioteca para seguir usándola.',
+    'recovery.update.failed':
+        'No se pudieron buscar actualizaciones. Comprueba tu conexión y vuelve a intentarlo.',
     'recovery.recovered.title': 'Curio está listo',
     'recovery.recovered.body': 'Tu biblioteca se abrió.',
     'recovery.recovered.setAside': 'La base de datos anterior se movió a {path}.',

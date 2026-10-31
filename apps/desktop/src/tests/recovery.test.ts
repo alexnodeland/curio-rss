@@ -10,6 +10,7 @@ import { matchLocale } from '$lib/i18n/locale.svelte';
 import { startupStore } from '$lib/state/startup.svelte';
 import { failureReport, fileName, recoveryCopy, recoveryPlan } from '$lib/utils/recovery';
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
@@ -20,6 +21,12 @@ import {
     rejectWith,
     startupFailureFixture,
 } from './ipc-harness';
+
+const updater = vi.hoisted(() => ({
+    checkForUpdate: vi.fn(),
+    installAndRelaunch: vi.fn(),
+}));
+vi.mock('$lib/utils/updates', () => updater);
 
 describe('recoveryPlan', () => {
     it('leads with the backup for a corrupt database that has one', () => {
@@ -40,12 +47,24 @@ describe('recoveryPlan', () => {
         });
     });
 
-    it('recommends nothing for a too-new database without a backup (update Curio)', () => {
+    it('leads with updating Curio for a too-new database — lossless, unlike the backup', () => {
         expect(recoveryPlan(startupFailureFixture({ class: 'too_new', backup: null }))).toEqual({
-            primary: null,
+            primary: 'update',
             secondary: ['fresh'],
         });
-        expect(recoveryPlan(startupFailureFixture({ class: 'too_new' })).primary).toBe('restore');
+        expect(recoveryPlan(startupFailureFixture({ class: 'too_new' }))).toEqual({
+            primary: 'update',
+            secondary: ['restore', 'fresh'],
+        });
+    });
+
+    it('only retries when the database is not what failed', () => {
+        expect(recoveryPlan(startupFailureFixture({ class: 'profile', backup: null }))).toEqual({
+            primary: 'retry',
+            secondary: [],
+        });
+        // Even a stray backup is not offered: replacing the database cannot help.
+        expect(recoveryPlan(startupFailureFixture({ class: 'profile' })).secondary).toEqual([]);
     });
 
     it('retries first where the cause can clear by itself', () => {
@@ -69,10 +88,19 @@ describe('recoveryPlan', () => {
 describe('recovery copy and report', () => {
     it('maps every class to its own title and body', () => {
         const keys = (
-            ['corrupt', 'too_new', 'locked', 'io', 'upgrade', 'no_profile', 'other'] as const
+            [
+                'corrupt',
+                'too_new',
+                'locked',
+                'io',
+                'profile',
+                'upgrade',
+                'no_profile',
+                'other',
+            ] as const
         ).map((failureClass) => recoveryCopy(failureClass));
-        expect(new Set(keys.map((k) => k.title)).size).toBe(7);
-        expect(new Set(keys.map((k) => k.body)).size).toBe(7);
+        expect(new Set(keys.map((k) => k.title)).size).toBe(8);
+        expect(new Set(keys.map((k) => k.body)).size).toBe(8);
     });
 
     it('names a backup by its file name on either separator', () => {
@@ -82,7 +110,7 @@ describe('recovery copy and report', () => {
 
     it('builds a plain-text report with the class, message and paths', () => {
         const report = failureReport(startupFailureFixture());
-        expect(report.split('\n')[0]).toBe('Curio could not start (corrupt)');
+        expect(report.split('\n')[0]).toBe('Curio 0.4.0 could not start (corrupt)');
         expect(report).toContain('file is not a database');
         expect(report).toContain('Profile: /home/user/.local/share/curio');
         expect(report).toContain('Backup: /home/user/.local/share/curio/curio.db.pre-v7.bak');
@@ -105,6 +133,12 @@ describe('matchLocale', () => {
         expect(matchLocale(['zh-CN'])).toBe('zh-Hans');
         expect(matchLocale(['ZH-HANS'])).toBe('zh-Hans');
         expect(matchLocale(['ja', 'pl-PL'])).toBe('pl');
+        // Traditional script goes to the Traditional-script catalog, never Simplified.
+        for (const tag of ['zh-HK', 'zh-MO', 'zh-TW', 'zh-Hant', 'zh-Hant-HK', 'yue-HK']) {
+            expect(matchLocale([tag])).toBe('yue');
+        }
+        expect(matchLocale(['zh-Hans-HK'])).toBe('zh-Hans');
+        expect(matchLocale(['zh-SG'])).toBe('zh-Hans');
         expect(matchLocale(['ja'])).toBeNull();
         expect(matchLocale([])).toBeNull();
     });
@@ -211,6 +245,25 @@ describe('startupStore', () => {
         expect(startupStore.notice).toEqual({ kind: 'error', text: 'no such folder' });
     });
 
+    it('installs a newer Curio for a too-new database, or says none is available', async () => {
+        const update = { version: '0.5.0' };
+        updater.checkForUpdate.mockResolvedValueOnce(update);
+        updater.installAndRelaunch.mockResolvedValueOnce(undefined);
+        await startupStore.run('update');
+        expect(updater.installAndRelaunch).toHaveBeenCalledWith(update);
+        expect(startupStore.busy).toBeNull();
+
+        updater.checkForUpdate.mockResolvedValueOnce(null);
+        await startupStore.run('update');
+        expect(startupStore.notice).toEqual({ kind: 'info', text: t('recovery.update.current') });
+
+        // Outside the packaged app (or offline) the updater throws.
+        updater.checkForUpdate.mockRejectedValueOnce(new Error('no runtime'));
+        await startupStore.run('update');
+        expect(startupStore.notice).toEqual({ kind: 'error', text: t('recovery.update.failed') });
+        expect(startupStore.busy).toBeNull();
+    });
+
     it('copies the report, and says so when the clipboard refuses', async () => {
         const writeText = vi.fn().mockResolvedValue(undefined);
         Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
@@ -293,6 +346,82 @@ describe('RecoveryScreen', () => {
         await flushIpc();
         expect(harness.calls.map((c) => c.cmd)).toEqual(['retry_startup']);
         expect(screen.getByRole('status').textContent).toContain(t('recovery.stillFailing'));
+    });
+
+    it('moves focus into the confirmation, back on cancel, and onto Open Curio', async () => {
+        harness = installIpcHarness({ start_fresh_profile: recoveryOutcomeFixture() });
+        render(RecoveryScreen, {
+            failure: startupFailureFixture({ backup: null }),
+            onopen: () => {},
+        });
+        const fresh = screen.getByRole('button', { name: t('recovery.action.fresh') });
+        fresh.focus();
+        await fireEvent.click(fresh);
+        await tick();
+        const confirmButton = screen.getByRole('button', { name: t('recovery.action.fresh') });
+        expect(document.activeElement).toBe(confirmButton);
+        expect(confirmButton.getAttribute('aria-describedby')).toBe('recovery-confirm');
+
+        await fireEvent.click(screen.getByRole('button', { name: t('recovery.action.cancel') }));
+        await tick();
+        expect(document.activeElement).toBe(
+            screen.getByRole('button', { name: t('recovery.action.fresh') }),
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: t('recovery.action.fresh') }));
+        await tick();
+        await fireEvent.click(screen.getByRole('button', { name: t('recovery.action.fresh') }));
+        await flushIpc();
+        await tick();
+        expect(document.activeElement).toBe(
+            screen.getByRole('button', { name: t('recovery.action.open') }),
+        );
+    });
+
+    it('keeps the running action focused and every button inert until it ends', async () => {
+        let finish: (value: unknown) => void = () => {};
+        harness = installIpcHarness({
+            retry_startup: () =>
+                new Promise((resolve) => {
+                    finish = resolve;
+                }),
+            quit_app: null,
+        });
+        const locked = startupFailureFixture({ class: 'locked', backup: null });
+        render(RecoveryScreen, { failure: locked, onopen: () => {} });
+        const retry = screen.getByRole('button', { name: t('recovery.action.retry') });
+        retry.focus();
+        await fireEvent.click(retry);
+        await tick();
+        const working = screen.getByRole('button', { name: t('recovery.working') });
+        expect(document.activeElement).toBe(working);
+        expect(working.getAttribute('aria-disabled')).toBe('true');
+        const quit = screen.getByRole('button', { name: t('recovery.action.quit') });
+        expect(quit.getAttribute('aria-disabled')).toBe('true');
+        await fireEvent.click(quit);
+        await fireEvent.click(working);
+        expect(harness.calls.map((c) => c.cmd)).toEqual(['retry_startup']);
+
+        finish(recoveryOutcomeFixture({ failure: locked, set_aside: null }));
+        await flushIpc();
+        await tick();
+        expect(quit.getAttribute('aria-disabled')).toBe('false');
+        await fireEvent.click(quit);
+        await flushIpc();
+        expect(harness.calls.map((c) => c.cmd)).toEqual(['retry_startup', 'quit_app']);
+    });
+
+    it('offers Check for updates first for a too-new database', async () => {
+        updater.checkForUpdate.mockResolvedValueOnce(null);
+        render(RecoveryScreen, {
+            failure: startupFailureFixture({ class: 'too_new', backup: null }),
+            onopen: () => {},
+        });
+        const update = screen.getByRole('button', { name: t('recovery.action.update') });
+        expect(update.classList.contains('btn-primary')).toBe(true);
+        await fireEvent.click(update);
+        await flushIpc();
+        expect(screen.getByRole('status').textContent).toBe(t('recovery.update.current'));
     });
 
     it('hides the profile actions when there is no profile', () => {

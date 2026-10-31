@@ -462,6 +462,14 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': 'Cela n’a pas résolu le problème.',
     'recovery.copied': 'Erreur copiée dans le presse-papiers',
     'recovery.copyFailed': 'Impossible de copier l’erreur',
+    'recovery.title.profile': 'Curio ne peut pas utiliser le dossier de son profil',
+    'recovery.body.profile':
+        'Votre bibliothèque est intacte, mais Curio n’a pas pu y créer ou écrire ses autres fichiers (comme le journal des événements). Vérifiez que le dossier du profil et tout son contenu sont accessibles en écriture, puis réessayez.',
+    'recovery.action.update': 'Rechercher des mises à jour',
+    'recovery.update.current':
+        'Aucune mise à jour n’est disponible. Installez la version plus récente de Curio qui a mis à niveau cette bibliothèque pour continuer à l’utiliser.',
+    'recovery.update.failed':
+        'Impossible de rechercher des mises à jour. Vérifiez votre connexion, puis réessayez.',
     'recovery.recovered.title': 'Curio est prêt',
     'recovery.recovered.body': 'Votre bibliothèque s’est ouverte.',
     'recovery.recovered.setAside': 'L’ancienne base de données a été déplacée dans {path}.',

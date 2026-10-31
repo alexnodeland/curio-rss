@@ -302,6 +302,7 @@ export function startupFailureFixture(
             '/home/user/.local/share/curio/curio.db is not a readable Curio database (corrupt or not SQLite): file is not a database',
         profile_dir: '/home/user/.local/share/curio',
         backup: '/home/user/.local/share/curio/curio.db.pre-v7.bak',
+        app_version: '0.4.0',
         ...overrides,
     };
 }

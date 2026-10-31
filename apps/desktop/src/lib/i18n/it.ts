@@ -457,6 +457,14 @@ export const it: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': 'Non ha risolto il problema.',
     'recovery.copied': 'Errore copiato negli appunti',
     'recovery.copyFailed': 'Impossibile copiare l’errore',
+    'recovery.title.profile': 'Curio non riesce a usare la cartella del profilo',
+    'recovery.body.profile':
+        'La tua libreria è a posto, ma Curio non è riuscito a creare o scrivere lì gli altri suoi file (come il registro degli eventi). Verifica che la cartella del profilo e tutto il suo contenuto siano scrivibili, poi riprova.',
+    'recovery.action.update': 'Cerca aggiornamenti',
+    'recovery.update.current':
+        'Nessun aggiornamento disponibile. Installa la versione più recente di Curio che ha aggiornato questa libreria per continuare a usarla.',
+    'recovery.update.failed':
+        'Impossibile cercare aggiornamenti. Controlla la connessione e riprova.',
     'recovery.recovered.title': 'Curio è pronto',
     'recovery.recovered.body': 'La tua libreria si è aperta.',
     'recovery.recovered.setAside': 'Il database precedente è stato spostato in {path}.',

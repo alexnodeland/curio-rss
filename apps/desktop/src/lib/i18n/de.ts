@@ -460,6 +460,14 @@ export const de: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': 'Das hat das Problem nicht behoben.',
     'recovery.copied': 'Fehler in die Zwischenablage kopiert',
     'recovery.copyFailed': 'Fehler konnte nicht kopiert werden',
+    'recovery.title.profile': 'Curio kann seinen Profilordner nicht verwenden',
+    'recovery.body.profile':
+        'Deine Bibliothek ist in Ordnung, aber Curio konnte seine übrigen Dateien dort (etwa das Ereignisprotokoll) nicht anlegen oder schreiben. Prüfe, ob der Profilordner und alles darin beschreibbar ist, und versuche es dann erneut.',
+    'recovery.action.update': 'Nach Updates suchen',
+    'recovery.update.current':
+        'Es ist kein Update verfügbar. Installiere die neuere Curio-Version, die diese Bibliothek aktualisiert hat, um sie weiter zu verwenden.',
+    'recovery.update.failed':
+        'Die Suche nach Updates ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.',
     'recovery.recovered.title': 'Curio ist bereit',
     'recovery.recovered.body': 'Deine Bibliothek wurde geöffnet.',
     'recovery.recovered.setAside': 'Die vorherige Datenbank wurde nach {path} verschoben.',

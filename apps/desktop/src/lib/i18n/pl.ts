@@ -461,6 +461,14 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'recovery.stillFailing': 'To nie rozwiązało problemu.',
     'recovery.copied': 'Skopiowano błąd do schowka',
     'recovery.copyFailed': 'Nie udało się skopiować błędu',
+    'recovery.title.profile': 'Curio nie może korzystać z folderu profilu',
+    'recovery.body.profile':
+        'Twoja biblioteka jest w porządku, ale Curio nie mogło utworzyć ani zapisać tam pozostałych plików (np. dziennika zdarzeń). Upewnij się, że folder profilu i cała jego zawartość są zapisywalne, i spróbuj ponownie.',
+    'recovery.action.update': 'Sprawdź aktualizacje',
+    'recovery.update.current':
+        'Brak dostępnej aktualizacji. Zainstaluj nowszą wersję Curio, która zaktualizowała tę bibliotekę, aby dalej z niej korzystać.',
+    'recovery.update.failed':
+        'Nie udało się sprawdzić aktualizacji. Sprawdź połączenie i spróbuj ponownie.',
     'recovery.recovered.title': 'Curio jest gotowe',
     'recovery.recovered.body': 'Twoja biblioteka została otwarta.',
     'recovery.recovered.setAside': 'Poprzednia baza danych została przeniesiona do {path}.',

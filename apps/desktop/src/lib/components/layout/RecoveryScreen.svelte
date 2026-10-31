@@ -6,12 +6,19 @@
  * (show the profile folder, copy the error, quit) always in reach. Restoring
  * a backup and starting fresh ask for confirmation first; both move the
  * current database aside, never delete it.
+ *
+ * Keyboard focus follows the flow: into the confirmation when it opens, back
+ * to the action that opened it on cancel (or that is now running), and onto
+ * "Open Curio" once recovered. While an action runs, every button stays
+ * focusable but inert (`aria-disabled`), so focus is never dropped to the
+ * page and nothing — quit included — can interrupt the file moves.
  */
 import Icon from '$components/common/Icon.svelte';
 import type { StartupFailureDto } from '$lib/bindings';
 import { type MessageKey, t } from '$lib/i18n';
 import { startupStore } from '$lib/state/startup.svelte';
 import { type RecoveryAction, fileName, recoveryCopy, recoveryPlan } from '$lib/utils/recovery';
+import { tick } from 'svelte';
 
 let { failure, onopen }: { failure: StartupFailureDto; onopen: () => void } = $props();
 
@@ -19,7 +26,19 @@ const LABELS: Record<RecoveryAction, MessageKey> = {
     retry: 'recovery.action.retry',
     restore: 'recovery.action.restore',
     fresh: 'recovery.action.fresh',
+    update: 'recovery.action.update',
 };
+
+/** The action buttons, to hand focus back to the one a flow started from. */
+const actionButtons: Partial<Record<RecoveryAction, HTMLButtonElement>> = $state({});
+let confirmButton: HTMLButtonElement | undefined = $state();
+let openButton: HTMLButtonElement | undefined = $state();
+
+$effect(() => {
+    if (startupStore.recovered !== null) {
+        openButton?.focus();
+    }
+});
 
 const CONFIRMS: Partial<Record<RecoveryAction, MessageKey>> = {
     restore: 'recovery.confirm.restore',
@@ -30,10 +49,12 @@ const CONFIRMS: Partial<Record<RecoveryAction, MessageKey>> = {
 let confirming: RecoveryAction | null = $state(null);
 
 const plan = $derived(recoveryPlan(failure));
-const copy = $derived(recoveryCopy(failure.class));
-const replaces = $derived(
-    [plan.primary, ...plan.secondary].some((action) => action === 'restore' || action === 'fresh'),
+/** Every offered action, the recommended one first. */
+const actions = $derived(
+    plan.primary === null ? plan.secondary : [plan.primary, ...plan.secondary],
 );
+const copy = $derived(recoveryCopy(failure.class));
+const replaces = $derived(actions.some((action) => action === 'restore' || action === 'fresh'));
 const busy = $derived(startupStore.busy !== null);
 
 /** The text either side of `{param}` in a message, so a path can be set in code. */
@@ -43,20 +64,44 @@ function around(key: MessageKey, param: string): [string, string] {
     return [before, after];
 }
 
-function choose(action: RecoveryAction): void {
-    if (CONFIRMS[action] !== undefined) {
-        confirming = action;
+async function choose(action: RecoveryAction): Promise<void> {
+    if (busy) {
         return;
     }
-    void startupStore.run(action);
+    if (CONFIRMS[action] !== undefined) {
+        confirming = action;
+        await tick();
+        confirmButton?.focus();
+        return;
+    }
+    await startupStore.run(action);
 }
 
-function confirm(): void {
+/** Closes the confirmation and puts focus back on the action that opened it. */
+async function closeConfirm(): Promise<RecoveryAction | null> {
     const action = confirming;
     confirming = null;
+    await tick();
     if (action !== null) {
-        void startupStore.run(action);
+        actionButtons[action]?.focus();
     }
+    return action;
+}
+
+async function confirm(): Promise<void> {
+    const action = await closeConfirm();
+    if (action !== null) {
+        await startupStore.run(action);
+    }
+}
+
+/** A footer action, inert while a recovery action runs. */
+function whenIdle(run: () => Promise<void>): () => void {
+    return () => {
+        if (!busy) {
+            void run();
+        }
+    };
 }
 
 function label(action: RecoveryAction): string {
@@ -81,7 +126,7 @@ function label(action: RecoveryAction): string {
                 {@render withPath('recovery.recovered.setAside', 'path', startupStore.recovered.setAside)}
             {/if}
             <div class="actions">
-                <button type="button" class="btn btn-primary" onclick={onopen}>
+                <button type="button" class="btn btn-primary" bind:this={openButton} onclick={onopen}>
                     {t('recovery.action.open')}
                 </button>
             </div>
@@ -101,33 +146,30 @@ function label(action: RecoveryAction): string {
                         {t(CONFIRMS[confirming] ?? 'recovery.confirm.fresh')}
                     </p>
                     <div class="actions">
-                        <button type="button" class="btn btn-primary" onclick={confirm}>
+                        <button
+                            type="button"
+                            class="btn btn-primary"
+                            aria-describedby="recovery-confirm"
+                            bind:this={confirmButton}
+                            onclick={confirm}
+                        >
                             {t(LABELS[confirming])}
                         </button>
-                        <button type="button" class="btn" onclick={() => (confirming = null)}>
+                        <button type="button" class="btn" onclick={() => void closeConfirm()}>
                             {t('recovery.action.cancel')}
                         </button>
                     </div>
                 </div>
-            {:else if plan.primary !== null || plan.secondary.length > 0}
+            {:else if actions.length > 0}
                 <div class="actions">
-                    {#if plan.primary !== null}
-                        {@const primary = plan.primary}
-                        <button
-                            type="button"
-                            class="btn btn-primary"
-                            disabled={busy}
-                            onclick={() => choose(primary)}
-                        >
-                            {label(primary)}
-                        </button>
-                    {/if}
-                    {#each plan.secondary as action (action)}
+                    {#each actions as action (action)}
                         <button
                             type="button"
                             class="btn"
-                            disabled={busy}
-                            onclick={() => choose(action)}
+                            class:btn-primary={action === plan.primary}
+                            aria-disabled={busy}
+                            bind:this={actionButtons[action]}
+                            onclick={() => void choose(action)}
                         >
                             {label(action)}
                         </button>
@@ -149,15 +191,30 @@ function label(action: RecoveryAction): string {
 
             <footer class="footer">
                 {#if failure.profile_dir !== null}
-                    <button type="button" class="link-btn" onclick={() => void startupStore.reveal()}>
+                    <button
+                        type="button"
+                        class="link-btn"
+                        aria-disabled={busy}
+                        onclick={whenIdle(() => startupStore.reveal())}
+                    >
                         {t('recovery.action.reveal')}
                     </button>
                 {/if}
-                <button type="button" class="link-btn" onclick={() => void startupStore.copyReport()}>
+                <button
+                    type="button"
+                    class="link-btn"
+                    aria-disabled={busy}
+                    onclick={whenIdle(() => startupStore.copyReport())}
+                >
                     {t('recovery.action.copy')}
                 </button>
                 <span class="spacer"></span>
-                <button type="button" class="link-btn" onclick={() => void startupStore.quit()}>
+                <button
+                    type="button"
+                    class="link-btn"
+                    aria-disabled={busy}
+                    onclick={whenIdle(() => startupStore.quit())}
+                >
                     {t('recovery.action.quit')}
                 </button>
             </footer>
@@ -259,8 +316,15 @@ function label(action: RecoveryAction): string {
             color var(--dur-fast) var(--ease);
     }
 
-    .btn:hover:not(:disabled) {
+    .btn:hover:not([aria-disabled='true']) {
         background: var(--hover);
+    }
+
+    /* Inert while an action runs, but still focusable (see the header). */
+    .btn[aria-disabled='true'],
+    .link-btn[aria-disabled='true'] {
+        cursor: default;
+        opacity: 0.55;
     }
 
     .btn-primary {
@@ -269,7 +333,7 @@ function label(action: RecoveryAction): string {
         color: var(--accent-fg);
     }
 
-    .btn-primary:hover:not(:disabled) {
+    .btn-primary:hover:not([aria-disabled='true']) {
         background: var(--accent-hover);
     }
 
@@ -345,7 +409,7 @@ function label(action: RecoveryAction): string {
         color: var(--fg-muted);
     }
 
-    .link-btn:hover {
+    .link-btn:hover:not([aria-disabled='true']) {
         color: var(--fg);
     }
 

@@ -58,7 +58,9 @@ chore ci build revert`. Small, logical commits.
 
 - `main` is always releasable. Every change lands as a short-lived branch →
   PR (mirroring `.github/PULL_REQUEST_TEMPLATE.md`) → green CI on the merging
-  commit → **squash-merge**. Never commit on or push to `main`. The
+  commit → **squash-merge**. Never commit on or push to `main`. Keep a
+  feature branch current by rebasing it onto its target and pushing with
+  `--force-with-lease --force-if-includes` (your own branch only). The
   **`ship-pr`** skill is the procedure.
 - Before pushing, run the gates for what you touched — the **`gates`** skill
   maps paths to `just` recipes. `just ci` is the full gate.
@@ -76,7 +78,7 @@ chore ci build revert`. Small, logical commits.
 | Skill | Use for |
 |---|---|
 | `gates` | which local checks a change needs before push |
-| `ship-pr` | branch → PR → CI loop → sync with main → squash-merge |
+| `ship-pr` | branch → PR → CI loop → rebase + force-with-lease → squash-merge |
 | `visual-check` | screenshot-driven validation of desktop UI changes |
 | `contract-change` | anything touching `schemas/`, frontmatter keys, event types, the manifest |
 | `add-source` | a new feed format / site layout / enrichment provider in curio-core |

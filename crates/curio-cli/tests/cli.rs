@@ -461,6 +461,73 @@ async fn bulk_save_exports_the_library_idempotently() {
         .failure();
 }
 
+/// Every CLI invocation re-applies curio.toml's destinations. That must
+/// never undo the missing-destination check: a vault that vanished (or an
+/// unmounted mount point that now looks empty) is refused, not recreated
+/// and fully re-exported — until `curio dest add` registers it afresh.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_vanished_vault_is_refused_not_recreated() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let vault = parent.path().join("vault");
+    seed(profile.path(), &server);
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let first = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(first["created"], 3);
+    let saved = |profile: &std::path::Path| {
+        events_lines(profile)
+            .iter()
+            .filter(|event| event["type"] == "article.saved")
+            .count()
+    };
+    assert_eq!(saved(profile.path()), 3);
+
+    // The folder is gone: refused, and nothing is recreated.
+    std::fs::remove_dir_all(&vault).unwrap();
+    curio(profile.path())
+        .args(["save", "--all", "--dest", "vault"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is missing"));
+    assert!(!vault.exists(), "the vault root must not be recreated");
+
+    // An empty folder at the old path (an unmounted mount point): refused
+    // too, and left empty.
+    std::fs::create_dir(&vault).unwrap();
+    curio(profile.path())
+        .args(["save", "--all", "--dest", "vault"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is missing"));
+    assert_eq!(std::fs::read_dir(&vault).unwrap().count(), 0);
+    assert_eq!(saved(profile.path()), 3, "no duplicate article.saved");
+
+    // Registering it again starts the destination afresh.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let afresh = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(afresh["created"], 3);
+    assert!(vault.join(".curio/manifest.json").is_file());
+}
+
 #[test]
 fn reddit_credentials_have_a_full_cli_surface_and_never_echo_the_secret() {
     let profile = tempfile::tempdir().unwrap();

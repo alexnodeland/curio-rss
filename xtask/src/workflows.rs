@@ -85,6 +85,7 @@ pub const RETIRED_RUNNERS: &[&str] = &[
     "macos-11",
     "macos-12",
     "macos-13",
+    "macos-14",
     "ubuntu-18.04",
     "ubuntu-20.04",
     "windows-2016",
@@ -936,7 +937,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
   build:
     needs: gate
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v4.4.0
       - run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
@@ -985,7 +986,7 @@ jobs:
       matrix:
         include:
           - { name: linux-x64, os: ubuntu-22.04 }
-          - { name: macos-universal, os: macos-14 }
+          - { name: macos-universal, os: macos-15 }
           - { name: windows-x64, os: windows-latest }
     steps:
       - run: npm run tauri build
@@ -1033,10 +1034,17 @@ jobs:
 
     #[test]
     fn a_retired_runner_is_flagged_in_any_workflow_and_matrix_spelling() {
-        let include = NIGHTLY.replace("os: macos-14", "os: macos-13");
+        let include = NIGHTLY.replace("os: macos-15", "os: macos-13");
         assert_flags(
             &run_nightly(&include),
             "job `bundle` runs on `macos-13`, a retired GitHub runner image",
+        );
+        // macos-14: brownouts from 2026-10, retired 2026-11-02
+        // (actions/runner-images#13518).
+        let brownout = NIGHTLY.replace("os: macos-15", "os: macos-14");
+        assert_flags(
+            &run_nightly(&brownout),
+            "job `bundle` runs on `macos-14`, a retired GitHub runner image",
         );
         let list = NIGHTLY.replace(
             "[ubuntu-22.04, windows-latest]",

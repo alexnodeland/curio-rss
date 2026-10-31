@@ -278,9 +278,18 @@ mod tests {
 
     use super::*;
 
+    /// The crate dir is read at run time (cargo sets it for test runs): a
+    /// compile-time path goes stale when a shared target dir reuses this
+    /// binary from another worktree (issue #183).
     fn fixture(name: &str) -> String {
-        let path = format!("{}/../../fixtures/opml/{name}", env!("CARGO_MANIFEST_DIR"));
-        std::fs::read_to_string(path).unwrap()
+        let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|| panic!("CARGO_MANIFEST_DIR unset: run the tests through cargo"));
+        std::fs::read_to_string(
+            std::path::Path::new(&crate_dir)
+                .join("../../fixtures/opml")
+                .join(name),
+        )
+        .unwrap()
     }
 
     fn roundtrip(feeds: &[OpmlFeed]) -> Vec<OpmlFeed> {

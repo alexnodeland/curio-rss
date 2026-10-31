@@ -304,16 +304,12 @@ impl CoreHandle {
             source,
         })?;
         let storage = Arc::new(Storage::open(profile_dir.join("curio.db"))?);
-        let events_dir = profile_dir.join(".curio").join("events");
-        let log = EventLog::open(&events_dir).map_err(EventsError::Log)?;
-        // Contract: the event log is never committed to git.
-        let gitignore = profile_dir.join(".curio").join(".gitignore");
-        if !gitignore.exists() {
-            std::fs::write(&gitignore, "events/\n").map_err(|source| CoreError::Io {
-                path: gitignore.clone(),
-                source,
-            })?;
-        }
+        let state_dir = profile_dir.join(".curio");
+        let log = EventLog::open(state_dir.join("events"), state_dir.join(EVENTS_LOCK_FILE))
+            .map_err(EventsError::Log)?;
+        // Contract: the event log is never committed to git — nor is the
+        // cross-process lock file guarding it.
+        ensure_gitignore(&state_dir.join(".gitignore"))?;
         // No fatal replay here: intents a previous process left staged
         // are drained by the `emit` below, which degrades to the backlog
         // flag instead of refusing to open a profile on a full disk.
@@ -400,5 +396,156 @@ impl CoreHandle {
             self.emit();
         }
         changed
+    }
+}
+
+impl CoreError {
+    /// Whether this is transient contention with another process sharing
+    /// the profile — the database stayed busy
+    /// ([`StorageError::Busy`], or [`OpenError::Locked`] while opening) or
+    /// the events lock stayed held
+    /// ([`crate::events::EventLogError::ProfileLocked`]). Retrying the
+    /// same operation once the other process finishes can succeed; heads
+    /// surface it as "busy, try again" (the CLI exits with a distinct
+    /// code).
+    #[must_use]
+    pub fn is_profile_busy(&self) -> bool {
+        match self {
+            Self::Storage(err)
+            | Self::Events(EventsError::Storage(err))
+            | Self::Open(OpenError::Storage(err)) => err.is_busy(),
+            Self::Open(OpenError::Locked { .. })
+            | Self::Events(EventsError::Log(crate::events::EventLogError::ProfileLocked {
+                ..
+            })) => true,
+            _ => false,
+        }
+    }
+}
+
+/// The cross-process events lock, inside `.curio/` beside (never inside)
+/// the `events/` contract directory (see [`EventLog`]).
+const EVENTS_LOCK_FILE: &str = "events.lock";
+
+/// Lines `.curio/.gitignore` must carry: the events directory and its
+/// lock file.
+const GITIGNORE_LINES: [&str; 2] = ["events/", EVENTS_LOCK_FILE];
+
+/// Writes `.curio/.gitignore`, or appends whichever required lines an
+/// existing one (from an older build, or hand-edited) lacks.
+fn ensure_gitignore(path: &Path) -> Result<(), CoreError> {
+    let io = |source| CoreError::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+    let existing = match std::fs::read_to_string(path) {
+        Ok(existing) => existing,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(io(err)),
+    };
+    let missing: Vec<&str> = GITIGNORE_LINES
+        .into_iter()
+        .filter(|line| !existing.lines().any(|have| have.trim() == *line))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    for line in missing {
+        next.push_str(line);
+        next.push('\n');
+    }
+    std::fs::write(path, next).map_err(io)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use crate::events::EventLogError;
+
+    fn busy() -> StorageError {
+        StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ))
+    }
+
+    #[test]
+    fn contention_from_either_side_reads_as_profile_busy() {
+        assert!(CoreError::Storage(busy()).is_profile_busy());
+        assert!(CoreError::Events(EventsError::Storage(busy())).is_profile_busy());
+        assert!(
+            CoreError::Events(EventsError::Log(EventLogError::ProfileLocked {
+                path: PathBuf::from("events.lock"),
+                waited_ms: 15_000,
+            }))
+            .is_profile_busy()
+        );
+        assert!(
+            CoreError::Open(OpenError::Locked {
+                path: PathBuf::from("curio.db"),
+                source: rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    None,
+                ),
+            })
+            .is_profile_busy()
+        );
+        assert!(CoreError::Open(OpenError::Storage(busy())).is_profile_busy());
+        assert!(
+            !CoreError::Open(OpenError::TooNew {
+                found: 99,
+                supported: 8
+            })
+            .is_profile_busy()
+        );
+        assert!(!CoreError::Storage(StorageError::WriterGone).is_profile_busy());
+        assert!(
+            !CoreError::Events(EventsError::Log(EventLogError::Io(std::io::Error::other(
+                "disk"
+            ))))
+            .is_profile_busy()
+        );
+        assert!(!CoreError::NotFound { entity: "article" }.is_profile_busy());
+    }
+
+    #[test]
+    fn gitignore_is_written_then_upgraded_without_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".gitignore");
+        ensure_gitignore(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "events/\nevents.lock\n"
+        );
+
+        // An older build's file (no lock line, no trailing newline) gains
+        // only the missing line; the user's own lines stay.
+        std::fs::write(&path, "events/\n*.bak").unwrap();
+        ensure_gitignore(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "events/\n*.bak\nevents.lock\n"
+        );
+        ensure_gitignore(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "events/\n*.bak\nevents.lock\n",
+            "idempotent"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_gitignore_is_a_profile_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where the file should be: reading it fails.
+        let path = dir.path().join(".gitignore");
+        std::fs::create_dir(&path).unwrap();
+        assert!(matches!(ensure_gitignore(&path), Err(CoreError::Io { .. })));
     }
 }

@@ -1,20 +1,31 @@
 //! The append-only JSONL writer: rotation, retention, fsync-on-flush,
-//! and torn-tail crash recovery (see [`heal_torn_tail`]).
+//! torn-tail crash recovery (see [`heal_torn_tail`]), and the
+//! cross-process events lock that lets several heads share one log.
+
+mod file;
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use chrono::NaiveDate;
 use curio_types::EventEnvelope;
 
 use super::{EventLogError, file_name, parse_file_name};
+use crate::lock::{FileLock, LockError};
+use file::{heal_torn_tail, scan_latest, truncate_and_sync, write_line};
 
 /// Contract rotation threshold: 50 MB.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Contract retention floor: the producer retains files at least 90 days.
 pub const MIN_RETENTION_DAYS: u32 = 90;
+
+/// How long a log operation waits for another process to release the
+/// events lock before failing with [`EventLogError::ProfileLocked`].
+/// Holders keep it for one drain (a few appends, one fsync, one intent
+/// delete), so a wait this long means the holder is stuck.
+pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Append-only writer for a `.curio/events/` directory.
 ///
@@ -24,11 +35,24 @@ pub const MIN_RETENTION_DAYS: u32 = 90;
 /// exceeded (`-2`, `-3`, … suffix). Files are append-only and never
 /// rewritten. [`EventLog::flush`] is the durability point: it fsyncs
 /// (`sync_all`) the current file.
+///
+/// **Several processes may share one directory** (the desktop app and a
+/// CLI run on one profile). Every operation runs under an exclusive
+/// advisory lock on a lock file the caller names at open — the profile
+/// keeps it at `.curio/events.lock`, *beside* the contract directory so
+/// consumers listing it never see it — and starts by re-syncing with
+/// whatever the other writers did meanwhile:
+/// a torn tail is healed, a file another process rotated to is adopted,
+/// and the size counter is re-read from disk. Lines from different
+/// processes therefore never interleave, never land in a stale `-N`
+/// file, and a heal never truncates an append in flight.
 #[derive(Debug)]
 pub struct EventLog {
     dir: PathBuf,
     max_file_bytes: u64,
     retention_days: u32,
+    lock: FileLock,
+    lock_timeout: Duration,
     current: Option<OpenFile>,
     /// A failed append closed `current` without managing to truncate and
     /// fsync it, so the whole lines appended before the failure are not
@@ -42,6 +66,27 @@ pub struct EventLog {
     short_write: Option<(usize, usize)>,
 }
 
+/// An [`EventLog`] whose cross-process lock is held: the only way to
+/// append or fsync. Obtained through `EventLog::locked`, which keeps
+/// the lock for the whole closure so a caller can claim, append, fsync
+/// and retire a batch as one critical section.
+#[derive(Debug)]
+pub(crate) struct LockedLog<'log> {
+    log: &'log mut EventLog,
+}
+
+impl LockedLog<'_> {
+    /// [`EventLog::append`] inside the held lock.
+    pub(crate) fn append(&mut self, envelope: &EventEnvelope) -> Result<(), EventLogError> {
+        self.log.append_held(envelope)
+    }
+
+    /// [`EventLog::flush`] inside the held lock.
+    pub(crate) fn flush(&mut self) -> Result<(), EventLogError> {
+        self.log.flush_held()
+    }
+}
+
 #[derive(Debug)]
 struct OpenFile {
     date: NaiveDate,
@@ -52,31 +97,88 @@ struct OpenFile {
 }
 
 impl EventLog {
-    /// Opens (creating if absent) the events directory. Appending resumes
-    /// on the newest existing log file, so restarts continue the day's
-    /// file instead of abandoning it. A torn final line left by a crash
-    /// mid-append is healed here (truncated back to the last complete
-    /// line — see `heal_torn_tail`), so readers and subsequent appends
-    /// only ever see whole lines.
+    /// Opens (creating if absent) the events directory `dir` and the
+    /// cross-process lock file `lock_file`, waiting up to
+    /// [`DEFAULT_LOCK_TIMEOUT`] for another process holding the lock.
+    /// Nothing is created anywhere but those two paths.
+    ///
+    /// Every handle on one directory must name the same lock file — the
+    /// lock is what serializes them. Keep it out of `dir` (consumers list
+    /// that) and somewhere that is not cleaned while Curio runs; a lock
+    /// file deleted anyway is noticed and re-created at the next
+    /// operation. `lock_file`'s directory must exist.
+    /// Appending resumes on the newest existing log
+    /// file, so restarts continue the day's file instead of abandoning
+    /// it. A torn final line left by a crash mid-append is healed here
+    /// (truncated back to the last complete line — see `heal_torn_tail`)
+    /// and again at the start of every later operation, always under the
+    /// lock — so readers and subsequent appends only ever see whole
+    /// lines, and a heal never truncates another process's append in
+    /// flight.
     ///
     /// # Errors
     ///
-    /// Filesystem errors creating or scanning the directory.
-    pub fn open(dir: impl Into<PathBuf>) -> Result<Self, EventLogError> {
+    /// [`EventLogError::ProfileLocked`] if another process keeps the lock
+    /// past the timeout; filesystem errors creating the directory or the
+    /// lock file, or healing.
+    pub fn open(
+        dir: impl Into<PathBuf>,
+        lock_file: impl Into<PathBuf>,
+    ) -> Result<Self, EventLogError> {
+        Self::open_with_lock_timeout(dir, lock_file, DEFAULT_LOCK_TIMEOUT)
+    }
+
+    /// [`EventLog::open`] with an explicit lock timeout, which also
+    /// bounds every later operation's wait for the lock.
+    ///
+    /// # Errors
+    ///
+    /// See [`EventLog::open`].
+    pub fn open_with_lock_timeout(
+        dir: impl Into<PathBuf>,
+        lock_file: impl Into<PathBuf>,
+        lock_timeout: Duration,
+    ) -> Result<Self, EventLogError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
-        if let Some((date, suffix)) = scan_latest(&dir)? {
-            heal_torn_tail(&dir.join(file_name(date, suffix)))?;
-        }
-        Ok(Self {
+        let lock = FileLock::open(lock_file)?;
+        let mut log = Self {
             dir,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             retention_days: MIN_RETENTION_DAYS,
+            lock,
+            lock_timeout,
             current: None,
             #[cfg(test)]
             short_write: None,
             unsynced_close: false,
-        })
+        };
+        // The catch-up every locked section starts with heals the tail.
+        log.locked(|_| Ok::<_, EventLogError>(()))?;
+        Ok(log)
+    }
+
+    /// The cross-process lock file guarding this directory.
+    #[must_use]
+    pub fn lock_path(&self) -> &Path {
+        self.lock.path()
+    }
+
+    /// Runs `f` with the cross-process lock held, after re-syncing with
+    /// what other processes wrote since this handle last held it.
+    pub(crate) fn locked<T, E>(
+        &mut self,
+        f: impl FnOnce(&mut LockedLog<'_>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<EventLogError>,
+    {
+        let _guard = self
+            .lock
+            .acquire(self.lock_timeout)
+            .map_err(|err| E::from(self.lock_error(err)))?;
+        self.resync()?;
+        f(&mut LockedLog { log: self })
     }
 
     /// Overrides the size-rotation threshold (min 1 byte). The contract
@@ -101,10 +203,10 @@ impl EventLog {
         &self.dir
     }
 
-    /// Appends one envelope as one JSONL line, rotating first if the
-    /// envelope's UTC date has passed the current file's or the size cap
-    /// would be exceeded. Buffered durability: call [`EventLog::flush`]
-    /// to fsync.
+    /// Appends one envelope as one JSONL line (under the lock), rotating
+    /// first if the envelope's UTC date has passed the current file's or
+    /// the size cap would be exceeded. Buffered durability: call
+    /// [`EventLog::flush`] to fsync.
     ///
     /// All-or-nothing: a write that fails part-way (a full disk, an I/O
     /// error) is rolled back — the file is truncated to its last known
@@ -114,8 +216,13 @@ impl EventLog {
     ///
     /// # Errors
     ///
-    /// Serialization or filesystem errors.
+    /// [`EventLogError::ProfileLocked`]; serialization or filesystem
+    /// errors.
     pub fn append(&mut self, envelope: &EventEnvelope) -> Result<(), EventLogError> {
+        self.locked(|log| log.append(envelope))
+    }
+
+    fn append_held(&mut self, envelope: &EventEnvelope) -> Result<(), EventLogError> {
         let mut line = serde_json::to_string(envelope)?;
         line.push('\n');
         let line_bytes = u64::try_from(line.len()).unwrap_or(u64::MAX);
@@ -193,8 +300,12 @@ impl EventLog {
     ///
     /// # Errors
     ///
-    /// Filesystem errors.
+    /// [`EventLogError::ProfileLocked`]; filesystem errors.
     pub fn flush(&mut self) -> Result<(), EventLogError> {
+        self.locked(|log| log.log.flush_held())
+    }
+
+    fn flush_held(&mut self) -> Result<(), EventLogError> {
         if let Some(current) = &mut self.current {
             current.file.sync_all()?;
         } else if self.unsynced_close {
@@ -207,13 +318,18 @@ impl EventLog {
     }
 
     /// Deletes log files older than the retention window, measured from
-    /// `today` (UTC). The currently open file is never swept. Returns the
-    /// removed paths.
+    /// `today` (UTC), under the lock. The currently open file is never
+    /// swept. Returns the removed paths.
     ///
     /// # Errors
     ///
-    /// Filesystem errors scanning or deleting.
+    /// [`EventLogError::ProfileLocked`]; filesystem errors scanning or
+    /// deleting.
     pub fn sweep_retention(&mut self, today: NaiveDate) -> Result<Vec<PathBuf>, EventLogError> {
+        self.locked(|log| log.log.sweep_held(today))
+    }
+
+    fn sweep_held(&mut self, today: NaiveDate) -> Result<Vec<PathBuf>, EventLogError> {
         let mut removed = Vec::new();
         for entry in std::fs::read_dir(&self.dir)? {
             let entry = entry?;
@@ -237,6 +353,41 @@ impl EventLog {
         Ok(removed)
     }
 
+    /// Catches up with other writers before a locked operation: heals a
+    /// torn tail on the newest file, adopts a file another process
+    /// rotated to (fsyncing ours first — it may hold unflushed lines of
+    /// an earlier [`EventLog::append`]), and re-reads the size counter.
+    fn resync(&mut self) -> Result<(), EventLogError> {
+        let latest = scan_latest(&self.dir)?;
+        if let Some((date, suffix)) = latest {
+            heal_torn_tail(&self.dir.join(file_name(date, suffix)))?;
+        }
+        let same_file = match (&self.current, latest) {
+            (Some(current), Some(latest)) => (current.date, current.suffix) == latest,
+            (Some(_), None) => false,
+            (None, _) => return Ok(()),
+        };
+        if same_file {
+            if let Some(current) = &mut self.current {
+                current.bytes = current.file.metadata()?.len();
+            }
+        } else {
+            self.flush_held()?;
+            self.current = None;
+        }
+        Ok(())
+    }
+
+    fn lock_error(&self, err: LockError) -> EventLogError {
+        match err {
+            LockError::TimedOut { waited } => EventLogError::ProfileLocked {
+                path: self.lock.path().to_path_buf(),
+                waited_ms: u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
+            },
+            LockError::Io(err) => EventLogError::Io(err),
+        }
+    }
+
     /// Makes sure `current` points at the right file for an event dated
     /// `date` whose serialized line is `line_bytes` long.
     fn ensure_file(&mut self, date: NaiveDate, line_bytes: u64) -> Result<(), EventLogError> {
@@ -254,7 +405,7 @@ impl EventLog {
         if let Some(current) = &self.current
             && date > current.date
         {
-            self.flush()?;
+            self.flush_held()?;
             self.open_file(date, 1)?;
         }
 
@@ -266,7 +417,7 @@ impl EventLog {
                 break;
             }
             let (date, suffix) = (current.date, current.suffix + 1);
-            self.flush()?;
+            self.flush_held()?;
             self.open_file(date, suffix)?;
         }
         Ok(())
@@ -294,203 +445,5 @@ impl EventLog {
     }
 }
 
-/// Truncates `path` to `len` bytes and fsyncs it, through a fresh
-/// write handle: the log's own handle is append-only, which on Windows
-/// lacks the write-data access a truncate needs (`set_len` on it fails
-/// with access denied), so the rollback can't reuse it.
-fn truncate_and_sync(path: &Path, len: u64) -> std::io::Result<()> {
-    let file = OpenOptions::new().write(true).open(path)?;
-    file.set_len(len)?;
-    file.sync_all()
-}
-
-/// Writes one serialized line. `short_write` is the test-only fault
-/// injection: write that many bytes, then fail as a full disk would.
-fn write_line(file: &mut File, line: &[u8], short_write: Option<usize>) -> std::io::Result<()> {
-    match short_write {
-        None => file.write_all(line),
-        Some(n) => {
-            file.write_all(&line[..n.min(line.len())])?;
-            Err(std::io::Error::new(
-                std::io::ErrorKind::StorageFull,
-                "injected short write",
-            ))
-        }
-    }
-}
-
-/// Backwards-scan chunk size used by [`heal_torn_tail`].
-const HEAL_SCAN_CHUNK: u64 = 8192;
-
-/// Repairs a torn final line — the artifact of a crash (or a partial
-/// write on a full disk) mid-append — by truncating the file back to its
-/// last complete line.
-///
-/// Safe by the emitter's ordering contract: a line can only be torn if
-/// its fsync never ran, and the fsync always happens *before* the staged
-/// write-ahead intent is deleted — so the envelope on the torn line
-/// still exists as an intent and is replayed in full at the next
-/// startup. Without this heal, the replayed line would be glued onto the
-/// torn bytes, permanently corrupting the file for every line-oriented
-/// consumer (including `read_all`, which refuses invalid lines).
-fn heal_torn_tail(path: &Path) -> Result<(), EventLogError> {
-    let mut file = match OpenOptions::new().read(true).write(true).open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-    let len = file.metadata()?.len();
-    if len == 0 {
-        return Ok(());
-    }
-    file.seek(SeekFrom::End(-1))?;
-    let mut last = [0u8; 1];
-    file.read_exact(&mut last)?;
-    if last[0] == b'\n' {
-        return Ok(());
-    }
-    // Scan backwards for the last newline; everything after it is the
-    // torn line. Chunked so a large file never loads whole.
-    let mut buf = vec![0u8; usize::try_from(HEAL_SCAN_CHUNK).unwrap_or(8192)];
-    let mut end = len;
-    let keep = loop {
-        if end == 0 {
-            break 0;
-        }
-        let start = end.saturating_sub(HEAL_SCAN_CHUNK);
-        let n = usize::try_from(end - start).unwrap_or(buf.len());
-        file.seek(SeekFrom::Start(start))?;
-        file.read_exact(&mut buf[..n])?;
-        if let Some(idx) = buf[..n].iter().rposition(|&b| b == b'\n') {
-            break start + idx as u64 + 1;
-        }
-        end = start;
-    };
-    file.set_len(keep)?;
-    file.sync_all()?;
-    tracing::warn!(
-        path = %path.display(),
-        torn_bytes = len - keep,
-        "healed torn event-log tail left by a previous crash"
-    );
-    Ok(())
-}
-
-/// The newest `(date, suffix)` among existing log files, if any.
-fn scan_latest(dir: &Path) -> Result<Option<(NaiveDate, u32)>, EventLogError> {
-    let mut latest: Option<(NaiveDate, u32)> = None;
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if let Some(parsed) = parse_file_name(name)
-            && latest.is_none_or(|best| parsed > best)
-        {
-            latest = Some(parsed);
-        }
-    }
-    Ok(latest)
-}
-
 #[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use curio_types::{CurioId, EventId, EventPayload, EventsSchemaV1Marker};
-
-    use super::*;
-    use crate::events::read_all;
-
-    fn opened(ts: &str) -> EventEnvelope {
-        EventEnvelope {
-            schema: EventsSchemaV1Marker,
-            event_id: EventId::new(),
-            ts: ts.parse().unwrap(),
-            event: EventPayload::ArticleOpened {
-                curio_id: CurioId::new(),
-                dwell_ms: None,
-            },
-        }
-    }
-
-    /// Asserts the file is a sequence of whole lines — newline-terminated,
-    /// every line a parseable envelope — and returns them.
-    fn whole_lines(path: &Path) -> Vec<String> {
-        let raw = std::fs::read_to_string(path).unwrap();
-        assert!(raw.is_empty() || raw.ends_with('\n'), "torn tail:\n{raw}");
-        raw.lines()
-            .map(|line| {
-                serde_json::from_str::<EventEnvelope>(line).unwrap();
-                line.to_owned()
-            })
-            .collect()
-    }
-
-    /// #118: an append that dies mid-line (ENOSPC) must not leave torn
-    /// bytes behind for the in-process retry to extend.
-    #[test]
-    fn a_failed_append_is_rolled_back_and_the_retry_writes_one_whole_line() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("events-20260703.jsonl");
-        let mut log = EventLog::open(dir.path()).unwrap();
-        let first = opened("2026-07-03T10:00:00.000Z");
-        log.append(&first).unwrap();
-        log.flush().unwrap();
-
-        let second = opened("2026-07-03T10:00:01.000Z");
-        log.inject_short_write(0, 17);
-        let err = log.append(&second).unwrap_err();
-        assert!(
-            matches!(&err, EventLogError::Io(io) if io.kind() == std::io::ErrorKind::StorageFull),
-            "{err}"
-        );
-        // Nothing torn survives the failure itself...
-        assert_eq!(whole_lines(&path).len(), 1);
-
-        // ...and the retry appends exactly one whole copy.
-        log.append(&second).unwrap();
-        log.flush().unwrap();
-        let lines = whole_lines(&path);
-        assert_eq!(lines.len(), 2, "no duplicate, no partial: {lines:?}");
-        assert_eq!(read_all(dir.path()).unwrap(), vec![first, second]);
-    }
-
-    /// If the rollback itself could not truncate + fsync, the lines that
-    /// landed before the failure are not known durable: `flush` must not
-    /// report success (the emitter would retire their intents) until the
-    /// file is reopened and fsynced again.
-    #[test]
-    fn flush_refuses_after_an_unsynced_rollback_until_the_reopen() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut log = EventLog::open(dir.path()).unwrap();
-        let first = opened("2026-07-03T10:00:00.000Z");
-        log.append(&first).unwrap();
-        // The state roll_back_failed_append leaves when set_len/sync_all
-        // fail: file closed, durability unknown.
-        log.current = None;
-        log.unsynced_close = true;
-        log.flush().unwrap_err();
-
-        let second = opened("2026-07-03T10:00:01.000Z");
-        log.append(&second).unwrap();
-        log.flush().unwrap();
-        assert_eq!(read_all(dir.path()).unwrap(), vec![first, second]);
-    }
-
-    /// A failure on the very first line of a fresh file rolls back to empty.
-    #[test]
-    fn a_failed_first_append_leaves_an_empty_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("events-20260703.jsonl");
-        let mut log = EventLog::open(dir.path()).unwrap();
-        let only = opened("2026-07-03T10:00:00.000Z");
-        log.inject_short_write(0, 5);
-        log.append(&only).unwrap_err();
-        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
-
-        log.append(&only).unwrap();
-        log.flush().unwrap();
-        assert_eq!(whole_lines(&path).len(), 1);
-        assert_eq!(read_all(dir.path()).unwrap(), vec![only]);
-    }
-}
+mod tests;

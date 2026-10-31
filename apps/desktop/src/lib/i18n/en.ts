@@ -10,6 +10,8 @@ export const en = {
     'app.tagline': 'Your reading, in your notes',
     'app.loading': 'Loading…',
     'app.error.internal': 'Something went wrong. Retrying may help.',
+    'app.error.profileBusy':
+        'Another Curio process (such as a command-line run) is using this profile right now. Try again in a moment.',
 
     'a11y.skipToContent': 'Skip to content',
 

@@ -71,6 +71,9 @@ curio-core = { workspace = true, features = ["test-support"] }
 # "Never panics" properties over discovery's pure extraction (arbitrary
 # bytes / multi-byte text); already a workspace dev-dependency.
 proptest = { workspace = true }
+# Builds the `SQLITE_BUSY` source of a `StorageError::Busy` for the
+# error-mapping tests (already in the graph via curio-core).
+rusqlite = { workspace = true }
 specta-typescript = "=0.0.12"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

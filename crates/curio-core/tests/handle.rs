@@ -792,6 +792,82 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
     assert!(core.destinations().is_empty(), "removal survives reopen");
 }
 
+/// #116: once a destination has exported, a vault that moved or was
+/// unmounted is refused — not recreated empty at the old path and fully
+/// re-exported. The marker check survives a reopen; registering the
+/// destination again is the recovery path.
+#[test]
+fn an_exported_destination_that_vanished_is_destination_missing() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    let dest: DestinationName = "vault".parse().unwrap();
+    let (first, second) = {
+        let core = open_core(profile.path());
+        core.add_destination(dest.clone(), root.clone()).unwrap();
+        core.storage()
+            .upsert_articles(vec![
+                manual_article("k1", "One"),
+                manual_article("k2", "Two"),
+            ])
+            .unwrap();
+        let ids: Vec<_> = core
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        core.save_to_destination(ids[0], &dest).unwrap();
+        (ids[0], ids[1])
+    };
+    let is_missing = |err: curio_core::CoreError| {
+        matches!(
+            err,
+            curio_core::CoreError::Export(
+                curio_core::export::ExportError::DestinationMissing { .. }
+            )
+        )
+    };
+
+    // The whole folder goes away (unmounted / moved): refused, and the
+    // tree is never recreated.
+    std::fs::remove_dir_all(&root).unwrap();
+    let core = open_core(profile.path());
+    assert!(is_missing(
+        core.save_to_destination(second, &dest).unwrap_err()
+    ));
+    assert!(!root.exists(), "the old path must not be recreated");
+
+    // An empty directory back at the path (an unmounted mount point) is
+    // no better: the `.curio/` marker of the earlier exports is missing.
+    std::fs::create_dir(&root).unwrap();
+    assert!(is_missing(
+        core.save_to_destination(second, &dest).unwrap_err()
+    ));
+    assert!(std::fs::read_dir(&root).unwrap().next().is_none());
+
+    // Registering it again starts the destination afresh.
+    core.add_destination(dest.clone(), root.clone()).unwrap();
+    let saved = core.save_to_destination(first, &dest).unwrap();
+    assert_eq!(saved.disposition, ExportDisposition::Created);
+    assert!(root.join(&saved.path).is_file());
+}
+
+/// The exported-destinations record is facade-owned like the registry.
+#[test]
+fn the_facade_refuses_its_reserved_exported_destinations_setting() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    assert!(matches!(
+        core.set_setting("destinations.exported", "[]"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
+    assert!(matches!(
+        core.get_setting("destinations.exported"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
+}
+
 /// The retention sweep is facade-owned (single-writer event log): expired
 /// files go, the live file stays.
 #[test]

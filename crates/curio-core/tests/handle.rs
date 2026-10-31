@@ -1558,3 +1558,54 @@ fn database_health_probes_go_through_the_facade() {
     let core = open_core(profile.path());
     assert_eq!(core.pending_intent_count().unwrap(), 0);
 }
+
+/// A hand-edited note that no longer parses stops a bulk export at that
+/// article (as the CLI guide documents), even when its content is
+/// unchanged: the export never claims a note it cannot account for is
+/// intact. Notes already written stay, and once the user repairs (here:
+/// deletes) the note, re-running the bulk export completes.
+#[tokio::test]
+async fn bulk_export_stops_at_a_note_that_no_longer_parses() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let dest: DestinationName = "vault".parse().unwrap();
+    core.add_destination(dest.clone(), vault.path().to_path_buf())
+        .unwrap();
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "First note"),
+            manual_article("k2", "Second note"),
+        ])
+        .unwrap();
+    let first = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!(first.created, 2);
+
+    let garbled = vault.path().join("curio/second-note.md");
+    std::fs::write(&garbled, "markers and frontmatter gone\n").unwrap();
+    let err = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::CoreError::Export(curio_core::export::ExportError::NoteParse { .. })
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&garbled).unwrap(),
+        "markers and frontmatter gone\n",
+        "the unparseable note is never rewritten"
+    );
+    assert!(vault.path().join("curio/first-note.md").is_file());
+
+    std::fs::remove_file(&garbled).unwrap();
+    let repaired = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!(repaired.total(), 2);
+    assert!(garbled.is_file(), "the deleted note is healed");
+}

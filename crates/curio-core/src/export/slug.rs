@@ -20,9 +20,12 @@ use curio_types::CurioId;
 use icu_normalizer::ComposingNormalizerBorrowed;
 
 /// Byte budget of a slug, before any dedup suffix and the `.md` extension.
-/// Worst case on disk: 100 + `-` + 36-byte UUID + `.md` = 140 bytes, well
-/// under the 255-byte `NAME_MAX` of ext4/APFS/NTFS (which counts UTF-16
-/// units, never more than UTF-8 bytes).
+/// Longest final name: 100 + `-` + 36-byte UUID + `.md` = 140 bytes. The
+/// longest name actually *created* is the write's temp file,
+/// `.{name}.curio-tmp-{pid}`: 1 + 140 + 11 + up to 10 pid digits = 162
+/// bytes. Both stay well under the 255-byte `NAME_MAX` of ext4/APFS/NTFS
+/// (NTFS counts UTF-16 units, never more than UTF-8 bytes) — and it was
+/// the temp name that overflowed before this cap existed.
 pub(crate) const SLUG_MAX_BYTES: usize = 100;
 
 /// Windows device names, reserved with *any* extension (`CON.md` is still
@@ -133,9 +136,13 @@ mod tests {
             let slug = slugify(&title, &id);
             assert!(slug.len() <= SLUG_MAX_BYTES, "{} bytes", slug.len());
             assert!(!slug.is_empty() && !slug.ends_with('-'));
-            // The longest name unique_note_path can produce.
+            // The longest name unique_note_path can produce…
             let file_name = format!("{slug}-{id}.md");
             assert!(file_name.len() <= 255, "{} bytes", file_name.len());
+            // …and the longest one a write creates: its temp file, with
+            // the widest possible pid.
+            let temp_name = format!(".{file_name}.curio-tmp-{}", u32::MAX);
+            assert!(temp_name.len() <= 255, "{} bytes", temp_name.len());
         }
         // 200 CJK chars = 600 bytes; the cap lands on a char boundary.
         assert_eq!(slugify(&"漢".repeat(200), &id), "漢".repeat(33));

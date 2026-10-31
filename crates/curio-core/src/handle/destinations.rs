@@ -171,7 +171,10 @@ impl CoreHandle {
     ///
     /// [`CoreError::UnknownDestination`]; the first per-article
     /// export/storage/emission error aborts the walk (already-written
-    /// notes stay — each save is atomic).
+    /// notes stay — each save is atomic). That includes
+    /// [`crate::export::ExportError::NoteParse`] for a note the user
+    /// edited into something that no longer parses, even when the article
+    /// itself is unchanged.
     pub fn save_all_to_destination(
         &self,
         filter: &ListArticles,

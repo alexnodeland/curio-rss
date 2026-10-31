@@ -498,3 +498,75 @@ fn windows_reserved_titles_never_produce_a_device_name() {
         );
     }
 }
+
+/// A manifest written before slugs were NFC-normalized can still hold an
+/// NFD path (`cafe\u{301}.md`) that names the same file on APFS/HFS+ as
+/// the NFC path a new "Café" article now slugs to. The manifest
+/// comparison is normalization-aware, so the new article takes the
+/// deduplicated path instead of the old article's note.
+#[test]
+fn a_legacy_nfd_manifest_path_still_owns_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let old_id = CurioId::new();
+    let old = export_note(&dest, &input(old_id, "Caf\u{e9}", "old")).unwrap();
+
+    // Rewind to the pre-normalization layout: NFD path in the manifest
+    // and on disk.
+    let legacy = "curio/cafe\u{301}.md";
+    std::fs::rename(dir.path().join(&old.path), dir.path().join(legacy)).unwrap();
+    let mut manifest = load_manifest(dir.path()).unwrap();
+    manifest.notes.get_mut(&old_id).unwrap().path = legacy.to_owned();
+    curio_core::export::write_manifest(dir.path(), &manifest).unwrap();
+
+    let new = export_note(&dest, &input(CurioId::new(), "Caf\u{e9}", "new")).unwrap();
+    assert_ne!(new.path, "curio/caf\u{e9}.md");
+    assert!(new.path.starts_with("curio/caf\u{e9}-"), "{}", new.path);
+    let kept = std::fs::read_to_string(dir.path().join(legacy)).unwrap();
+    assert!(kept.contains(&format!("curio_id: {old_id}")));
+    assert!(kept.contains("old") && !kept.contains("new"));
+}
+
+/// The manifest is not the only witness of ownership: when it has lost
+/// an entry (deleted, or rolled back by a sync tool) — or when two
+/// byte-distinct names fold to one file — the note on disk still names
+/// its article. A new article never takes over a note that parses with
+/// another `curio_id`; the owner itself re-adopts its note in place.
+#[test]
+fn a_note_owned_by_another_article_on_disk_is_never_taken_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let owner = CurioId::new();
+    let first = export_note(&dest, &input(owner, "Shared Title", "owner's")).unwrap();
+    assert_eq!(first.path, "curio/shared-title.md");
+    std::fs::remove_file(dir.path().join(".curio/manifest.json")).unwrap();
+
+    let newcomer =
+        export_note(&dest, &input(CurioId::new(), "Shared Title", "newcomer's")).unwrap();
+    assert_eq!(newcomer.disposition, ExportDisposition::Created);
+    assert_ne!(newcomer.path, first.path);
+    let kept = std::fs::read_to_string(dir.path().join(&first.path)).unwrap();
+    assert!(kept.contains(&format!("curio_id: {owner}")));
+    assert!(kept.contains("owner's") && !kept.contains("newcomer's"));
+
+    // The owner, exported again, re-adopts its own note at its own path.
+    let readopted = export_note(&dest, &input(owner, "Shared Title", "owner's")).unwrap();
+    assert_eq!(readopted.path, first.path);
+}
+
+/// A crash can leave stale, non-UTF-8 blocks where a note was: that is
+/// an unparseable note (the user should look at it), not an I/O fault.
+#[test]
+fn a_non_utf8_note_is_reported_as_unparseable() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let article = input(CurioId::new(), "Stale Blocks", "body");
+    let first = export_note(&dest, &article).unwrap();
+    std::fs::write(dir.path().join(&first.path), b"---\n\xff\xfe\x00garbage").unwrap();
+
+    let err = export_note(&dest, &article).unwrap_err();
+    assert!(
+        matches!(err, curio_core::export::ExportError::NoteParse { .. }),
+        "{err}"
+    );
+}

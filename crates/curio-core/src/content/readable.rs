@@ -48,7 +48,15 @@ pub fn extract_full_page_with_meta(
     raw_html: &str,
     url: &str,
 ) -> Result<(String, PageMeta), ContentError> {
-    let mut readability = Readability::new(raw_html, Some(url), Some(Config::default()))?;
+    // Classes survive extraction (`keep_classes`) only so the sanitizer can
+    // read the `language-*` fence language off `pre`/`code`; the sanitizer
+    // drops every other class token. Scoring is unaffected — the extractor
+    // strips classes in post-processing, after scoring.
+    let config = Config {
+        keep_classes: true,
+        ..Config::default()
+    };
+    let mut readability = Readability::new(raw_html, Some(url), Some(config))?;
     let article = readability.parse()?;
     let non_empty = |s: String| {
         let trimmed = s.trim();

@@ -98,6 +98,31 @@ This kills the sketch's stored-XSS chain at the root and fixes full-text search 
 silent no-op in the same pass. The desktop head's strict CSP + capabilities are
 defense-in-depth, not the primary defense.
 
+The allowlist is strict but not lossy where it matters (`content/sanitize.rs`
+documents each rule; `fixtures/html/` pins each with a golden fixture, and every
+allowance carries a vector in `xss-corpus.html`):
+
+- **Lazy images** — `data-src` / `data-lazy-src` / the widest `srcset` candidate is
+  promoted to `src`, and a `<noscript>` fallback image is lifted out when its visible
+  sibling is only a placeholder; the promoted `src` still faces the http(s)-only check.
+- **Footnotes and in-page links** — `id`s survive as `user-content-<id>` (a namespace
+  the app never uses for its own DOM ids, so feed content cannot clobber them) and
+  fragment-only `href`s are kept in the same namespace instead of being absolutized to
+  the source site. Markdown export turns footnotes into `[^1]` / `[^1]: …` (dropping
+  the `↩` back-references) and drops the destination of any other in-page link.
+- **Direction and structure** — `dir`, `lang`, `ol[start]`, `<bdi>`/`<bdo>`, and the
+  `language-*` class on `pre`/`code` (the exported fence language). When a
+  whole-page feed item is extracted, direction set only on the winning container
+  survives as a `<div dir lang>` wrapper.
+- **Embeds** — iframes from known media/content hosts (YouTube, Vimeo, Spotify,
+  SoundCloud, CodePen, Bluesky) or with an embed-shaped URL (`/embed`, `/player`, …,
+  e.g. Mastodon) become a plain "Embedded media/content (host) ↗" link; invisible
+  tracking frames, ad / comment / share widgets and arbitrary iframes are dropped.
+
+The lazy-image and embed passes run on feed items and on fetched full pages alike: on
+the full-page path they run before readability extraction too, since the extractor
+deletes `<noscript>` and every iframe outside its own short video-host list.
+
 ### `store/` — WAL SQLite behind an async facade
 
 - WAL mode + `busy_timeout`; a **dedicated writer thread** (channel-fed, all mutations

@@ -1,0 +1,26 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/code-fence-language.html
+---
+# Fenced code keeps its language
+
+Highlighters put the language on the code element:
+
+```rust
+fn main() {
+    println!("hello");
+}
+```
+
+Prism's lang- alias on the pre element:
+
+```python
+print("hello")
+```
+
+And a block with no language stays a bare fence:
+
+```
+plain text
+```

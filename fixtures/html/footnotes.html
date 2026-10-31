@@ -1,0 +1,20 @@
+<article>
+<h1>Footnotes round-trip</h1>
+<p>Pandoc-style references<sup id="fnref1"><a href="#fn1" class="footnote-ref" role="doc-noteref">1</a></sup> and a
+kramdown-style one<sup id="fnref:2"><a href="#fn:2" class="footnote" rel="footnote">2</a></sup>.
+A <a href="#later">jump to a later section</a> keeps its words.</p>
+<h2 id="later">Later section</h2>
+<p>An ordinary numbered list beside the footnotes is left alone:</p>
+<ol start="3">
+  <li>third</li>
+  <li>fourth</li>
+</ol>
+<section class="footnotes" role="doc-endnotes">
+<hr>
+<ol>
+<li id="fn1"><p>The first note, with a <a href="https://example.com/source">source</a>.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn:2"><p>The second note spans two paragraphs.</p>
+<p>This is the second one. <a href="#fnref:2" class="reversefootnote">&#8617;</a></p></li>
+</ol>
+</section>
+</article>

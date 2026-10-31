@@ -122,6 +122,59 @@ fn code_ahead_of_the_key_in_the_real_sign_job_is_flagged() {
     }
 }
 
+/// Dropping the real sign job's `environment:` (so the key would be read
+/// outside the tag-restricted, reviewer-gated `updater-signing` environment)
+/// fails the lint (issue #187).
+#[test]
+fn the_real_sign_job_must_keep_its_environment() {
+    let line = "    environment: ${{ github.event_name == 'push' && 'updater-signing' || '' }}\n";
+    assert_flagged(
+        &lint_release_edit(line, ""),
+        "job `sign` holds the signing key but declares no `environment:`",
+    );
+    // Selecting it unconditionally would hold the dispatch dry run at the
+    // tag-only deployment rule.
+    assert_flagged(
+        &lint_release_edit(line, "    environment: updater-signing\n"),
+        "always deploys to `updater-signing`",
+    );
+}
+
+/// Pins the committed sign job's text: its environment expression names
+/// `updater-signing` only on a tag push (empty, i.e. no environment,
+/// otherwise), and the key step and the throwaway-key step split on that same
+/// condition. A pin, not a proof — the lint rule itself is exercised in
+/// `xtask/src/workflows.rs`, and that GitHub really runs the dispatch dry run
+/// with no environment is checked by the post-merge dry run (runbook §2).
+#[test]
+fn the_real_dry_run_runs_outside_the_signing_environment() {
+    let dir = workflows_dir();
+    let release = std::fs::read_to_string(dir.join("release.yml")).expect("read release.yml");
+    let doc: serde_yaml::Value = serde_yaml::from_str(&release).expect("parse release.yml");
+    let sign = &doc["jobs"]["sign"];
+    assert_eq!(
+        sign["environment"].as_str(),
+        Some("${{ github.event_name == 'push' && 'updater-signing' || '' }}")
+    );
+    let conditions: Vec<(&str, &str)> = sign["steps"]
+        .as_sequence()
+        .expect("sign steps")
+        .iter()
+        .filter_map(|step| Some((step["name"].as_str()?, step["if"].as_str()?)))
+        .collect();
+    assert!(
+        conditions.contains(&("Sign the updater archive", "github.event_name == 'push'")),
+        "{conditions:#?}"
+    );
+    assert!(
+        conditions.contains(&(
+            "Sign with a throwaway key (dry run)",
+            "github.event_name != 'push'"
+        )),
+        "{conditions:#?}"
+    );
+}
+
 /// Lint the committed `ci.yml` + `release.yml` beside an edited copy of the
 /// committed `nightly.yml` (issue #175).
 fn lint_nightly_edit(from: &str, to: &str) -> Vec<String> {

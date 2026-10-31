@@ -23,7 +23,11 @@
 # prebuilt `tauri signer sign` binary — no build.rs, no vite plugin, no npm
 # lifecycle script ever runs with the key in its environment. The build job
 # turns `createUpdaterArtifacts` off and tars Curio.app itself (byte-for-byte
-# what tauri's bundler would archive: `Curio.app/` at the root).
+# what tauri's bundler would archive: `Curio.app/` at the root). The key is
+# meant to be an environment secret of `updater-signing` (tag-restricted,
+# reviewer-gated), not a repository secret — the runbook's one-time setup
+# (docs/release/runbook.md §2) moves it there — so the sign job waits for a
+# maintainer's approval on every tag and no other ref can read it.
 #
 # Dry run: `workflow_dispatch` runs everything except the publish steps — the
 # signing step is replaced by one that signs with a throwaway key generated on
@@ -156,6 +160,17 @@ jobs:
     name: sign the updater archive
     needs: build
     runs-on: ubuntu-latest
+    # The signing secrets are to exist ONLY as secrets of the
+    # `updater-signing` environment (issue #187; the runbook setup moves them
+    # there), whose deployment rule admits `v*` tags alone and which waits for
+    # a required reviewer: a workflow on any other ref reads the key as empty,
+    # and a deployment nobody approved never runs. The environment is
+    # selected under exactly the real key step's `if:`; on the
+    # `workflow_dispatch` dry run the name is '' (= no environment), so the
+    # dry run is not held at a tag-only rule it can never pass. Setup is in
+    # docs/release/runbook.md §2; `cargo run -p xtask -- workflows` fails if
+    # this line is dropped or drifts from the key step's condition.
+    environment: ${{ github.event_name == 'push' && 'updater-signing' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -180,12 +195,32 @@ jobs:
         # The one step holding the key. It runs the prebuilt signer only;
         # `--app-version` binds the version into the signed trusted comment,
         # exactly as `tauri build` does when it signs.
+        #
+        # Two fail-fast guards run before the signer. UPDATER_SIGNING_READY
+        # is a variable set ONLY on the configured `updater-signing`
+        # environment (runbook §2, step 4): GitHub silently auto-creates a
+        # referenced environment that does not exist yet, with no protection
+        # rules, so without this sentinel a tag cut before the setup would
+        # sign unapproved with the repository secrets. An empty key means the
+        # secret is missing from the environment (or this job ran outside
+        # it) — fail with that, not a cryptic signer error.
         working-directory: dist
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          UPDATER_SIGNING_READY: ${{ vars.UPDATER_SIGNING_READY }}
           VERSION: ${{ needs.build.outputs.version }}
-        run: ../apps/desktop/node_modules/.bin/tauri signer sign --app-version "$VERSION" Curio.app.tar.gz
+        run: |
+          set -euo pipefail
+          if [ "${UPDATER_SIGNING_READY:-}" != "true" ]; then
+            echo "::error::the updater-signing environment is not configured (no UPDATER_SIGNING_READY=true variable on it) — GitHub may have auto-created it without protection rules; finish the one-time setup in docs/release/runbook.md §2 before tagging"
+            exit 1
+          fi
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is empty — add it as a secret of the updater-signing environment (docs/release/runbook.md §2)"
+            exit 1
+          fi
+          ../apps/desktop/node_modules/.bin/tauri signer sign --app-version "$VERSION" Curio.app.tar.gz
       - name: Sign with a throwaway key (dry run)
         if: github.event_name != 'push'
         # Exercises the exact signing invocation without the real key. The

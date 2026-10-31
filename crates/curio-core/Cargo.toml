@@ -17,6 +17,11 @@ enrich-reddit = []
 # `secrets` module explicitly — the core never reads the keychain on its
 # own, so core tests stay hermetic.
 keychain = ["dep:keyring"]
+# Test-only: compiles in the raw `CoreHandle::storage()` accessor so test
+# code can seed rows the facade deliberately does not expose. Enabled only
+# from `[dev-dependencies]` (this crate's own, the desktop head's), never
+# by a production build — a head that bypasses the facade does not compile.
+test-support = []
 
 [dependencies]
 ammonia = { workspace = true }
@@ -44,6 +49,9 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+# Self dev-dependency: the integration tests under tests/ link the library
+# with `test-support` on (see the feature above).
+curio-core = { path = ".", features = ["test-support"] }
 insta = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

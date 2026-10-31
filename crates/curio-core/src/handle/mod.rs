@@ -314,6 +314,7 @@ impl CoreHandle {
     /// facade deliberately does not expose (e.g. inserting an article
     /// without a fetch). Test-only: compiled in by the `test-support`
     /// feature, which no production build enables.
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn storage(&self) -> &Storage {
         &self.storage

@@ -203,7 +203,7 @@ impl CoreHandle {
         for tag in tags {
             self.storage.tag_article(id, tag)?;
         }
-        self.emit()?;
+        self.emit();
         self.storage
             .get_article(id)?
             .ok_or(CoreError::NotFound { entity: "article" })

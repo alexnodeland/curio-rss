@@ -14,6 +14,11 @@
 //! clock so a scheduled sweep never piles on right after one; an in-flight flag
 //! keeps two scheduled ticks from overlapping (per-feed locks make overlap
 //! safe but pointless).
+//!
+//! The same tick is also the event-emission retry timer (#118): a failed
+//! JSONL flush (full disk, unwritable events dir) never fails the mutation
+//! that staged it — core raises its "pending events" flag instead — so each
+//! tick re-drains the staged intents while that flag is up.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -22,8 +27,8 @@ use std::time::{Duration, Instant};
 use curio_core::CoreHandle;
 use tauri::AppHandle;
 
-use crate::commands::SharedCore;
 use crate::commands::feeds::refresh_all_and_emit;
+use crate::commands::{SharedCore, run_blocking};
 
 const INTERVAL_KEY: &str = "ui.refresh.interval-minutes";
 const ON_LAUNCH_KEY: &str = "ui.refresh.on-launch";
@@ -111,8 +116,9 @@ fn refresh_on_launch(core: &CoreHandle) -> bool {
 }
 
 /// Spawns the background refresh loop onto the Tauri async runtime: an
-/// on-launch sweep (if enabled) after a short settle, then a due-check every
-/// `TICK` against the configured interval. The task lives for the process.
+/// on-launch sweep (if enabled) after a short settle, then — every `TICK` —
+/// the pending-events retry and a due-check against the configured interval.
+/// The task lives for the process.
 pub fn spawn(handle: AppHandle, core: SharedCore, scheduler: std::sync::Arc<RefreshScheduler>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(LAUNCH_SETTLE).await;
@@ -121,11 +127,39 @@ pub fn spawn(handle: AppHandle, core: SharedCore, scheduler: std::sync::Arc<Refr
         }
         loop {
             tokio::time::sleep(TICK).await;
+            retry_pending_events(&core).await;
             if refresh_due(interval_minutes(&core), scheduler.since_last()) {
                 run_once(&handle, &core, &scheduler).await;
             }
         }
     });
+}
+
+/// Re-drains event intents a failed flush left staged. A no-op (one atomic
+/// load) while core's pending-events flag is down.
+async fn retry_pending_events(core: &SharedCore) {
+    if !core.has_pending_events() {
+        return;
+    }
+    let core = std::sync::Arc::clone(core);
+    if let Err(error) = run_blocking(move || Ok(flush_pending_events_impl(&core))).await {
+        tracing::warn!(%error, "pending-events retry did not run");
+    }
+}
+
+/// The blocking half of [`retry_pending_events`]: drain and log the outcome.
+/// Returns how many staged events reached the log.
+fn flush_pending_events_impl(core: &CoreHandle) -> usize {
+    match core.flush_pending_events() {
+        Ok(emitted) => {
+            tracing::info!(emitted, "pending events flushed to the event log");
+            emitted
+        }
+        Err(error) => {
+            tracing::warn!(%error, "pending events still cannot be flushed; retrying next tick");
+            0
+        }
+    }
 }
 
 /// One scheduled sweep, guarded so two ticks never overlap. Emits the same
@@ -149,6 +183,30 @@ async fn run_once(handle: &AppHandle, core: &SharedCore, scheduler: &RefreshSche
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::testutil::{seed_article, temp_core};
+
+    /// The timer's drain: nothing while the events dir is unwritable, the
+    /// whole backlog once it is back (#118).
+    #[test]
+    #[allow(clippy::unwrap_used)] // test assertions
+    fn the_retry_drains_the_backlog_once_the_log_is_writable_again() {
+        let (_dir, core) = temp_core();
+        let id = curio_core::model::ArticleId(seed_article(&core, "starred"));
+        let events_dir = core.profile_dir().join(".curio").join("events");
+        std::fs::remove_dir_all(&events_dir).unwrap();
+        std::fs::write(&events_dir, b"not a directory").unwrap();
+
+        assert!(core.set_starred(id, true).unwrap(), "the mutation succeeds");
+        assert!(core.has_pending_events());
+        assert_eq!(flush_pending_events_impl(&core), 0);
+        assert!(core.has_pending_events());
+
+        std::fs::remove_file(&events_dir).unwrap();
+        std::fs::create_dir(&events_dir).unwrap();
+        assert_eq!(flush_pending_events_impl(&core), 1);
+        assert!(!core.has_pending_events());
+        assert_eq!(core.pending_intent_count().unwrap(), 0);
+    }
 
     #[test]
     fn a_zero_interval_is_never_due() {

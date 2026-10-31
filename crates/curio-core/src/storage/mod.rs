@@ -259,12 +259,44 @@ impl Storage {
 }
 
 /// Pragmas for the single read-write connection.
+///
+/// `synchronous = FULL` is deliberate (#118): every transaction that
+/// stages an event intent must be **durable** before the emitter fsyncs
+/// that event to the JSONL log. Under WAL + `NORMAL`, a commit that has
+/// returned can still roll back on power loss — the log would then hold
+/// an `article.starred` whose state change (and intent) the database
+/// forgot, and no negation would ever follow. `FULL` fsyncs the WAL on
+/// every commit; the writer is single-threaded and commits are batched
+/// per operation, so the cost is one fsync per mutation.
 fn configure_write_connection(conn: &Connection) -> Result<(), StorageError> {
     let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
     if !mode.eq_ignore_ascii_case("wal") {
         return Err(StorageError::WalUnavailable { mode });
     }
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "synchronous", "FULL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    /// #118: the writer's commits must be durable before the emitter
+    /// fsyncs their events — `synchronous = FULL` (2), not `NORMAL` (1).
+    #[test]
+    fn the_writer_connection_commits_durably() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(dir.path().join("curio.db")).unwrap();
+        let level: i64 = storage
+            .write(|conn| Ok(conn.query_row("PRAGMA synchronous", [], |row| row.get(0))?))
+            .unwrap();
+        assert_eq!(level, 2, "PRAGMA synchronous on the writer must be FULL");
+        let mode: String = storage
+            .write(|conn| Ok(conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?))
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
 }

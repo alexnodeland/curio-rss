@@ -103,7 +103,7 @@ impl CoreHandle {
                 }
             }
         }
-        self.emit()?;
+        self.emit();
         Ok(outcome)
     }
 

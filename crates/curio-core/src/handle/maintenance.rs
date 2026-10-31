@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
+use std::sync::atomic::Ordering;
 
 use curio_types::Timestamp;
 
@@ -60,7 +61,9 @@ impl CoreHandle {
 
     /// How many event intents are staged in the database but not yet
     /// flushed to the JSONL log. Zero in a healthy profile: every
-    /// operation flushes before it returns, and `open` replays leftovers.
+    /// operation flushes before it returns, and `open` replays leftovers;
+    /// non-zero after a crash or a failed flush (full disk, unwritable
+    /// events dir — see [`CoreHandle::has_pending_events`]).
     ///
     /// A pure read (the doctor probe): it counts every staged row, an
     /// undecodable one included, and never quarantines — that only
@@ -84,6 +87,35 @@ impl CoreHandle {
     /// Storage errors.
     pub fn quarantined_intent_count(&self) -> Result<u64, CoreError> {
         Ok(self.storage.quarantined_intent_count()?)
+    }
+
+    /// The "pending events" health flag: `true` once a flush to the JSONL
+    /// log failed and its intents are still staged; cleared by the next
+    /// successful drain. A cheap in-memory check — heads poll it to decide
+    /// whether to call [`CoreHandle::flush_pending_events`].
+    #[must_use]
+    pub fn has_pending_events(&self) -> bool {
+        self.events_backlog.load(Ordering::Acquire)
+    }
+
+    /// Drains every staged event intent to the JSONL log now — the retry
+    /// for a flush that failed earlier (mutations treat their own flush
+    /// as non-fatal). Returns how many events were emitted, and updates
+    /// the [`CoreHandle::has_pending_events`] flag either way.
+    ///
+    /// # Errors
+    ///
+    /// Storage or event-log errors; the intents stay staged and the flag
+    /// stays raised.
+    pub fn flush_pending_events(&self) -> Result<usize, CoreError> {
+        let mut emitter = self.emitter.lock().unwrap_or_else(PoisonError::into_inner);
+        let drained = emitter.emit_pending();
+        // Under the emitter lock, so concurrent drains set the flag in
+        // the order they ran.
+        self.events_backlog
+            .store(drained.is_err(), Ordering::Release);
+        drop(emitter);
+        Ok(drained?)
     }
 
     /// Deletes event-log files older than the retention window (≥ 90

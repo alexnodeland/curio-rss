@@ -107,6 +107,34 @@ fn refuses_a_database_from_a_newer_build() {
     assert!(matches!(err, OpenError::TooNew { found: 9999, .. }));
 }
 
+/// "Refused untouched" holds byte for byte, even for a rollback-journal
+/// file the WAL switch would otherwise rewrite: the version check runs
+/// before any pragma that writes.
+#[test]
+fn a_too_new_database_is_refused_byte_for_byte_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE from_the_future (x); INSERT INTO from_the_future VALUES (1);",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", Storage::schema_version() + 1)
+            .unwrap();
+    }
+    let before = std::fs::read(&path).unwrap();
+    let err = Storage::open(&path).unwrap_err();
+    assert!(matches!(err, OpenError::TooNew { .. }), "{err:?}");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["curio.db"], "no -wal/-shm sidecars, no backup");
+}
+
 /// The two "cannot use this file" cases a head must tell apart: a file
 /// that is not a database at all, and a database from a newer build.
 #[test]
@@ -1735,4 +1763,42 @@ fn migration_0007_backfills_content_origin_and_guards_the_fts_trigger() {
             .is_err()
     );
     storage.fts_integrity_check().unwrap();
+}
+
+/// A profile #206's build already took to v7 still gets the dead-letter
+/// table: migration 0008 runs on top of 0007, after a `pre-v8` backup.
+#[test]
+fn migration_0008_adds_the_dead_letter_table_to_a_v7_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        // A v7-shaped database: migrations 0001–0007 applied by hand.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../src/storage/migrations/0001_init.sql"),
+            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+            include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 7).unwrap();
+        let has_dead: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'event_intents_dead'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_dead, 0);
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(Storage::schema_version(), 8);
+    assert_eq!(storage.db_schema_version().unwrap(), 8);
+    assert_eq!(storage.quarantined_intent_count().unwrap(), 0);
+    assert!(dir.path().join("curio.db.pre-v8.bak").is_file());
 }

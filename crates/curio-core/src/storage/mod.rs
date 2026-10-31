@@ -96,7 +96,7 @@ pub struct Storage {
 impl Storage {
     /// Opens (creating if absent) the database at `path`, applies pending
     /// migrations — after writing a pre-migration backup next to the file
-    /// (`curio.db.pre-v{N}.bak`, the two newest kept) — and spins up the
+    /// (`curio.db.pre-v{N}.bak`; it and the highest-numbered other are kept) — and spins up the
     /// writer thread plus a read pool of [`DEFAULT_READ_POOL_SIZE`]
     /// connections.
     ///
@@ -124,8 +124,16 @@ impl Storage {
         let path = path.as_ref().to_path_buf();
         let classify = open::classifier(&path);
         let mut conn = Connection::open(&path).map_err(|e| classify(e.into()))?;
+        // Before the first statement, so a lock held elsewhere is waited
+        // out (then reported as `OpenError::Locked`) rather than failing
+        // at once.
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| classify(e.into()))?;
         // The first statement that reads the file header — a garbage file
-        // fails here with SQLITE_NOTADB (→ `Corrupt`).
+        // fails here with SQLITE_NOTADB (→ `Corrupt`) — and a pure read: a
+        // too-new database is refused before the WAL switch below could
+        // rewrite its header or create sidecar files.
+        migrations::refuse_too_new(&conn, &path)?;
         configure_write_connection(&conn).map_err(&classify)?;
         migrations::apply(&mut conn, &path)?;
         let writer = WriterHandle::spawn(conn);
@@ -252,9 +260,6 @@ impl Storage {
 
 /// Pragmas for the single read-write connection.
 fn configure_write_connection(conn: &Connection) -> Result<(), StorageError> {
-    // Before the first statement, so a lock held elsewhere is waited out
-    // (then reported as `OpenError::Locked`) rather than failing at once.
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
     if !mode.eq_ignore_ascii_case("wal") {
         return Err(StorageError::WalUnavailable { mode });

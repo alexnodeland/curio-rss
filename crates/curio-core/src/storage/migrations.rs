@@ -75,6 +75,22 @@ pub(crate) fn current_version(conn: &Connection) -> Result<i64, StorageError> {
     Ok(version)
 }
 
+/// Refuses a database written by a newer build before anything else
+/// touches it: a read of the header's `user_version` only, so the file is
+/// left exactly as found (no journal-mode switch, no `-wal`/`-shm`
+/// sidecars). Also the first statement to read the header, so a garbage
+/// file fails here as [`OpenError::Corrupt`].
+pub(crate) fn refuse_too_new(conn: &Connection, db_path: &Path) -> Result<(), OpenError> {
+    let found = current_version(conn).map_err(classifier(db_path))?;
+    if found > SCHEMA_VERSION {
+        return Err(OpenError::TooNew {
+            found,
+            supported: SCHEMA_VERSION,
+        });
+    }
+    Ok(())
+}
+
 /// Applies every pending migration to the database at `db_path`, backing
 /// it up first. Returns the backup's path if one was written (a fresh
 /// database, or one already current, needs none).

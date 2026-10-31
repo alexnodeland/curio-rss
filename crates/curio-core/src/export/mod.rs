@@ -39,6 +39,8 @@
 //! this module reports the [`ExportDisposition`] the facade maps onto
 //! the contract events.
 
+#[cfg(test)]
+mod golden_tests;
 mod lock;
 mod manifest;
 mod note;

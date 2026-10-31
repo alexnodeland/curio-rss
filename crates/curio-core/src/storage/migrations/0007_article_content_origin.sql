@@ -11,13 +11,25 @@
 -- ('full_text'/'enriched') bodies survive every later refresh of a feed
 -- still listing the item, which may update title and metadata only.
 --
--- Existing rows default to 'feed' (manual-scope rows to 'manual'): nothing
--- recorded provenance before, and a body already reverted to the excerpt
--- is indistinguishable from one never hydrated.
+-- Backfill: nothing recorded provenance before, so it is inferred.
+--   * manual-scope ('m:') rows → 'manual';
+--   * rows of a feed in full-text mode → 'full_text': the newest batch may
+--     still hold its readability extract (full-text mode only hydrates
+--     fresh keys, so it would never re-hydrate them). A row already
+--     reverted holds the excerpt either way; the only cost is that the
+--     feed's own excerpt edits no longer reach it (load-full still does);
+--   * every other row → 'feed'. A body loaded in full (load-full) on a
+--     feed NOT in full-text mode is indistinguishable from the excerpt,
+--     so the first refresh after the upgrade that still lists it reverts
+--     it one last time; from then on provenance is recorded.
 ALTER TABLE articles ADD COLUMN content_origin TEXT NOT NULL DEFAULT 'feed'
     CHECK (content_origin IN ('feed', 'manual', 'full_text', 'enriched'));
 
 UPDATE articles SET content_origin = 'manual' WHERE substr(dedupe_key, 1, 2) = 'm:';
+
+UPDATE articles SET content_origin = 'full_text'
+WHERE substr(dedupe_key, 1, 2) <> 'm:'
+  AND feed_id IN (SELECT id FROM feeds WHERE fetch_full_text = 1);
 
 -- D4: FTS reindexes only on an actual title/content change. `UPDATE OF`
 -- alone fires whenever a listed column is in the SET clause, even with an

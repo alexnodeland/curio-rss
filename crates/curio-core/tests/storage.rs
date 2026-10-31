@@ -1602,14 +1602,23 @@ fn migration_0007_backfills_content_origin_and_guards_the_fts_trigger() {
         ] {
             conn.execute_batch(sql).unwrap();
         }
+        // Feed 7 is a plain feed; feed 8 is in full-text mode, so its rows
+        // may still hold a readability extract and are backfilled
+        // `full_text` (a pre-upgrade refresh never re-hydrates them).
         conn.execute_batch(
             "INSERT INTO feeds (id, url, added_at, modified_at)
              VALUES (7, 'https://a.example/feed.xml', '2026-07-01T00:00:00.000Z',
                      '2026-07-01T00:00:00.000Z');
+             INSERT INTO feeds (id, url, added_at, modified_at, fetch_full_text)
+             VALUES (8, 'https://b.example/feed.xml', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z', 1);
              INSERT INTO articles (curio_id, feed_id, dedupe_key, title, source_url,
                                    saved_at, modified_at)
              VALUES ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d', 7, 'f7:guid:1', 'From feed',
                      'https://a.example/1', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z'),
+                    ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6f', 8, 'f8:guid:3', 'Full text',
+                     'https://b.example/3', '2026-07-01T00:00:00.000Z',
                      '2026-07-01T00:00:00.000Z'),
                     ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6e', NULL, 'm:guid:2', 'Manual',
                      'https://m.example/2', '2026-07-01T00:00:00.000Z',
@@ -1636,6 +1645,7 @@ fn migration_0007_backfills_content_origin_and_guards_the_fts_trigger() {
         origins,
         vec![
             ("f7:guid:1".to_owned(), "feed".to_owned()),
+            ("f8:guid:3".to_owned(), "full_text".to_owned()),
             ("m:guid:2".to_owned(), "manual".to_owned()),
         ]
     );

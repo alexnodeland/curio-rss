@@ -10,27 +10,41 @@ use std::path::PathBuf;
 
 use crate::error::{CommandError, ErrorCode};
 
-/// Reverse-DNS pieces for `directories` (D12: owned identifier,
-/// `io.github.alexnodeland.curio`).
-const QUALIFIER: &str = "io.github";
-const ORGANIZATION: &str = "alexnodeland";
-const APPLICATION: &str = "curio";
-
-/// The profile directory holding `curio.db` + the events log.
+/// The profile directory holding `curio.db` + the events log: the
+/// default shared with the CLI ([`curio_core::paths::default_profile_dir`]).
 /// `CURIO_PROFILE` overrides for development and tests.
 ///
 /// # Errors
 ///
 /// Internal error when the platform reports no home directory.
-pub fn profile_dir() -> Result<PathBuf, CommandError> {
-    if let Ok(overridden) = std::env::var("CURIO_PROFILE")
-        && !overridden.trim().is_empty()
-    {
-        return Ok(PathBuf::from(overridden));
+pub fn profile_dir() -> Result<ProfileChoice, CommandError> {
+    profile_dir_from(std::env::var("CURIO_PROFILE").ok())
+}
+
+/// The profile the app opens, and whether it is the shared default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileChoice {
+    /// The profile directory.
+    pub dir: PathBuf,
+    /// `true` unless `CURIO_PROFILE` chose it — only the default profile
+    /// adopts a legacy one ([`curio_core::paths::adopt_legacy_profiles`]).
+    pub is_default: bool,
+}
+
+/// [`profile_dir`] over an explicit `CURIO_PROFILE` value (blank = unset).
+fn profile_dir_from(overridden: Option<String>) -> Result<ProfileChoice, CommandError> {
+    if let Some(dir) = overridden.filter(|dir| !dir.trim().is_empty()) {
+        return Ok(ProfileChoice {
+            dir: PathBuf::from(dir),
+            is_default: false,
+        });
     }
-    directories::ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION)
-        .map(|dirs| dirs.data_dir().to_path_buf())
-        .ok_or_else(no_home)
+    curio_core::paths::default_profile_dir()
+        .map(|dir| ProfileChoice {
+            dir,
+            is_default: true,
+        })
+        .map_err(|_| no_home())
 }
 
 /// Where [`crate::image_cache::ImageCache`] stores fetched images:
@@ -72,6 +86,30 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn the_default_profile_is_the_one_the_cli_opens() {
+        let choice = profile_dir_from(None).unwrap();
+        assert!(choice.is_default);
+        assert_eq!(
+            choice.dir,
+            curio_core::paths::default_profile_dir().unwrap()
+        );
+        // A blank override is no override.
+        assert_eq!(profile_dir_from(Some("  ".into())).unwrap(), choice);
+    }
+
+    #[test]
+    fn curio_profile_overrides_the_default() {
+        let choice = profile_dir_from(Some("/tmp/p".into())).unwrap();
+        assert_eq!(
+            choice,
+            ProfileChoice {
+                dir: PathBuf::from("/tmp/p"),
+                is_default: false
+            }
+        );
+    }
 
     #[test]
     fn cache_paths_live_under_the_asset_scope_root() {

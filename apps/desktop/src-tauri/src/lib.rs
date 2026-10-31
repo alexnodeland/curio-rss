@@ -159,9 +159,26 @@ pub fn run() {
             // and this closure — nothing here depends on that).
             create_main_window(app)?;
 
-            let profile = paths::profile_dir()?;
+            let paths::ProfileChoice {
+                dir: profile,
+                is_default,
+            } = paths::profile_dir()?;
+            // The one-time move of a pre-0.5 profile (the old CLI location,
+            // or Roaming `AppData` on Windows) onto the default shared with the
+            // CLI — before logging, which would create the default dir.
+            let legacy = if is_default {
+                curio_core::paths::adopt_legacy_profiles(
+                    &profile,
+                    &curio_core::paths::legacy_profile_dirs(),
+                )
+            } else {
+                Vec::new()
+            };
             // Rotating logs + panic hook first, so anything below is captured.
             logging::init(&profile.join("logs"));
+            for notice in &legacy {
+                tracing::warn!(%notice, "legacy profile");
+            }
             let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
             let core: commands::SharedCore = Arc::new(core);
             // Optional Reddit API credentials from the OS keychain (D15) —

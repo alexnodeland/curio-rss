@@ -281,7 +281,7 @@ impl CoreHandle {
             path: profile_dir.clone(),
             source,
         })?;
-        let storage = Arc::new(Storage::open(profile_dir.join("curio.db"))?);
+        let storage = Arc::new(Storage::open(profile_dir.join(crate::paths::DB_FILE))?);
         let events_dir = profile_dir.join(".curio").join("events");
         let log = EventLog::open(&events_dir).map_err(EventsError::Log)?;
         // Contract: the event log is never committed to git.

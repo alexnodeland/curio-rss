@@ -29,7 +29,7 @@ function persistListWidth(width: number): void {
 }
 </script>
 
-<div class="three-pane">
+<div class="three-pane" data-testid="three-pane">
     {#if !uiStore.sidebarCollapsed}
         <ResizablePane
             bind:width={uiStore.sidebarWidth}

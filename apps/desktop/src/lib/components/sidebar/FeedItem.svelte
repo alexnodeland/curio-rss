@@ -251,6 +251,8 @@ function hue(text: string): number {
 <div
     id={rowId}
     class="feed-item"
+    data-testid="feed-row"
+    data-feed-url={feed.url}
     class:active={selected}
     class:tree-active={isTreeActive}
     class:unhealthy={feed.status !== 'active' || errored}

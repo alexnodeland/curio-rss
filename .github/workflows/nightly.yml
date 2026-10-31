@@ -1,5 +1,6 @@
-# Nightly + on-demand workflow — deliberately NOT per-PR or per-merge (see
-# ci.yml for the fast PR gate). This is the heavy tier: the 3-OS `tauri build`
+# Nightly + on-demand workflow — deliberately NOT per-merge, and per-PR only
+# for PRs that touch its own plumbing (see `on:`; ci.yml is the fast PR
+# gate). This is the heavy tier: the 3-OS `tauri build`
 # matrix that
 # produces the shippable (unsigned) bundles, the WebdriverIO + tauri-driver
 # smoke on the two platforms a driver exists for (Linux + Windows — there is
@@ -16,7 +17,7 @@
 name: nightly
 
 on:
-  # Daily + on-demand only — NOT per-push. The per-PR gate (ci.yml) already
+  # Daily + on-demand — NOT per-push. The per-PR gate (ci.yml) already
   # validates every change, and release.yml builds the shipped bundles on a
   # tag, so building the full 3-OS matrix on every merge just hammered the
   # (scarce) macOS runners. Dispatch a run manually before a release if you
@@ -24,6 +25,31 @@ on:
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
+  # ...plus the PRs that can break the nightly itself: a change to its own
+  # plumbing runs bundle + smoke BEFORE it merges instead of turning up red
+  # the next morning. That is this file, the tauri configs the bundle merges,
+  # the e2e harness, and the desktop npm + crate manifests (`tauri build`
+  # refuses to bundle when a tauri npm plugin and its crate disagree on
+  # version). Every nightly break fixed so far — the retired macos-13 image,
+  # the updater signing step, the plugin-updater mismatch — was such a change.
+  # A Cargo.lock-only bump is left to the schedule (it rides most PRs).
+  # `just workflows` (xtask) requires this file to stay on the list.
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - apps/desktop/src-tauri/tauri.conf.json
+      - apps/desktop/src-tauri/tauri.nightly.conf.json
+      - apps/desktop/src-tauri/Cargo.toml
+      - apps/desktop/e2e/**
+      - apps/desktop/package.json
+      - apps/desktop/package-lock.json
+
+# A newer push to the same PR supersedes its run. Scheduled and dispatched
+# runs each get a group of their own (the run id), so one stuck run never
+# queues — or cancels — the next night's.
+concurrency:
+  group: nightly-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -219,6 +245,10 @@ jobs:
 
   bench:
     name: cold-start bench (@50k fixture)
+    # Never on a PR: the bench tracks main's trailing baseline, a PR run would
+    # compare (and could comment-on-alert) a commit that never merged, and no
+    # path in the PR filter above changes what it measures.
+    if: github.event_name != 'pull_request'
     # curio-fixtures depends on curio-core only (no webview), so this job
     # needs no gtk/webkit system packages.
     runs-on: ubuntu-22.04

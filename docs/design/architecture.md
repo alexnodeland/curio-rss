@@ -87,6 +87,13 @@ feed-rs parse → normalize (dedupe guid → link → hash(title+published),
               → content_text extraction (FTS is real) → htmd DOM-walk CommonMark
 ```
 
+Dedupe keys are unique within a fetch: a guid the feed reuses for items with
+different links is no identity, so every item sharing it is keyed
+`guid+link:` instead, and an exact repeat of an earlier item is dropped.
+Because that choice sees only one fetch, refresh then settles the keys
+against the stored rows, so an item keeps its article when the guid's
+sharing changes between fetches.
+
 This kills the sketch's stored-XSS chain at the root and fixes full-text search being a
 silent no-op in the same pass. The desktop head's strict CSP + capabilities are
 defense-in-depth, not the primary defense.

@@ -4,7 +4,9 @@ A self-contained WebdriverIO harness that drives the **real** Curio desktop
 head — real webview, real curio-core engine behind the IPC boundary — through
 [`tauri-driver`](https://tauri.app/develop/tests/webdriver/). It runs in the
 nightly `smoke` job (`.github/workflows/nightly.yml`) as a **hard gate** —
-never in the per-PR gate — and it has its **own** `package.json` +
+never in the per-PR gate (`ci.yml`), though a PR that edits this harness, the
+nightly workflow, the tauri configs or the desktop manifests runs the nightly
+(and so this smoke) before it merges — and it has its **own** `package.json` +
 `package-lock.json` (installed with `npm ci`) so its heavy WebdriverIO
 dependency tree never touches the frontend's install or lint/test surface.
 

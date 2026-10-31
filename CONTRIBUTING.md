@@ -10,7 +10,10 @@ PRs are welcome; coordinate before starting anything large.
 > lands without it being green. Two of its jobs have no `just ci` twin: the
 > engine + CLI tests on macOS and Windows (`test-cross-os`), and the MSRV
 > check (`msrv`, locally `just msrv`). The heavy tier (3-OS bundles, e2e
-> smoke, cold-start bench) runs nightly and on demand (`nightly.yml`).
+> smoke, cold-start bench) runs nightly and on demand (`nightly.yml`) — and
+> on any PR that touches its own plumbing (`nightly.yml`, the tauri configs,
+> `apps/desktop/src-tauri/Cargo.toml`, the desktop npm manifests, the e2e
+> harness), whose bundle + smoke legs must then be green before it merges.
 
 Everything goes through [`just`](https://github.com/casey/just) — run `just`
 with no arguments to list the recipes.

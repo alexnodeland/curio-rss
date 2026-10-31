@@ -1,20 +1,30 @@
 //! The append-only JSONL writer: rotation, retention, fsync-on-flush,
-//! and torn-tail crash recovery (see [`heal_torn_tail`]).
+//! torn-tail crash recovery (see [`heal_torn_tail`]), and the
+//! cross-process events lock that lets several heads share one log.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::NaiveDate;
 use curio_types::EventEnvelope;
 
 use super::{EventLogError, file_name, parse_file_name};
+use crate::lock::{FileLock, LockError};
 
 /// Contract rotation threshold: 50 MB.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Contract retention floor: the producer retains files at least 90 days.
 pub const MIN_RETENTION_DAYS: u32 = 90;
+
+/// How long a log operation waits for another process to release the
+/// events lock before failing with [`EventLogError::ProfileLocked`].
+/// Holders keep it for one drain (a few appends, one fsync, one intent
+/// delete), so a wait this long means the holder is stuck.
+pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Append-only writer for a `.curio/events/` directory.
 ///
@@ -24,12 +34,45 @@ pub const MIN_RETENTION_DAYS: u32 = 90;
 /// exceeded (`-2`, `-3`, … suffix). Files are append-only and never
 /// rewritten. [`EventLog::flush`] is the durability point: it fsyncs
 /// (`sync_all`) the current file.
+///
+/// **Several processes may share one directory** (the desktop app and a
+/// CLI run on one profile). Every operation runs under an exclusive
+/// advisory lock on the sibling lock file `<dir>.lock` — kept *outside*
+/// the contract directory so consumers listing it never see it — and
+/// starts by re-syncing with whatever the other writers did meanwhile:
+/// a torn tail is healed, a file another process rotated to is adopted,
+/// and the size counter is re-read from disk. Lines from different
+/// processes therefore never interleave, never land in a stale `-N`
+/// file, and a heal never truncates an append in flight.
 #[derive(Debug)]
 pub struct EventLog {
     dir: PathBuf,
     max_file_bytes: u64,
     retention_days: u32,
+    lock: Arc<FileLock>,
+    lock_timeout: Duration,
     current: Option<OpenFile>,
+}
+
+/// An [`EventLog`] whose cross-process lock is held: the only way to
+/// append or fsync. Obtained through `EventLog::locked`, which keeps
+/// the lock for the whole closure so a caller can claim, append, fsync
+/// and retire a batch as one critical section.
+#[derive(Debug)]
+pub(crate) struct LockedLog<'log> {
+    log: &'log mut EventLog,
+}
+
+impl LockedLog<'_> {
+    /// [`EventLog::append`] inside the held lock.
+    pub(crate) fn append(&mut self, envelope: &EventEnvelope) -> Result<(), EventLogError> {
+        self.log.append_held(envelope)
+    }
+
+    /// [`EventLog::flush`] inside the held lock.
+    pub(crate) fn flush(&mut self) -> Result<(), EventLogError> {
+        self.log.flush_held()
+    }
 }
 
 #[derive(Debug)]
@@ -42,28 +85,73 @@ struct OpenFile {
 }
 
 impl EventLog {
-    /// Opens (creating if absent) the events directory. Appending resumes
-    /// on the newest existing log file, so restarts continue the day's
-    /// file instead of abandoning it. A torn final line left by a crash
-    /// mid-append is healed here (truncated back to the last complete
-    /// line — see `heal_torn_tail`), so readers and subsequent appends
-    /// only ever see whole lines.
+    /// Opens (creating if absent) the events directory and its lock
+    /// file, waiting up to [`DEFAULT_LOCK_TIMEOUT`] for another process
+    /// holding the lock. Appending resumes on the newest existing log
+    /// file, so restarts continue the day's file instead of abandoning
+    /// it. A torn final line left by a crash mid-append is healed here
+    /// (truncated back to the last complete line — see `heal_torn_tail`)
+    /// and again at the start of every later operation, always under the
+    /// lock — so readers and subsequent appends only ever see whole
+    /// lines, and a heal never truncates another process's append in
+    /// flight.
     ///
     /// # Errors
     ///
-    /// Filesystem errors creating or scanning the directory.
+    /// [`EventLogError::ProfileLocked`] if another process keeps the lock
+    /// past the timeout; filesystem errors creating the directory or the
+    /// lock file, or healing.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, EventLogError> {
+        Self::open_with_lock_timeout(dir, DEFAULT_LOCK_TIMEOUT)
+    }
+
+    /// [`EventLog::open`] with an explicit lock timeout, which also
+    /// bounds every later operation's wait for the lock.
+    ///
+    /// # Errors
+    ///
+    /// See [`EventLog::open`].
+    pub fn open_with_lock_timeout(
+        dir: impl Into<PathBuf>,
+        lock_timeout: Duration,
+    ) -> Result<Self, EventLogError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
-        if let Some((date, suffix)) = scan_latest(&dir)? {
-            heal_torn_tail(&dir.join(file_name(date, suffix)))?;
-        }
-        Ok(Self {
+        let lock = Arc::new(FileLock::open(lock_path(&dir))?);
+        let mut log = Self {
             dir,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             retention_days: MIN_RETENTION_DAYS,
+            lock,
+            lock_timeout,
             current: None,
-        })
+        };
+        // The catch-up every locked section starts with heals the tail.
+        log.locked(|_| Ok::<_, EventLogError>(()))?;
+        Ok(log)
+    }
+
+    /// The cross-process lock file guarding this directory (`<dir>.lock`).
+    #[must_use]
+    pub fn lock_path(&self) -> &Path {
+        self.lock.path()
+    }
+
+    /// Runs `f` with the cross-process lock held, after re-syncing with
+    /// what other processes wrote since this handle last held it.
+    pub(crate) fn locked<T, E>(
+        &mut self,
+        f: impl FnOnce(&mut LockedLog<'_>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<EventLogError>,
+    {
+        let _guard = self
+            .lock
+            .acquire(self.lock_timeout)
+            .map_err(|err| E::from(self.lock_error(err)))?;
+        self.resync()?;
+        f(&mut LockedLog { log: self })
     }
 
     /// Overrides the size-rotation threshold (min 1 byte). The contract
@@ -88,15 +176,20 @@ impl EventLog {
         &self.dir
     }
 
-    /// Appends one envelope as one JSONL line, rotating first if the
-    /// envelope's UTC date has passed the current file's or the size cap
-    /// would be exceeded. Buffered durability: call [`EventLog::flush`]
-    /// to fsync.
+    /// Appends one envelope as one JSONL line (under the lock), rotating
+    /// first if the envelope's UTC date has passed the current file's or
+    /// the size cap would be exceeded. Buffered durability: call
+    /// [`EventLog::flush`] to fsync.
     ///
     /// # Errors
     ///
-    /// Serialization or filesystem errors.
+    /// [`EventLogError::ProfileLocked`]; serialization or filesystem
+    /// errors.
     pub fn append(&mut self, envelope: &EventEnvelope) -> Result<(), EventLogError> {
+        self.locked(|log| log.append(envelope))
+    }
+
+    fn append_held(&mut self, envelope: &EventEnvelope) -> Result<(), EventLogError> {
         let mut line = serde_json::to_string(envelope)?;
         line.push('\n');
         let line_bytes = u64::try_from(line.len()).unwrap_or(u64::MAX);
@@ -114,8 +207,12 @@ impl EventLog {
     ///
     /// # Errors
     ///
-    /// Filesystem errors.
+    /// [`EventLogError::ProfileLocked`]; filesystem errors.
     pub fn flush(&mut self) -> Result<(), EventLogError> {
+        self.locked(|log| log.log.flush_held())
+    }
+
+    fn flush_held(&mut self) -> Result<(), EventLogError> {
         if let Some(current) = &mut self.current {
             current.file.sync_all()?;
         }
@@ -123,13 +220,18 @@ impl EventLog {
     }
 
     /// Deletes log files older than the retention window, measured from
-    /// `today` (UTC). The currently open file is never swept. Returns the
-    /// removed paths.
+    /// `today` (UTC), under the lock. The currently open file is never
+    /// swept. Returns the removed paths.
     ///
     /// # Errors
     ///
-    /// Filesystem errors scanning or deleting.
+    /// [`EventLogError::ProfileLocked`]; filesystem errors scanning or
+    /// deleting.
     pub fn sweep_retention(&mut self, today: NaiveDate) -> Result<Vec<PathBuf>, EventLogError> {
+        self.locked(|log| log.log.sweep_held(today))
+    }
+
+    fn sweep_held(&mut self, today: NaiveDate) -> Result<Vec<PathBuf>, EventLogError> {
         let mut removed = Vec::new();
         for entry in std::fs::read_dir(&self.dir)? {
             let entry = entry?;
@@ -153,6 +255,41 @@ impl EventLog {
         Ok(removed)
     }
 
+    /// Catches up with other writers before a locked operation: heals a
+    /// torn tail on the newest file, adopts a file another process
+    /// rotated to (fsyncing ours first — it may hold unflushed lines of
+    /// an earlier [`EventLog::append`]), and re-reads the size counter.
+    fn resync(&mut self) -> Result<(), EventLogError> {
+        let latest = scan_latest(&self.dir)?;
+        if let Some((date, suffix)) = latest {
+            heal_torn_tail(&self.dir.join(file_name(date, suffix)))?;
+        }
+        let same_file = match (&self.current, latest) {
+            (Some(current), Some(latest)) => (current.date, current.suffix) == latest,
+            (Some(_), None) => false,
+            (None, _) => return Ok(()),
+        };
+        if same_file {
+            if let Some(current) = &mut self.current {
+                current.bytes = current.file.metadata()?.len();
+            }
+        } else {
+            self.flush_held()?;
+            self.current = None;
+        }
+        Ok(())
+    }
+
+    fn lock_error(&self, err: LockError) -> EventLogError {
+        match err {
+            LockError::TimedOut { waited } => EventLogError::ProfileLocked {
+                path: self.lock.path().to_path_buf(),
+                waited_ms: u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
+            },
+            LockError::Io(err) => EventLogError::Io(err),
+        }
+    }
+
     /// Makes sure `current` points at the right file for an event dated
     /// `date` whose serialized line is `line_bytes` long.
     fn ensure_file(&mut self, date: NaiveDate, line_bytes: u64) -> Result<(), EventLogError> {
@@ -170,7 +307,7 @@ impl EventLog {
         if let Some(current) = &self.current
             && date > current.date
         {
-            self.flush()?;
+            self.flush_held()?;
             self.open_file(date, 1)?;
         }
 
@@ -182,7 +319,7 @@ impl EventLog {
                 break;
             }
             let (date, suffix) = (current.date, current.suffix + 1);
-            self.flush()?;
+            self.flush_held()?;
             self.open_file(date, suffix)?;
         }
         Ok(())
@@ -206,12 +343,28 @@ impl EventLog {
     }
 }
 
+/// The lock file guarding `dir`: its sibling `<name>.lock`, so the
+/// contract directory itself only ever holds event files.
+fn lock_path(dir: &Path) -> PathBuf {
+    match dir.file_name() {
+        Some(name) => {
+            let mut lock_name = name.to_os_string();
+            lock_name.push(".lock");
+            dir.with_file_name(lock_name)
+        }
+        None => dir.join(".lock"),
+    }
+}
+
 /// Backwards-scan chunk size used by [`heal_torn_tail`].
 const HEAL_SCAN_CHUNK: u64 = 8192;
 
 /// Repairs a torn final line — the artifact of a crash (or a partial
 /// write on a full disk) mid-append — by truncating the file back to its
 /// last complete line.
+///
+/// Only ever called with the events lock held, so the "torn" bytes can
+/// never be another live process's append in flight.
 ///
 /// Safe by the emitter's ordering contract: a line can only be torn if
 /// its fsync never ran, and the fsync always happens *before* the staged
@@ -277,4 +430,161 @@ fn scan_latest(dir: &Path) -> Result<Option<(NaiveDate, u32)>, EventLogError> {
         }
     }
     Ok(latest)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+
+    use std::sync::mpsc;
+
+    use curio_types::{CurioId, EventId, EventPayload, EventsSchemaV1Marker};
+
+    use super::*;
+
+    const TORN: &[u8] = b"{\"schema\":\"curio.events.v1\",\"event_id\":\"in-fli";
+
+    fn opened(ts: &str) -> EventEnvelope {
+        EventEnvelope {
+            schema: EventsSchemaV1Marker,
+            event_id: EventId::new(),
+            ts: ts.parse().unwrap(),
+            event: EventPayload::ArticleOpened {
+                curio_id: CurioId::new(),
+                dwell_ms: None,
+            },
+        }
+    }
+
+    /// One whole line on disk in the day's file; returns its path.
+    fn one_whole_line(dir: &Path) -> PathBuf {
+        let mut log = EventLog::open(dir).unwrap();
+        log.append(&opened("2026-07-03T10:00:00.000Z")).unwrap();
+        log.flush().unwrap();
+        dir.join("events-20260703.jsonl")
+    }
+
+    /// Appends `TORN` raw — what a live process looks like halfway
+    /// through an append.
+    fn start_an_append(path: &Path) {
+        OpenOptions::new()
+            .append(true)
+            .open(path)
+            .unwrap()
+            .write_all(TORN)
+            .unwrap();
+    }
+
+    fn ends_torn(path: &Path) -> bool {
+        std::fs::read(path).unwrap().ends_with(TORN)
+    }
+
+    #[test]
+    fn the_lock_file_sits_beside_the_contract_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("events");
+        let log = EventLog::open(&events).unwrap();
+        assert_eq!(log.lock_path(), dir.path().join("events.lock"));
+        assert!(log.lock_path().exists());
+        assert_eq!(
+            std::fs::read_dir(&events).unwrap().count(),
+            0,
+            "nothing but event files ever lands in the contract dir"
+        );
+        assert_eq!(lock_path(Path::new("/")), Path::new("/").join(".lock"));
+    }
+
+    /// Acceptance (#114): `heal_torn_tail` never truncates while another
+    /// handle holds the lock — the "torn" bytes may be that handle's
+    /// append in flight. The opener waits; once the holder lets go (here
+    /// without finishing, as if it crashed) the heal runs.
+    #[test]
+    fn heal_waits_while_another_handle_holds_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("events");
+        let path = one_whole_line(&events);
+        let mut holder = EventLog::open(&events).unwrap();
+        let (opened_tx, opened_rx) = mpsc::channel();
+        let opener = holder
+            .locked(|_| {
+                start_an_append(&path);
+                let events = events.clone();
+                let opener = std::thread::spawn(move || {
+                    let log = EventLog::open_with_lock_timeout(&events, Duration::from_secs(30));
+                    opened_tx.send(()).unwrap();
+                    log.map(|_| ())
+                });
+                std::thread::sleep(Duration::from_millis(200));
+                assert!(
+                    opened_rx.try_recv().is_err(),
+                    "the second open must wait for the lock"
+                );
+                assert!(ends_torn(&path), "no truncation while the lock is held");
+                Ok::<_, EventLogError>(opener)
+            })
+            .unwrap();
+        opener.join().unwrap().unwrap();
+        assert!(!ends_torn(&path), "healed once the holder let go");
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
+    }
+
+    #[test]
+    fn a_lock_held_past_the_timeout_is_a_typed_error_and_touches_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("events");
+        let path = one_whole_line(&events);
+        let mut holder = EventLog::open(&events).unwrap();
+        holder
+            .locked(|_| {
+                start_an_append(&path);
+                let err = EventLog::open_with_lock_timeout(&events, Duration::from_millis(50))
+                    .unwrap_err();
+                match &err {
+                    EventLogError::ProfileLocked {
+                        path: lock,
+                        waited_ms,
+                    } => {
+                        assert_eq!(lock, &dir.path().join("events.lock"));
+                        assert!(*waited_ms >= 50);
+                    }
+                    other => panic!("expected ProfileLocked, got {other:?}"),
+                }
+                assert!(err.to_string().contains("another Curio process"), "{err}");
+                assert!(ends_torn(&path));
+                Ok::<_, EventLogError>(())
+            })
+            .unwrap();
+    }
+
+    /// A handle that held a file open while another process rotated past
+    /// it adopts the newer file instead of growing the stale one.
+    #[test]
+    fn a_handle_adopts_the_file_another_handle_rotated_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = opened("2026-07-03T10:00:00.000Z");
+        let line = u64::try_from(serde_json::to_string(&first).unwrap().len() + 1).unwrap();
+        // Two lines per file.
+        let mut a = EventLog::open(dir.path())
+            .unwrap()
+            .with_max_file_bytes(line * 2);
+        let mut b = EventLog::open(dir.path())
+            .unwrap()
+            .with_max_file_bytes(line * 2);
+        let events: Vec<_> = (1..=4)
+            .map(|s| opened(&format!("2026-07-03T10:00:0{s}.000Z")))
+            .collect();
+        a.append(&events[0]).unwrap();
+        b.append(&events[1]).unwrap();
+        b.append(&events[2]).unwrap(); // rotates to -2
+        a.append(&events[3]).unwrap(); // must follow into -2, not overfill the base
+        a.flush().unwrap();
+        b.flush().unwrap();
+        let base = std::fs::read_to_string(dir.path().join("events-20260703.jsonl")).unwrap();
+        assert_eq!(base.lines().count(), 2, "the base file is never overfilled");
+        assert_eq!(
+            crate::events::read_all(dir.path()).unwrap(),
+            events,
+            "file order is append order"
+        );
+    }
 }

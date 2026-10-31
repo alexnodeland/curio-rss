@@ -43,8 +43,9 @@ directories = "6"
 dom_smoothie = "0.18"
 ego-tree = "0.11"
 feed-rs = "2"
-# Advisory cross-process file locks (flock / LockFileEx) for the per-destination
-# export lock. std's File::lock needs Rust 1.89; the engine MSRV is 1.88.
+# Advisory cross-process file locks (flock / LockFileEx): the per-destination
+# export lock and the events-log lock that serializes emission across heads
+# sharing one profile. std's File::lock needs Rust 1.89; the engine MSRV is 1.88.
 fs4 = { version = "1", default-features = false, features = ["sync"] }
 htmd = "0.5"
 # NFC for note filenames. Already in the graph via url → idna; the

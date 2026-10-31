@@ -118,6 +118,12 @@ defense-in-depth, not the primary defense.
   `content_text` actually differ.
 - Network-filesystem guard (planned, #112): refuses to open the DB on
   Syncthing/iCloud/NFS-class mounts without an explicit override flag.
+- Fault containment: a panicking write job replies `JobPanicked`, its open transaction
+  is rolled back and the writer keeps serving; a panicking read still returns its pooled
+  connection, and a read that waits too long for one fails with `PoolTimeout` rather
+  than hanging. Lock contention with another process on the profile surfaces as the
+  typed, retryable `StorageError::Busy` (CLI exit status 75), never a bare
+  `sqlite error`.
 
 ### `events/` — event-sourced article state
 
@@ -130,6 +136,15 @@ same transaction. One mechanism serves three masters:
    checkpointing, daily rotation, file + webhook sinks).
 3. The substrate for any future sync — server head, client mode, or file-based journal
    merge — as a deterministic merge problem instead of a retrofit.
+
+**Several heads on one profile** (the desktop app plus a CLI cron job) share the JSONL
+log safely: every drain — claim the staged intents, append, fsync, delete the intents —
+runs under an exclusive advisory lock on `.curio/events.lock` (beside the contract
+directory, never inside it), and starts by catching up with the other writers (heal a
+torn tail, adopt a file they rotated to, re-read the size counter). An intent is
+therefore emitted by exactly one process, lines never interleave, and a heal never
+truncates another process's append in flight. A holder that keeps the lock past 15 s
+yields the typed, retryable `EventLogError::ProfileLocked`.
 
 Cursor semantics are designed now (`events since <cursor>`) so the JSONL export, `curio
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.

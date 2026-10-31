@@ -607,3 +607,103 @@ fn replay_after_partial_emission_duplicates_harmlessly() {
     assert_eq!(state.events_seen(), 1, "dedupe collapses the duplicate");
     assert!(state.starred.contains(&curio_id));
 }
+
+// ------------------------------------------------- cross-process emission
+
+/// Set in a child process: the shared profile it works on.
+const CHILD_PROFILE_ENV: &str = "CURIO_TEST_MULTIPROCESS_PROFILE";
+/// Set in a child process: the article id it flips.
+const CHILD_ARTICLE_ENV: &str = "CURIO_TEST_MULTIPROCESS_ARTICLE";
+const PROCESSES: usize = 3;
+const FLIPS_PER_PROCESS: usize = 500;
+
+/// Acceptance (#114): N `CoreHandle` processes × 500 state flips on one
+/// profile — every staged event lands in the log exactly once, and every
+/// line is whole. Before the events lock, each process's startup replay
+/// re-emitted intents the others had staged but not yet drained, heals
+/// could truncate another process's append in flight, and stale
+/// rotation counters split one file's lines across processes.
+///
+/// The children are this very test binary, re-run with `--exact` on
+/// [`multiprocess_child`] — real, separate processes, nothing but the
+/// filesystem shared, no network.
+#[test]
+fn concurrent_processes_emit_every_event_exactly_once() {
+    if std::env::var_os(CHILD_PROFILE_ENV).is_some() {
+        return; // inside a child: only `multiprocess_child` does work
+    }
+    let profile = tempfile::tempdir().unwrap();
+    let ids: Vec<_> = {
+        let core = curio_core::CoreHandle::open(profile.path()).unwrap();
+        let articles = (0..PROCESSES)
+            .map(|n| NewArticle {
+                feed_id: None,
+                dedupe_key: format!("mp-{n}"),
+                title: format!("Article {n}"),
+                source_url: format!("https://example.com/mp/{n}"),
+                author: None,
+                published_at: None,
+                content: ArticleContent {
+                    html: "<p>body</p>".to_owned(),
+                    text: "body".to_owned(),
+                },
+                lang: None,
+                word_count: None,
+                source_updated_at: None,
+                lead_image: None,
+            })
+            .collect();
+        core.storage().upsert_articles(articles).unwrap();
+        core.storage()
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .into_iter()
+            .map(|a| a.id)
+            .collect()
+    };
+    assert_eq!(ids.len(), PROCESSES);
+
+    let exe = std::env::current_exe().unwrap();
+    let children: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            std::process::Command::new(&exe)
+                .args(["--exact", "multiprocess_child", "--test-threads=1"])
+                .env(CHILD_PROFILE_ENV, profile.path())
+                .env(CHILD_ARTICLE_ENV, id.0.to_string())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for mut child in children {
+        assert!(child.wait().unwrap().success(), "a child process failed");
+    }
+
+    let events_dir = profile.path().join(".curio").join("events");
+    // `read_all` refuses any invalid (torn, glued, interleaved) line.
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), PROCESSES * FLIPS_PER_PROCESS);
+    let unique: std::collections::HashSet<_> = events.iter().map(|e| e.event_id).collect();
+    assert_eq!(unique.len(), events.len(), "an event_id appeared twice");
+    // ...and nothing is left staged.
+    let core = curio_core::CoreHandle::open(profile.path()).unwrap();
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+    let state = FoldedState::fold(events);
+    assert!(state.starred.is_empty(), "each child ends on an unstar");
+}
+
+/// Child half of [`concurrent_processes_emit_every_event_exactly_once`];
+/// a no-op unless that test spawned this process.
+#[test]
+fn multiprocess_child() {
+    let Some(profile) = std::env::var_os(CHILD_PROFILE_ENV) else {
+        return;
+    };
+    let id =
+        curio_core::model::ArticleId(std::env::var(CHILD_ARTICLE_ENV).unwrap().parse().unwrap());
+    let core = curio_core::CoreHandle::open(profile).unwrap();
+    for flip in 0..FLIPS_PER_PROCESS {
+        assert!(core.set_starred(id, flip % 2 == 0).unwrap());
+    }
+}

@@ -1,55 +1,112 @@
-# Release workflow — pushing a `vX.Y.Z` tag builds the unsigned macOS
-# **universal** bundle (arm64 + x64 in one binary) on a single Apple-silicon
-# runner, and publishes a DRAFT GitHub release with the DMG under the stable
-# name the Homebrew cask expects (Curio-universal.dmg, which backs
-# `releases/latest/download/Curio-universal.dmg`). A universal build avoids
-# the scarce Intel (`macos-13`) runner queue entirely and matches the tap's
-# other casks. The release is a DRAFT on purpose: nothing is public — and
-# `brew` sees nothing — until a human reviews it and clicks Publish. macOS is
-# the shipped channel, unsigned (docs/design/decisions.md).
+# Release workflow — pushing a `vX.Y.Z` tag runs the full CI gate, builds the
+# unsigned macOS **universal** bundle (arm64 + x64 in one binary) on a single
+# Apple-silicon runner, signs the updater archive in an isolated job, and
+# publishes a DRAFT GitHub release with the DMG under the stable name the
+# Homebrew cask expects (Curio-universal.dmg, which backs
+# `releases/latest/download/Curio-universal.dmg`), plus SHA256SUMS, CycloneDX
+# SBOMs and a build-provenance attestation. A universal build avoids the
+# scarce Intel runner queue entirely and matches the tap's other casks. The
+# release is a DRAFT on purpose: nothing is public — and neither `brew` nor
+# the in-app updater sees anything — until a human reviews it and clicks
+# Publish. macOS is the shipped channel, Apple-unsigned
+# (docs/design/decisions.md).
+#
+# Job graph (every job transitively needs `gate`, so a tag on a commit with
+# red CI never reaches a draft release — `cargo run -p xtask -- workflows`
+# enforces that shape, the SHA pins, and the signing-key isolation):
+#
+#   gate (ci.yml, the per-PR suite) ─┬─ build (macOS, NO secrets) ── sign ─┐
+#                                    └─ sbom ───────────────────────────────┴─ release
+#
+# Updater signing key isolation: `TAURI_SIGNING_PRIVATE_KEY` is referenced by
+# exactly ONE step (sign → "Sign the updater archive"), which runs only the
+# prebuilt `tauri signer sign` binary — no build.rs, no vite plugin, no npm
+# lifecycle script ever runs with the key in its environment. The build job
+# turns `createUpdaterArtifacts` off and tars Curio.app itself (byte-for-byte
+# what tauri's bundler would archive: `Curio.app/` at the root).
+#
+# Dry run: `workflow_dispatch` runs everything except the publish steps — the
+# signing step is replaced by one that signs with a throwaway key generated on
+# the runner, no attestation is minted, and no release is drafted; the would-be
+# release assets are uploaded as the `release-dry-run` run artifact instead.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
+# Least privilege by default; the one job that writes (release) asks for its
+# grants explicitly.
 permissions:
-  contents: write # create the release + upload assets
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  gate:
+    # The whole per-PR suite (fmt, clippy, tests, coverage floor, deny,
+    # bindings drift, frontend gates, …) re-run on the tagged commit. Never
+    # `secrets: inherit` — the gate needs no secrets, and the signing key must
+    # never reach it.
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
-    name: build macOS (universal)
+    name: build macOS (universal, unsigned)
+    needs: gate
     runs-on: macos-14
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
-      - name: Verify CHANGELOG leads with this tag's version
+          persist-credentials: false
+      - name: Resolve the release version
+        id: meta
+        # A tag push releases the tag's version; a dry run (workflow_dispatch)
+        # releases the workspace version as if it were tagged.
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            tag="$REF_NAME"
+          else
+            tag="v$(sed -nE 's/^version = "([^"]+)".*/\1/p' Cargo.toml | head -1)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "releasing $tag"
+      - name: Verify CHANGELOG leads with this version
         # Release notes are extracted from the FIRST `## ` section of
         # CHANGELOG.md (see the "Assemble release notes" step). If the tag is cut
         # before a matching `## [X.Y.Z]` section is added, the release ships the
         # previous version's notes — this guard fails the build fast instead.
         env:
-          TAG: ${{ github.ref_name }}
+          WANT: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          want="${TAG#v}"
           got="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | sed -E 's/[^0-9.]//g' || true)"
-          if [ "$got" != "$want" ]; then
-            echo "::error::CHANGELOG.md's leading section is [$got] but the tag is v$want — add a '## [$want]' section (release notes come from the first section)."
+          if [ "$got" != "$WANT" ]; then
+            echo "::error::CHANGELOG.md's leading section is [$got] but the release is v$WANT — add a '## [$WANT]' section (release notes come from the first section)."
             exit 1
           fi
-          echo "CHANGELOG leads with [$want] ✓"
-      - uses: dtolnay/rust-toolchain@stable
+          echo "CHANGELOG leads with [$WANT] ✓"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: x86_64-apple-darwin,aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "."
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -57,36 +114,103 @@ jobs:
       - name: Install frontend deps
         working-directory: apps/desktop
         run: npm ci
-      - name: Build the universal bundle (Apple-unsigned; updater-signed)
+      - name: Build the universal bundle (Apple-unsigned, updater-unsigned)
         working-directory: apps/desktop
-        # Apple notarization is intentionally skipped (unsigned distribution,
-        # see nightly.yml / decisions.md). The signing env below is the *Tauri
-        # updater* minisign key — orthogonal to Apple codesign — so
-        # `createUpdaterArtifacts` emits Curio.app.tar.gz(.sig). Universal lipo
-        # of arm64 + x64 on the arm64 runner.
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri build -- --target universal-apple-darwin
-      - name: Stage the DMG + updater artifacts and the manifest
-        # The DMG keeps the cask's stable name (Curio-universal.dmg). The updater
-        # consumes the .app.tar.gz (not the DMG) verified against the .sig; the
-        # manifest lists BOTH darwin arch keys pointing at the one universal tar
-        # with the one signature (the client looks up darwin-aarch64/x86_64 —
-        # there is no darwin-universal key). `version` is plain semver (no `v`).
-        env:
-          TAG: ${{ github.ref_name }}
+        # No signing env of any kind reaches this step: Apple notarization is
+        # intentionally skipped (decisions.md), and the Tauri updater archive is
+        # produced + signed later (createUpdaterArtifacts off here, so tauri
+        # never looks for the minisign key). Universal lipo of arm64 + x64 on
+        # the arm64 runner.
+        run: >-
+          npm run tauri build --
+          --target universal-apple-darwin
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Stage the DMG and the (unsigned) updater archive
+        # The DMG keeps the cask's stable name (Curio-universal.dmg). The
+        # updater consumes Curio.app.tar.gz — the same archive tauri's bundler
+        # writes: a gzip'd tar with `Curio.app/` at the root (the updater
+        # strips that first component on install). COPYFILE_DISABLE and
+        # --no-xattrs keep macOS from adding AppleDouble `._*` entries or
+        # xattr records that would land inside the installed bundle.
         run: |
           set -euo pipefail
           bundle=target/universal-apple-darwin/release/bundle
-          version="${TAG#v}"
           mkdir -p dist
           cp "$(ls "$bundle"/dmg/Curio_*_universal.dmg)" dist/Curio-universal.dmg
-          cp "$bundle"/macos/Curio.app.tar.gz dist/Curio.app.tar.gz
+          COPYFILE_DISABLE=1 tar --no-xattrs -czf dist/Curio.app.tar.gz -C "$bundle/macos" Curio.app
+          tar -tzf dist/Curio.app.tar.gz | head -3
           shasum -a 256 dist/Curio-universal.dmg dist/Curio.app.tar.gz
-          SIG="$(cat "$bundle"/macos/Curio.app.tar.gz.sig)" \
+      - name: Upload the unsigned bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned
+          path: dist/
+          if-no-files-found: error
+
+  sign:
+    # The ONLY job that ever sees the updater signing key, and only in one
+    # step. It checks out nothing but the npm manifest + lockfile (to install
+    # the exact, integrity-checked tauri CLI) and runs no build: `npm ci
+    # --ignore-scripts` executes no lifecycle scripts, so nothing installed
+    # here can have planted code that later runs beside the key.
+    name: sign the updater archive
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            apps/desktop/package.json
+            apps/desktop/package-lock.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install the pinned tauri CLI (no lifecycle scripts)
+        working-directory: apps/desktop
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Collect the unsigned bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned
+          path: dist
+      - name: Sign the updater archive
+        if: github.event_name == 'push'
+        # The one step holding the key. It runs the prebuilt signer only;
+        # `--app-version` binds the version into the signed trusted comment,
+        # exactly as `tauri build` does when it signs.
+        working-directory: dist
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: ../apps/desktop/node_modules/.bin/tauri signer sign --app-version "$VERSION" Curio.app.tar.gz
+      - name: Sign with a throwaway key (dry run)
+        if: github.event_name != 'push'
+        # Exercises the exact signing invocation without the real key. The
+        # resulting .sig verifies against nothing a user trusts.
+        working-directory: dist
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          signer=../apps/desktop/node_modules/.bin/tauri
+          "$signer" signer generate --ci -w "$RUNNER_TEMP/dry-run.key"
+          TAURI_SIGNING_PRIVATE_KEY="$(cat "$RUNNER_TEMP/dry-run.key")" \
+            "$signer" signer sign --app-version "$VERSION" Curio.app.tar.gz
+      - name: Write the updater manifest
+        # The manifest lists BOTH darwin arch keys pointing at the one
+        # universal tar with the one signature (the client looks up
+        # darwin-aarch64/x86_64 — there is no darwin-universal key). `version`
+        # is plain semver (no `v`).
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          SIG="$(cat dist/Curio.app.tar.gz.sig)" \
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Curio.app.tar.gz" \
-          VERSION="$version" \
           node -e '
             const fs = require("fs");
             const { SIG, URL, VERSION } = process.env;
@@ -99,24 +223,95 @@ jobs:
             }, null, 2));
           '
           cat dist/latest.json
-      - name: Upload the release assets
-        uses: actions/upload-artifact@v4
+      - name: Upload the signature + manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-assets
+          name: signed
+          path: |
+            dist/Curio.app.tar.gz.sig
+            dist/latest.json
+          if-no-files-found: error
+
+  sbom:
+    # CycloneDX SBOMs for what ships: the Rust dependency graph of the desktop
+    # crate (one per darwin arch the universal binary contains) and the npm
+    # lockfile that the bundled frontend is compiled from. `cargo cyclonedx`
+    # reads `cargo metadata` only — nothing is compiled here.
+    name: SBOM (CycloneDX)
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-cyclonedx@0.5.9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Generate the SBOMs
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo cyclonedx --manifest-path apps/desktop/src-tauri/Cargo.toml \
+              --format json --spec-version 1.5 --all --target "$target" --target-in-filename
+            cp "apps/desktop/src-tauri/curio-desktop_${target}.cdx.json" "dist/Curio-rust-${target}.cdx.json"
+          done
+          (cd apps/desktop && npm sbom --sbom-format cyclonedx --package-lock-only) > dist/Curio-npm.cdx.json
+          ls -l dist
+      - name: Upload the SBOMs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
           path: dist/
           if-no-files-found: error
 
   release:
     name: draft the GitHub release
-    needs: build
+    needs: [build, sign, sbom]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # draft the release + upload assets
+      id-token: write # sigstore OIDC for the provenance attestation
+      attestations: write # store the attestation
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Collect the release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
+      - name: Write SHA256SUMS
+        # Covers every asset the release carries (verify with
+        # `shasum -a 256 -c SHA256SUMS`); it is also the subject list of the
+        # provenance attestation below.
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
+          cat SHA256SUMS
+      - name: Attest build provenance
+        id: attest
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Attach the attestation bundle
+        if: github.event_name == 'push'
+        # The sigstore bundle as a release asset, so the provenance travels
+        # with the download (`gh attestation verify <file> --bundle …`), not
+        # only in the repo's attestation store.
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE" dist/Curio-provenance.sigstore.json
       - name: Assemble release notes
         # The unsigned/Gatekeeper banner, then this version's CHANGELOG section
         # (everything between the first and second `## ` heading).
@@ -132,22 +327,41 @@ jobs:
             echo '```'
             echo "Install via Homebrew: \`brew install --cask alexnodeland/tap/curio\`"
             echo
+            echo "Verify a download: \`shasum -a 256 -c SHA256SUMS --ignore-missing\` and"
+            echo "\`gh attestation verify Curio-universal.dmg --repo ${GITHUB_REPOSITORY}\`."
+            echo
             awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md || true
           } > NOTES.md
           cat NOTES.md
       - name: Draft the release
+        if: github.event_name == 'push'
         # Still a DRAFT on purpose (human review before public). The updater
         # endpoint `releases/latest/download/latest.json` resolves only once a
         # human clicks Publish — which is exactly the review gate we want: no
         # auto-update reaches users until the release is published.
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           draft: true
           prerelease: false
-          name: Curio ${{ github.ref_name }}
+          name: Curio ${{ needs.build.outputs.tag }}
           body_path: NOTES.md
           fail_on_unmatched_files: true
           files: |
             dist/Curio-universal.dmg
             dist/Curio.app.tar.gz
+            dist/Curio.app.tar.gz.sig
             dist/latest.json
+            dist/SHA256SUMS
+            dist/Curio-rust-aarch64-apple-darwin.cdx.json
+            dist/Curio-rust-x86_64-apple-darwin.cdx.json
+            dist/Curio-npm.cdx.json
+            dist/Curio-provenance.sigstore.json
+      - name: Upload the would-be release (dry run)
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-dry-run
+          path: |
+            dist/
+            NOTES.md
+          if-no-files-found: error

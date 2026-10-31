@@ -23,7 +23,7 @@
 mod client;
 pub mod policy;
 
-pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient};
+pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient, screen_url};
 
 use std::net::IpAddr;
 

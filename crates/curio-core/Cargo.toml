@@ -21,6 +21,8 @@ keychain = ["dep:keyring"]
 # code can seed rows the facade deliberately does not expose. Enabled only
 # from `[dev-dependencies]` (this crate's own, the desktop head's), never
 # by a production build — a head that bypasses the facade does not compile.
+# Test-target builds unify this feature into every head, so CI's
+# `just check-prod` step (libs + bins only) is what enforces that per commit.
 test-support = []
 
 [dependencies]

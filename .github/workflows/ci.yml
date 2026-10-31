@@ -60,6 +60,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Every other Rust job builds test targets, and resolver 2 then unifies
+      # dev-dependency features (curio-core's `test-support`) into the heads.
+      # Libs + bins alone is how a release build sees them: a head that
+      # reaches past the facade to `CoreHandle::storage()` fails here.
+      # Local mirror: `just check-prod`.
+      - name: Type-check production targets (no dev-dependency features)
+        run: cargo check --workspace --locked
 
   test:
     name: test (hermetic)

@@ -18,7 +18,7 @@ caught is wasted wall-clock.
 
 | Changed | Run |
 |---|---|
-| any `*.rs` | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` |
+| any `*.rs` | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `just check-prod` (libs + bins without dev-dependency features — the only gate where a head calling the test-only `CoreHandle::storage()` fails) |
 | `crates/curio-core/**` | `cargo test -p curio-core` · `just cov` when adding/removing meaningful code (85% region floor, a ratchet — never lower it, never add exclusions) |
 | `crates/curio-types/**`, `schemas/**` | `cargo test -p curio-types` (round-trips pin types to the schema artifacts) · contract-change skill |
 | `crates/curio-cli/**` | `cargo test -p curio-cli` |

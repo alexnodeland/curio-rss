@@ -46,6 +46,14 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# Type-check the production targets alone (libs + bins, no tests/examples).
+# Every other Rust gate builds test targets, and resolver 2 then unifies
+# dev-dependency features (curio-core's `test-support`) into the heads —
+# this is the one gate that sees the heads the way a release build does,
+# so a head reaching past the facade to `CoreHandle::storage()` fails here.
+check-prod:
+    cargo check --workspace --locked
+
 # fmt-check + clippy
 lint: fmt-check clippy
 
@@ -159,5 +167,5 @@ blob-guard:
     echo "blob guard: OK — no object in history exceeds 1MB"
 
 # Everything CI runs, in CI order — green here means green there
-ci: fmt-check clippy test deny boundary workflows bindings-check cov doc blob-guard frontend-bans desktop-lint desktop-npm-test
+ci: fmt-check clippy check-prod test deny boundary workflows bindings-check cov doc blob-guard frontend-bans desktop-lint desktop-npm-test
     @echo "ci suite green"

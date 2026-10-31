@@ -67,7 +67,8 @@ boundary:
     cargo run -p xtask -- boundary
 
 # Supply-chain lint over .github/workflows: SHA-pinned actions, release gated
-# on CI, updater signing key in one build-free step, SHA256SUMS/SBOM/attestation
+# on CI, updater signing key in one build-free step, SHA256SUMS/SBOM/attestation,
+# no retired runner images, and a nightly that self-validates on PRs + hard-gates
 workflows:
     cargo run -p xtask -- workflows
 

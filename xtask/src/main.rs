@@ -6,7 +6,8 @@
 //!   defense; this is defense in depth, and it is what CI runs.
 //! - `workflows` — the supply-chain lint over `.github/workflows`: SHA-pinned
 //!   actions, the release gated on CI, the updater signing key confined to
-//!   one build-free step, checksums/SBOM/attestation on the draft release
+//!   one build-free step, checksums/SBOM/attestation on the draft release,
+//!   no retired runner images, and a nightly that runs on the PRs editing it
 //!   (see `xtask::workflows`).
 
 use std::path::Path;
@@ -40,7 +41,7 @@ fn workflows() -> ExitCode {
     match xtask::workflows::lint_dir(&dir) {
         Ok(violations) if violations.is_empty() => {
             println!(
-                "xtask workflows: OK — actions SHA-pinned, release gated on CI, signing key isolated, release assets complete"
+                "xtask workflows: OK — actions SHA-pinned, release gated on CI, signing key isolated, release assets complete, no retired runners, nightly self-validating"
             );
             ExitCode::SUCCESS
         }

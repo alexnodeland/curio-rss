@@ -1,6 +1,8 @@
 //! The committed `.github/workflows` satisfy the supply-chain lint, so the
 //! workspace suite goes red the moment an edit un-pins an action, ungates the
-//! release, or widens the updater signing key's reach (issue #174).
+//! release, or widens the updater signing key's reach (issue #174) — or puts
+//! the nightly back on a retired runner, softens its gate, or stops it from
+//! running on the PRs that edit it (issue #175).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -116,4 +118,83 @@ fn code_ahead_of_the_key_in_the_real_sign_job_is_flagged() {
             "`{step}`: {violations:#?}"
         );
     }
+}
+
+/// Lint the committed `ci.yml` + `release.yml` beside an edited copy of the
+/// committed `nightly.yml` (issue #175).
+fn lint_nightly_edit(from: &str, to: &str) -> Vec<String> {
+    let dir = workflows_dir();
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("read workflow");
+    let (ci, release, nightly) = (read("ci.yml"), read("release.yml"), read("nightly.yml"));
+    assert_eq!(
+        nightly.matches(from).count(),
+        1,
+        "`{from}` must occur exactly once in nightly.yml"
+    );
+    let edited = nightly.replace(from, to);
+    xtask::workflows::lint(&[
+        xtask::workflows::WorkflowFile {
+            name: "ci.yml",
+            source: &ci,
+        },
+        xtask::workflows::WorkflowFile {
+            name: "release.yml",
+            source: &release,
+        },
+        xtask::workflows::WorkflowFile {
+            name: "nightly.yml",
+            source: &edited,
+        },
+    ])
+}
+
+fn assert_flagged(violations: &[String], needle: &str) {
+    assert!(
+        violations.iter().any(|v| v.contains(needle)),
+        "expected `{needle}` in {violations:#?}"
+    );
+}
+
+/// The real nightly runs on a PR that edits it — dropping itself from the
+/// PR path filter (so the next nightly change merges unrun) fails the lint.
+#[test]
+fn the_real_nightly_validates_its_own_edits() {
+    assert_flagged(
+        &lint_nightly_edit("      - .github/workflows/nightly.yml\n", ""),
+        "does not list `.github/workflows/nightly.yml`",
+    );
+}
+
+/// Putting the retired Intel image back (its leg queued 24h, then was
+/// cancelled, every night) fails the lint.
+#[test]
+fn a_retired_macos_leg_in_the_real_nightly_is_flagged() {
+    let windows =
+        "          - { name: windows-x64, os: windows-latest, bundle: target/release/bundle }\n";
+    assert_flagged(
+        &lint_nightly_edit(
+            windows,
+            &format!("          - {{ name: macos-x64, os: macos-13 }}\n{windows}"),
+        ),
+        "job `bundle` runs on `macos-13`",
+    );
+}
+
+/// The real smoke is a hard gate and the real bundle upload fails on empty.
+#[test]
+fn softening_the_real_nightly_is_flagged() {
+    assert_flagged(
+        &lint_nightly_edit(
+            "    name: e2e smoke (${{ matrix.name }})\n",
+            "    name: e2e smoke (${{ matrix.name }})\n    continue-on-error: true\n",
+        ),
+        "job `smoke` sets `continue-on-error`",
+    );
+    assert_flagged(
+        &lint_nightly_edit(
+            "          if-no-files-found: error\n",
+            "          if-no-files-found: warn\n",
+        ),
+        "uploads without `if-no-files-found: error`",
+    );
 }

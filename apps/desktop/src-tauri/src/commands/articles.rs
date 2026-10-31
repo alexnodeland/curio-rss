@@ -287,7 +287,7 @@ mod tests {
         let id = seed_article(&core, "reader");
         let full = get_article_impl(&core, id).unwrap().unwrap();
         assert_eq!(full.content_html, "<p>reader</p>");
-        assert!(!full.curio_id.is_empty());
+        assert_ne!(full.curio_id, "");
         assert!(get_article_impl(&core, id + 999).unwrap().is_none());
     }
 
@@ -301,7 +301,7 @@ mod tests {
         let hits = search_articles_impl(&core, "quenched", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, id);
-        assert!(search_articles_impl(&core, "   ", 10).unwrap().is_empty());
+        assert_eq!(search_articles_impl(&core, "   ", 10).unwrap().len(), 0);
     }
 
     #[test]

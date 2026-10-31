@@ -220,9 +220,15 @@ fn retention_cannot_be_configured_below_the_contract_floor() {
     let today = chrono::NaiveDate::from_ymd_opt(2026, 7, 3).unwrap();
     // 32 days old — must survive a "7 day" (clamped to 90) sweep. It is
     // also the currently open file, so re-check with a fresh handle.
-    assert!(log.sweep_retention(today).unwrap().is_empty());
+    assert_eq!(
+        log.sweep_retention(today).unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
     let mut fresh = EventLog::open(dir.path()).unwrap().with_retention_days(7);
-    assert!(fresh.sweep_retention(today).unwrap().is_empty());
+    assert_eq!(
+        fresh.sweep_retention(today).unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
     assert_eq!(list_files(dir.path()), vec!["events-20260601.jsonl"]);
 }
 
@@ -380,7 +386,10 @@ fn emitter_drains_intents_into_the_log() {
     let tag = storage.tag_article(id, "rust").unwrap().unwrap();
     assert_eq!(emitter.emit_pending().unwrap(), 2);
     assert_eq!(emitter.emit_pending().unwrap(), 0, "drain is idempotent");
-    assert!(storage.pending_intents().unwrap().is_empty());
+    assert_eq!(
+        storage.pending_intents().unwrap(),
+        [] as [curio_core::storage::PendingIntent; 0]
+    );
 
     let read = read_all(&events_dir).unwrap();
     assert_eq!(read, vec![star, tag]);
@@ -413,7 +422,10 @@ fn startup_replays_intents_that_never_reached_the_log() {
         EventLog::open(&events_dir).unwrap(),
     )
     .unwrap();
-    assert!(storage.pending_intents().unwrap().is_empty());
+    assert_eq!(
+        storage.pending_intents().unwrap(),
+        [] as [curio_core::storage::PendingIntent; 0]
+    );
 
     let events = read_all(&events_dir).unwrap();
     assert_eq!(events.len(), 1);

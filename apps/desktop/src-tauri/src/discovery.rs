@@ -341,7 +341,7 @@ mod tests {
     fn a_plain_page_with_no_links_falls_back_to_the_origin_favicon() {
         let html = "<html><head><title>Nothing here</title></head><body></body></html>";
         let out = extract(html.as_bytes(), "https://blog.test/some/deep/page");
-        assert!(out.feeds.is_empty());
+        assert_eq!(out.feeds.len(), 0);
         assert_eq!(
             out.favicon.as_deref(),
             Some("https://blog.test/favicon.ico")
@@ -392,14 +392,14 @@ mod tests {
         let html =
             r#"<link rel="canonical" href="https://example.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">"#;
         let out = extract(html.as_bytes(), "https://example.com/some/page");
-        assert!(out.feeds.is_empty());
+        assert_eq!(out.feeds.len(), 0);
     }
 
     #[test]
     fn xhtml_alternates_are_not_mistaken_for_feeds() {
         let html = r#"<link rel="alternate" type="application/xhtml+xml" href="/amp">"#;
         let out = extract(html.as_bytes(), "https://blog.test/");
-        assert!(out.feeds.is_empty());
+        assert_eq!(out.feeds.len(), 0);
     }
 
     #[tokio::test]

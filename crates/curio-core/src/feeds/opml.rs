@@ -328,7 +328,7 @@ mod tests {
             "nesting collapses to one `/`-joined path tag, not a flat bag"
         );
         assert_eq!(feeds[2].tags, vec!["Cooking"]);
-        assert!(feeds[3].tags.is_empty());
+        assert_eq!(feeds[3].tags, [] as [std::string::String; 0]);
     }
 
     #[test]

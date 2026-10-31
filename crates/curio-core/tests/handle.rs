@@ -311,7 +311,10 @@ async fn http_410_auto_pauses_the_feed_for_good() {
     let again = core.refresh_feed(feed.id).await.unwrap();
     assert!(again.error.unwrap().contains("dead"));
     // And refresh_all skips it entirely.
-    assert!(core.refresh_all().await.unwrap().is_empty());
+    assert_eq!(
+        core.refresh_all().await.unwrap(),
+        [] as [curio_core::RefreshOutcome; 0]
+    );
 }
 
 #[tokio::test]
@@ -336,10 +339,9 @@ async fn ssrf_guard_holds_inside_the_facade_without_the_w1_flag() {
     let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.status, FetchStatus::Error);
     assert!(outcome.error.unwrap().contains("not public"));
-    assert!(
-        core.list_articles(ListArticles::default())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        core.list_articles(ListArticles::default()).unwrap(),
+        [] as [curio_core::model::Article; 0]
     );
 }
 
@@ -770,7 +772,7 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
         let saved = core.save_to_destination(article, &dest).unwrap();
 
         core.remove_destination(&dest).unwrap();
-        assert!(core.destinations().is_empty());
+        assert_eq!(core.destinations(), [] as [curio_types::Destination; 0]);
         // The name is gone from the operation surface…
         let err = core.save_to_destination(article, &dest).unwrap_err();
         assert!(matches!(
@@ -821,7 +823,10 @@ fn sweep_event_retention_removes_only_expired_files() {
     assert_eq!(survivors.len(), 1, "today's file survives: {survivors:?}");
 
     // Idempotent: nothing left to sweep.
-    assert!(core.sweep_event_retention().unwrap().is_empty());
+    assert_eq!(
+        core.sweep_event_retention().unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 /// The facade serves backend-owned unread counts — heads render the map,
@@ -1304,7 +1309,7 @@ async fn save_url_of_an_unreachable_page_still_saves_the_bare_link() {
     assert!(saved.created);
     assert!(!saved.hydrated, "no content, but the link is not lost");
     assert_eq!(saved.article.title, url, "the URL stands in for a title");
-    assert!(saved.article.content.text.is_empty());
+    assert_eq!(saved.article.content.text, "");
     assert!(
         core.article_state(saved.article.id).unwrap().read_later,
         "still lands in read-later"

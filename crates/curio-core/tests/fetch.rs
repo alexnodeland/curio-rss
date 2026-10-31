@@ -265,7 +265,7 @@ async fn conditional_get_sends_validators_and_maps_304() {
     };
     let response = client.fetch(&request).await.unwrap();
     assert!(response.is_not_modified());
-    assert!(response.body.is_empty());
+    assert_eq!(response.body, [] as [u8; 0]);
 
     // Both validators rode the request (asserted on the raw request:
     // wiremock's header matcher splits date values on commas).

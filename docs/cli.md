@@ -30,6 +30,7 @@ future head.
 | `curio dest add <name> <path>` | Register a save destination |
 | `curio save <id> --dest <name>` | Export a note per `curio.frontmatter.v1` |
 | `curio import <file> --from <service>` | Import subscriptions + saved articles from a third-party export (idempotent) |
+| `curio reddit login\|status\|logout` | Manage the optional BYO Reddit API credentials (OS keychain, per profile) |
 | `curio events tail [-n N]` | Watch the behavioral event stream |
 | `curio doctor` | DB integrity, FTS sync, events-log health |
 
@@ -53,6 +54,7 @@ All state lives in one profile directory:
 | `curio.db` | WAL SQLite: feeds, articles, state, FTS index |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
 | `.curio/.gitignore` | scaffolded so the events log is never committed |
+| `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
 
 The default location is the platform data directory —
 `~/.local/share/curio` on Linux (XDG-respecting: `XDG_DATA_HOME` wins),
@@ -141,6 +143,26 @@ politeness delay — so `curio fetch` of a subreddit `.rss` works out of the box
 This override is hard-coded in the engine (not a `curio.toml` knob) and is
 disclosed in [PRIVACY.md](../PRIVACY.md); every other host keeps rustls + the
 honest `curio/<version>` UA and the default 500 ms delay.
+
+**Reddit API credentials (optional).** Reddit enrichment works
+unauthenticated, slowly. Bring your own free app from reddit.com/prefs/apps
+(type "script") and Curio uses the authenticated API at the faster tier:
+
+```sh
+curio reddit login --client-id <id>   # reads the secret from stdin (keeps it out of shell history)
+curio reddit status                   # configured? and the client id — never the secret
+curio reddit logout                   # remove them; back to unauthenticated
+```
+
+The credentials live in the OS keychain, **one item per profile**: `--profile`
+(or `CURIO_PROFILE`) selects whose app a command — including a cron
+`curio fetch` — uses, and two profiles can hold different apps. Note that the
+CLI's default profile is not the desktop app's, so credentials saved in the
+app are not seen by a bare `curio fetch` unless you point `--profile` at the
+app's profile directory. The keychain item is keyed by the id in
+`.curio/profile-id`, so moving a profile directory keeps its credentials.
+Upgrading from 0.4.x, the old shared item is copied into each profile the
+first time it opens; `reddit logout` removes it.
 
 ## Reading
 

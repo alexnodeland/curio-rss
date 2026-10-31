@@ -1136,12 +1136,20 @@ async fn authenticated_reddit_enrichment_grants_once_and_sends_the_bearer() {
 
     let profile = tempfile::tempdir().unwrap();
     let core = open_core_trusting_localhost(profile.path());
-    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+    let config = curio_core::enrich::reddit_auth::RedditApiConfig {
         client_id: "cid".to_owned(),
-        client_secret: "sec".to_owned(),
+        client_secret: "s3cr3t-value".to_owned(),
         token_url: format!("{}/api/v1/access_token", server.uri()),
         api_origin: server.uri(),
-    }));
+    };
+    // The secret never reaches a `{:?}` of the config (log lines,
+    // panic messages)…
+    let config_debug = format!("{config:?}");
+    assert!(
+        !config_debug.contains("s3cr3t-value"),
+        "secret leaked: {config_debug}"
+    );
+    core.set_reddit_api(Some(config));
     assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid"));
 
     let mk = |key: &str, comments_id: &str| {
@@ -1169,6 +1177,19 @@ async fn authenticated_reddit_enrichment_grants_once_and_sends_the_bearer() {
             hydrated.content.text
         );
     }
+
+    // …nor does it — or the live, cached bearer — reach a `{:?}` of the
+    // handle holding both.
+    let core_debug = format!("{core:?} {core:#?}");
+    assert!(core_debug.contains("<redacted>"), "{core_debug}");
+    assert!(
+        !core_debug.contains("s3cr3t-value"),
+        "secret leaked: {core_debug}"
+    );
+    assert!(
+        !core_debug.contains("tok123"),
+        "bearer leaked: {core_debug}"
+    );
 
     // Clearing credentials reports unconfigured again.
     core.set_reddit_api(None);

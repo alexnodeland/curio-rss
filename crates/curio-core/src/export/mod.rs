@@ -176,23 +176,26 @@ pub enum ExportError {
 /// Ordering: note → event intent → manifest. Staging the intent before
 /// the manifest write means no crash window can lose the contract
 /// event: with no intent and no manifest entry, the next export re-runs
-/// as Created/Updated and stages then; with an intent but no manifest
+/// (as `Updated` once the article's own note is on disk) and stages then; with an intent but no manifest
 /// entry, startup replay emits it (at worst a consumer later sees a
 /// duplicate snapshot for the same `curio_id`, which folds
 /// idempotently). Were the manifest written first, its
 /// `(curio_id, checksum)` idempotency hit would suppress the event on
 /// every retry — losing it forever.
 ///
-/// A staged export holds the destination's export lock until it is
-/// committed or dropped, so keep the window short: another export to the
-/// same destination (any thread, any process) waits for it.
+/// A staged export that writes holds the destination's export lock until
+/// it is committed or dropped, so keep the window short: another export to
+/// the same destination (any thread, any process) waits for it. The pure
+/// idempotency hit writes nothing and takes no lock — an unchanged export
+/// still works on a read-only destination.
 #[derive(Debug)]
 #[must_use = "call commit() — the manifest write is still pending"]
 pub struct StagedExport {
     outcome: ExportOutcome,
     pending: Option<PendingManifest>,
-    /// Held from the manifest load through the manifest commit.
-    _lock: DestinationLock,
+    /// Held from the manifest load through the manifest commit; `None`
+    /// for the lock-free idempotency hit.
+    _lock: Option<DestinationLock>,
 }
 
 #[derive(Debug)]
@@ -292,12 +295,6 @@ enum NoteWrite {
     Replace(String),
 }
 
-impl From<Option<String>> for NoteWrite {
-    fn from(existing: Option<String>) -> Self {
-        existing.map_or(Self::Fresh, Self::Replace)
-    }
-}
-
 /// Decides the target for an article the manifest already records.
 fn recorded_target(
     root: &Path,
@@ -328,8 +325,7 @@ fn recorded_target(
         // A stale manifest: the recorded path now holds another
         // article's note. Never touch it — move to a free path.
         Occupant::OtherArticle => {
-            let (rel_path, existing) = unique_note_path(root, manifest, input)?;
-            (rel_path, ExportDisposition::Updated, Some(existing.into()))
+            return unrecorded_target(root, manifest, input, ExportDisposition::Updated);
         }
     };
     Ok(Target {
@@ -337,6 +333,70 @@ fn recorded_target(
         disposition,
         write,
     })
+}
+
+/// Decides the target for an article the manifest does not (truthfully)
+/// record: the first free deterministic candidate path, or this article's
+/// own note when one is already on disk (a lost or stale manifest).
+///
+/// `fresh` is the disposition of a brand-new note — `Created` for an
+/// article the manifest never knew, `Updated` for one whose recorded path
+/// turned out to hold another article's note. Finding the article's own
+/// note is `Updated`, never `Created`: the note proves an earlier export,
+/// so a second `article.saved` would be a lie. Nor is it `Unchanged`
+/// (no event), even when the note already carries this checksum — the
+/// note may be the leftover of an export that crashed before staging its
+/// event intent, and suppressing the event here would lose it for good.
+/// `article.updated` carries the same full snapshot and folds
+/// idempotently. Either way the manifest records the note again.
+fn unrecorded_target(
+    root: &Path,
+    manifest: &curio_types::ManifestV1,
+    input: &ExportInput,
+    fresh: ExportDisposition,
+) -> Result<Target, ExportError> {
+    let (rel_path, existing) = unique_note_path(root, manifest, input)?;
+    let (disposition, write) = match existing {
+        None => (fresh, Some(NoteWrite::Fresh)),
+        Some(old) => (ExportDisposition::Updated, Some(NoteWrite::Replace(old))),
+    };
+    Ok(Target {
+        rel_path,
+        disposition,
+        write,
+    })
+}
+
+/// The idempotency hit, decided without the destination lock: it writes
+/// nothing, so it needs no serialization (manifest and note are replaced
+/// by atomic renames — a concurrent reader sees one version or the
+/// other), and it keeps working where the lock cannot be taken (a
+/// read-only destination). Anything short of a clean hit — no entry, a
+/// changed checksum, a moved or missing note, pending conflict copies —
+/// is `None`, and the caller redoes the decision under the lock.
+fn unlocked_idempotency_hit(
+    root: &Path,
+    input: &ExportInput,
+    checksum: Checksum,
+) -> Result<Option<ExportOutcome>, ExportError> {
+    if !root.is_dir() {
+        // The locked path reports the missing destination.
+        return Ok(None);
+    }
+    let manifest = load_manifest(root)?;
+    let Some(entry) = manifest.notes.get(&input.curio_id) else {
+        return Ok(None);
+    };
+    if entry.checksum != checksum || !manifest_conflict_copies(root)?.is_empty() {
+        return Ok(None);
+    }
+    let target = recorded_target(root, &manifest, input, entry, checksum)?;
+    let hit = target.write.is_none() && target.rel_path == entry.path;
+    Ok(hit.then_some(ExportOutcome {
+        path: target.rel_path,
+        checksum,
+        disposition: ExportDisposition::Unchanged,
+    }))
 }
 
 /// Exports one article into a destination, per the contract flow:
@@ -374,22 +434,27 @@ pub fn stage_export_note(
     let body = body.as_ref();
     let checksum = region_checksum(body);
     let root = &destination.root;
+    if let Some(outcome) = unlocked_idempotency_hit(root, input, checksum)? {
+        return Ok(StagedExport {
+            outcome,
+            pending: None,
+            _lock: None,
+        });
+    }
     // One export per destination at a time, from the manifest load
     // through the manifest commit — across threads and processes.
     let lock = DestinationLock::acquire(root)?;
     let mut manifest = load_manifest(root)?;
     let merged_copies = manifest::merge_conflict_copies(root, &mut manifest)?;
 
-    let target = if let Some(entry) = manifest.notes.get(&input.curio_id) {
-        recorded_target(root, &manifest, input, entry, checksum)?
-    } else {
-        let (rel_path, existing) = unique_note_path(root, &manifest, input)?;
-        Target {
-            rel_path,
-            disposition: ExportDisposition::Created,
-            write: Some(existing.into()),
-        }
+    let target = match manifest.notes.get(&input.curio_id) {
+        Some(entry) => recorded_target(root, &manifest, input, entry, checksum)?,
+        None => unrecorded_target(root, &manifest, input, ExportDisposition::Created)?,
     };
+    // Every target but the idempotency hit (whose manifest entry already
+    // says exactly this) is (re-)recorded — also when the note on disk
+    // turns out to be current already and its write is skipped.
+    let record = target.write.is_some();
     let outcome = ExportOutcome {
         path: target.rel_path,
         checksum,
@@ -401,12 +466,21 @@ pub fn stage_export_note(
         // replacement that preserves user content byte-for-byte.
         let abs_path = contained_path(root, &outcome.path)?;
         let fm = frontmatter(input, checksum);
-        let content = match write {
-            NoteWrite::Replace(old) => note::replace_managed(&old, &fm, body, &abs_path)?,
-            NoteWrite::Fresh => render_note(&fm, body)?,
+        let (content, current) = match write {
+            NoteWrite::Replace(old) => {
+                let content = note::replace_managed(&old, &fm, body, &abs_path)?;
+                let current = content == old;
+                (content, current)
+            }
+            NoteWrite::Fresh => (render_note(&fm, body)?, false),
         };
-        // Contract write ordering: note first…
-        write_atomic(root, &abs_path, content.as_bytes())?;
+        // Contract write ordering: note first (skipped when the note on
+        // disk already has exactly these bytes)…
+        if !current {
+            write_atomic(root, &abs_path, content.as_bytes())?;
+        }
+    }
+    if record {
         // …manifest second — held back so the caller can stage its event
         // intent between the two writes (see [`StagedExport`]).
         manifest.notes.insert(
@@ -422,7 +496,7 @@ pub fn stage_export_note(
         return Ok(StagedExport {
             outcome,
             pending: None,
-            _lock: lock,
+            _lock: Some(lock),
         });
     }
     Ok(StagedExport {
@@ -432,7 +506,7 @@ pub fn stage_export_note(
             manifest,
             merged_copies,
         }),
-        _lock: lock,
+        _lock: Some(lock),
     })
 }
 

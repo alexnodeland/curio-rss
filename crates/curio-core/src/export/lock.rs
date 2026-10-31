@@ -13,6 +13,10 @@
 //! - **cross-process**: an advisory exclusive lock (`flock` /
 //!   `LockFileEx`) on `.curio/manifest.lock`, which the OS releases when
 //!   the holder exits, so a crashed export never wedges the destination.
+//!   A filesystem without advisory locks (some NFS, SMB and FUSE mounts
+//!   answer `ENOLCK`/`ENOTSUP`/`ENOSYS`) falls back to the in-process
+//!   level alone, with a warning: exporting there still works, it is only
+//!   unserialized against *other processes*.
 //!
 //! The lock file is never deleted (deleting a lock file reopens the very
 //! race it guards) and carries no data; `.curio/.gitignore` keeps it out
@@ -20,6 +24,7 @@
 
 use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
@@ -32,6 +37,57 @@ pub(super) const LOCK_FILE: &str = "manifest.lock";
 static HELD: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 /// Signalled whenever a root leaves [`HELD`].
 static RELEASED: Condvar = Condvar::new();
+
+/// Lock files whose filesystem refused an advisory lock — warned about
+/// once per process, not once per exported note.
+static UNLOCKABLE: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// OS error codes meaning "this filesystem has no advisory locks" (as
+/// opposed to a real failure, which stays a hard error).
+#[cfg(unix)]
+const NO_ADVISORY_LOCKS: &[i32] = &[libc::ENOLCK, libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS];
+/// `ERROR_INVALID_FUNCTION` and `ERROR_NOT_SUPPORTED` — what `LockFileEx`
+/// answers on a share or filesystem driver without byte-range locks.
+#[cfg(windows)]
+const NO_ADVISORY_LOCKS: &[i32] = &[1, 50];
+#[cfg(not(any(unix, windows)))]
+const NO_ADVISORY_LOCKS: &[i32] = &[];
+
+fn advisory_locks_unsupported(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::Unsupported
+        || err
+            .raw_os_error()
+            .is_some_and(|code| NO_ADVISORY_LOCKS.contains(&code))
+}
+
+/// Takes the cross-process lock with `lock`. On a filesystem without
+/// advisory locks the export carries on under the in-process lock alone
+/// (warned once per lock file); any other failure is returned.
+fn lock_advisory(
+    file: &File,
+    lock_path: &Path,
+    lock: impl FnOnce(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    match lock(file) {
+        Ok(()) => Ok(()),
+        Err(err) if advisory_locks_unsupported(&err) => {
+            let first = UNLOCKABLE
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(lock_path.to_path_buf());
+            if first {
+                tracing::warn!(
+                    path = %lock_path.display(),
+                    %err,
+                    "the destination's filesystem has no advisory locks; exports to it are \
+                     serialized within this process only"
+                );
+            }
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
 
 fn held() -> MutexGuard<'static, BTreeSet<PathBuf>> {
     // The set is only ever mutated by a single insert/remove — a
@@ -99,7 +155,7 @@ impl DestinationLock {
             .map_err(io_err)?;
         // Fully qualified: from Rust 1.89 std has an inherent `File::lock`
         // that would shadow the trait method on newer toolchains only.
-        fs4::FileExt::lock(&file).map_err(io_err)?;
+        lock_advisory(&file, &lock_path, <File as fs4::FileExt>::lock).map_err(io_err)?;
         guard.file = Some(file);
         Ok(guard)
     }
@@ -185,6 +241,35 @@ mod tests {
         drop(foreign);
         rx.recv_timeout(Duration::from_secs(30)).unwrap();
         waiter.join().unwrap();
+    }
+
+    #[test]
+    fn a_filesystem_without_advisory_locks_falls_back_to_the_in_process_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LOCK_FILE);
+        let file = File::create(&path).unwrap();
+        // Twice each: the second refusal takes the already-warned path.
+        for _ in 0..2 {
+            lock_advisory(&file, &path, |_| {
+                Err(io::Error::from(io::ErrorKind::Unsupported))
+            })
+            .unwrap();
+            for code in NO_ADVISORY_LOCKS {
+                lock_advisory(&file, &path, |_| Err(io::Error::from_raw_os_error(*code))).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_real_lock_failure_stays_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LOCK_FILE);
+        let file = File::create(&path).unwrap();
+        let err = lock_advisory(&file, &path, |_| {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[test]

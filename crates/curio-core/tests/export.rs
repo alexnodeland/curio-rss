@@ -228,13 +228,14 @@ fn staged_export_holds_the_manifest_back_until_commit() {
     assert_eq!(manifest.notes.get(&id).unwrap().checksum, outcome.checksum);
 
     // A staged-but-never-committed export (crash before the manifest
-    // write) re-converges: the next export re-runs as Created and heals
-    // the manifest.
+    // write) re-converges: the next export finds the article's own note,
+    // re-runs as Updated (so an intent the crash lost is staged again —
+    // never suppressed as Unchanged) and heals the manifest.
     let id2 = CurioId::new();
     drop(stage_export_note(&dest, &input(id2, "Crashy", "body")).unwrap());
     assert!(!load_manifest(dir.path()).unwrap().notes.contains_key(&id2));
     let retried = export_note(&dest, &input(id2, "Crashy", "body")).unwrap();
-    assert_eq!(retried.disposition, ExportDisposition::Created);
+    assert_eq!(retried.disposition, ExportDisposition::Updated);
     assert!(load_manifest(dir.path()).unwrap().notes.contains_key(&id2));
 }
 
@@ -423,6 +424,15 @@ fn a_lost_manifest_reconciles_an_article_onto_its_own_note() {
     remove_manifest(dir.path());
     let again = export_note(&dest, &input(id, "Mine", "v2")).unwrap();
     assert_eq!(again.path, first.path);
+    assert_eq!(
+        again.disposition,
+        ExportDisposition::Updated,
+        "the article was saved before: never a second article.saved"
+    );
+    assert_eq!(
+        load_manifest(dir.path()).unwrap().notes[&id].path,
+        first.path
+    );
     let note = std::fs::read_to_string(&abs).unwrap();
     assert!(
         note.contains("\nv2\n") && note.ends_with("\nkept\n"),
@@ -432,6 +442,59 @@ fn a_lost_manifest_reconciles_an_article_onto_its_own_note() {
         std::fs::read_dir(dir.path().join("curio")).unwrap().count(),
         1
     );
+}
+
+/// A lost manifest + an *unchanged* re-export: the note's bytes stay as
+/// they are, the export is `Updated` (never a second `article.saved`, and
+/// never a silent `Unchanged` that could swallow a crashed export's
+/// event), and the manifest records the note again.
+#[test]
+fn a_lost_manifest_and_an_unchanged_article_keep_the_note_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+    let first = export_note(&dest, &input(id, "Mine", "same")).unwrap();
+    let abs = dir.path().join(&first.path);
+    let annotated = format!("{}\nkept\n", std::fs::read_to_string(&abs).unwrap());
+    std::fs::write(&abs, &annotated).unwrap();
+
+    remove_manifest(dir.path());
+    let again = export_note(&dest, &input(id, "Mine", "same")).unwrap();
+    assert_eq!(again.disposition, ExportDisposition::Updated);
+    assert_eq!(again.path, first.path);
+    assert_eq!(std::fs::read_to_string(&abs).unwrap(), annotated);
+    let manifest = load_manifest(dir.path()).unwrap();
+    assert_eq!(manifest.notes[&id].path, first.path);
+    assert_eq!(manifest.notes[&id].checksum, first.checksum);
+
+    // A note whose region was edited by hand is healed.
+    remove_manifest(dir.path());
+    let tampered = annotated.replace("\nsame\n", "\nhand edit\n");
+    assert_ne!(tampered, annotated);
+    std::fs::write(&abs, &tampered).unwrap();
+    let healed = export_note(&dest, &input(id, "Mine", "same")).unwrap();
+    assert_eq!(healed.disposition, ExportDisposition::Updated);
+    assert!(std::fs::read_to_string(&abs).unwrap().contains("\nsame\n"));
+}
+
+/// The idempotency hit writes nothing, so it takes no lock: it creates
+/// no lock file, and works on a destination it could not lock.
+#[test]
+fn an_unchanged_export_takes_no_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+    export_note(&dest, &input(id, "Steady", "body")).unwrap();
+    let lock = dir.path().join(".curio/manifest.lock");
+    std::fs::remove_file(&lock).unwrap();
+
+    let again = export_note(&dest, &input(id, "Steady", "body")).unwrap();
+    assert_eq!(again.disposition, ExportDisposition::Unchanged);
+    assert!(!lock.exists(), "the idempotency hit must not take the lock");
+
+    // A changed article does take it.
+    export_note(&dest, &input(id, "Steady", "new body")).unwrap();
+    assert!(lock.is_file());
 }
 
 /// A stale manifest (restored from git, or reset by a sync tool) that
@@ -593,6 +656,69 @@ fn manifest_conflict_copies_are_detected_and_merged() {
         Vec::<std::path::PathBuf>::new(),
         "merged copies are removed once the merged manifest is durable"
     );
+}
+
+/// Two devices each exported a different same-titled article to one path
+/// and the sync tool forked the manifest: the merged manifest keeps only
+/// the article whose note actually sits at that path; the other is
+/// re-homed by its next export instead of falsely claiming the note.
+#[test]
+fn a_merged_copy_never_leaves_two_articles_claiming_one_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let a = CurioId::new();
+    let b = CurioId::new();
+    let a_out = export_note(&dest, &input(a, "Weekly links", "a")).unwrap();
+    // Device 2 had exported B to the same path; its manifest is the copy.
+    let mut copy = curio_types::ManifestV1::new();
+    copy.notes.insert(
+        b,
+        curio_types::ManifestEntry {
+            path: a_out.path.clone(),
+            checksum: region_checksum("b"),
+            exported_at: "2026-07-02T09:00:00.000Z".parse().unwrap(),
+        },
+    );
+    std::fs::write(
+        dir.path().join(".curio/manifest (conflicted copy).json"),
+        copy.to_canonical_json(),
+    )
+    .unwrap();
+    let a_bytes = std::fs::read(dir.path().join(&a_out.path)).unwrap();
+
+    // Any export merges the copy (here: an unrelated article).
+    export_note(&dest, &input(CurioId::new(), "Other", "x")).unwrap();
+    let manifest = load_manifest(dir.path()).unwrap();
+    assert_eq!(manifest.notes[&a].path, a_out.path);
+    assert!(
+        !manifest.notes.contains_key(&b),
+        "B does not own the note at that path"
+    );
+
+    // B's next export finds a path of its own; A's note is untouched.
+    let b_out = export_note(&dest, &input(b, "Weekly links", "b")).unwrap();
+    assert_ne!(b_out.path, a_out.path);
+    assert_eq!(b_out.disposition, ExportDisposition::Created);
+    assert_eq!(
+        std::fs::read(dir.path().join(&a_out.path)).unwrap(),
+        a_bytes
+    );
+}
+
+/// A user's own `manifest.backup.json` is not a sync conflict copy: it is
+/// neither merged nor deleted.
+#[test]
+fn a_user_backup_of_the_manifest_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    export_note(&dest, &input(CurioId::new(), "First", "body")).unwrap();
+    let backup = dir.path().join(".curio/manifest.backup.json");
+    std::fs::copy(dir.path().join(".curio/manifest.json"), &backup).unwrap();
+    let before = std::fs::read(&backup).unwrap();
+
+    export_note(&dest, &input(CurioId::new(), "Second", "body")).unwrap();
+    assert_eq!(std::fs::read(&backup).unwrap(), before);
+    assert_eq!(load_manifest(dir.path()).unwrap().notes.len(), 2);
 }
 
 /// The merge persists even when the export itself is an idempotency hit.

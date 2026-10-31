@@ -695,8 +695,10 @@ fn a_crash_before_the_manifest_write_never_loses_article_saved() {
     );
 
     // And the next save re-converges the manifest without losing anything.
+    // The article's own note is already on disk, so the retry is an
+    // update — never a second article.saved.
     let saved = core.save_to_destination(article_id, &dest_name).unwrap();
-    assert_eq!(saved.disposition, ExportDisposition::Created);
+    assert_eq!(saved.disposition, ExportDisposition::Updated);
     let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
     assert_eq!(folded.articles[&curio_id].path, saved.path);
 }

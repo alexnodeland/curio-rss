@@ -7,16 +7,19 @@
 //! concurrent edit by parking the losing side next to the original —
 //! `manifest (conflicted copy).json` (Dropbox, Nextcloud),
 //! `manifest 2.json` (iCloud), `manifest.sync-conflict-….json`
-//! (Syncthing). Those entries are real exports; [`manifest_conflict_copies`]
-//! finds such files and the exporter folds them back in (union, newest
-//! `exported_at` wins) instead of silently losing them.
+//! (Syncthing), `manifest-HOSTNAME.json` (Microsoft `OneDrive`). Those entries are
+//! real exports; [`manifest_conflict_copies`] finds such files and the
+//! exporter folds them back in (union, newest `exported_at` wins) instead
+//! of silently losing them. Only those sync-tool name shapes count: a
+//! `manifest.backup.json` of the user's own is never touched.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use curio_types::ManifestV1;
+use curio_types::{CurioId, ManifestV1};
 
 use super::lock::LOCK_FILE;
-use super::{ExportError, write_atomic};
+use super::{ExportError, contained_path, note, write_atomic};
 
 const MANIFEST_FILE: &str = "manifest.json";
 
@@ -53,16 +56,40 @@ fn parse_manifest(raw: &str, path: PathBuf) -> Result<ManifestV1, ExportError> {
     })
 }
 
-/// Whether a `.curio/` file name looks like a sync tool's conflict copy
-/// of `manifest.json`: `manifest<anything>.json`, excluding the manifest
-/// itself and dot-prefixed names (Curio's own temp files).
+/// Whether a `.curio/` file name is a sync tool's conflict copy of
+/// `manifest.json`. Only the shapes sync tools actually produce count —
+/// anything else named `manifest….json` (a backup the user made) is
+/// theirs, not a copy to merge and delete:
+///
+/// - `manifest (…).json` / `manifest(…).json` — Dropbox, Nextcloud,
+///   Seafile, Google Drive, Windows' own `(1)` suffix;
+/// - `manifest <n>.json` — iCloud;
+/// - `manifest.sync-conflict-….json` — Syncthing;
+/// - `manifest-HOSTNAME.json` (upper-case host name) — Microsoft `OneDrive`.
 fn is_conflict_copy(name: &str) -> bool {
-    !name.eq_ignore_ascii_case(MANIFEST_FILE)
-        && !name.starts_with('.')
-        && name.starts_with("manifest")
-        && Path::new(name)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+    let path = Path::new(name);
+    let is_json = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+    let Some(rest) = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.strip_prefix("manifest"))
+    else {
+        return false;
+    };
+    let parenthesized = rest.trim_start().starts_with('(') && rest.ends_with(')');
+    let numbered = rest
+        .strip_prefix(' ')
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    let syncthing = rest.starts_with(".sync-conflict-");
+    let host_suffixed = rest.strip_prefix('-').is_some_and(|host| {
+        !host.is_empty()
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
+    });
+    is_json && (parenthesized || numbered || syncthing || host_suffixed)
 }
 
 /// Sync-tool conflict copies of the manifest sitting in the destination's
@@ -102,6 +129,11 @@ pub fn manifest_conflict_copies(root: &Path) -> Result<Vec<PathBuf>, ExportError
 /// copy that does not load is left in place and reported in the log; it
 /// is never guessed at.
 ///
+/// A union can claim one path for two articles (two devices each
+/// exported a different same-titled article to `curio/weekly-links.md`).
+/// The manifest tells consumers who owns a note, so such a claim is
+/// settled by the note itself — see [`settle_contested_paths`].
+///
 /// # Errors
 ///
 /// [`ExportError::Io`] when `.curio/` cannot be listed.
@@ -135,7 +167,41 @@ pub(super) fn merge_conflict_copies(
         tracing::info!(path = %path.display(), "merged a manifest conflict copy");
         merged.push(path);
     }
+    if !merged.is_empty() {
+        settle_contested_paths(root, manifest);
+    }
     Ok(merged)
+}
+
+/// Keeps at most one manifest entry per note path: the one whose
+/// `curio_id` the note's own frontmatter names. Every other claimant is
+/// dropped (and logged) — the article is then simply unrecorded, and its
+/// next export finds it a path of its own (or its own note) through the
+/// normal ownership checks. When the note is gone or names none of the
+/// claimants, all of them are dropped.
+fn settle_contested_paths(root: &Path, manifest: &mut ManifestV1) {
+    let mut claimants: BTreeMap<&str, Vec<CurioId>> = BTreeMap::new();
+    for (id, entry) in &manifest.notes {
+        claimants.entry(entry.path.as_str()).or_default().push(*id);
+    }
+    let contested: Vec<(String, Vec<CurioId>)> = claimants
+        .into_iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .map(|(path, ids)| (path.to_owned(), ids))
+        .collect();
+    for (path, ids) in contested {
+        let owner = contained_path(root, &path).ok().and_then(|abs| {
+            std::fs::read_to_string(&abs)
+                .ok()
+                .and_then(|content| note::note_owner(&content, &abs).ok())
+        });
+        for id in ids {
+            if Some(id) != owner {
+                manifest.notes.remove(&id);
+                tracing::warn!(%path, curio_id = %id, "dropped a merged manifest entry: another article owns that note path");
+            }
+        }
+    }
 }
 
 /// Writes the manifest in canonical form via temp-file + atomic rename.
@@ -252,6 +318,7 @@ mod tests {
             "manifest(1).json",
             "manifest.sync-conflict-20261031-120000-ABCDEFG.json",
             "manifest-DESKTOP-1A2B3C.json",
+            "manifest 3.JSON",
         ] {
             assert!(is_conflict_copy(name), "{name}");
         }
@@ -260,6 +327,12 @@ mod tests {
             ".manifest.json.curio-tmp-1-2",
             "manifest.lock",
             "manifest.json.bak",
+            "manifest.backup.json",
+            "manifest-backup.json",
+            "manifest_old.json",
+            "manifest .json",
+            "manifest 2b.json",
+            "manifest (1).txt",
             "events",
             ".gitignore",
         ] {

@@ -70,6 +70,7 @@ All state lives in one profile directory:
 | `.curio/events.lock` | the lock that lets several Curio processes share the events log (holds no data; safe to ignore, never commit) |
 | `.curio/.gitignore` | scaffolded so the events log and its lock file are never committed |
 | `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
+| `set-aside/<timestamp>/` | databases the desktop recovery screen moved out of the way (never deleted; see [Upgrades and backups](#upgrades-and-backups)) |
 
 The default profile is **shared with the desktop app** — the CLI and the
 app open the same database, so `curio clip <url>` shows up in the reader
@@ -397,3 +398,18 @@ that is not a Curio database at all.
 
 To roll back by hand: quit every Curio process, delete `curio.db-wal`
 and `curio.db-shm` if present, then copy the backup over `curio.db`.
+
+The desktop app does this for you. When the profile won't open (a
+corrupt or too-new database, a lock held by another copy, an unwritable
+data folder, a failed upgrade), it shows a recovery screen instead of
+quitting, and logs the cause to `logs/curio.log.*`. From there you can
+try again, restore the newest backup this version can open, start fresh,
+show the profile folder, copy the error, or quit; for a database a newer
+Curio wrote, it first offers to check for updates. Restoring and starting
+fresh never delete anything: the current `curio.db` (and its `-wal` /
+`-shm` files) is first moved to `set-aside/<UTC timestamp>/` inside the
+profile, all or nothing — if any file can't be moved, the ones already
+moved go back. When the database is fine but the rest of the profile
+isn't (an unwritable `.curio/events` log, say), the screen only offers
+to try again once you've fixed it: replacing a healthy database would
+not help.

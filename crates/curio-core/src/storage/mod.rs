@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
+pub use backup::{PreMigrationBackup, pre_migration_backups};
 pub use netfs::{
     ALLOW_NETWORK_FS_ENV, NetworkFsKind, detect_network_fs, network_fs_override_from_env,
 };

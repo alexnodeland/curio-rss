@@ -197,9 +197,16 @@ impl CoreHandle {
         id: FeedId,
         feed: &Feed,
         response: &crate::fetch::FetchResponse,
-        parsed: crate::feeds::ParsedFeed,
+        mut parsed: crate::feeds::ParsedFeed,
         now: Timestamp,
     ) -> Result<(RefreshOutcome, Vec<ArticleId>), CoreError> {
+        // A reused guid's keys are chosen per fetch; settle them against
+        // what earlier fetches stored so no item changes key (and splits
+        // into a duplicate article) when the guid's sharing changes.
+        let stored = self
+            .storage
+            .source_urls_by_dedupe_key(Some(id), parsed.settle_lookups())?;
+        parsed.settle_keys(&feed.url, |key| stored.get(key).map(String::as_str));
         let articles: Vec<NewArticle> = parsed
             .entries
             .into_iter()
@@ -207,10 +214,14 @@ impl CoreHandle {
             .collect();
         // Which entries are new, decided BEFORE the upsert (afterwards
         // everything exists). Same-feed refreshes are serialized by the
-        // caller's per-feed lock, so this read-then-write cannot race.
+        // caller's per-feed lock, so this read-then-write cannot race. A
+        // link-less entry has no page of its own (its source URL is the
+        // feed's — see `ingest_entry`), so it is never queued: hydrating it
+        // would fetch the feed XML as if it were an article.
         let fresh_keys: Vec<String> = if feed.fetch_full_text {
             articles
                 .iter()
+                .filter(|article| !is_feed_own_url(&article.source_url, feed))
                 .filter(|article| {
                     self.storage
                         .article_id_by_dedupe_key(Some(id), &article.dedupe_key)
@@ -293,9 +304,21 @@ impl CoreHandle {
     }
 }
 
+/// Whether `url` is `feed`'s own URL — what a link-less entry's
+/// `source_url` holds (see [`ingest_entry`]). Such an article has no page
+/// of its own to hydrate.
+pub(super) fn is_feed_own_url(url: &str, feed: &Feed) -> bool {
+    url == feed.url
+}
+
 /// Turns a parsed entry into a storage row via the content pipeline
 /// (sanitize → extract whole pages only → text — the D6 invariant lives
 /// here).
+///
+/// An entry without a link of its own gets the feed URL as `source_url`:
+/// the published contracts require every article to carry a source URI,
+/// and the feed is the only one it has. That value marks the article as
+/// link-less — full-text hydration recognizes it and never fetches it.
 fn ingest_entry(feed_id: FeedId, feed_url: &str, entry: ParsedEntry) -> NewArticle {
     let base = entry.link.as_deref().unwrap_or(feed_url).to_owned();
     let processed = content::process(&entry.content_html, Some(&base));

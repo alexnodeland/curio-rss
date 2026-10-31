@@ -96,9 +96,12 @@ consumer implementation.
   lost or corrupted, but the log can carry a duplicate line. Related:
   the events lock is held while the delete waits behind this process's
   queued write jobs, so a long in-process job (a vacuum, a big import)
-  stalls other processes' emits, and past 15 s they fail with the
-  retryable `ProfileLocked`. Trigger to act: a consumer that cannot
-  dedupe, or `ProfileLocked` reports from real use. The fix would be a
+  stalls other processes' emits. Past 15 s their drain gives up with
+  `ProfileLocked` and, emission being non-fatal (#118), the events stay
+  staged behind the pending-events flag until the next mutation, the
+  desktop's periodic retry, or the next open drains them; only opening
+  a profile reports it (CLI exit 75). Trigger to act: a consumer that
+  cannot dedupe, or `ProfileLocked` reports from real use. The fix would be a
   durable "appended, not yet retired" record kept under the lock.
 - **FIXED (#111): every refresh reverted hydrated/enriched full text to
   the feed excerpt and rewrote unchanged rows.** `upsert_articles`

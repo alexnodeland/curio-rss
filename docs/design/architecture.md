@@ -145,7 +145,9 @@ torn tail, adopt a file they rotated to, re-read the size counter). A staged int
 therefore drained by one process at a time, lines never interleave, and a heal never
 truncates another process's append in flight. A lock file deleted while in use is
 noticed (file identity is re-checked on every acquire) and re-created. A holder that
-keeps the lock past 15 s yields the typed, retryable `EventLogError::ProfileLocked`.
+keeps the lock past 15 s yields the typed, retryable `EventLogError::ProfileLocked`
+(at open; a mutation's drain treats it like any emission failure and leaves the
+events staged for the next drain).
 Delivery is **at-least-once**, as the contract already assumes: if deleting the drained
 intents fails after the fsync (a crash, or the database staying busy past its 5 s
 timeout because another process holds a long write), the next drain appends them again
@@ -160,6 +162,29 @@ Cursor semantics are designed now (`events since <cursor>`) so the JSONL export,
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.
 Envelope, event types, negation rule (ULID `event_id`, tags-in-payload, non-monotone
 histories) are fixed by [contracts-draft.md](contracts-draft.md).
+
+**Emission durability (as built).** Each state change commits together with a
+write-ahead *intent* row; the emitter then appends the envelope to the JSONL log,
+fsyncs, and only then deletes the intent — a crash can duplicate a line (consumers
+dedupe by `event_id`), never lose one. Three failure modes are closed explicitly:
+
+- *Power loss:* the writer connection runs `PRAGMA synchronous = FULL`, so a commit
+  that returned is on disk before its event is fsynced. Under WAL + `NORMAL` the
+  commit could roll back on power loss and leave an `article.starred` line whose
+  state change the database forgot, with no negation ever following. The cost is
+  one WAL fsync per mutation.
+- *Disk full / I/O error mid-append:* the log truncates back to its last whole
+  line and reopens through the torn-tail heal, so a retry never extends a partial
+  line; lines already appended in that batch are fsynced and retired, the rest
+  stay staged.
+- *Unwritable events directory:* a failed flush is not a failed mutation — the
+  change is stored, so the operation reports success, the handle raises its
+  pending-events flag (`CoreHandle::has_pending_events`), and the next mutation,
+  the desktop head's once-a-minute retry (`flush_pending_events`), or the next open
+  drains the backlog. `curio doctor` reports staged intents.
+
+Readers that must keep going past damage use `events::read_all_lenient`, which
+skips and reports invalid lines; `read_all` stays strict.
 
 ### `export/` — the strategic seam
 

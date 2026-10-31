@@ -1914,3 +1914,85 @@ async fn bulk_export_stops_at_a_note_that_no_longer_parses() {
     assert_eq!(repaired.total(), 2);
     assert!(garbled.is_file(), "the deleted note is healed");
 }
+
+/// Makes the profile's events dir unwritable for every user (root
+/// included, unlike a permission bit): a regular file squats its path.
+fn break_events_dir(profile: &std::path::Path) -> std::path::PathBuf {
+    let events_dir = profile.join(".curio/events");
+    std::fs::remove_dir_all(&events_dir).unwrap();
+    std::fs::write(&events_dir, b"not a directory").unwrap();
+    events_dir
+}
+
+fn repair_events_dir(events_dir: &std::path::Path) {
+    std::fs::remove_file(events_dir).unwrap();
+    std::fs::create_dir(events_dir).unwrap();
+}
+
+/// #118: a failed flush must not turn a committed change into a reported
+/// failure. The intent stays staged, the health flag goes up, and the
+/// next emission drains it.
+#[test]
+fn a_failed_event_flush_is_not_a_failed_mutation() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    let events_dir = break_events_dir(profile.path());
+    assert!(!core.has_pending_events());
+
+    assert!(
+        core.set_starred(article, true).unwrap(),
+        "the star persisted"
+    );
+    assert!(core.article_state(article).unwrap().starred);
+    assert_eq!(core.pending_intent_count().unwrap(), 1);
+    assert!(core.has_pending_events());
+    // A user retry is an idempotent no-op — and still not an error.
+    assert!(!core.set_starred(article, true).unwrap());
+    // The explicit retry reports the failure honestly.
+    core.flush_pending_events().unwrap_err();
+    assert!(core.has_pending_events());
+
+    repair_events_dir(&events_dir);
+    assert_eq!(core.flush_pending_events().unwrap(), 1);
+    assert!(!core.has_pending_events());
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+}
+
+/// The backlog also drains on the next mutation's own flush, in order.
+#[test]
+fn the_next_mutation_drains_a_staged_backlog() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    let events_dir = break_events_dir(profile.path());
+    assert!(core.set_starred(article, true).unwrap());
+    assert!(core.has_pending_events());
+
+    repair_events_dir(&events_dir);
+    assert!(core.tag_article(article, "rust").unwrap());
+    assert!(!core.has_pending_events());
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+    assert!(matches!(
+        events[1].event,
+        EventPayload::ArticleTagged { .. }
+    ));
+}

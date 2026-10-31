@@ -5,7 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
-use curio_core::events::{EventEmitter, EventLog, FoldedState, read_all};
+use curio_core::events::{
+    EventEmitter, EventLog, EventLogError, FoldedState, read_all, read_all_lenient,
+};
 use curio_core::model::{ArticleContent, NewArticle};
 use curio_core::storage::{ListArticles, Storage};
 use curio_types::{CurioId, EventEnvelope, EventId, EventPayload, EventsSchemaV1Marker};
@@ -214,6 +216,57 @@ fn a_wholly_torn_file_heals_to_empty_at_open() {
     let _log = dir.open().unwrap();
     assert_eq!(read_all(dir.path()).unwrap(), vec![]);
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+}
+
+/// One damaged line fails the strict reader but costs the lenient reader
+/// only that line, which it reports with its path and line number.
+#[test]
+fn the_lenient_reader_skips_and_reports_invalid_lines() {
+    let dir = LogDir::new();
+    let id = CurioId::new();
+    let before = opened("2026-07-03T10:00:00.000Z", id);
+    let after = opened("2026-07-03T10:00:01.000Z", id);
+    let path = dir.path().join("events-20260703.jsonl");
+    std::fs::write(
+        &path,
+        format!(
+            "{}\n{{\"schema\":\"curio.ev{}\n\n{}\n",
+            serde_json::to_string(&before).unwrap(),
+            serde_json::to_string(&after).unwrap(),
+            "not json at all",
+        ),
+    )
+    .unwrap();
+
+    assert!(matches!(
+        read_all(dir.path()),
+        Err(EventLogError::InvalidLine { line: 2, .. })
+    ));
+    let lenient = read_all_lenient(dir.path()).unwrap();
+    assert_eq!(lenient.events, vec![before]);
+    let skipped: Vec<u64> = lenient
+        .skipped
+        .iter()
+        .map(|err| match err {
+            EventLogError::InvalidLine { path: p, line, .. } => {
+                assert_eq!(p, &path);
+                *line
+            }
+            other => panic!("unexpected {other}"),
+        })
+        .collect();
+    assert_eq!(skipped, vec![2, 4], "blank line 3 is not an error");
+
+    // An intact stream reads identically either way; a missing dir is empty.
+    std::fs::remove_file(&path).unwrap();
+    let mut log = dir.open().unwrap();
+    log.append(&after).unwrap();
+    log.flush().unwrap();
+    let lenient = read_all_lenient(dir.path()).unwrap();
+    assert_eq!(lenient.events, read_all(dir.path()).unwrap());
+    assert!(lenient.skipped.is_empty());
+    let absent = read_all_lenient(&dir.path().join("absent")).unwrap();
+    assert_eq!(absent.events, vec![]);
 }
 
 // --------------------------------------------------------------- retention

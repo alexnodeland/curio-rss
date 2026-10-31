@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use curio_core::model::{
-    ArticleContent, ArticleId, FeedId, FeedStatus, FetchRecord, FetchStatus, NewArticle, NewFeed,
+    ArticleContent, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchRecord, FetchStatus,
+    NewArticle, NewFeed,
 };
 use curio_core::storage::{ListArticles, Storage, StorageError};
 use curio_types::{EventPayload, Timestamp};
@@ -1378,4 +1379,291 @@ fn absent_lead_image_reads_back_as_none() {
     let id = insert_one(&storage, "img:none", "No image", "body");
     let stored = storage.get_article(id).unwrap().unwrap();
     assert_eq!(stored.lead_image, None);
+}
+
+// ------------------------------- change-aware, provenance-aware upsert (#111)
+
+/// A side connection onto the profile database, for asserting on columns
+/// and shadow tables the repo API does not expose.
+fn side_conn(dir: &tempfile::TempDir) -> rusqlite::Connection {
+    rusqlite::Connection::open(dir.path().join("curio.db")).unwrap()
+}
+
+fn modified_at(conn: &rusqlite::Connection, id: ArticleId) -> String {
+    conn.query_row(
+        "SELECT modified_at FROM articles WHERE id = ?1",
+        [id.0],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+fn content_origin(conn: &rusqlite::Connection, id: ArticleId) -> String {
+    conn.query_row(
+        "SELECT content_origin FROM articles WHERE id = ?1",
+        [id.0],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+/// Every FTS5 segment block, in order — any delete+reinsert of an index
+/// row writes new blocks, so equal snapshots mean zero FTS writes.
+fn fts_blocks(conn: &rusqlite::Connection) -> Vec<(i64, Vec<u8>)> {
+    let mut stmt = conn
+        .prepare("SELECT id, block FROM articles_fts_data ORDER BY id")
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+/// `PRAGMA data_version` moves whenever another connection commits a
+/// change to the database — an unchanged value means nothing was written.
+fn data_version(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("PRAGMA data_version", [], |row| row.get(0))
+        .unwrap()
+}
+
+fn feed_batch(feed_id: FeedId) -> Vec<NewArticle> {
+    (0..3)
+        .map(|i| {
+            let mut article = new_article(&format!("guid:{i}"), &format!("Item {i}"), "excerpt");
+            article.feed_id = Some(feed_id);
+            article.author = Some("Ann".to_owned());
+            article.published_at = Some("2026-07-01T00:00:00.000Z".parse().unwrap());
+            article.word_count = Some(1);
+            article
+        })
+        .collect()
+}
+
+fn one_feed(storage: &Storage) -> FeedId {
+    storage
+        .add_feed(NewFeed {
+            url: "https://a.example/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap()
+        .0
+        .id
+}
+
+#[test]
+fn re_upserting_identical_entries_writes_nothing() {
+    let (dir, storage) = temp_storage();
+    let feed = one_feed(&storage);
+    assert_eq!(
+        storage.upsert_articles(feed_batch(feed)).unwrap().inserted,
+        3
+    );
+    let conn = side_conn(&dir);
+    let ids: Vec<ArticleId> = storage
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    let stamps: Vec<String> = ids.iter().map(|id| modified_at(&conn, *id)).collect();
+    let blocks = fts_blocks(&conn);
+    let version = data_version(&conn);
+
+    let outcome = storage.upsert_articles(feed_batch(feed)).unwrap();
+    assert_eq!((outcome.inserted, outcome.updated), (0, 0));
+    // Nothing was committed at all: no row, no FTS shadow-table write.
+    assert_eq!(data_version(&conn), version, "the batch wrote nothing");
+    assert_eq!(fts_blocks(&conn), blocks, "zero FTS writes");
+    let after: Vec<String> = ids.iter().map(|id| modified_at(&conn, *id)).collect();
+    assert_eq!(after, stamps, "modified_at unchanged");
+    storage.fts_integrity_check().unwrap();
+
+    // One genuinely changed entry is the only one written and counted.
+    let mut batch = feed_batch(feed);
+    batch[1].content.text = "excerpt, revised".to_owned();
+    let outcome = storage.upsert_articles(batch).unwrap();
+    assert_eq!((outcome.inserted, outcome.updated), (0, 1));
+    assert_ne!(data_version(&conn), version);
+    storage.fts_integrity_check().unwrap();
+}
+
+#[test]
+fn a_metadata_only_change_updates_the_row_without_reindexing_fts() {
+    let (dir, storage) = temp_storage();
+    let feed = one_feed(&storage);
+    storage.upsert_articles(feed_batch(feed)).unwrap();
+    let conn = side_conn(&dir);
+    let blocks = fts_blocks(&conn);
+
+    let mut batch = feed_batch(feed);
+    batch[0].author = Some("Bea".to_owned());
+    let outcome = storage.upsert_articles(batch).unwrap();
+    assert_eq!(outcome.updated, 1);
+    assert_eq!(fts_blocks(&conn), blocks, "author is not FTS-indexed");
+    let stored = storage
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|a| a.dedupe_key.ends_with(":guid:0"))
+        .unwrap();
+    assert_eq!(stored.author.as_deref(), Some("Bea"));
+    storage.fts_integrity_check().unwrap();
+}
+
+#[test]
+fn hydrated_and_enriched_content_survive_a_feed_re_upsert() {
+    let (dir, storage) = temp_storage();
+    let feed = one_feed(&storage);
+    storage.upsert_articles(feed_batch(feed)).unwrap();
+    let rows = storage.list_articles(ListArticles::default()).unwrap();
+    let id_of = |suffix: &str| {
+        rows.iter()
+            .find(|a| a.dedupe_key.ends_with(suffix))
+            .unwrap()
+            .id
+    };
+    let (full_id, enriched_id, plain_id) = (id_of(":guid:0"), id_of(":guid:1"), id_of(":guid:2"));
+    let conn = side_conn(&dir);
+    assert_eq!(content_origin(&conn, plain_id), "feed");
+
+    let full = ArticleContent {
+        html: "<p>the whole hydrated readability body</p>".to_owned(),
+        text: "the whole hydrated readability body".to_owned(),
+    };
+    let enriched = ArticleContent {
+        html: "<p>enriched selftext from the provider</p>".to_owned(),
+        text: "enriched selftext from the provider".to_owned(),
+    };
+    storage
+        .update_article_content(full_id, &full, Some(5), ContentOrigin::FullText)
+        .unwrap();
+    storage
+        .update_article_content(enriched_id, &enriched, Some(5), ContentOrigin::Enriched)
+        .unwrap();
+    assert_eq!(content_origin(&conn, full_id), "full_text");
+    assert_eq!(content_origin(&conn, enriched_id), "enriched");
+
+    // The same feed XML again: nothing changes, nothing reverts.
+    let outcome = storage.upsert_articles(feed_batch(feed)).unwrap();
+    assert_eq!((outcome.inserted, outcome.updated), (0, 0));
+    for (id, content) in [(full_id, &full), (enriched_id, &enriched)] {
+        let stored = storage.get_article(id).unwrap().unwrap();
+        assert_eq!(&stored.content, content);
+        assert_eq!(stored.word_count, Some(5));
+    }
+
+    // A revised feed entry still updates title/metadata — never the body.
+    let mut batch = feed_batch(feed);
+    batch[0].title = "Item 0, retitled".to_owned();
+    batch[0].content.text = "a different excerpt".to_owned();
+    batch[2].content.text = "plain excerpt, revised".to_owned();
+    let outcome = storage.upsert_articles(batch).unwrap();
+    assert_eq!(outcome.updated, 2);
+    let retitled = storage.get_article(full_id).unwrap().unwrap();
+    assert_eq!(retitled.title, "Item 0, retitled");
+    assert_eq!(retitled.content, full, "hydrated body kept");
+    assert_eq!(content_origin(&conn, full_id), "full_text");
+    assert_eq!(
+        storage.get_article(plain_id).unwrap().unwrap().content.text,
+        "plain excerpt, revised",
+        "feed-origin content still refreshes"
+    );
+    // The FTS row follows the new title and still indexes the full body.
+    let hits = storage.search_articles("retitled readability", 5).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, full_id);
+    storage.fts_integrity_check().unwrap();
+}
+
+#[test]
+fn manual_saves_are_recorded_with_manual_origin() {
+    let (dir, storage) = temp_storage();
+    let id = insert_one(&storage, "clip:1", "Clip", "clipped body");
+    assert_eq!(content_origin(&side_conn(&dir), id), "manual");
+}
+
+/// Migration 0007 backfills provenance on existing rows and swaps in the
+/// change-only FTS update trigger.
+#[test]
+fn migration_0007_backfills_content_origin_and_guards_the_fts_trigger() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        // A v6-shaped database: migrations 0001–0006 applied by hand.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../src/storage/migrations/0001_init.sql"),
+            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        // Feed 7 is a plain feed; feed 8 is in full-text mode, so its rows
+        // may still hold a readability extract and are backfilled
+        // `full_text` (a pre-upgrade refresh never re-hydrates them).
+        conn.execute_batch(
+            "INSERT INTO feeds (id, url, added_at, modified_at)
+             VALUES (7, 'https://a.example/feed.xml', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z');
+             INSERT INTO feeds (id, url, added_at, modified_at, fetch_full_text)
+             VALUES (8, 'https://b.example/feed.xml', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z', 1);
+             INSERT INTO articles (curio_id, feed_id, dedupe_key, title, source_url,
+                                   saved_at, modified_at)
+             VALUES ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d', 7, 'f7:guid:1', 'From feed',
+                     'https://a.example/1', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z'),
+                    ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6f', 8, 'f8:guid:3', 'Full text',
+                     'https://b.example/3', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z'),
+                    ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6e', NULL, 'm:guid:2', 'Manual',
+                     'https://m.example/2', '2026-07-01T00:00:00.000Z',
+                     '2026-07-01T00:00:00.000Z');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 6).unwrap();
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(
+        storage.db_schema_version().unwrap(),
+        Storage::schema_version()
+    );
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let origins: Vec<(String, String)> = conn
+        .prepare("SELECT dedupe_key, content_origin FROM articles ORDER BY dedupe_key")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        origins,
+        vec![
+            ("f7:guid:1".to_owned(), "feed".to_owned()),
+            ("f8:guid:3".to_owned(), "full_text".to_owned()),
+            ("m:guid:2".to_owned(), "manual".to_owned()),
+        ]
+    );
+    let trigger: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'articles_fts_au'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        trigger.contains("WHEN old.title IS NOT new.title"),
+        "{trigger}"
+    );
+    // The CHECK constraint rejects an unknown provenance.
+    assert!(
+        conn.execute("UPDATE articles SET content_origin = 'bogus'", [])
+            .is_err()
+    );
+    storage.fts_integrity_check().unwrap();
 }

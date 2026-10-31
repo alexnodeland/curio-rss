@@ -587,10 +587,11 @@ async fn updated_content_re_export_emits_article_updated() {
     let first = core.save_to_destination(article.id, &dest).unwrap();
     assert_eq!(first.disposition, ExportDisposition::Created);
 
-    // Second refresh updates the article in place (same dedupe key).
+    // Second refresh updates the revised article in place (same dedupe
+    // key); the two unchanged entries are not rewritten or counted.
     let second_refresh = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(second_refresh.new_articles, 0);
-    assert_eq!(second_refresh.updated_articles, 3);
+    assert_eq!(second_refresh.updated_articles, 1);
 
     let second = core.save_to_destination(article.id, &dest).unwrap();
     assert_eq!(second.disposition, ExportDisposition::Updated);
@@ -1413,8 +1414,141 @@ async fn full_text_mode_hydrates_new_articles_at_refresh() {
         article.content.text
     );
 
-    // A second refresh sees no new items and fetches no pages (expect(1)).
+    // A second refresh sees no new items and fetches no pages (expect(1))
+    // — and must not revert the hydrated body to the feed's stub excerpt
+    // (#111), nor count the unchanged, re-listed item as updated.
+    let second = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((second.new_articles, second.updated_articles), (0, 0));
+    let after = core.get_article(article.id).unwrap().unwrap();
+    assert_eq!(after.content, article.content, "full text survives refresh");
+    assert_eq!(after.word_count, article.word_count);
+}
+
+/// A feed that only ships an excerpt of one post whose source page lives
+/// at `post_path` on the mock server.
+fn excerpt_feed(server: &MockServer, post_path: &str) -> String {
+    format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Excerpts</title><link>{0}</link>
+        <item><guid>p1</guid><title>Post One</title><link>{0}{post_path}</link>
+        <description>Just a stub excerpt.</description></item>
+        </channel></rss>"#,
+        server.uri()
+    )
+}
+
+/// #111: a manual load-full, then a refresh of the same (unchanged) feed
+/// XML. The hydrated body must survive, the refresh must change nothing,
+/// and the bulk export afterwards must be a pure idempotency hit — no
+/// rewritten note, no `article.updated` carrying the excerpt to the vault.
+#[tokio::test]
+async fn hydrated_full_text_survives_refresh_and_re_export_is_unchanged() {
+    let server = MockServer::start().await;
+    let page = r"<html><body><article>
+        <h1>Post One</h1>
+        <p>The full body of the post that the feed only excerpted, with enough
+           genuine running prose that the readability scorer confidently keeps
+           this container as the main content of the fetched page.</p>
+        <p>A second paragraph makes the extraction unambiguous and pushes the
+           word count well past the one-line stub the feed shipped.</p>
+        </article></body></html>";
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(excerpt_feed(&server, "/post"), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/post"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page, "text/html"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    let dest: DestinationName = "vault".parse().unwrap();
+    core.add_destination(dest.clone(), vault.path().to_path_buf())
+        .unwrap();
+
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let stub = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    let hydrated = core.hydrate_article(stub.id).await.unwrap();
+    assert!(hydrated.content.text.contains("full body of the post"));
+    let first = core.save_to_destination(hydrated.id, &dest).unwrap();
+    assert_eq!(first.disposition, ExportDisposition::Created);
+
+    let refresh = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((refresh.new_articles, refresh.updated_articles), (0, 0));
+    let after = core.get_article(hydrated.id).unwrap().unwrap();
+    assert_eq!(
+        after.content, hydrated.content,
+        "full text survives refresh"
+    );
+    assert_eq!(after.word_count, hydrated.word_count);
+    // The FTS index still serves the hydrated body.
+    assert_eq!(core.search_articles("readability", 5).unwrap().len(), 1);
+    core.fts_integrity_check().unwrap();
+
+    let bulk = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!((bulk.created, bulk.updated, bulk.unchanged), (0, 0, 1));
+    let events = read_all(&profile.path().join(".curio/events")).unwrap();
+    assert!(
+        events
+            .iter()
+            .all(|e| e.event.event_type() != "article.updated"),
+        "no article.updated after an unchanged refresh"
+    );
+}
+
+/// #111 for the enrichment path: a reddit post's enriched full selftext
+/// survives a refresh of the feed that still lists the post.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn enriched_reddit_body_survives_a_refresh_of_its_feed() {
+    let server = MockServer::start().await;
+    let post_path = "/r/rust/comments/abc123/title/";
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(excerpt_feed(&server, post_path), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    let post_json = include_str!("../../../fixtures/feeds/reddit_post.json");
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/abc123/title.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(post_json, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
     core.refresh_feed(feed.id).await.unwrap();
+    let stub = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    let enriched = core.hydrate_article(stub.id).await.unwrap();
+    assert!(enriched.content.text.contains("cut compile times in half"));
+
+    let refresh = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((refresh.new_articles, refresh.updated_articles), (0, 0));
+    let after = core.get_article(enriched.id).unwrap().unwrap();
+    assert_eq!(after.content, enriched.content, "enriched body survives");
+    core.fts_integrity_check().unwrap();
 }
 
 #[tokio::test]

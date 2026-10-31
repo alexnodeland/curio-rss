@@ -204,15 +204,18 @@ fn insert_article(
         VERBS[rng.below(VERBS.len())],
     );
     let curio_id = deterministic_uuid_v7(published_millis, rng);
-    let dedupe_key = match feed_id {
-        Some(fid) => format!("f{fid}:guid-{index}"),
-        None => format!("m:guid-{index}"),
+    // Mirrors the real write path's provenance: feed rows are `feed`,
+    // feedless (`m:`) saves are `manual`.
+    let (dedupe_key, content_origin) = match feed_id {
+        Some(fid) => (format!("f{fid}:guid-{index}"), "feed"),
+        None => (format!("m:guid-{index}"), "manual"),
     };
     tx.prepare_cached(
         "INSERT INTO articles \
          (id, curio_id, feed_id, dedupe_key, title, source_url, author, published_at, \
-          content_html, content_text, lang, word_count, saved_at, source_updated_at, modified_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'en', ?11, ?12, ?8, ?12)",
+          content_html, content_text, lang, word_count, saved_at, source_updated_at, modified_at, \
+          content_origin) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'en', ?11, ?12, ?8, ?12, ?13)",
     )?
     .execute((
         id,
@@ -227,6 +230,7 @@ fn insert_article(
         text,
         i64::from(words),
         &published, // saved_at == published for reproducibility
+        content_origin,
     ))?;
     // A deterministic slice of state so unread counts and filters have signal.
     if n.is_multiple_of(3) || n.is_multiple_of(7) {

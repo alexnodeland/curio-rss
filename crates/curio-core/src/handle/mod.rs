@@ -156,7 +156,8 @@ pub struct RefreshOutcome {
     pub http_status: Option<u16>,
     /// Articles inserted by this refresh.
     pub new_articles: u64,
-    /// Existing articles refreshed by this refresh.
+    /// Existing articles this refresh actually changed (identical
+    /// re-listed entries are not counted).
     pub updated_articles: u64,
     /// Error detail for [`FetchStatus::Error`].
     pub error: Option<String>,

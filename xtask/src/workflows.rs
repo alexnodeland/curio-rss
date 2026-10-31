@@ -40,8 +40,9 @@
 //! 6. **A bench the tracker can read** (issue #185). The nightly's bencher-
 //!    format `cargo bench` runs criterion statelessly — `CRITERION_HOME` on a
 //!    per-job `runner.temp` dir (never the cached `target/`) and
-//!    `--discard-baseline` — under `pipefail`; `xtask bench-output` checks
-//!    the log before `github-action-benchmark` reads it; and the tracker
+//!    `--discard-baseline` — under `pipefail`; `xtask bench-output --expect
+//!    <bench-id>` checks the log before `github-action-benchmark` reads it;
+//!    and the tracker
 //!    keeps its `alert-threshold` with `fail-on-alert: true`.
 
 use std::collections::BTreeSet;
@@ -1031,21 +1032,34 @@ fn pipefail_switch(words: &[&str]) -> Option<bool> {
     })
 }
 
-/// What a script's own `set` lines do to `pipefail`: `Some(false)` if any
-/// line that starts with `set` turns it off (`set +o pipefail` — the pipe may
-/// sit after it), else `Some(true)` if one turns it on, else `None`. A comment
-/// or a string that merely mentions pipefail does not count.
+/// A shell line's words, with a `;` glued to a word's end split off as its
+/// own separator (`set -euo pipefail; cargo bench …` → `pipefail`, `;`, …).
+fn switch_words(line: &str) -> Vec<&str> {
+    line.split_whitespace()
+        .flat_map(|word| match word.strip_suffix(';') {
+            Some(head) if !head.is_empty() => vec![head, ";"],
+            _ => vec![word],
+        })
+        .collect()
+}
+
+/// What a script's own `set` lines leave `pipefail` at where `cargo bench`
+/// starts: the last switch (`Some(true)` on, `Some(false)` off) on a line
+/// that starts with `set`, up to and including the bench's own line (`set
+/// -o pipefail; cargo bench …`); `None` when none touches it. A `set` after
+/// the bench is too late to cover its pipe, and a comment or a string that
+/// merely mentions pipefail does not count.
 fn script_pipefail(run: &str) -> Option<bool> {
     let mut on = None;
     for line in run.lines() {
-        let words: Vec<&str> = line.split_whitespace().collect();
-        if words.first() != Some(&"set") {
-            continue;
+        let words = switch_words(line);
+        if words.first() == Some(&"set")
+            && let Some(switch) = pipefail_switch(&words[1..])
+        {
+            on = Some(switch);
         }
-        match pipefail_switch(&words[1..]) {
-            Some(false) => return Some(false),
-            Some(true) => on = Some(true),
-            None => {}
+        if line.contains("cargo bench") {
+            break;
         }
     }
     on
@@ -1055,7 +1069,7 @@ fn script_pipefail(run: &str) -> Option<bool> {
 /// `bash --noprofile --norc -eo pipefail {0}`; a custom command line counts
 /// when it passes the option itself.
 fn shell_has_pipefail(shell: &str) -> bool {
-    let words: Vec<&str> = shell.split_whitespace().collect();
+    let words = switch_words(shell);
     shell == "bash" || pipefail_switch(&words) == Some(true)
 }
 
@@ -1081,6 +1095,18 @@ fn fails_on_pipe(doc: &Value, job: &Value, step: &Value) -> bool {
         .or_else(|| default_shell(doc))
         .and_then(Value::as_str);
     script_pipefail(run).unwrap_or_else(|| shell.is_some_and(shell_has_pipefail))
+}
+
+/// Is a `CRITERION_HOME` value a path inside the job's `${{ runner.temp }}`
+/// — the expression itself, or a relative path under it with no `..` to
+/// climb back out (say into the cached `target/criterion`)?
+fn is_under_runner_temp(home: &str) -> bool {
+    home.trim()
+        .strip_prefix("${{ runner.temp }}")
+        .is_some_and(|rest| {
+            (rest.is_empty() || rest.starts_with('/'))
+                && !rest.split(['/', '\\']).any(|part| part == "..")
+        })
 }
 
 /// Is a `with:` flag literally on (`true` or `"true"`)?
@@ -1110,8 +1136,7 @@ fn bench_tracking(nightly: &Parsed<'_>) -> Vec<String> {
                 "{at} runs `cargo bench` without `--discard-baseline` — criterion compares against (and saves) its own baseline, and a stale one breaks the line the tracker parses"
             ));
         }
-        if !env_value(job, step, "CRITERION_HOME").is_some_and(|home| home.contains("runner.temp"))
-        {
+        if !env_value(job, step, "CRITERION_HOME").is_some_and(is_under_runner_temp) {
             out.push(format!(
                 "{at} runs `cargo bench` without `CRITERION_HOME` on a `runner.temp` dir — criterion's default home is the cached `target/criterion`, where a stale `base/` breaks the line the tracker parses"
             ));
@@ -1129,18 +1154,18 @@ fn bench_tracking(nightly: &Parsed<'_>) -> Vec<String> {
                 .and_then(Value::as_str)
                 .is_some_and(|uses| uses.starts_with(BENCH_TRACKER))
         });
-        let checked = later[..tracker_at.unwrap_or(later.len())]
+        let check = later[..tracker_at.unwrap_or(later.len())]
             .iter()
-            .any(|check| {
-                check
-                    .get("run")
-                    .and_then(Value::as_str)
-                    .is_some_and(|run| run.contains("xtask -- bench-output"))
-            });
-        if !checked {
-            out.push(format!(
+            .filter_map(|check| check.get("run").and_then(Value::as_str))
+            .find(|run| run.contains("xtask -- bench-output"));
+        match check {
+            None => out.push(format!(
                 "{name}: job `{job_id}` has no `xtask -- bench-output` step between the bench and the tracker — an untrackable log fails as a bare \"No benchmark result was found\""
-            ));
+            )),
+            Some(run) if !shell_words(run).contains(&"--expect") => out.push(format!(
+                "{name}: job `{job_id}` checks the bench log without `--expect <bench-id>` — any one unrelated result would pass while the tracked benchmark is missing"
+            )),
+            Some(_) => {}
         }
         let Some(tracker_at) = tracker_at else {
             out.push(format!(
@@ -1375,7 +1400,7 @@ jobs:
           cargo bench -p curio-fixtures --bench cold_start -- \
             --output-format bencher --noplot --discard-baseline \
             | tee bench-output.txt
-      - run: cargo run -p xtask -- bench-output bench-output.txt
+      - run: cargo run -p xtask -- bench-output bench-output.txt --expect cold_start/open_and_first_page_50k
       - uses: benchmark-action/github-action-benchmark@0123456789abcdef0123456789abcdef01234567 # v1.22.2
         with:
           tool: cargo
@@ -1623,6 +1648,26 @@ jobs:
             "CRITERION_HOME: target/criterion",
         );
         assert_flags(&run_nightly(&cached_home), "without `CRITERION_HOME`");
+        // Naming `runner.temp` is not enough: the path must stay under it.
+        for home in [
+            "${{ runner.temp }}/../work/curio-rss/curio-rss/target/criterion",
+            "${{ runner.temp }}/criterion/..",
+            "${{ runner.temp }}criterion",
+            "target/${{ runner.temp }}/criterion",
+        ] {
+            let escaped = NIGHTLY.replace(
+                "CRITERION_HOME: ${{ runner.temp }}/criterion",
+                &format!("CRITERION_HOME: \"{home}\""),
+            );
+            assert_flags(&run_nightly(&escaped), "without `CRITERION_HOME`");
+        }
+        for home in ["${{ runner.temp }}", "${{ runner.temp }}/bench/criterion"] {
+            let fine = NIGHTLY.replace(
+                "CRITERION_HOME: ${{ runner.temp }}/criterion",
+                &format!("CRITERION_HOME: \"{home}\""),
+            );
+            assert_eq!(run_nightly(&fine), Vec::<String>::new(), "{home}");
+        }
 
         // Job-level env counts.
         let job_env = NIGHTLY.replace(BENCH_ENV, "      - run: |\n").replace(
@@ -1679,6 +1724,10 @@ jobs:
             "          set -eo pipefail\n",
             "          set -euo pipefail\n",
             "          set -e -o pipefail # crashed bench stays red\n",
+            // A `;` glued to the option is still a separator.
+            "          set -euo pipefail; echo start\n",
+            // Off, then back on before the bench.
+            "          set +o pipefail\n          set -o pipefail\n",
         ] {
             let nightly = NIGHTLY.replace("          set -o pipefail\n", script);
             assert_eq!(run_nightly(&nightly), Vec::<String>::new(), "{script}");
@@ -1709,17 +1758,49 @@ jobs:
             &run_nightly(&off_under_bash),
             "pipes `cargo bench` without `set -o pipefail`",
         );
+
+        // On the bench's own line, ahead of it, counts…
+        let same_line = NIGHTLY.replace(
+            "          set -o pipefail\n          cargo bench",
+            "          set -o pipefail; cargo bench",
+        );
+        assert_ne!(same_line, NIGHTLY);
+        assert_eq!(run_nightly(&same_line), Vec::<String>::new());
+        // …after the bench is too late to cover its pipe…
+        let too_late = NIGHTLY.replace("          set -o pipefail\n", "").replace(
+            "            | tee bench-output.txt\n",
+            "            | tee bench-output.txt\n          set -o pipefail\n",
+        );
+        assert_flags(
+            &run_nightly(&too_late),
+            "pipes `cargo bench` without `set -o pipefail`",
+        );
+        // …and so is turning it off after the bench (it already ran under it).
+        let off_after = NIGHTLY.replace(
+            "            | tee bench-output.txt\n",
+            "            | tee bench-output.txt\n          set +o pipefail\n",
+        );
+        assert_ne!(off_after, NIGHTLY);
+        assert_eq!(run_nightly(&off_after), Vec::<String>::new());
     }
 
     #[test]
     fn the_bench_log_is_checked_and_tracked_with_a_hard_alert() {
         let unchecked = NIGHTLY.replace(
-            "      - run: cargo run -p xtask -- bench-output bench-output.txt\n",
+            "      - run: cargo run -p xtask -- bench-output bench-output.txt --expect cold_start/open_and_first_page_50k\n",
             "",
         );
         assert_flags(
             &run_nightly(&unchecked),
             "job `bench` has no `xtask -- bench-output` step between the bench and the tracker",
+        );
+        // The check must name the tracked benchmark: without `--expect`, any
+        // one unrelated result would pass it.
+        let unnamed = NIGHTLY.replace(" --expect cold_start/open_and_first_page_50k", "");
+        assert_ne!(unnamed, NIGHTLY);
+        assert_flags(
+            &run_nightly(&unnamed),
+            "job `bench` checks the bench log without `--expect <bench-id>`",
         );
 
         let soft = NIGHTLY.replace("fail-on-alert: true", "fail-on-alert: false");

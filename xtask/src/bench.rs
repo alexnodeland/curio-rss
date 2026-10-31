@@ -38,9 +38,17 @@ const CRITERION_ERROR: &str = "Criterion.rs ERROR:";
 #[must_use]
 pub fn parse_line(line: &str) -> Option<BenchResult> {
     let rest = line.strip_prefix("test ")?;
-    // `(.+)` is greedy: the name runs to the LAST `...` (a benchmark id may
-    // itself contain one).
-    let (name, after) = rest.rsplit_once("...")?;
+    // `(.+)` is greedy and the regex backtracks: the name runs to the LAST
+    // `...` after which the rest of the line still matches (a benchmark id
+    // may itself contain one, and so may a `[0-9,.]+` range).
+    rest.rmatch_indices("...")
+        .find_map(|(at, dots)| parse_split(&rest[..at], &rest[at + dots.len()..]))
+}
+
+/// The line after `test `, split at one candidate `...` into the `name`
+/// before it and the rest `after` it. `None` when that split does not match
+/// the tracker's regex.
+fn parse_split(name: &str, after: &str) -> Option<BenchResult> {
     // `(.+)\s+` — a non-empty name, then at least one blank before `...`.
     if !name.ends_with(char::is_whitespace) {
         return None;
@@ -240,5 +248,17 @@ mod tests {
         assert_eq!(result.name, "group/wait ... then/load");
         let result = parse_line("test a...b ... bench: 7 ns/iter (+/- 1)").unwrap();
         assert_eq!(result.name, "a...b");
+    }
+
+    #[test]
+    fn the_name_backtracks_past_an_ellipsis_the_rest_cannot_follow() {
+        // The last `...` sits in the range, where no `bench:` follows it; the
+        // regex backtracks to the one before `bench:` and still matches.
+        let result = parse_line("test x ... bench: 3 ns/iter (+/- 1...)").unwrap();
+        assert_eq!(result.name, "x");
+        assert_eq!(result.range, "1...");
+        let result = parse_line("test a...b ... bench: 3 ns/iter (+/- 1...2)").unwrap();
+        assert_eq!(result.name, "a...b");
+        assert_eq!(result.range, "1...2");
     }
 }

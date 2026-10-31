@@ -305,6 +305,13 @@ fn an_unchecked_or_soft_real_bench_is_flagged() {
     );
     assert_flagged(
         &lint_nightly_edit(
+            "          --expect cold_start/open_and_first_page_50k\n",
+            "",
+        ),
+        "checks the bench log without `--expect <bench-id>`",
+    );
+    assert_flagged(
+        &lint_nightly_edit(
             "          fail-on-alert: true\n",
             "          fail-on-alert: false\n",
         ),

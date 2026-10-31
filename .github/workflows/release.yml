@@ -58,7 +58,7 @@ jobs:
   build:
     name: build macOS (universal, unsigned)
     needs: gate
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}

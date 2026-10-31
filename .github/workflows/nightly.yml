@@ -83,7 +83,7 @@ jobs:
           # (its leg queued for 24h, then was cancelled, every night), and
           # lipo-ing both arches on one runner needs no Intel host at all.
           - name: macos-universal
-            os: macos-14
+            os: macos-15
             targets: x86_64-apple-darwin,aarch64-apple-darwin
             args: --target universal-apple-darwin
             bundle: target/universal-apple-darwin/release/bundle

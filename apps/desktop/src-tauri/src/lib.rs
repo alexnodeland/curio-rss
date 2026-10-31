@@ -181,7 +181,16 @@ pub fn run() {
             }
             // Served to the startup notice and the doctor panel.
             app.manage(legacy);
-            let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
+            // A profile on network or sync-managed storage is refused
+            // unless the user set the override (there is no flag to pass
+            // a desktop app, so the variable is the explicit choice).
+            let core = CoreHandle::open_with(
+                &profile,
+                CoreOptions {
+                    allow_network_fs: curio_core::storage::network_fs_override_from_env(),
+                    ..CoreOptions::default()
+                },
+            )?;
             let core: commands::SharedCore = Arc::new(core);
             // Optional Reddit API credentials from the OS keychain (D15) —
             // best-effort; absence just means the unauthenticated tier.

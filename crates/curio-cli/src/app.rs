@@ -30,12 +30,23 @@ impl App {
     /// Only [`OpenMode::Create`] (`curio init`) may create a profile; every
     /// other command refuses a directory that holds none, so a mistyped
     /// `--profile` fails loudly instead of printing an empty library.
+    ///
+    /// A profile on network or sync-managed storage is refused unless
+    /// `allow_network_fs` (`--allow-network-fs`) or the
+    /// `CURIO_ALLOW_NETWORK_FS` override is set.
     pub(crate) fn open(
         profile: Option<PathBuf>,
         json: bool,
+        allow_network_fs: bool,
         mode: OpenMode,
     ) -> anyhow::Result<Self> {
-        Self::open_in(profile, json, mode, &ProfileLayout::current)
+        Self::open_in(
+            profile,
+            json,
+            allow_network_fs,
+            mode,
+            &ProfileLayout::current,
+        )
     }
 
     /// [`Self::open`] over an explicit default/legacy layout — the seam the
@@ -44,6 +55,7 @@ impl App {
     fn open_in(
         profile: Option<PathBuf>,
         json: bool,
+        allow_network_fs: bool,
         mode: OpenMode,
         layout: &dyn Fn() -> anyhow::Result<ProfileLayout>,
     ) -> anyhow::Result<Self> {
@@ -62,6 +74,8 @@ impl App {
             &profile,
             CoreOptions {
                 fetch: config.fetch_config(),
+                allow_network_fs: allow_network_fs
+                    || curio_core::storage::network_fs_override_from_env(),
             },
         )
         .with_context(|| format!("opening profile {}", profile.display()))?;
@@ -225,7 +239,7 @@ mod tests {
         fn with_legacy_profile() -> Self {
             let tmp = tempfile::tempdir().unwrap();
             let legacy = tmp.path().join("old-cli");
-            drop(App::open(Some(legacy.clone()), false, OpenMode::Create).unwrap());
+            drop(App::open(Some(legacy.clone()), false, false, OpenMode::Create).unwrap());
             assert!(curio_core::paths::is_profile(&legacy));
             let layout = ProfileLayout {
                 default: tmp.path().join("shared").join("default"),
@@ -236,7 +250,7 @@ mod tests {
 
         fn open(&self, flag: Option<PathBuf>, mode: OpenMode) -> anyhow::Result<App> {
             let layout = self.layout.clone();
-            App::open_in(flag, false, mode, &move || Ok(layout.clone()))
+            App::open_in(flag, false, false, mode, &move || Ok(layout.clone()))
         }
 
         fn legacy(&self) -> &Path {
@@ -269,7 +283,13 @@ mod tests {
     fn a_library_left_behind_blocks_a_fresh_default() {
         let fx = Fixture::with_legacy_profile();
         // Another process holds the old library open, so it cannot move.
-        let holder = App::open(Some(fx.legacy().to_path_buf()), false, OpenMode::Existing).unwrap();
+        let holder = App::open(
+            Some(fx.legacy().to_path_buf()),
+            false,
+            false,
+            OpenMode::Existing,
+        )
+        .unwrap();
         for mode in [OpenMode::Existing, OpenMode::Create] {
             let err = fx.open(None, mode).unwrap_err().to_string();
             assert!(err.contains("not creating a new default profile"), "{err}");
@@ -293,7 +313,7 @@ mod tests {
         };
         let open = |mode| {
             let layout = layout.clone();
-            App::open_in(None, false, mode, &move || Ok(layout.clone()))
+            App::open_in(None, false, false, mode, &move || Ok(layout.clone()))
         };
         let err = open(OpenMode::Existing).unwrap_err().to_string();
         assert!(err.contains("run `curio init`"), "{err}");

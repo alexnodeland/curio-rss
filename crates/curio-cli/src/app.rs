@@ -35,21 +35,25 @@ impl App {
         json: bool,
         mode: OpenMode,
     ) -> anyhow::Result<Self> {
-        let choice = resolve_profile_dir(profile)?;
-        if choice.is_default {
-            // The one-time move of a pre-0.5 profile onto the shared
-            // default; whatever it could not move is reported, never fatal.
-            for notice in curio_core::paths::adopt_legacy_profiles(
-                &choice.dir,
-                &curio_core::paths::legacy_profile_dirs(),
-            ) {
-                eprintln!("{}", legacy_notice(&notice));
-            }
-        }
-        let ProfileChoice {
-            dir: profile,
-            is_default: is_default_profile,
-        } = choice;
+        Self::open_in(profile, json, mode, &ProfileLayout::current)
+    }
+
+    /// [`Self::open`] over an explicit default/legacy layout — the seam the
+    /// tests drive. `layout` is consulted only when no `--profile` /
+    /// `CURIO_PROFILE` was given.
+    fn open_in(
+        profile: Option<PathBuf>,
+        json: bool,
+        mode: OpenMode,
+        layout: &dyn Fn() -> anyhow::Result<ProfileLayout>,
+    ) -> anyhow::Result<Self> {
+        let (profile, is_default_profile) = if let Some(dir) = profile {
+            (dir, false)
+        } else {
+            let layout = layout()?;
+            adopt_legacy(&layout)?;
+            (layout.default, true)
+        };
         if mode == OpenMode::Existing {
             ensure_profile_exists(&profile)?;
         }
@@ -87,30 +91,50 @@ pub(crate) enum OpenMode {
     Existing,
 }
 
-/// The profile directory a command runs against.
+/// Where the default profile lives and where earlier releases kept one —
+/// what a run without `--profile` / `CURIO_PROFILE` resolves against.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProfileChoice {
-    pub(crate) dir: PathBuf,
-    /// `true` when neither `--profile` nor `CURIO_PROFILE` was given, so
-    /// this is the default profile the desktop app opens too.
-    pub(crate) is_default: bool,
+struct ProfileLayout {
+    /// The default profile shared with the desktop app
+    /// ([`curio_core::paths::default_profile_dir`]).
+    default: PathBuf,
+    /// [`curio_core::paths::legacy_profile_dirs`].
+    legacy: Vec<PathBuf>,
 }
 
-/// `--profile` / `CURIO_PROFILE`, else the default profile shared with the
-/// desktop app ([`curio_core::paths::default_profile_dir`]).
-pub(crate) fn resolve_profile_dir(flag: Option<PathBuf>) -> anyhow::Result<ProfileChoice> {
-    if let Some(dir) = flag {
-        return Ok(ProfileChoice {
-            dir,
-            is_default: false,
-        });
+impl ProfileLayout {
+    /// This user's layout on this platform.
+    fn current() -> anyhow::Result<Self> {
+        Ok(Self {
+            default: curio_core::paths::default_profile_dir()
+                .context("pass --profile or set CURIO_PROFILE")?,
+            legacy: curio_core::paths::legacy_profile_dirs(),
+        })
     }
-    let dir =
-        curio_core::paths::default_profile_dir().context("pass --profile or set CURIO_PROFILE")?;
-    Ok(ProfileChoice {
-        dir,
-        is_default: true,
-    })
+}
+
+/// The one-time move of a pre-0.5 profile onto the shared default. What it
+/// could not move is reported on stderr; when that leaves a library behind
+/// while the default holds none, the run stops — creating (or pointing the
+/// user at `init` for) a fresh default would strand that library for good.
+fn adopt_legacy(layout: &ProfileLayout) -> anyhow::Result<()> {
+    let outcomes = curio_core::paths::adopt_legacy_profiles(&layout.default, &layout.legacy);
+    for notice in &outcomes {
+        eprintln!("{}", legacy_notice(notice));
+    }
+    if let Some(stranded) = outcomes.iter().find_map(|outcome| match outcome {
+        LegacyProfile::Left { path, .. } if outcome.would_be_stranded() => Some(path),
+        _ => None,
+    }) {
+        anyhow::bail!(
+            "not creating a new default profile at {} while the library from an earlier \
+             release (see the warning above) is left behind — resolve that and run curio \
+             again, or open the old library with --profile {}",
+            layout.default.display(),
+            stranded.display()
+        );
+    }
+    Ok(())
 }
 
 /// Refuses a directory that holds no profile, pointing at `curio init`.
@@ -181,26 +205,101 @@ mod tests {
 
     #[test]
     fn the_default_profile_is_the_one_the_desktop_opens() {
-        let choice = resolve_profile_dir(None).unwrap();
-        assert!(choice.is_default);
-        // The desktop head resolves through the same core function (its
+        let layout = ProfileLayout::current().unwrap();
+        // The desktop head resolves through the same core functions (its
         // own test pins that side), so both heads share one database.
         assert_eq!(
-            choice.dir,
+            layout.default,
             curio_core::paths::default_profile_dir().unwrap()
         );
+        assert_eq!(layout.legacy, curio_core::paths::legacy_profile_dirs());
+    }
+
+    /// A temp default + one legacy location holding a real profile.
+    struct Fixture {
+        _tmp: tempfile::TempDir,
+        layout: ProfileLayout,
+    }
+
+    impl Fixture {
+        fn with_legacy_profile() -> Self {
+            let tmp = tempfile::tempdir().unwrap();
+            let legacy = tmp.path().join("old-cli");
+            drop(App::open(Some(legacy.clone()), false, OpenMode::Create).unwrap());
+            assert!(curio_core::paths::is_profile(&legacy));
+            let layout = ProfileLayout {
+                default: tmp.path().join("shared").join("default"),
+                legacy: vec![legacy],
+            };
+            Self { _tmp: tmp, layout }
+        }
+
+        fn open(&self, flag: Option<PathBuf>, mode: OpenMode) -> anyhow::Result<App> {
+            let layout = self.layout.clone();
+            App::open_in(flag, false, mode, &move || Ok(layout.clone()))
+        }
+
+        fn legacy(&self) -> &Path {
+            &self.layout.legacy[0]
+        }
     }
 
     #[test]
-    fn an_explicit_profile_is_not_the_default() {
-        let choice = resolve_profile_dir(Some(PathBuf::from("/tmp/p"))).unwrap();
-        assert_eq!(
-            choice,
-            ProfileChoice {
-                dir: PathBuf::from("/tmp/p"),
-                is_default: false
-            }
-        );
+    fn the_default_profile_adopts_a_lone_legacy_profile() {
+        let fx = Fixture::with_legacy_profile();
+        let app = fx.open(None, OpenMode::Existing).unwrap();
+        assert!(app.is_default_profile);
+        assert_eq!(app.profile, fx.layout.default);
+        assert!(curio_core::paths::is_profile(&fx.layout.default));
+        assert!(!fx.legacy().exists(), "moved, not copied");
+    }
+
+    #[test]
+    fn an_explicit_profile_never_adopts() {
+        let fx = Fixture::with_legacy_profile();
+        let explicit = fx.layout.default.with_file_name("explicit");
+        let app = fx.open(Some(explicit.clone()), OpenMode::Create).unwrap();
+        assert!(!app.is_default_profile);
+        assert_eq!(app.profile, explicit);
+        assert!(curio_core::paths::is_profile(fx.legacy()), "left alone");
+        assert!(!fx.layout.default.exists());
+    }
+
+    #[test]
+    fn a_library_left_behind_blocks_a_fresh_default() {
+        let fx = Fixture::with_legacy_profile();
+        // Another process holds the old library open, so it cannot move.
+        let holder = App::open(Some(fx.legacy().to_path_buf()), false, OpenMode::Existing).unwrap();
+        for mode in [OpenMode::Existing, OpenMode::Create] {
+            let err = fx.open(None, mode).unwrap_err().to_string();
+            assert!(err.contains("not creating a new default profile"), "{err}");
+            assert!(err.contains(&fx.legacy().display().to_string()), "{err}");
+            assert!(!err.contains("run `curio init`"), "{err}");
+            assert!(!fx.layout.default.exists(), "nothing created");
+        }
+        // Once it is released, the next run moves it.
+        drop(holder);
+        let app = fx.open(None, OpenMode::Existing).unwrap();
+        assert_eq!(app.profile, fx.layout.default);
+        assert!(!fx.legacy().exists());
+    }
+
+    #[test]
+    fn with_no_legacy_profile_the_default_still_needs_init() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = ProfileLayout {
+            default: tmp.path().join("default"),
+            legacy: vec![tmp.path().join("absent")],
+        };
+        let open = |mode| {
+            let layout = layout.clone();
+            App::open_in(None, false, mode, &move || Ok(layout.clone()))
+        };
+        let err = open(OpenMode::Existing).unwrap_err().to_string();
+        assert!(err.contains("run `curio init`"), "{err}");
+        let app = open(OpenMode::Create).unwrap();
+        assert!(app.is_default_profile);
+        assert!(curio_core::paths::is_profile(&layout.default));
     }
 
     #[test]

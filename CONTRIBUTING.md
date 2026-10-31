@@ -32,7 +32,7 @@ a side effect of a new dependency or language feature. Also required:
 [lefthook](https://github.com/evilmartians/lefthook),
 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny),
 [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) (`just cov`,
-part of `just ci`).
+part of `just ci`), and [jq](https://jqlang.org) for `just msrv`.
 Not required for engine work: Node or npm — every crate except the desktop
 head builds and tests fully headless. Phase 4 brought `apps/desktop/src-tauri`
 (the `curio-desktop` head) into the workspace, so `--workspace` gates compile

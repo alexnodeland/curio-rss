@@ -20,6 +20,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "msrv: jq is required (it reads rust-version out of cargo metadata) — install it from your package manager" >&2
+    exit 1
+fi
+
 # "<rust_version> <package>" for every workspace member.
 pairs="$(cargo metadata --no-deps --format-version 1 --locked \
     | jq -r '.packages[] | "\(.rust_version // "") \(.name)"')"

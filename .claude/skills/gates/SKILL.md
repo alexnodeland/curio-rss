@@ -8,8 +8,11 @@ description: Pick and run the right local quality gates for a change before comm
 `just ci` is the whole gate and is always correct. It is also slow on a
 4-core box, so while iterating, run the subset the change touches, then the
 full `just ci` (or at least every row that applies) before the final push.
-CI is the server-side copy of `just ci`; a red CI job that the local gates
-would have caught is wasted wall-clock.
+CI is the server-side copy of `just ci` plus two jobs with no local twin in
+it: `msrv` (locally `just msrv`, see the table) and `test-cross-os` (the
+engine + CLI tests on macOS and Windows, CI-only — keep paths, line endings
+and process spawning portable). A red CI job that the local gates would have
+caught is wasted wall-clock.
 
 ## Path → gates
 
@@ -21,7 +24,7 @@ would have caught is wasted wall-clock.
 | `crates/curio-cli/**` | `cargo test -p curio-cli` |
 | `apps/desktop/src-tauri/**` | `cargo test -p curio-desktop` · if a `#[tauri::command]`, DTO or event type changed: `just bindings` and commit the regenerated `bindings.ts` (`just bindings-check` must be clean) |
 | `apps/desktop/src/**` | `just frontend-bans` · `just desktop-lint` · `just desktop-npm-test` (70% floor on state/utils) · the visual-check skill for anything a user can see |
-| `Cargo.toml` / `Cargo.lock` / new deps | `just deny` · `just boundary` (curio-core stays webview-free) |
+| `Cargo.toml` / `Cargo.lock` / new deps | `just deny` · `just boundary` (curio-core stays webview-free) · `just msrv` (every crate builds on its declared `rust-version`; needs `jq`, downloads the pinned toolchains) |
 | docs / rustdoc comments | `just doc` (rustdoc `-D warnings`) |
 | anything added to git | `just blob-guard` (no object over 1 MB, ever) |
 

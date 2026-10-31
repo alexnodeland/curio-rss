@@ -105,8 +105,8 @@ After first launch Curio keeps itself current — **Settings → General → Che
 for updates**, or let it auto-check. Updates are downloaded, signature-verified,
 and installed in place from the GitHub release feed, then relaunch on a click.
 
-Windows and Linux bundles are built nightly and downloadable as CI artifacts,
-but are not a shipped channel yet.
+Linux, Windows and macOS (universal `.dmg`) bundles are also built nightly and
+downloadable as CI artifacts, but the nightlies are not a shipped channel yet.
 
 ## Keyboard shortcuts
 

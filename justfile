@@ -150,6 +150,20 @@ fixtures *ARGS:
 bench-cold-start:
     cargo bench -p curio-fixtures --bench cold_start
 
+# The nightly `bench` job's run, locally: bencher output from a stateless
+# criterion (fresh CRITERION_HOME, --discard-baseline), written to
+# bench-output.txt (gitignored), then the parse check the job runs before
+# github-action-benchmark reads that file.
+bench-cold-start-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    home="$(mktemp -d)"
+    trap 'rm -rf "$home"' EXIT
+    CRITERION_HOME="$home" cargo bench -p curio-fixtures --bench cold_start -- \
+      --output-format bencher --noplot --discard-baseline | tee bench-output.txt
+    cargo run -q -p xtask -- bench-output bench-output.txt \
+      --expect cold_start/open_and_first_page_50k
+
 # Blob-size guard: fail if any git object in history exceeds 1MB
 # (mirrors CI's blob-guard job — catches the blob BEFORE it is pushed
 # and immortalized in history)

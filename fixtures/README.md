@@ -24,6 +24,11 @@ Current layout:
   `curio.db` (hash-asserted by the crate's own tests), written through the
   real migrated schema. It powers the criterion cold-start bench
   (`just bench-cold-start`) and can seed a profile for manual QA.
+  `just bench-cold-start-ci` runs the bench the way the nightly `bench` job
+  does — bencher output from a criterion that keeps no baseline of its own
+  (the job's `github-action-benchmark` step owns the trailing baseline and
+  fails at 130% of it), then `cargo run -p xtask -- bench-output` to check
+  the tracker can parse the result.
 
 Planned layout (populated from later phases, per `docs/design/roadmap.md`):
 

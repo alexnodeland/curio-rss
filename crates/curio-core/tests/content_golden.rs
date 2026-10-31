@@ -29,14 +29,30 @@ fn html_fixture(name: &str) -> String {
 /// from the crate dir baked in at compile time, which is another worktree's
 /// when cargo reuses this binary from a shared `CARGO_TARGET_DIR` (issue
 /// #183). `.cargo/config.toml` hands it the root at run time instead.
+///
+/// Cargo discovers `.cargo/config.toml` from its working directory, not
+/// from `--manifest-path`, so a cargo started outside the checkout leaves
+/// the variable unset and insta falls back to its own lookup — correct
+/// whenever the binary was built here. The config entry itself is pinned
+/// unconditionally; the variable is checked whenever cargo passed it.
 #[test]
 fn insta_resolves_the_workspace_root_at_run_time() {
-    let root = std::env::var_os("INSTA_WORKSPACE_ROOT")
-        .unwrap_or_else(|| panic!("INSTA_WORKSPACE_ROOT unset: .cargo/config.toml [env] sets it"));
-    assert_eq!(
-        std::path::Path::new(&root).canonicalize().unwrap(),
-        common::manifest_dir().join("../..").canonicalize().unwrap(),
+    let workspace_root = common::manifest_dir().join("../..").canonicalize().unwrap();
+
+    let config = std::fs::read_to_string(workspace_root.join(".cargo/config.toml")).unwrap();
+    assert!(
+        config
+            .lines()
+            .any(|line| line.trim() == r#"INSTA_WORKSPACE_ROOT = { value = ".", relative = true }"#),
+        ".cargo/config.toml [env] must set INSTA_WORKSPACE_ROOT relative to the checkout",
     );
+
+    if let Some(root) = std::env::var_os("INSTA_WORKSPACE_ROOT") {
+        assert_eq!(
+            std::path::Path::new(&root).canonicalize().unwrap(),
+            workspace_root,
+        );
+    }
 }
 
 #[test]

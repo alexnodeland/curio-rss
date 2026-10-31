@@ -156,7 +156,8 @@ fn schema_patterns_are_pinned() {
     // demand; this pins the regex literals themselves so a schema edit
     // that loosens them shows up here. The crate dir is read at run time
     // (issue #183: a shared target dir reuses binaries across worktrees).
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|| panic!("CARGO_MANIFEST_DIR unset: run the tests through cargo"));
     let events = std::fs::read_to_string(
         std::path::Path::new(&manifest_dir).join("../../schemas/events.v1.json"),
     )

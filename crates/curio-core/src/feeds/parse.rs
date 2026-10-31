@@ -239,8 +239,14 @@ mod tests {
     /// compile-time path goes stale when a shared target dir reuses this
     /// binary from another worktree (issue #183).
     fn fixture(name: &str) -> Vec<u8> {
-        let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        std::fs::read(format!("{crate_dir}/../../fixtures/feeds/{name}")).unwrap()
+        let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|| panic!("CARGO_MANIFEST_DIR unset: run the tests through cargo"));
+        std::fs::read(
+            std::path::Path::new(&crate_dir)
+                .join("../../fixtures/feeds")
+                .join(name),
+        )
+        .unwrap()
     }
 
     #[test]

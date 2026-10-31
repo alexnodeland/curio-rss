@@ -3,9 +3,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use curio_core::events::{EventEmitter, EventLog, FoldedState, read_all};
+use curio_core::events::{
+    EventEmitter, EventLog, EventLogError, FoldedState, read_all, read_all_lenient,
+};
 use curio_core::model::{ArticleContent, NewArticle};
 use curio_core::storage::{ListArticles, Storage};
 use curio_types::{CurioId, EventEnvelope, EventId, EventPayload, EventsSchemaV1Marker};
@@ -29,6 +31,37 @@ fn opened(ts: &str, id: CurioId) -> EventEnvelope {
     )
 }
 
+/// An events directory plus its lock file, laid out like a profile's
+/// `.curio/` (lock beside the contract dir) inside one temp dir — so
+/// the lock file is cleaned up with it and never lands in the
+/// directory the tests list.
+struct LogDir {
+    root: tempfile::TempDir,
+    events: PathBuf,
+}
+
+impl LogDir {
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let events = root.path().join("events");
+        std::fs::create_dir(&events).unwrap();
+        Self { root, events }
+    }
+
+    /// The events (contract) directory.
+    fn path(&self) -> &Path {
+        &self.events
+    }
+
+    fn lock(&self) -> PathBuf {
+        self.root.path().join("events.lock")
+    }
+
+    fn open(&self) -> Result<EventLog, curio_core::events::EventLogError> {
+        EventLog::open(&self.events, self.lock())
+    }
+}
+
 fn list_files(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
@@ -42,8 +75,8 @@ fn list_files(dir: &Path) -> Vec<String> {
 
 #[test]
 fn lines_are_contract_shaped_json() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap();
     let id = CurioId::new();
     log.append(&envelope_at(
         "2026-07-03T09:15:00.123Z",
@@ -70,8 +103,8 @@ fn lines_are_contract_shaped_json() {
 
 #[test]
 fn rotates_at_utc_midnight() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap();
     let id = CurioId::new();
     log.append(&opened("2026-07-01T23:59:59.999Z", id)).unwrap();
     log.append(&opened("2026-07-02T00:00:00.000Z", id)).unwrap();
@@ -88,9 +121,9 @@ fn rotates_at_utc_midnight() {
 
 #[test]
 fn rotates_with_numeric_suffixes_at_the_size_cap() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     // Cap of 1 byte: every line overflows → one file per event.
-    let mut log = EventLog::open(dir.path()).unwrap().with_max_file_bytes(1);
+    let mut log = dir.open().unwrap().with_max_file_bytes(1);
     let id = CurioId::new();
     let events: Vec<EventEnvelope> = (0..12)
         .map(|_| opened("2026-07-03T10:00:00.000Z", id))
@@ -114,17 +147,17 @@ fn rotates_with_numeric_suffixes_at_the_size_cap() {
 
 #[test]
 fn append_resumes_the_newest_file_across_reopen() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     let id = CurioId::new();
     let first = opened("2026-07-03T10:00:00.000Z", id);
     {
-        let mut log = EventLog::open(dir.path()).unwrap();
+        let mut log = dir.open().unwrap();
         log.append(&first).unwrap();
         log.flush().unwrap();
     }
     let second = opened("2026-07-03T11:00:00.000Z", id);
     {
-        let mut log = EventLog::open(dir.path()).unwrap();
+        let mut log = dir.open().unwrap();
         log.append(&second).unwrap();
         log.flush().unwrap();
     }
@@ -140,11 +173,11 @@ fn append_resumes_the_newest_file_across_reopen() {
 /// complete line.
 #[test]
 fn a_torn_final_line_is_healed_at_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     let id = CurioId::new();
     let whole = opened("2026-07-03T10:00:00.000Z", id);
     {
-        let mut log = EventLog::open(dir.path()).unwrap();
+        let mut log = dir.open().unwrap();
         log.append(&whole).unwrap();
         log.flush().unwrap();
     }
@@ -162,7 +195,7 @@ fn a_torn_final_line_is_healed_at_open() {
 
     // Reopen and append (the replayed envelope in real life).
     let replayed = opened("2026-07-03T10:00:01.000Z", id);
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let mut log = dir.open().unwrap();
     log.append(&replayed).unwrap();
     log.flush().unwrap();
 
@@ -176,21 +209,72 @@ fn a_torn_final_line_is_healed_at_open() {
 /// after a crash).
 #[test]
 fn a_wholly_torn_file_heals_to_empty_at_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     let path = dir.path().join("events-20260703.jsonl");
     std::fs::write(&path, b"{\"schema\":\"curio.eve").unwrap();
 
-    let _log = EventLog::open(dir.path()).unwrap();
+    let _log = dir.open().unwrap();
     assert_eq!(read_all(dir.path()).unwrap(), vec![]);
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+}
+
+/// One damaged line fails the strict reader but costs the lenient reader
+/// only that line, which it reports with its path and line number.
+#[test]
+fn the_lenient_reader_skips_and_reports_invalid_lines() {
+    let dir = LogDir::new();
+    let id = CurioId::new();
+    let before = opened("2026-07-03T10:00:00.000Z", id);
+    let after = opened("2026-07-03T10:00:01.000Z", id);
+    let path = dir.path().join("events-20260703.jsonl");
+    std::fs::write(
+        &path,
+        format!(
+            "{}\n{{\"schema\":\"curio.ev{}\n\n{}\n",
+            serde_json::to_string(&before).unwrap(),
+            serde_json::to_string(&after).unwrap(),
+            "not json at all",
+        ),
+    )
+    .unwrap();
+
+    assert!(matches!(
+        read_all(dir.path()),
+        Err(EventLogError::InvalidLine { line: 2, .. })
+    ));
+    let lenient = read_all_lenient(dir.path()).unwrap();
+    assert_eq!(lenient.events, vec![before]);
+    let skipped: Vec<u64> = lenient
+        .skipped
+        .iter()
+        .map(|err| match err {
+            EventLogError::InvalidLine { path: p, line, .. } => {
+                assert_eq!(p, &path);
+                *line
+            }
+            other => panic!("unexpected {other}"),
+        })
+        .collect();
+    assert_eq!(skipped, vec![2, 4], "blank line 3 is not an error");
+
+    // An intact stream reads identically either way; a missing dir is empty.
+    std::fs::remove_file(&path).unwrap();
+    let mut log = dir.open().unwrap();
+    log.append(&after).unwrap();
+    log.flush().unwrap();
+    let lenient = read_all_lenient(dir.path()).unwrap();
+    assert_eq!(lenient.events, read_all(dir.path()).unwrap());
+    assert!(lenient.skipped.is_empty());
+    let absent = read_all_lenient(&dir.path().join("absent")).unwrap();
+    assert_eq!(absent.events, vec![]);
 }
 
 // --------------------------------------------------------------- retention
 
 #[test]
 fn retention_sweep_removes_only_files_past_the_window() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap();
     let id = CurioId::new();
     log.append(&opened("2026-01-01T12:00:00.000Z", id)).unwrap();
     log.append(&opened("2026-04-01T12:00:00.000Z", id)).unwrap();
@@ -212,8 +296,8 @@ fn retention_sweep_removes_only_files_past_the_window() {
 
 #[test]
 fn retention_cannot_be_configured_below_the_contract_floor() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap().with_retention_days(7); // clamped to 90
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap().with_retention_days(7); // clamped to 90
     let id = CurioId::new();
     log.append(&opened("2026-06-01T12:00:00.000Z", id)).unwrap();
     log.flush().unwrap();
@@ -224,7 +308,7 @@ fn retention_cannot_be_configured_below_the_contract_floor() {
         log.sweep_retention(today).unwrap(),
         [] as [std::path::PathBuf; 0]
     );
-    let mut fresh = EventLog::open(dir.path()).unwrap().with_retention_days(7);
+    let mut fresh = dir.open().unwrap().with_retention_days(7);
     assert_eq!(
         fresh.sweep_retention(today).unwrap(),
         [] as [std::path::PathBuf; 0]
@@ -378,7 +462,7 @@ fn emitter_drains_intents_into_the_log() {
 
     let mut emitter = EventEmitter::new(
         std::sync::Arc::clone(&storage),
-        EventLog::open(&events_dir).unwrap(),
+        EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap(),
     )
     .unwrap();
 
@@ -419,7 +503,7 @@ fn startup_replays_intents_that_never_reached_the_log() {
     let storage = std::sync::Arc::new(Storage::open(&db).unwrap());
     let _emitter = EventEmitter::new(
         std::sync::Arc::clone(&storage),
-        EventLog::open(&events_dir).unwrap(),
+        EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -584,7 +668,7 @@ fn replay_after_partial_emission_duplicates_harmlessly() {
     // Simulate the partial emission: append + fsync, but never mark.
     {
         let pending = storage.pending_intents().unwrap();
-        let mut log = EventLog::open(&events_dir).unwrap();
+        let mut log = EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap();
         for intent in &pending {
             log.append(&intent.envelope).unwrap();
         }
@@ -596,7 +680,7 @@ fn replay_after_partial_emission_duplicates_harmlessly() {
     // Restart: the replay appends the same envelope again.
     let _emitter = EventEmitter::new(
         std::sync::Arc::clone(&storage),
-        EventLog::open(&events_dir).unwrap(),
+        EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap(),
     )
     .unwrap();
     let events = read_all(&events_dir).unwrap();
@@ -606,4 +690,104 @@ fn replay_after_partial_emission_duplicates_harmlessly() {
     let state = FoldedState::fold(events);
     assert_eq!(state.events_seen(), 1, "dedupe collapses the duplicate");
     assert!(state.starred.contains(&curio_id));
+}
+
+// ------------------------------------------------- cross-process emission
+
+/// Set in a child process: the shared profile it works on.
+const CHILD_PROFILE_ENV: &str = "CURIO_TEST_MULTIPROCESS_PROFILE";
+/// Set in a child process: the article id it flips.
+const CHILD_ARTICLE_ENV: &str = "CURIO_TEST_MULTIPROCESS_ARTICLE";
+const PROCESSES: usize = 3;
+const FLIPS_PER_PROCESS: usize = 500;
+
+/// Acceptance (#114): N `CoreHandle` processes × 500 state flips on one
+/// profile — every staged event lands in the log exactly once, and every
+/// line is whole. Before the events lock, each process's startup replay
+/// re-emitted intents the others had staged but not yet drained, heals
+/// could truncate another process's append in flight, and stale
+/// rotation counters split one file's lines across processes.
+///
+/// The children are this very test binary, re-run with `--exact` on
+/// [`multiprocess_child`] — real, separate processes, nothing but the
+/// filesystem shared, no network.
+#[test]
+fn concurrent_processes_emit_every_event_exactly_once() {
+    if std::env::var_os(CHILD_PROFILE_ENV).is_some() {
+        return; // inside a child: only `multiprocess_child` does work
+    }
+    let profile = tempfile::tempdir().unwrap();
+    let ids: Vec<_> = {
+        let core = curio_core::CoreHandle::open(profile.path()).unwrap();
+        let articles = (0..PROCESSES)
+            .map(|n| NewArticle {
+                feed_id: None,
+                dedupe_key: format!("mp-{n}"),
+                title: format!("Article {n}"),
+                source_url: format!("https://example.com/mp/{n}"),
+                author: None,
+                published_at: None,
+                content: ArticleContent {
+                    html: "<p>body</p>".to_owned(),
+                    text: "body".to_owned(),
+                },
+                lang: None,
+                word_count: None,
+                source_updated_at: None,
+                lead_image: None,
+            })
+            .collect();
+        core.storage().upsert_articles(articles).unwrap();
+        core.storage()
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .into_iter()
+            .map(|a| a.id)
+            .collect()
+    };
+    assert_eq!(ids.len(), PROCESSES);
+
+    let exe = std::env::current_exe().unwrap();
+    let children: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            std::process::Command::new(&exe)
+                .args(["--exact", "multiprocess_child", "--test-threads=1"])
+                .env(CHILD_PROFILE_ENV, profile.path())
+                .env(CHILD_ARTICLE_ENV, id.0.to_string())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for mut child in children {
+        assert!(child.wait().unwrap().success(), "a child process failed");
+    }
+
+    let events_dir = profile.path().join(".curio").join("events");
+    // `read_all` refuses any invalid (torn, glued, interleaved) line.
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), PROCESSES * FLIPS_PER_PROCESS);
+    let unique: std::collections::HashSet<_> = events.iter().map(|e| e.event_id).collect();
+    assert_eq!(unique.len(), events.len(), "an event_id appeared twice");
+    // ...and nothing is left staged.
+    let core = curio_core::CoreHandle::open(profile.path()).unwrap();
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+    let state = FoldedState::fold(events);
+    assert!(state.starred.is_empty(), "each child ends on an unstar");
+}
+
+/// Child half of [`concurrent_processes_emit_every_event_exactly_once`];
+/// a no-op unless that test spawned this process.
+#[test]
+fn multiprocess_child() {
+    let Some(profile) = std::env::var_os(CHILD_PROFILE_ENV) else {
+        return;
+    };
+    let id =
+        curio_core::model::ArticleId(std::env::var(CHILD_ARTICLE_ENV).unwrap().parse().unwrap());
+    let core = curio_core::CoreHandle::open(profile).unwrap();
+    for flip in 0..FLIPS_PER_PROCESS {
+        assert!(core.set_starred(id, flip % 2 == 0).unwrap());
+    }
 }

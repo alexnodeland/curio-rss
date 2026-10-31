@@ -145,7 +145,11 @@ Bring your library over in one step (**Settings → Data → Import**):
 
 Curio also ships a CLI over the same engine. From a clone,
 `cargo install --path crates/curio-cli` (Rust 1.88 or newer; or run via
-`cargo run -p curio-cli --`). Then:
+`cargo run -p curio-cli --`). The CLI and the app share one library by
+default — `~/Library/Application Support/io.github.alexnodeland.curio` on
+macOS, `~/.local/share/curio` on Linux, `%LOCALAPPDATA%\alexnodeland\curio\data`
+on Windows (override with `--profile` / `CURIO_PROFILE`; `curio doctor`
+prints the resolved path). Then:
 
 ```sh
 curio init                                  # scaffold the profile: curio.toml, curio.db, events log

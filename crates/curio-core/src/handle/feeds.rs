@@ -15,7 +15,7 @@ impl CoreHandle {
     /// Storage (including duplicate URL) or emission errors.
     pub fn add_feed(&self, new: NewFeed) -> Result<Feed, CoreError> {
         let (feed, _envelope) = self.storage.add_feed(new)?;
-        self.emit()?;
+        self.emit();
         Ok(feed)
     }
 
@@ -31,7 +31,7 @@ impl CoreHandle {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
-        self.emit()?;
+        self.emit();
         Ok(())
     }
 

@@ -10,12 +10,17 @@ mod transfer;
 
 use std::process::ExitCode;
 
-use crate::app::App;
+use crate::app::{App, OpenMode};
 use crate::cli::{Cli, Command};
 
 /// Opens the profile and dispatches the parsed command.
 pub(crate) fn run(cli: Cli) -> anyhow::Result<ExitCode> {
-    let mut app = App::open(cli.profile, cli.json)?;
+    let mode = if matches!(cli.command, Command::Init) {
+        OpenMode::Create
+    } else {
+        OpenMode::Existing
+    };
+    let mut app = App::open(cli.profile, cli.json, mode)?;
     dispatch(&mut app, cli.command)
 }
 

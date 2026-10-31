@@ -22,6 +22,7 @@ import type {
     FeedDto,
     FetchRecordDto,
     ImportOutcomeDto,
+    LegacyProfileDto,
     OpmlImportOutcomeDto,
     PathTokenDto,
     RefreshOutcomeDto,
@@ -270,6 +271,17 @@ export function appInfoFixture(overrides: Partial<AppInfoDto> = {}): AppInfoDto 
         profile_dir: '/home/user/.local/share/curio',
         db_schema_version: 1,
         schema_supported: 1,
+        ...overrides,
+    };
+}
+
+export function legacyProfileFixture(overrides: Partial<LegacyProfileDto> = {}): LegacyProfileDto {
+    return {
+        path: '/home/user/Library/Application Support/curio',
+        default_dir: '/home/user/Library/Application Support/io.github.alexnodeland.curio',
+        status: 'in_use',
+        detail: null,
+        opened_in_place: false,
         ...overrides,
     };
 }

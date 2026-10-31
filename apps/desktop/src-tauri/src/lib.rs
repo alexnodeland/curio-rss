@@ -25,11 +25,9 @@ pub mod menu;
 pub mod notify;
 pub mod paths;
 pub mod refresh_scheduler;
-
-use std::sync::Arc;
+pub mod startup;
 
 use curio_core::fetch::{FetchConfig, PolicedClient};
-use curio_core::{CoreHandle, CoreOptions};
 use tauri::Manager as _;
 
 /// The tauri-specta builder naming every command and event — the single
@@ -120,6 +118,13 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::platform::pick_theme_export_path,
             commands::platform::pick_theme_import_file,
             commands::platform::pick_destination_root,
+            // startup recovery (work without a core)
+            commands::recovery::get_startup_failure,
+            commands::recovery::retry_startup,
+            commands::recovery::restore_startup_backup,
+            commands::recovery::start_fresh_profile,
+            commands::recovery::reveal_profile_folder,
+            commands::recovery::quit_app,
         ])
         .events(tauri_specta::collect_events![
             events::FeedsChanged,
@@ -133,6 +138,10 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
 /// Builds and runs the app: plugins (single-instance first, dialog,
 /// URL-scoped opener — deliberately NO shell plugin), the specta invoke
 /// handler, and managed state (core handle, path registry, image cache).
+///
+/// Startup is two-phase ([`startup`]): a profile that will not open is
+/// logged and shown on the in-window recovery screen, never a silent
+/// `exit(1)`.
 pub fn run() {
     let builder = specta_builder();
 
@@ -153,41 +162,41 @@ pub fn run() {
         .on_menu_event(menu::on_event)
         .setup(move |app| {
             builder.mount_events(app);
-            // Before anything else in setup, so the window still exists by the
-            // time the code below runs (tauri itself would have built a
-            // `create: true` window slightly earlier, ahead of its asset setup
-            // and this closure — nothing here depends on that).
-            create_main_window(app)?;
-
-            let profile = paths::profile_dir()?;
-            // Rotating logs + panic hook first, so anything below is captured.
-            logging::init(&profile.join("logs"));
-            let core = CoreHandle::open_with(&profile, CoreOptions::default())?;
-            let core: commands::SharedCore = Arc::new(core);
-            // Optional Reddit API credentials from the OS keychain (D15) —
-            // best-effort; absence just means the unauthenticated tier.
-            commands::reddit::load_credentials_at_startup(&core);
-            app.manage(Arc::clone(&core));
+            let profile = paths::profile_dir();
+            // Rotating logs + panic hook first, so anything below is captured
+            // (including why the profile would not open).
+            if let Ok(profile) = &profile {
+                logging::init(&profile.join("logs"));
+            }
+            // Managed before the window exists: the frontend's first call
+            // asks the gate whether to show the reader or the recovery screen.
+            app.manage(startup::StartupGate::default());
             app.manage(ipc_policy::PathRegistry::new());
-            app.manage(image_cache::ImageCache::new(
-                paths::image_cache_dir()?,
-                image_cache::DEFAULT_MAX_CACHE_BYTES,
-                PolicedClient::new(FetchConfig::default()),
-            ));
             app.manage(discovery::Discovery::new(PolicedClient::new(
                 FetchConfig::default(),
             )));
+            // Before the core opens, so the window exists whatever happens
+            // next. A window that cannot be built leaves nothing to show a
+            // recovery screen in: that one failure still ends the process.
+            create_main_window(app).inspect_err(|error| {
+                tracing::error!("could not create the main window: {error}");
+            })?;
 
-            // Background refresh: keep the reader current without a click. The
-            // scheduler is shared so a manual `refresh_all` resets its timer.
-            let scheduler = Arc::new(refresh_scheduler::RefreshScheduler::new());
-            app.manage(Arc::clone(&scheduler));
-            refresh_scheduler::spawn(app.handle().clone(), core, scheduler);
+            // Phase 1 (open) then phase 2 (install); a failure at either goes
+            // to the recovery screen, already logged.
+            if let Err(failure) =
+                startup::boot(profile).and_then(|core| startup::install(app.handle(), core))
+            {
+                app.state::<startup::StartupGate>().record(failure)?;
+            }
             Ok(())
         });
 
     if let Err(error) = tauri_builder.run(tauri::generate_context!()) {
-        // Startup failed before a window existed; stderr is all we have.
+        // The runtime itself failed (no webview, no window): there is no
+        // surface to show a recovery screen on. Log it for the diagnostics
+        // bundle, and keep stderr for development.
+        tracing::error!("curio-desktop failed to start: {error}");
         eprintln!("curio-desktop failed to start: {error}");
         std::process::exit(1);
     }

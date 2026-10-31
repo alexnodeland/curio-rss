@@ -25,9 +25,11 @@ import {
     installIpcHarness,
     opmlImportOutcomeFixture,
     pathTokenFixture,
+    recoveryOutcomeFixture,
     refreshOutcomeFixture,
     rejectWith,
     saveOutcomeFixture,
+    startupFailureFixture,
     unreadCountsFixture,
 } from './ipc-harness';
 
@@ -163,6 +165,15 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     pickThemeExportPath: { args: [], response: pathTokenFixture() },
     pickThemeImportFile: { args: [], response: pathTokenFixture() },
     pickDestinationRoot: { args: [], response: pathTokenFixture() },
+    getStartupFailure: { args: [], response: startupFailureFixture() },
+    retryStartup: {
+        args: [],
+        response: recoveryOutcomeFixture({ failure: startupFailureFixture(), set_aside: null }),
+    },
+    restoreStartupBackup: { args: [], response: recoveryOutcomeFixture() },
+    startFreshProfile: { args: [], response: recoveryOutcomeFixture() },
+    revealProfileFolder: { args: [], response: null },
+    quitApp: { args: [], response: null },
 };
 
 /** The wire name every wrapper must invoke: strict snake_case of its own. */

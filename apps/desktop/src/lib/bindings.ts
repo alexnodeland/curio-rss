@@ -379,6 +379,39 @@ export const commands = {
 	/**  Absolute path, for display only — never accepted back as input. */
 	path: string,
 } | null, CommandError>(__TAURI_INVOKE("pick_destination_root")),
+	/**
+	 *  Why startup failed, or `None` when the app started normally — the
+	 *  frontend asks this first, to pick the reader or the recovery screen.
+	 */
+	getStartupFailure: () => typedError<{
+	/**  The failure class. */
+	class: StartupFailureClass,
+	/**  The underlying error (for "Copy error" and the details disclosure). */
+	message: string,
+	/**  The profile directory, when one was resolved. */
+	profile_dir: string | null,
+	/**
+	 *  The pre-migration backup "Restore" would bring back: the newest one
+	 *  this build can open. `None` = nothing to restore.
+	 */
+	backup: string | null,
+} | null, CommandError>(__TAURI_INVOKE("get_startup_failure")),
+	/**
+	 *  Opens the profile again unchanged (after quitting another copy, or
+	 *  freeing disk space).
+	 */
+	retryStartup: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("retry_startup")),
+	/**
+	 *  Moves the database aside and restores the newest pre-migration backup
+	 *  this build can open, then opens the profile.
+	 */
+	restoreStartupBackup: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("restore_startup_backup")),
+	/**  Moves the database aside (never deletes it) and opens an empty one. */
+	startFreshProfile: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("start_fresh_profile")),
+	/**  Shows the failed profile's database (or folder) in the file manager. */
+	revealProfileFolder: () => typedError<null, CommandError>(__TAURI_INVOKE("reveal_profile_folder")),
+	/**  Quits the app (the recovery screen's last resort). */
+	quitApp: () => typedError<null, CommandError>(__TAURI_INVOKE("quit_app")),
 };
 
 /** Events */
@@ -776,6 +809,17 @@ export type PathTokenDto = {
 	path: string,
 };
 
+/**  What a recovery action did. */
+export type RecoveryOutcomeDto = {
+	/**
+	 *  `None`: the profile opened and the app is running — reload into
+	 *  it. `Some`: it still fails, for this reason.
+	 */
+	failure: StartupFailureDto | null,
+	/**  Where the replaced database was moved, when anything was moved. */
+	set_aside: string | null,
+};
+
 /**
  *  Reddit API credential status (D15). Deliberately secret-free: the
  *  client secret never crosses IPC back toward the webview.
@@ -843,6 +887,44 @@ export type SavedUrlDto = {
 	 *  unreachable page — the bare link is kept — and for existing rows).
 	 */
 	hydrated: boolean,
+};
+
+/**  Why startup failed — the class the recovery screen branches on. */
+export type StartupFailureClass = 
+/**  `curio.db` is not a readable `SQLite` database. */
+"corrupt" | 
+/**  The database was written by a newer build of Curio. */
+"too_new" | 
+/**  Another process holds the database. */
+"locked" | 
+/**
+ *  The OS refused a read or write (permissions, disk full, read-only
+ *  media), for the database or the event log.
+ */
+"io" | 
+/**
+ *  The schema upgrade (or its pre-migration backup) failed and was
+ *  rolled back.
+ */
+"upgrade" | 
+/**  The platform reported no home directory: there is no profile. */
+"no_profile" | 
+/**  Anything else. */
+"other";
+
+/**  A failed startup, as the recovery screen sees it. */
+export type StartupFailureDto = {
+	/**  The failure class. */
+	class: StartupFailureClass,
+	/**  The underlying error (for "Copy error" and the details disclosure). */
+	message: string,
+	/**  The profile directory, when one was resolved. */
+	profile_dir: string | null,
+	/**
+	 *  The pre-migration backup "Restore" would bring back: the newest one
+	 *  this build can open. `None` = nothing to restore.
+	 */
+	backup: string | null,
 };
 
 /**

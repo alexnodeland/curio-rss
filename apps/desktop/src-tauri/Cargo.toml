@@ -68,6 +68,9 @@ url = { workspace = true }
 # Test seeding (`commands::testutil::seed_article`) needs the raw
 # storage accessor; production builds never see it.
 curio-core = { workspace = true, features = ["test-support"] }
+# Startup-recovery tests forge too-new and backed-up databases; already in
+# the graph via curio-core, so no new licenses to triage.
+rusqlite = { workspace = true }
 specta-typescript = "=0.0.12"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

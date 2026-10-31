@@ -8,9 +8,18 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 /// Repo root (two levels up from the crate).
+///
+/// Resolved at run time from the `CARGO_MANIFEST_DIR` cargo sets for every
+/// test process — never the compile-time `env!` form: with one
+/// `CARGO_TARGET_DIR` shared across git worktrees, cargo reuses a test
+/// binary built in another worktree, and a baked-in path points there
+/// (issue #183).
 #[must_use]
 pub fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let Some(crate_dir) = std::env::var_os("CARGO_MANIFEST_DIR") else {
+        panic!("CARGO_MANIFEST_DIR unset: run the tests through cargo");
+    };
+    Path::new(&crate_dir)
         .join("../..")
         .canonicalize()
         .unwrap_or_else(|e| panic!("repo root: {e}"))

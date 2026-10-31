@@ -460,4 +460,97 @@ mod tests {
             "before + feed_tag (exact + subtree) + limit"
         );
     }
+
+    /// Property suite for the FTS query builder (issue #133): no user input
+    /// compiles to a query FTS5 rejects, FTS5 operator syntax in the input
+    /// is matched literally, and every plain word finds the row holding it.
+    mod fts_match_expr_props {
+        #![allow(clippy::unwrap_used)]
+
+        use proptest::prelude::*;
+
+        use super::super::fts_match_expr;
+
+        /// An FTS5 table shaped like `articles_fts` (same columns, default
+        /// tokenizer), holding `rows`.
+        fn index(rows: &[&str]) -> rusqlite::Connection {
+            let conn = rusqlite::Connection::open_in_memory().unwrap();
+            conn.execute_batch("CREATE VIRTUAL TABLE t USING fts5(title, content_text);")
+                .unwrap();
+            for row in rows {
+                conn.execute("INSERT INTO t(title, content_text) VALUES ('', ?1)", [row])
+                    .unwrap();
+            }
+            conn
+        }
+
+        fn hits(conn: &rusqlite::Connection, expr: &str) -> rusqlite::Result<i64> {
+            conn.query_row("SELECT count(*) FROM t WHERE t MATCH ?1", [expr], |row| {
+                row.get(0)
+            })
+        }
+
+        /// FTS5 query-language fragments a raw `MATCH` would interpret.
+        const OPERATORS: &[&str] = &[
+            "AND",
+            "OR",
+            "NOT",
+            "NEAR",
+            "NEAR(",
+            "*",
+            "^",
+            "-",
+            "+",
+            ":",
+            "(",
+            ")",
+            "\"",
+            "\"\"",
+            "title:",
+            "{title content_text}:",
+            "a*",
+            "NEAR(a b, 2)",
+            "'",
+            ";",
+            "--",
+        ];
+
+        proptest! {
+            #[test]
+            fn every_compiled_query_is_valid_fts5(input in "\\PC{0,120}") {
+                let conn = index(&["rust sqlite query", "日本語 テキスト", "say \"hi\""]);
+                match fts_match_expr(&input) {
+                    None => prop_assert!(input.split_whitespace().next().is_none()),
+                    Some(expr) => {
+                        let result = hits(&conn, &expr);
+                        prop_assert!(result.is_ok(), "{input:?} → {expr:?}: {result:?}");
+                    }
+                }
+            }
+
+            #[test]
+            fn operator_syntax_is_matched_literally(
+                words in prop::collection::vec(prop::sample::select(OPERATORS), 1..6),
+            ) {
+                // Raw, most of these are FTS5 syntax errors (`NEAR(`, a
+                // lone `"`, `title:` with no term) or operators. Compiled,
+                // each is a quoted phrase: always a valid query.
+                let conn = index(&["a apple and or not near", "title content"]);
+                let expr = fts_match_expr(&words.join(" ")).unwrap();
+                let result = hits(&conn, &expr);
+                prop_assert!(result.is_ok(), "{words:?} → {expr:?}: {result:?}");
+            }
+
+            #[test]
+            fn every_plain_word_finds_its_row(
+                words in prop::collection::vec("[a-z]{2,10}", 1..5),
+            ) {
+                let row = words.join(" ");
+                let conn = index(&[&row, "unrelated filler"]);
+                let expr = fts_match_expr(&format!("  {}\t", words.join("  "))).unwrap();
+                prop_assert_eq!(expr.matches('"').count(), words.len() * 2);
+                prop_assert_eq!(hits(&conn, &expr).unwrap(), 1);
+            }
+        }
+    }
 }

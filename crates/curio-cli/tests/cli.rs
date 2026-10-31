@@ -46,6 +46,24 @@ fn init_scaffolds_the_profile_and_is_idempotent() {
     assert_eq!(second["created"], false, "re-init must not clobber config");
 }
 
+#[test]
+fn a_garbage_database_is_refused_with_a_clear_message() {
+    let profile = tempfile::tempdir().unwrap();
+    let db = profile.path().join("curio.db");
+    std::fs::write(&db, "not a database at all\n".repeat(64)).unwrap();
+    curio(profile.path())
+        .arg("doctor")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not a readable Curio database"));
+    // Refused, never "repaired" over.
+    assert!(
+        std::fs::read_to_string(&db)
+            .unwrap()
+            .starts_with("not a database")
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
     clippy::too_many_lines,

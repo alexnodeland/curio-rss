@@ -8,13 +8,15 @@
 //! cannot fix — show a generic failure and point at diagnostics.
 //!
 //! Mapping policy (from the build spec): `NotFound` / `UnknownDestination`
-//! / `InvalidTag` / `SchemaTooNew` are user-tier, as is a missing
-//! destination folder (`ExportError::DestinationMissing`, code `IO`);
-//! `Sqlite` / `WriterGone` / `IntegrityFailed` / other IO are internal-tier.
+//! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) / a database
+//! locked by another process are user-tier, as is a missing destination
+//! folder (`ExportError::DestinationMissing`, code `IO`); `Sqlite` /
+//! `WriterGone` / `IntegrityFailed` / other IO / a corrupt or
+//! failed-upgrade database are internal-tier.
 
 use curio_core::CoreError;
 use curio_core::export::ExportError;
-use curio_core::storage::StorageError;
+use curio_core::storage::{OpenError, StorageError};
 use curio_types::ParseDestinationNameError;
 use serde::{Deserialize, Serialize};
 
@@ -102,9 +104,6 @@ impl From<StorageError> for CommandError {
             StorageError::InvalidTag => {
                 Self::user(ErrorCode::InvalidInput, error.to_string(), true)
             }
-            StorageError::SchemaTooNew { .. } => {
-                Self::user(ErrorCode::SchemaTooNew, error.to_string(), false)
-            }
             StorageError::Sqlite(_)
             | StorageError::WriterGone
             | StorageError::WalUnavailable { .. }
@@ -115,10 +114,26 @@ impl From<StorageError> for CommandError {
     }
 }
 
+impl From<OpenError> for CommandError {
+    fn from(error: OpenError) -> Self {
+        match error {
+            OpenError::Storage(storage) => storage.into(),
+            OpenError::TooNew { .. } => {
+                Self::user(ErrorCode::SchemaTooNew, error.to_string(), false)
+            }
+            OpenError::Locked { .. } => Self::user(ErrorCode::Storage, error.to_string(), true),
+            OpenError::Io { .. } => Self::internal(ErrorCode::Io, error.to_string()),
+            // Corrupt, Backup, MigrationFailed, and any class added later.
+            _ => Self::internal(ErrorCode::Storage, error.to_string()),
+        }
+    }
+}
+
 impl From<CoreError> for CommandError {
     fn from(error: CoreError) -> Self {
         match error {
             CoreError::Storage(storage) => storage.into(),
+            CoreError::Open(open) => open.into(),
             CoreError::NotFound { .. } => Self::user(ErrorCode::NotFound, error.to_string(), false),
             CoreError::UnknownDestination { .. } => {
                 Self::user(ErrorCode::UnknownDestination, error.to_string(), true)
@@ -222,12 +237,33 @@ mod tests {
 
     #[test]
     fn schema_too_new_is_a_user_facing_stop() {
-        let error = CommandError::from(StorageError::SchemaTooNew {
+        let error = CommandError::from(CoreError::Open(OpenError::TooNew {
             found: 9,
             supported: 1,
-        });
+        }));
         assert_eq!(error.kind, ErrorKind::User);
         assert_eq!(error.code, ErrorCode::SchemaTooNew);
+        assert!(!error.recoverable);
+    }
+
+    #[test]
+    fn open_error_classes_keep_their_tier() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let garbage = dir.path().join("curio.db");
+        std::fs::write(
+            &garbage,
+            b"definitely not sqlite, just long enough to have a header",
+        )
+        .unwrap_or_else(|e| panic!("write: {e}"));
+        let corrupt = match curio_core::storage::Storage::open(&garbage) {
+            Err(open) => CommandError::from(open),
+            Ok(_) => panic!("a garbage file opened"),
+        };
+        assert_eq!(corrupt.kind, ErrorKind::Internal);
+        assert_eq!(corrupt.code, ErrorCode::Storage);
+
+        let wrapped = CommandError::from(OpenError::Storage(StorageError::InvalidTag));
+        assert_eq!(wrapped.code, ErrorCode::InvalidInput);
     }
 
     #[test]

@@ -75,6 +75,10 @@ and as lefthook hooks scoped to `apps/desktop/` changes.
 - **Lints are the floor.** `cargo fmt` clean, `cargo clippy --workspace
   --all-targets -- -D warnings` clean, `cargo test --workspace` green.
   `unwrap`/`expect` are denied outside tests.
+- **Engine files stay small.** No `.rs` file under `crates/curio-core/src`
+  may exceed 700 lines (tests included) — the xtask `core_file_size` test
+  fails the suite on one that does. Grow a module by splitting it along its
+  sections into submodules, never by raising the ceiling.
 - **No blobs.** No git object may exceed 1 MB. `just blob-guard` (part of
   `just ci`) checks the full local history before you push; CI runs the
   same guard server-side.

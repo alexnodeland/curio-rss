@@ -30,6 +30,16 @@ pub struct EventLog {
     max_file_bytes: u64,
     retention_days: u32,
     current: Option<OpenFile>,
+    /// A failed append closed `current` without managing to truncate and
+    /// fsync it, so the whole lines appended before the failure are not
+    /// known durable: [`EventLog::flush`] fails until a reopen (whose
+    /// next flush covers them) clears this.
+    unsynced_close: bool,
+    /// Test-only fault injection: `(appends to let through, bytes)` — the
+    /// append after that many successes writes only `bytes` bytes of its
+    /// line, then fails as a full disk would.
+    #[cfg(test)]
+    short_write: Option<(usize, usize)>,
 }
 
 #[derive(Debug)]
@@ -63,6 +73,9 @@ impl EventLog {
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             retention_days: MIN_RETENTION_DAYS,
             current: None,
+            #[cfg(test)]
+            short_write: None,
+            unsynced_close: false,
         })
     }
 
@@ -93,6 +106,12 @@ impl EventLog {
     /// would be exceeded. Buffered durability: call [`EventLog::flush`]
     /// to fsync.
     ///
+    /// All-or-nothing: a write that fails part-way (a full disk, an I/O
+    /// error) is rolled back — the file is truncated to its last known
+    /// whole-line size and closed, so the next append reopens it through
+    /// the torn-tail heal. A retry therefore never glues a line onto torn
+    /// bytes, and the file only ever holds whole lines.
+    ///
     /// # Errors
     ///
     /// Serialization or filesystem errors.
@@ -102,11 +121,70 @@ impl EventLog {
         let line_bytes = u64::try_from(line.len()).unwrap_or(u64::MAX);
         let date = envelope.ts.as_datetime().date_naive();
         self.ensure_file(date, line_bytes)?;
+        let short_write = self.take_short_write();
         if let Some(current) = &mut self.current {
-            current.file.write_all(line.as_bytes())?;
+            if let Err(err) = write_line(&mut current.file, line.as_bytes(), short_write) {
+                self.roll_back_failed_append();
+                return Err(err.into());
+            }
             current.bytes = current.bytes.saturating_add(line_bytes);
         }
         Ok(())
+    }
+
+    /// Undoes a part-written line: truncates the current file back to its
+    /// last known size (always a whole-line boundary), fsyncs it — so the
+    /// whole lines appended before the failure stay flushable — and closes
+    /// it. If that fails too, closing is still enough for the torn bytes
+    /// (the reopen runs `heal_torn_tail`, which cuts back to the last
+    /// newline), and `flush` refuses until the reopen.
+    fn roll_back_failed_append(&mut self) {
+        let Some(current) = self.current.take() else {
+            return;
+        };
+        let rolled_back = current
+            .file
+            .set_len(current.bytes)
+            .and_then(|()| current.file.sync_all());
+        self.unsynced_close = rolled_back.is_err();
+        match rolled_back {
+            Ok(()) => tracing::warn!(
+                path = %current.path.display(),
+                bytes = current.bytes,
+                "event-log append failed; rolled the file back to its last whole line"
+            ),
+            Err(err) => tracing::warn!(
+                path = %current.path.display(),
+                error = %err,
+                "event-log append failed and the rollback truncate/fsync failed; \
+                 the torn tail heals when the file is reopened"
+            ),
+        }
+    }
+
+    #[cfg(not(test))]
+    #[allow(clippy::unused_self)] // mirrors the cfg(test) fault-injection twin
+    fn take_short_write(&mut self) -> Option<usize> {
+        None
+    }
+
+    #[cfg(test)]
+    fn take_short_write(&mut self) -> Option<usize> {
+        match self.short_write.take()? {
+            (0, bytes) => Some(bytes),
+            (after, bytes) => {
+                self.short_write = Some((after - 1, bytes));
+                None
+            }
+        }
+    }
+
+    /// Test-only fault injection: after `after_appends` more successful
+    /// appends, the next [`EventLog::append`] writes only `bytes` bytes
+    /// of its line and then fails with `StorageFull` (a full disk).
+    #[cfg(test)]
+    pub(crate) fn inject_short_write(&mut self, after_appends: usize, bytes: usize) {
+        self.short_write = Some((after_appends, bytes));
     }
 
     /// Fsyncs the current file (`sync_all`) — the durability point the
@@ -118,6 +196,11 @@ impl EventLog {
     pub fn flush(&mut self) -> Result<(), EventLogError> {
         if let Some(current) = &mut self.current {
             current.file.sync_all()?;
+        } else if self.unsynced_close {
+            return Err(std::io::Error::other(
+                "the event-log file closed by a failed append was never fsynced",
+            )
+            .into());
         }
         Ok(())
     }
@@ -195,6 +278,10 @@ impl EventLog {
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         let bytes = file.metadata()?.len();
         tracing::debug!(path = %path.display(), bytes, "event log file opened");
+        // A file closed unsynced by a failed append was the newest, so it
+        // is the one reopened here (rotation only ever moves forward from
+        // it, flushing it first) — its next fsync covers the earlier lines.
+        self.unsynced_close = false;
         self.current = Some(OpenFile {
             date,
             suffix,
@@ -203,6 +290,21 @@ impl EventLog {
             bytes,
         });
         Ok(())
+    }
+}
+
+/// Writes one serialized line. `short_write` is the test-only fault
+/// injection: write that many bytes, then fail as a full disk would.
+fn write_line(file: &mut File, line: &[u8], short_write: Option<usize>) -> std::io::Result<()> {
+    match short_write {
+        None => file.write_all(line),
+        Some(n) => {
+            file.write_all(&line[..n.min(line.len())])?;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                "injected short write",
+            ))
+        }
     }
 }
 
@@ -277,4 +379,107 @@ fn scan_latest(dir: &Path) -> Result<Option<(NaiveDate, u32)>, EventLogError> {
         }
     }
     Ok(latest)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use curio_types::{CurioId, EventId, EventPayload, EventsSchemaV1Marker};
+
+    use super::*;
+    use crate::events::read_all;
+
+    fn opened(ts: &str) -> EventEnvelope {
+        EventEnvelope {
+            schema: EventsSchemaV1Marker,
+            event_id: EventId::new(),
+            ts: ts.parse().unwrap(),
+            event: EventPayload::ArticleOpened {
+                curio_id: CurioId::new(),
+                dwell_ms: None,
+            },
+        }
+    }
+
+    /// Asserts the file is a sequence of whole lines — newline-terminated,
+    /// every line a parseable envelope — and returns them.
+    fn whole_lines(path: &Path) -> Vec<String> {
+        let raw = std::fs::read_to_string(path).unwrap();
+        assert!(raw.is_empty() || raw.ends_with('\n'), "torn tail:\n{raw}");
+        raw.lines()
+            .map(|line| {
+                serde_json::from_str::<EventEnvelope>(line).unwrap();
+                line.to_owned()
+            })
+            .collect()
+    }
+
+    /// #118: an append that dies mid-line (ENOSPC) must not leave torn
+    /// bytes behind for the in-process retry to extend.
+    #[test]
+    fn a_failed_append_is_rolled_back_and_the_retry_writes_one_whole_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events-20260703.jsonl");
+        let mut log = EventLog::open(dir.path()).unwrap();
+        let first = opened("2026-07-03T10:00:00.000Z");
+        log.append(&first).unwrap();
+        log.flush().unwrap();
+
+        let second = opened("2026-07-03T10:00:01.000Z");
+        log.inject_short_write(0, 17);
+        let err = log.append(&second).unwrap_err();
+        assert!(
+            matches!(&err, EventLogError::Io(io) if io.kind() == std::io::ErrorKind::StorageFull),
+            "{err}"
+        );
+        // Nothing torn survives the failure itself...
+        assert_eq!(whole_lines(&path).len(), 1);
+
+        // ...and the retry appends exactly one whole copy.
+        log.append(&second).unwrap();
+        log.flush().unwrap();
+        let lines = whole_lines(&path);
+        assert_eq!(lines.len(), 2, "no duplicate, no partial: {lines:?}");
+        assert_eq!(read_all(dir.path()).unwrap(), vec![first, second]);
+    }
+
+    /// If the rollback itself could not truncate + fsync, the lines that
+    /// landed before the failure are not known durable: `flush` must not
+    /// report success (the emitter would retire their intents) until the
+    /// file is reopened and fsynced again.
+    #[test]
+    fn flush_refuses_after_an_unsynced_rollback_until_the_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = EventLog::open(dir.path()).unwrap();
+        let first = opened("2026-07-03T10:00:00.000Z");
+        log.append(&first).unwrap();
+        // The state roll_back_failed_append leaves when set_len/sync_all
+        // fail: file closed, durability unknown.
+        log.current = None;
+        log.unsynced_close = true;
+        log.flush().unwrap_err();
+
+        let second = opened("2026-07-03T10:00:01.000Z");
+        log.append(&second).unwrap();
+        log.flush().unwrap();
+        assert_eq!(read_all(dir.path()).unwrap(), vec![first, second]);
+    }
+
+    /// A failure on the very first line of a fresh file rolls back to empty.
+    #[test]
+    fn a_failed_first_append_leaves_an_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events-20260703.jsonl");
+        let mut log = EventLog::open(dir.path()).unwrap();
+        let only = opened("2026-07-03T10:00:00.000Z");
+        log.inject_short_write(0, 5);
+        log.append(&only).unwrap_err();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+
+        log.append(&only).unwrap();
+        log.flush().unwrap();
+        assert_eq!(whole_lines(&path).len(), 1);
+        assert_eq!(read_all(dir.path()).unwrap(), vec![only]);
+    }
 }

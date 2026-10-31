@@ -54,6 +54,7 @@ All state lives in one profile directory:
 | `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (two newest kept; see [Upgrades and backups](#upgrades-and-backups)) |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
 | `.curio/.gitignore` | scaffolded so the events log is never committed |
+| `set-aside/<timestamp>/` | databases the desktop recovery screen moved out of the way (never deleted; see [Upgrades and backups](#upgrades-and-backups)) |
 
 The default location is the platform data directory —
 `~/.local/share/curio` on Linux (XDG-respecting: `XDG_DATA_HOME` wins),
@@ -241,3 +242,13 @@ that is not a Curio database at all.
 
 To roll back by hand: quit every Curio process, delete `curio.db-wal`
 and `curio.db-shm` if present, then copy the backup over `curio.db`.
+
+The desktop app does this for you. When the profile won't open (a
+corrupt or too-new database, a lock held by another copy, an unwritable
+data folder, a failed upgrade), it shows a recovery screen instead of
+quitting, and logs the cause to `logs/curio.log.*`. From there you can
+try again, restore the newest backup this version can open, start fresh,
+show the profile folder, copy the error, or quit. Restoring and starting
+fresh never delete anything: the current `curio.db` (and its `-wal` /
+`-shm` files) is first moved to `set-aside/<UTC timestamp>/` inside the
+profile.

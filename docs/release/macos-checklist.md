@@ -31,6 +31,19 @@ production feed).
 - [ ] **Keyboard-only session** — navigate feeds/articles and read one end-to-end with only the keyboard (`j`/`k`, `o`, `s`, `l`, `m`, `p`, `/`, `?`).
 - [ ] **Promote-to-destination** — press `p`, pick a temp destination, confirm a Markdown note with valid `curio.frontmatter.v1` frontmatter is written.
 
+## Startup recovery (do each on the built .app)
+
+A bundled app has no visible stderr, so a profile that won't open must land
+on the recovery screen, never a bouncing icon that vanishes. Use throwaway
+profiles (`CURIO_PROFILE=$(mktemp -d) open -a Curio`, quit, then break it):
+
+- [ ] **Corrupt DB → recovery screen** — `printf 'garbage, not sqlite' > "$CURIO_PROFILE/curio.db"`, relaunch: the window opens on "Curio can't read its database" (no crash, no silent exit), and `logs/curio.log.*` in the profile has an `ERROR … startup failed` line naming the class.
+- [ ] **Start fresh** — on that screen, Start fresh → confirm: the app opens into an empty reader after "Open Curio", and the garbage file sits untouched in `set-aside/<timestamp>/curio.db`.
+- [ ] **Restore backup** — with a profile from the previous release (so the upgrade wrote `curio.db.pre-vN.bak`), corrupt `curio.db` again and relaunch: "Restore backup" is offered, and restoring brings back the feeds.
+- [ ] **Too-new DB** — `sqlite3 "$CURIO_PROFILE/curio.db" 'PRAGMA user_version = 999'`: the screen says the database is from a newer Curio.
+- [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
+- [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
+
 ## Gatekeeper (unsigned) sanity
 
 - [ ] Fresh-install path works: right-click → Open (or `xattr -dr com.apple.quarantine`) launches the app.

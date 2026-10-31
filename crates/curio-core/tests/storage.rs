@@ -1242,8 +1242,20 @@ fn writer_mutations_use_immediate_transactions() {
         }
     }
     scanned.sort();
-    // Guard against a vacuous pass: the scan must see the whole module.
-    for expected in ["articles.rs", "feeds.rs", "mod.rs", "state.rs", "tags.rs"] {
+    // Guard against a vacuous pass: the scan (which is not recursive) must see
+    // every section file, so one moved or renamed out of the directory fails
+    // here instead of silently dropping out of the check.
+    for expected in [
+        "articles.rs",
+        "feeds.rs",
+        "fetch_log.rs",
+        "intents.rs",
+        "mod.rs",
+        "rows.rs",
+        "settings.rs",
+        "state.rs",
+        "tags.rs",
+    ] {
         assert!(
             scanned.iter().any(|name| name == expected),
             "repo module scan missed {expected}; saw {scanned:?}",

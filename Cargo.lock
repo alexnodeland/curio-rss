@@ -1096,6 +1096,7 @@ dependencies = [
  "curio-core",
  "curio-types",
  "directories",
+ "proptest",
  "scraper",
  "serde",
  "serde_json",

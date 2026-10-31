@@ -353,7 +353,12 @@ corrupt or too-new database, a lock held by another copy, an unwritable
 data folder, a failed upgrade), it shows a recovery screen instead of
 quitting, and logs the cause to `logs/curio.log.*`. From there you can
 try again, restore the newest backup this version can open, start fresh,
-show the profile folder, copy the error, or quit. Restoring and starting
+show the profile folder, copy the error, or quit; for a database a newer
+Curio wrote, it first offers to check for updates. Restoring and starting
 fresh never delete anything: the current `curio.db` (and its `-wal` /
 `-shm` files) is first moved to `set-aside/<UTC timestamp>/` inside the
-profile.
+profile, all or nothing — if any file can't be moved, the ones already
+moved go back. When the database is fine but the rest of the profile
+isn't (an unwritable `.curio/events` log, say), the screen only offers
+to try again once you've fixed it: replacing a healthy database would
+not help.

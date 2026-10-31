@@ -23,6 +23,14 @@
 //! 4. **Release assets.** The draft release step ships `SHA256SUMS`, a
 //!    `CycloneDX` SBOM and the provenance attestation bundle, and its job mints
 //!    that attestation first.
+//! 5. **A nightly that runs** (issue #175). No job anywhere targets a retired
+//!    runner image (such a leg queues until GitHub cancels it a day later —
+//!    what `macos-13` did every night). `nightly.yml` keeps its schedule, is
+//!    also triggered by PRs that edit it or the main-window creation its
+//!    Windows smoke depends on (a path-filtered `pull_request`, so a broken
+//!    nightly is caught before merge, not the next morning), sets no
+//!    `continue-on-error` (it is a hard gate), and its unconditional
+//!    artifact uploads fail on an empty bundle and cover Linux + Windows.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -68,6 +76,30 @@ const SIGNING_JOB_ACTIONS: &[&str] = &[
 const CI_WORKFLOW: &str = "ci.yml";
 /// The tag-triggered release workflow.
 const RELEASE_WORKFLOW: &str = "release.yml";
+/// The heavy tier: 3-OS bundles, the e2e smoke, the cold-start bench.
+const NIGHTLY_WORKFLOW: &str = "nightly.yml";
+
+/// Runner images GitHub has retired. A job on one is never picked up: it sits
+/// queued until GitHub cancels it after 24h, failing the whole run.
+pub const RETIRED_RUNNERS: &[&str] = &[
+    "macos-11",
+    "macos-12",
+    "macos-13",
+    "ubuntu-18.04",
+    "ubuntu-20.04",
+    "windows-2016",
+    "windows-2019",
+];
+
+/// Files whose edits must trigger the nightly on their PR (its
+/// `pull_request.paths` must cover each): the workflow itself, and the
+/// main-window creation that forwards the `WebView2` automation flags in a
+/// Windows debug build — without them every Windows smoke session fails.
+pub const NIGHTLY_PR_PATHS: &[&str] = &[
+    ".github/workflows/nightly.yml",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src-tauri/src/browser_args.rs",
+];
 
 /// One workflow file: its file name (e.g. `release.yml`) and raw text.
 #[derive(Debug, Clone, Copy)]
@@ -138,6 +170,14 @@ pub fn lint(files: &[WorkflowFile<'_>]) -> Vec<String> {
         out.extend(release_assets(release));
     } else {
         out.push(format!("{RELEASE_WORKFLOW}: missing"));
+    }
+    for wf in &parsed {
+        out.extend(retired_runners(wf));
+    }
+    if let Some(nightly) = parsed.iter().find(|wf| wf.name == NIGHTLY_WORKFLOW) {
+        out.extend(nightly_tier(nightly));
+    } else {
+        out.push(format!("{NIGHTLY_WORKFLOW}: missing"));
     }
     out
 }
@@ -632,6 +672,178 @@ fn release_assets(release: &Parsed<'_>) -> Vec<String> {
     out
 }
 
+// ── 5. a nightly that runs ─────────────────────────────────────────────────
+
+/// The runner labels a job can land on: a literal `runs-on` (a string, a
+/// list, or the `labels` of its `{ group, labels }` form), and every `os` /
+/// `runs-on` value in its matrix (where `runs-on: ${{ matrix.os }}` takes
+/// them from) — except under `matrix.exclude`, which names the legs that do
+/// *not* run.
+fn runner_labels(job: &Value) -> Vec<&str> {
+    let mut found = Vec::new();
+    for key in ["runs-on", "strategy"] {
+        if let Some(node) = job.get(key) {
+            collect_strings(node, &mut vec![key.to_owned()], &mut found);
+        }
+    }
+    found
+        .into_iter()
+        .filter(|(path, _)| {
+            if path.iter().any(|segment| segment == "exclude") {
+                return false;
+            }
+            // `os: [a, b]` / `runs-on: [self-hosted, x]` end in an index.
+            path.iter()
+                .rev()
+                .find(|segment| !segment.bytes().all(|b| b.is_ascii_digit()))
+                .is_some_and(|key| {
+                    key == "os"
+                        || key == "runs-on"
+                        || (key == "labels" && path.first().is_some_and(|k| k == "runs-on"))
+                })
+        })
+        .map(|(_, label)| label)
+        .collect()
+}
+
+fn retired_runners(wf: &Parsed<'_>) -> Vec<String> {
+    let mut out = Vec::new();
+    for (job_id, job) in jobs(&wf.doc) {
+        for label in runner_labels(job) {
+            if RETIRED_RUNNERS.contains(&label) {
+                out.push(format!(
+                    "{}: job `{job_id}` runs on `{label}`, a retired GitHub runner image — the leg queues until GitHub cancels it and the run fails",
+                    wf.name
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// Is a `continue-on-error` value anything but a literal `false`?
+fn tolerates_failure(node: Option<&Value>) -> bool {
+    !matches!(node, None | Some(Value::Bool(false)))
+}
+
+fn nightly_tier(nightly: &Parsed<'_>) -> Vec<String> {
+    let name = nightly.name;
+    let mut out = Vec::new();
+    let on = triggers(&nightly.doc);
+    if !on.contains("schedule") {
+        out.push(format!(
+            "{name}: no `schedule` trigger — the heavy tier never runs on its own"
+        ));
+    }
+
+    if on.contains("pull_request") {
+        let paths: Vec<&str> = nightly
+            .doc
+            .get("on")
+            .and_then(|on| on.get("pull_request"))
+            .and_then(|pr| pr.get("paths"))
+            .and_then(Value::as_sequence)
+            .map(|paths| paths.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        if paths.is_empty() {
+            out.push(format!(
+                "{name}: `pull_request` has no `paths` filter — the 3-OS matrix would run on every PR"
+            ));
+        } else {
+            for required in NIGHTLY_PR_PATHS {
+                if !paths_filter_covers(&paths, required) {
+                    out.push(format!(
+                        "{name}: `pull_request.paths` does not cover `{required}` — an edit to it would merge without the nightly ever running"
+                    ));
+                }
+            }
+        }
+    } else {
+        out.push(format!(
+            "{name}: no path-filtered `pull_request` trigger — an edit to the nightly is first run the morning after it merges"
+        ));
+    }
+
+    let mut upload_labels = Vec::new();
+    for (job_id, job) in jobs(&nightly.doc) {
+        if tolerates_failure(job.get("continue-on-error")) {
+            out.push(format!(
+                "{name}: job `{job_id}` sets `continue-on-error` — the nightly is a hard gate"
+            ));
+        }
+        for (index, step) in steps(job).iter().enumerate() {
+            if tolerates_failure(step.get("continue-on-error")) {
+                out.push(format!(
+                    "{name}: job `{job_id}` step {} sets `continue-on-error` — the nightly is a hard gate",
+                    index + 1
+                ));
+            }
+            let uploads = step
+                .get("uses")
+                .and_then(Value::as_str)
+                .is_some_and(|uses| uses.starts_with("actions/upload-artifact@"));
+            // Conditional uploads (failure screenshots) may legitimately be
+            // empty; the unconditional ones are the bundles themselves.
+            if !uploads || step.get("if").is_some() {
+                continue;
+            }
+            upload_labels.extend(runner_labels(job));
+            let on_empty = step
+                .get("with")
+                .and_then(|with| with.get("if-no-files-found"))
+                .and_then(Value::as_str);
+            if on_empty != Some("error") {
+                out.push(format!(
+                    "{name}: job `{job_id}` step {} uploads without `if-no-files-found: error` — a bundle job that uploads nothing must fail",
+                    index + 1
+                ));
+            }
+        }
+    }
+    for (os, prefix) in [("Linux", "ubuntu-"), ("Windows", "windows-")] {
+        if !upload_labels.iter().any(|label| label.starts_with(prefix)) {
+            out.push(format!(
+                "{name}: no unconditional artifact upload runs on a {os} (`{prefix}*`) runner — the nightly must ship a {os} bundle"
+            ));
+        }
+    }
+    out
+}
+
+/// Does a `pull_request.paths` filter trigger on `path`? GitHub's rule: the
+/// last pattern that matches decides, and a `!pattern` excludes.
+fn paths_filter_covers(patterns: &[&str], path: &str) -> bool {
+    patterns
+        .iter()
+        .fold(false, |covered, pattern| match pattern.strip_prefix('!') {
+            Some(negated) if glob_matches(negated.as_bytes(), path.as_bytes()) => false,
+            Some(_) => covered,
+            None => covered || glob_matches(pattern.as_bytes(), path.as_bytes()),
+        })
+}
+
+/// GitHub filter-pattern glob: `**` matches anything (`/` included), `*`
+/// anything but `/`, `?` one character but `/`; every other byte is literal.
+fn glob_matches(pattern: &[u8], path: &[u8]) -> bool {
+    match pattern {
+        [] => path.is_empty(),
+        [b'*', b'*', rest @ ..] => {
+            // `**/x` also matches a bare `x` at this level.
+            let rest_after_slash = rest.strip_prefix(b"/").unwrap_or(rest);
+            (0..=path.len()).any(|skip| glob_matches(rest, &path[skip..]))
+                || glob_matches(rest_after_slash, path)
+        }
+        [b'*', rest @ ..] => {
+            let segment = path.iter().position(|&b| b == b'/').unwrap_or(path.len());
+            (0..=segment).any(|skip| glob_matches(rest, &path[skip..]))
+        }
+        [b'?', rest @ ..] => {
+            matches!(path.first(), Some(&b) if b != b'/') && glob_matches(rest, &path[1..])
+        }
+        [literal, rest @ ..] => path.first() == Some(literal) && glob_matches(rest, &path[1..]),
+    }
+}
+
 // ── YAML helpers ───────────────────────────────────────────────────────────
 
 fn jobs(doc: &Value) -> Vec<(&str, &Value)> {
@@ -755,7 +967,54 @@ jobs:
             dist/Curio-provenance.sigstore.json
 "#;
 
+    /// A minimal nightly.yml with the shape the lint demands.
+    const NIGHTLY: &str = r#"on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - apps/desktop/src-tauri/src/lib.rs
+      - apps/desktop/src-tauri/src/browser_args.rs
+      - apps/desktop/e2e/**
+jobs:
+  bundle:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-22.04 }
+          - { name: macos-universal, os: macos-14 }
+          - { name: windows-x64, os: windows-latest }
+    steps:
+      - run: npm run tauri build
+      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567 # v4.6.2
+        with:
+          name: curio-${{ matrix.name }}
+          if-no-files-found: error
+  smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    steps:
+      - run: npm test
+      - if: failure()
+        uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567 # v4.6.2
+        with:
+          if-no-files-found: ignore
+"#;
+
     fn run(ci: &str, release: &str) -> Vec<String> {
+        run_all(ci, release, NIGHTLY)
+    }
+
+    fn run_nightly(nightly: &str) -> Vec<String> {
+        run_all(CI, RELEASE, nightly)
+    }
+
+    fn run_all(ci: &str, release: &str, nightly: &str) -> Vec<String> {
         lint(&[
             WorkflowFile {
                 name: "ci.yml",
@@ -765,7 +1024,206 @@ jobs:
                 name: "release.yml",
                 source: release,
             },
+            WorkflowFile {
+                name: "nightly.yml",
+                source: nightly,
+            },
         ])
+    }
+
+    #[test]
+    fn a_retired_runner_is_flagged_in_any_workflow_and_matrix_spelling() {
+        let include = NIGHTLY.replace("os: macos-14", "os: macos-13");
+        assert_flags(
+            &run_nightly(&include),
+            "job `bundle` runs on `macos-13`, a retired GitHub runner image",
+        );
+        let list = NIGHTLY.replace(
+            "[ubuntu-22.04, windows-latest]",
+            "[ubuntu-20.04, windows-latest]",
+        );
+        assert_flags(&run_nightly(&list), "job `smoke` runs on `ubuntu-20.04`");
+        let literal = CI.replace("runs-on: ubuntu-latest", "runs-on: windows-2019");
+        assert_flags(
+            &run(&literal, RELEASE),
+            "ci.yml: job `test` runs on `windows-2019`",
+        );
+        // A matrix *name* that merely looks like a label is not a runner.
+        let named = NIGHTLY.replace("name: macos-universal", "name: macos-13");
+        assert!(!run_nightly(&named).iter().any(|v| v.contains("retired")));
+        // Excluding a retired image is the opposite of running on it.
+        let excluded = NIGHTLY.replace(
+            "        os: [ubuntu-22.04, windows-latest]\n",
+            "        os: [ubuntu-22.04, windows-latest]\n        exclude:\n          - os: macos-13\n",
+        );
+        assert!(!run_nightly(&excluded).iter().any(|v| v.contains("retired")));
+        // The `{ group, labels }` form of `runs-on` names runners too.
+        let grouped = CI.replace(
+            "runs-on: ubuntu-latest",
+            "runs-on:\n      group: big\n      labels: [ubuntu-20.04]",
+        );
+        assert_flags(
+            &run(&grouped, RELEASE),
+            "ci.yml: job `test` runs on `ubuntu-20.04`",
+        );
+    }
+
+    #[test]
+    fn path_filter_globs_follow_github_semantics() {
+        let lib = "apps/desktop/src-tauri/src/lib.rs";
+        assert!(paths_filter_covers(&[lib], lib));
+        assert!(paths_filter_covers(
+            &["apps/desktop/src-tauri/src/*.rs"],
+            lib
+        ));
+        assert!(paths_filter_covers(&["apps/**"], lib));
+        assert!(paths_filter_covers(&["**/lib.rs"], lib));
+        assert!(paths_filter_covers(&["**/lib.?s"], lib));
+        assert!(paths_filter_covers(
+            &[".github/workflows/**"],
+            ".github/workflows/nightly.yml"
+        ));
+        // `*` and `?` stop at a `/`.
+        assert!(!paths_filter_covers(&["apps/*.rs"], lib));
+        assert!(!paths_filter_covers(&["apps?desktop/**"], lib));
+        // The last matching pattern decides; `!` excludes.
+        assert!(!paths_filter_covers(&["apps/**", "!**/lib.rs"], lib));
+        assert!(paths_filter_covers(
+            &["apps/**", "!**/lib.rs", "**/src/lib.rs"],
+            lib
+        ));
+        assert!(paths_filter_covers(&["!**/main.rs", "apps/**"], lib));
+        assert!(!paths_filter_covers(&[], lib));
+        assert!(!paths_filter_covers(
+            &["apps/desktop/src-tauri/src/lib.rsx"],
+            lib
+        ));
+    }
+
+    #[test]
+    fn the_nightly_must_keep_its_schedule_and_self_validate_on_prs() {
+        let unscheduled = NIGHTLY.replace("  schedule:\n    - cron: \"0 7 * * *\"\n", "");
+        assert_flags(&run_nightly(&unscheduled), "no `schedule` trigger");
+
+        let no_pr = NIGHTLY.replace(
+            "  pull_request:\n    paths:\n      - .github/workflows/nightly.yml\n      - apps/desktop/src-tauri/src/lib.rs\n      - apps/desktop/src-tauri/src/browser_args.rs\n      - apps/desktop/e2e/**\n",
+            "",
+        );
+        assert_flags(
+            &run_nightly(&no_pr),
+            "no path-filtered `pull_request` trigger",
+        );
+
+        let unfiltered = NIGHTLY.replace(
+            "    paths:\n      - .github/workflows/nightly.yml\n      - apps/desktop/src-tauri/src/lib.rs\n      - apps/desktop/src-tauri/src/browser_args.rs\n      - apps/desktop/e2e/**\n",
+            "",
+        );
+        assert_flags(&run_nightly(&unfiltered), "has no `paths` filter");
+
+        let not_self = NIGHTLY.replace("      - .github/workflows/nightly.yml\n", "");
+        assert_flags(
+            &run_nightly(&not_self),
+            "does not cover `.github/workflows/nightly.yml`",
+        );
+        // An equivalent glob covers it just as well.
+        let glob = NIGHTLY.replace(
+            "      - .github/workflows/nightly.yml\n",
+            "      - .github/workflows/**\n",
+        );
+        assert!(
+            !run_nightly(&glob)
+                .iter()
+                .any(|v| v.contains("does not cover"))
+        );
+
+        // Main-window creation (the WebView2 automation flags) must also run
+        // the nightly, so a refactor that drops them can't merge unrun.
+        let no_window = NIGHTLY.replace(
+            "      - apps/desktop/src-tauri/src/lib.rs\n      - apps/desktop/src-tauri/src/browser_args.rs\n",
+            "",
+        );
+        let violations = run_nightly(&no_window);
+        assert_flags(
+            &violations,
+            "does not cover `apps/desktop/src-tauri/src/lib.rs`",
+        );
+        assert_flags(
+            &violations,
+            "does not cover `apps/desktop/src-tauri/src/browser_args.rs`",
+        );
+    }
+
+    #[test]
+    fn the_nightly_is_a_hard_gate() {
+        let job = NIGHTLY.replace("  smoke:\n", "  smoke:\n    continue-on-error: true\n");
+        assert_flags(&run_nightly(&job), "job `smoke` sets `continue-on-error`");
+        let step = NIGHTLY.replace(
+            "      - run: npm test\n",
+            "      - run: npm test\n        continue-on-error: ${{ matrix.os == 'windows-latest' }}\n",
+        );
+        assert_flags(
+            &run_nightly(&step),
+            "job `smoke` step 1 sets `continue-on-error`",
+        );
+        let explicit_off =
+            NIGHTLY.replace("  smoke:\n", "  smoke:\n    continue-on-error: false\n");
+        assert!(
+            !run_nightly(&explicit_off)
+                .iter()
+                .any(|v| v.contains("continue-on-error"))
+        );
+    }
+
+    #[test]
+    fn bundle_uploads_must_fail_on_empty_and_cover_linux_and_windows() {
+        let warn = NIGHTLY.replace("if-no-files-found: error", "if-no-files-found: warn");
+        assert_flags(
+            &run_nightly(&warn),
+            "job `bundle` step 2 uploads without `if-no-files-found: error`",
+        );
+        let unset = NIGHTLY.replace("          if-no-files-found: error\n", "");
+        assert_flags(
+            &run_nightly(&unset),
+            "uploads without `if-no-files-found: error`",
+        );
+
+        let no_windows = NIGHTLY.replace(
+            "          - { name: windows-x64, os: windows-latest }\n",
+            "",
+        );
+        assert_flags(
+            &run_nightly(&no_windows),
+            "no unconditional artifact upload runs on a Windows",
+        );
+        let no_linux = NIGHTLY.replace("          - { name: linux-x64, os: ubuntu-22.04 }\n", "");
+        assert_flags(
+            &run_nightly(&no_linux),
+            "no unconditional artifact upload runs on a Linux",
+        );
+        // The smoke's failure-only screenshot upload neither needs `error`
+        // nor counts as a bundle leg.
+        let no_bundle_upload = NIGHTLY.replace(
+            "      - uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567 # v4.6.2\n        with:\n          name: curio-${{ matrix.name }}\n          if-no-files-found: error\n",
+            "",
+        );
+        let violations = run_nightly(&no_bundle_upload);
+        assert_flags(&violations, "on a Linux");
+        assert!(!violations.iter().any(|v| v.contains("if-no-files-found")));
+    }
+
+    #[test]
+    fn a_missing_nightly_is_flagged() {
+        let without = lint(&[
+            WorkflowFile {
+                name: "ci.yml",
+                source: CI,
+            },
+            WorkflowFile {
+                name: "release.yml",
+                source: RELEASE,
+            },
+        ]);
+        assert_eq!(without, vec!["nightly.yml: missing".to_owned()]);
     }
 
     fn assert_flags(violations: &[String], needle: &str) {

@@ -222,7 +222,9 @@ jobs:
     # Supply-chain shape of .github/: every action SHA-pinned, the release
     # build gated on this workflow, the updater signing key confined to one
     # build-free step, and the draft release carrying SHA256SUMS + SBOM +
-    # attestation. Local mirror: `just workflows`.
+    # attestation; no job on a retired runner image, and nightly.yml run by
+    # the PRs that edit it, a hard gate, uploading Linux + Windows bundles.
+    # Local mirror: `just workflows`.
     name: workflow lint (pins, release gate, signing-key isolation)
     runs-on: ubuntu-latest
     steps:

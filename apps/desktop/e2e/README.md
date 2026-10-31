@@ -3,10 +3,16 @@
 A self-contained WebdriverIO harness that drives the **real** Curio desktop
 head — real webview, real curio-core engine behind the IPC boundary — through
 [`tauri-driver`](https://tauri.app/develop/tests/webdriver/). It runs in the
-nightly `smoke` job (`.github/workflows/nightly.yml`) as a **hard gate** —
-never in the per-PR gate — and it has its **own** `package.json` +
+nightly `smoke` job (`.github/workflows/nightly.yml`) as a **hard gate**, never
+in the per-PR gate (`ci.yml`). It has its **own** `package.json` +
 `package-lock.json` (installed with `npm ci`) so its heavy WebdriverIO
 dependency tree never touches the frontend's install or lint/test surface.
+
+A PR that edits this harness, the nightly workflow, the tauri configs, the
+desktop manifests or main-window creation (`src-tauri/src/lib.rs`,
+`browser_args.rs`) runs the nightly — and so this smoke — before it merges.
+Those runs are not a required check (a path-filtered workflow can't be one), so
+waiting for them to go green is on the shipper and the reviewer.
 
 ## Platforms
 
@@ -16,6 +22,15 @@ for WKWebView**, so macOS correctness rides the versioned manual checklist in
 [`docs/release/macos-checklist.md`](../../../docs/release/macos-checklist.md)
 instead — this is a deliberate gap (docs/design/roadmap.md §5, decision D11:
 "Playwright-drives-Tauri is unimplementable; no test backdoors").
+
+On Windows, `msedgedriver` hands WebView2 its `--remote-debugging-port` /
+`--user-data-dir` flags through the `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+env var, which the runtime ignores once an app sets browser arguments of its
+own — and wry always does. Debug builds of the app (the smoke builds with
+`--debug`) therefore forward that env var's flags after wry's defaults when
+they create the main window (`src-tauri/src/browser_args.rs`); release builds
+never take injected flags. Without it every Windows session fails with
+"DevToolsActivePort file doesn't exist".
 
 ## What the harness sets up (`wdio.conf.ts`)
 

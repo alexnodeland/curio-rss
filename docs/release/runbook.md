@@ -13,6 +13,10 @@ GitHub release). macOS correctness is signed off by hand via
 
 - `main` is green on CI and on the latest nightly `bundle` + `smoke` + `bench` runs
   (the smoke is a hard gate: all five Linux/Windows scenarios, none skipped).
+  The latest *scheduled* run must be on a commit at or after the last change
+  to the nightly's plumbing — a PR run of the nightly proves the change, the
+  schedule proves `main`. With no fresh run, dispatch one (Actions → nightly →
+  Run workflow).
 - No open release blockers; `CHANGELOG` drafted.
 
 ## 1. Version bump

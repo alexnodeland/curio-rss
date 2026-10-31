@@ -12,7 +12,7 @@
 // seeded through the real `curio` CLI before the app boots — no test hooks in
 // the app itself (D11).
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -111,11 +111,31 @@ export const config: WebdriverIO.Config = {
         await curio(profile, 'dest', 'add', 'notes', destination);
         await curio(profile, 'fetch');
     },
-    onComplete: async () => {
+    onComplete: async (exitCode: number) => {
         await stub?.close();
-        if (scratch !== undefined) {
-            rmSync(scratch, { recursive: true, force: true });
+        if (scratch === undefined) {
+            return;
         }
+        // A red run keeps the app's own log next to the screenshots (the
+        // nightly uploads both). A session that never starts produces no
+        // screenshot, so the log — or its absence, meaning the app never
+        // initialised logging (setup or main-window creation failed, and the
+        // error went to the app's stderr) — is the only clue to what went
+        // wrong.
+        if (exitCode !== 0) {
+            const logs = join(scratch, 'profile', 'logs');
+            const keep = join(failureShots, 'app-logs');
+            mkdirSync(failureShots, { recursive: true });
+            if (existsSync(logs)) {
+                cpSync(logs, keep, { recursive: true });
+            } else {
+                writeFileSync(
+                    join(failureShots, 'app-logs-missing.txt'),
+                    `no ${logs}: the app never initialised logging (setup or window creation failed; see its stderr)\n`,
+                );
+            }
+        }
+        rmSync(scratch, { recursive: true, force: true });
     },
 
     // Worker process: boot tauri-driver (installed by the nightly job,

@@ -11,7 +11,6 @@
 //!   no retired runner images, and a nightly that runs on the PRs editing it
 //!   (see `xtask::workflows`).
 
-use std::path::Path;
 use std::process::{Command, ExitCode};
 
 use xtask::banned_crates_in_tree;
@@ -38,7 +37,16 @@ fn usage() {
 }
 
 fn workflows() -> ExitCode {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
+    // The repo root comes from the run-time CARGO_MANIFEST_DIR: a binary
+    // reused from another worktree's shared target dir must lint this
+    // worktree's workflows, not that one's (issue #183).
+    let dir = match xtask::paths::repo_root() {
+        Ok(root) => root.join(".github/workflows"),
+        Err(err) => {
+            eprintln!("xtask workflows: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match xtask::workflows::lint_dir(&dir) {
         Ok(violations) if violations.is_empty() => {
             println!(

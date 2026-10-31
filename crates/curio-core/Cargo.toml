@@ -33,6 +33,7 @@ curio-types = { workspace = true }
 dom_smoothie = { workspace = true }
 ego-tree = { workspace = true }
 feed-rs = { workspace = true }
+fs4 = { workspace = true }
 htmd = { workspace = true }
 keyring = { workspace = true, optional = true }
 quick-xml = { workspace = true }
@@ -49,6 +50,9 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 url = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [dev-dependencies]
 # Self dev-dependency: the integration tests under tests/ link the library

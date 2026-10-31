@@ -235,9 +235,18 @@ mod tests {
 
     use super::*;
 
+    /// The crate dir is read at run time (cargo sets it for test runs): a
+    /// compile-time path goes stale when a shared target dir reuses this
+    /// binary from another worktree (issue #183).
     fn fixture(name: &str) -> Vec<u8> {
-        let path = format!("{}/../../fixtures/feeds/{name}", env!("CARGO_MANIFEST_DIR"));
-        std::fs::read(path).unwrap()
+        let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|| panic!("CARGO_MANIFEST_DIR unset: run the tests through cargo"));
+        std::fs::read(
+            std::path::Path::new(&crate_dir)
+                .join("../../fixtures/feeds")
+                .join(name),
+        )
+        .unwrap()
     }
 
     #[test]

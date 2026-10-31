@@ -1,6 +1,6 @@
 /* Curio — global styles: reset, the CSS custom-property token system, and
    the 9 [data-theme] themes (selected by the app.html preload script before
-   first paint, owned at runtime by src/lib/state/ui.svelte.ts). */
+   first paint, owned at runtime by src/lib/state/theme.svelte.ts). */
 
 /* CSS Reset */
 *,

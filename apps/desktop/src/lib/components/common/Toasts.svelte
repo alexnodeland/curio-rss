@@ -1,13 +1,13 @@
 <script lang="ts">
 /**
- * The toast outlet — renders `uiStore.toasts` (queued by the action layer
+ * The toast outlet — renders `toastStore.toasts` (queued by the action layer
  * on command failures, and by anything else that needs a transient notice).
  * Errors interrupt as `role="alert"` (assertive); everything else announces
  * politely as `role="status"`. Every toast is dismissible.
  */
 import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { fly } from 'svelte/transition';
 
 /**
@@ -30,7 +30,7 @@ const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
 </script>
 
 <div class="toasts">
-    {#each uiStore.toasts as toast (toast.id)}
+    {#each toastStore.toasts as toast (toast.id)}
         <div
             class="toast toast-{toast.tone}"
             role={toast.tone === 'error' ? 'alert' : 'status'}
@@ -39,7 +39,7 @@ const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
             <span class="toast-message">{toast.message}</span>
             <button
                 class="toast-dismiss"
-                onclick={() => uiStore.dismissToast(toast.id)}
+                onclick={() => toastStore.dismissToast(toast.id)}
                 aria-label={t('toast.dismiss')}
             >
                 <Icon name="close" size={16} />

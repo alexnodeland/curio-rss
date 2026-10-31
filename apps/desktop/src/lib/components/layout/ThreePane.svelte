@@ -1,12 +1,12 @@
 <script lang="ts">
 /**
  * The reader's frame: sidebar | article list | reader, the first two
- * resizable with widths owned by `uiStore` and persisted to the settings
+ * resizable with widths owned by `layoutStore` and persisted to the settings
  * table on resize end. The reader takes whatever remains.
  */
 import { t } from '$lib/i18n';
 import { SETTING_KEYS, settingsStore } from '$lib/state/settings.svelte';
-import { PANE_LIMITS, uiStore } from '$lib/state/ui.svelte';
+import { PANE_LIMITS, layoutStore } from '$lib/state/layout.svelte';
 import type { Snippet } from 'svelte';
 import ResizablePane from './ResizablePane.svelte';
 
@@ -30,9 +30,9 @@ function persistListWidth(width: number): void {
 </script>
 
 <div class="three-pane" data-testid="three-pane">
-    {#if !uiStore.sidebarCollapsed}
+    {#if !layoutStore.sidebarCollapsed}
         <ResizablePane
-            bind:width={uiStore.sidebarWidth}
+            bind:width={layoutStore.sidebarWidth}
             min={PANE_LIMITS.sidebar.min}
             max={PANE_LIMITS.sidebar.max}
             label={t('pane.sidebar.resize')}
@@ -43,7 +43,7 @@ function persistListWidth(width: number): void {
         </ResizablePane>
     {/if}
     <ResizablePane
-        bind:width={uiStore.listWidth}
+        bind:width={layoutStore.listWidth}
         min={PANE_LIMITS.list.min}
         max={PANE_LIMITS.list.max}
         label={t('pane.list.resize')}

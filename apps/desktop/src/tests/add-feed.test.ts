@@ -6,7 +6,8 @@
  */
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { resetImageCache } from '$lib/utils/images';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +22,7 @@ import {
     installIpcHarness,
     rejectWith,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function base(overrides: Record<string, Responder> = {}): Record<string, Responder> {
     return {
@@ -39,7 +41,7 @@ describe('AddFeedModal', () => {
     afterEach(() => {
         cleanup();
         resetImageCache();
-        uiStore.reset();
+        resetUiStores();
         feedsStore.refreshing = false;
         feedsStore.refreshOutcomes = [];
         harness?.teardown();
@@ -131,7 +133,7 @@ describe('AddFeedModal', () => {
         await flushIpc();
 
         expect(harness.callsFor('add_feed')).toHaveLength(0);
-        expect(uiStore.toasts.at(-1)?.message).toBe('You are already subscribed to this feed.');
+        expect(toastStore.toasts.at(-1)?.message).toBe('You are already subscribed to this feed.');
     });
 
     it('surfaces a discovery failure as an error toast', async () => {
@@ -154,8 +156,8 @@ describe('AddFeedModal', () => {
         await fireEvent.click(getByText('Find feeds'));
         await flushIpc();
 
-        expect(uiStore.toasts.at(-1)?.message).toBe('host unreachable');
-        expect(uiStore.toasts.at(-1)?.tone).toBe('error');
+        expect(toastStore.toasts.at(-1)?.message).toBe('host unreachable');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('error');
     });
 
     it('persists the Google-favicon opt-in through set_setting', async () => {
@@ -165,7 +167,7 @@ describe('AddFeedModal', () => {
         await fireEvent.click(getByRole('checkbox'));
         await flushIpc();
 
-        expect(uiStore.allowRemoteFavicon).toBe(true);
+        expect(prefsStore.allowRemoteFavicon).toBe(true);
         expect(harness.callsFor('set_setting')).toEqual([
             { key: 'ui.favicon.allow-remote', value: 'true' },
         ]);
@@ -219,8 +221,8 @@ describe('AddFeedModal', () => {
             { url: 'https://example.org/essay', tags: [] },
         ]);
         expect(harness.callsFor('add_feed')).toHaveLength(0);
-        expect(uiStore.toasts.at(-1)?.message).toContain('Clipped Essay');
-        expect(uiStore.toasts.at(-1)?.tone).toBe('success');
+        expect(toastStore.toasts.at(-1)?.message).toContain('Clipped Essay');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('success');
         expect(onclose).toHaveBeenCalledOnce();
     });
 
@@ -250,7 +252,7 @@ describe('AddFeedModal', () => {
         await fireEvent.click(saveButton);
         await flushIpc();
 
-        expect(uiStore.toasts.at(-1)?.tone).toBe('warning');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('warning');
     });
 
     it('offers Hacker News presets that fill a working feed URL', async () => {

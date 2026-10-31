@@ -12,7 +12,7 @@
  * a fixed rounded square for a list row, a full-width 16:9 for a card.
  */
 import { loadCachedImage } from '$lib/utils/images';
-import { uiStore } from '$lib/state/ui.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
 
 let {
     image,
@@ -29,7 +29,7 @@ let resolved: string | null = $state(null);
 $effect(() => {
     resolved = null;
     const url = image;
-    if (!uiStore.mediaPrefetch || url === null) {
+    if (!prefsStore.mediaPrefetch || url === null) {
         return;
     }
     let cancelled = false;

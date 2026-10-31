@@ -6,10 +6,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn workflows_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows")
+    xtask::paths::repo_root().unwrap().join(".github/workflows")
 }
 
 #[test]
@@ -45,7 +45,9 @@ fn no_workflow_uses_a_mutable_version_tag() {
 /// repo ships (actions, cargo, npm).
 #[test]
 fn dependabot_covers_actions_cargo_and_npm() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/dependabot.yml");
+    let path = xtask::paths::repo_root()
+        .unwrap()
+        .join(".github/dependabot.yml");
     let text = std::fs::read_to_string(&path).expect("read dependabot.yml");
     for ecosystem in ["github-actions", "cargo", "npm"] {
         assert!(

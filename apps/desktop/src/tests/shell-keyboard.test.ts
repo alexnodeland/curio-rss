@@ -6,9 +6,9 @@
  */
 import type { ArticleSummaryDto, ListArticlesDto } from '$lib/bindings';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import Page from '../routes/+page.svelte';
@@ -22,6 +22,7 @@ import {
     installIpcHarness,
     unreadCountsFixture,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 /** `count` summaries with descending ids starting at `topId`. */
 function pageOf(topId: number, count: number): ArticleSummaryDto[] {
@@ -87,7 +88,7 @@ describe('shell keyboard wiring', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -226,7 +227,7 @@ describe('shell keyboard wiring', () => {
         harness = installIpcHarness(shellResponders());
         const { getAllByRole } = await mountShell();
 
-        const startWidth = uiStore.listWidth;
+        const startWidth = layoutStore.listWidth;
         const separators = getAllByRole('separator');
         const listSeparator = separators[separators.length - 1];
         expect(listSeparator).toBeTruthy();
@@ -235,7 +236,7 @@ describe('shell keyboard wiring', () => {
         }
         await fireEvent.keyDown(listSeparator, { key: 'ArrowRight' });
         await flushIpc();
-        expect(uiStore.listWidth).toBe(startWidth + 16);
+        expect(layoutStore.listWidth).toBe(startWidth + 16);
         expect(harness.callsFor('set_setting')).toContainEqual({
             key: 'ui.panes.list-width',
             value: String(startWidth + 16),

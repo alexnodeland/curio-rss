@@ -23,7 +23,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use curio_types::{ArticleFrontmatter, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
+use curio_types::{ArticleFrontmatter, CurioId, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
 
 use super::ExportError;
 
@@ -140,6 +140,28 @@ pub fn split_note(content: &str, path: &Path) -> Result<NoteParts, ExportError> 
     })
 }
 
+/// The `curio_id` an existing note's frontmatter claims — which article
+/// owns the file. A path is only ever rewritten for the article that owns
+/// it: with a lost or stale manifest, the slug path of a same-titled
+/// article belongs to someone else.
+///
+/// # Errors
+///
+/// [`ExportError::NoteParse`] when the note is not an accountable
+/// `curio.frontmatter.v1` note (same rules as [`replace_managed`]).
+pub(crate) fn note_owner(existing: &str, path: &Path) -> Result<CurioId, ExportError> {
+    let parts = split_note(existing, path)?;
+    let old = parse_frontmatter(&parts.yaml, path)?;
+    Ok(old.curio_id)
+}
+
+fn parse_frontmatter(yaml: &str, path: &Path) -> Result<ArticleFrontmatter, ExportError> {
+    serde_yaml::from_str(yaml).map_err(|err| ExportError::NoteParse {
+        path: path.to_path_buf(),
+        message: format!("frontmatter does not parse as curio.frontmatter.v1: {err}"),
+    })
+}
+
 /// Rewrites an existing note: new machine keys + new region body, user
 /// bytes and unknown frontmatter keys preserved.
 ///
@@ -154,11 +176,7 @@ pub fn replace_managed(
     path: &Path,
 ) -> Result<String, ExportError> {
     let parts = split_note(existing, path)?;
-    let old: ArticleFrontmatter =
-        serde_yaml::from_str(&parts.yaml).map_err(|err| ExportError::NoteParse {
-            path: path.to_path_buf(),
-            message: format!("frontmatter does not parse as curio.frontmatter.v1: {err}"),
-        })?;
+    let old = parse_frontmatter(&parts.yaml, path)?;
     let mut merged = fresh.clone();
     merged.extra = old.extra; // unknown keys are the user's — keep them
     let yaml = serde_yaml::to_string(&merged)?;

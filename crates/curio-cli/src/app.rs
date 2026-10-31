@@ -61,12 +61,13 @@ pub(crate) fn resolve_profile_dir(flag: Option<PathBuf>) -> anyhow::Result<PathB
         )
 }
 
-/// Loads the optional Reddit API credentials from the OS keychain into
-/// the runtime core (D15). Best-effort on purpose: a locked or missing
-/// keychain backend (headless Linux without secret-service) degrades to
-/// the unauthenticated tier with a warning, never a failed command.
+/// Loads the profile's optional Reddit API credentials from the OS
+/// keychain into the runtime core (D15). Best-effort on purpose: a
+/// locked or missing keychain backend (headless Linux without
+/// secret-service) degrades to the unauthenticated tier with a warning,
+/// never a failed command.
 fn load_reddit_credentials(core: &CoreHandle) {
-    match curio_core::secrets::load_reddit_api() {
+    match curio_core::secrets::load_reddit_api(core.profile_dir()) {
         Ok(Some(secret)) => {
             core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig::new(
                 secret.client_id,
@@ -80,14 +81,15 @@ fn load_reddit_credentials(core: &CoreHandle) {
     }
 }
 
-/// Applies curio.toml onto the engine: destinations are (re-)registered,
+/// Applies curio.toml onto the engine: destinations are reconciled (never
+/// recreated once exported to — a vanished vault must stay visible),
 /// and per-feed W1 flags are pushed onto matching subscriptions.
 fn reconcile(core: &CoreHandle, config: &ProfileConfig) -> anyhow::Result<()> {
     for (name, root) in &config.destinations {
         let name: DestinationName = name
             .parse()
             .with_context(|| format!("invalid destination name {name:?} in curio.toml"))?;
-        core.add_destination(name, root.clone())?;
+        core.reconcile_destination(name, root.clone())?;
     }
     for (url, overrides) in &config.feeds {
         if let Some(feed) = core.get_feed_by_url(url)?

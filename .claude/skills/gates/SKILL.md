@@ -41,3 +41,9 @@ caught is wasted wall-clock.
   (see commit 7627c87 for the house style), not a retry loop.
 - Shared build dirs: concurrent worktrees may share a `CARGO_TARGET_DIR`;
   "Blocking waiting for file lock" is normal — wait, don't delete the dir.
+  Cargo reuses a test binary built in another worktree as fresh, so tests
+  resolve paths at run time (`std::env::var_os("CARGO_MANIFEST_DIR")`),
+  never through `env!` — `cargo test -p xtask` fails on a compile-time read
+  (#183). If a build reports items you just added as missing, another
+  worktree's build of that crate looks fresh: `touch` the edited file and
+  rebuild.

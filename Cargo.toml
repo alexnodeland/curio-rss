@@ -43,7 +43,13 @@ directories = "6"
 dom_smoothie = "0.18"
 ego-tree = "0.11"
 feed-rs = "2"
+# Advisory cross-process file locks (flock / LockFileEx) for the per-destination
+# export lock. std's File::lock needs Rust 1.89; the engine MSRV is 1.88.
+fs4 = { version = "1", default-features = false, features = ["sync"] }
 htmd = "0.5"
+# OS error codes only (ENOLCK & co.): telling "this filesystem has no advisory
+# locks" from a real lock failure in the export lock. Already in the tree.
+libc = "0.2"
 quick-xml = "0.41"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored"] }

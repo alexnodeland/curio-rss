@@ -10,13 +10,15 @@ import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
 import type { DestinationDto } from '$lib/bindings';
 import { promoteSelected } from '$lib/state/actions';
 import { destinationsStore } from '$lib/state/destinations.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, flushIpc, installIpcHarness, saveOutcomeFixture } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 const ROOT = '/home/user/Documents/vault';
 const TOKEN = '01JZABCDEFGHJKMNPQRSTVWXYZ';
@@ -28,7 +30,7 @@ describe('promote flow', () => {
         cleanup();
         resetQueryCache();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         settingsStore.reset();
         destinationsStore.reset();
         harness?.teardown();
@@ -80,8 +82,8 @@ describe('promote flow', () => {
         }
 
         // A success toast names the destination.
-        expect(uiStore.toasts.at(-1)?.message).toBe('Saved to vault');
-        expect(uiStore.toasts.at(-1)?.tone).toBe('success');
+        expect(toastStore.toasts.at(-1)?.message).toBe('Saved to vault');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('success');
     });
 
     it('the first p of a session waits for the registry and promotes to the sole destination', async () => {
@@ -97,7 +99,7 @@ describe('promote flow', () => {
         await promoteSelected();
         await flushIpc();
 
-        expect(uiStore.activeModal).toBeNull();
+        expect(layoutStore.activeModal).toBeNull();
         expect(harness.callsFor('promote_article')).toEqual([
             { articleId: 100, destination: 'vault' },
         ]);
@@ -111,7 +113,7 @@ describe('promote flow', () => {
         selectionStore.selectedArticleId = 100;
         await promoteSelected();
 
-        expect(uiStore.activeModal).toBe('destinations');
+        expect(layoutStore.activeModal).toBe('destinations');
         expect(harness.callsFor('promote_article')).toHaveLength(0);
     });
 
@@ -122,6 +124,6 @@ describe('promote flow', () => {
 
         await promoteSelected();
         expect(harness.callsFor('promote_article')).toHaveLength(0);
-        expect(uiStore.activeModal).toBeNull();
+        expect(layoutStore.activeModal).toBeNull();
     });
 });

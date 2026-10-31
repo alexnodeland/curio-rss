@@ -10,7 +10,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 /// The `tauri-*` family members `deny.toml` pins explicitly (defense in
 /// depth beyond xtask's prefix matching).
@@ -25,7 +24,7 @@ const TAURI_FAMILY: &[&str] = &[
 ];
 
 fn deny_toml_banned_crates() -> BTreeSet<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../deny.toml");
+    let path = xtask::paths::repo_root().unwrap().join("deny.toml");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
     let doc: toml::Value = toml::from_str(&raw).expect("deny.toml must parse as TOML");

@@ -24,25 +24,25 @@ import { handleShortcut } from '$lib/state/actions';
 import { menuStore } from '$lib/state/menu.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 
 const matcher = createMatcher();
 
 // While a modal owns the screen, the whole app frame behind it is `inert`
 // — removed from the tab order and hidden from assistive tech — so the
 // modal's focus trap has nothing to leak to.
-const backgroundInert = $derived(uiStore.activeModal !== null);
+const backgroundInert = $derived(layoutStore.activeModal !== null);
 
 // A modal owns the keyboard; Escape (and `?` over help) dismisses it. Returns
 // true when the event belonged to the modal layer (handled or swallowed).
 function handleModalKey(event: KeyboardEvent): boolean {
-    if (uiStore.activeModal === null) {
+    if (layoutStore.activeModal === null) {
         return false;
     }
-    const dismissesHelp = uiStore.activeModal === 'help' && event.key === '?';
+    const dismissesHelp = layoutStore.activeModal === 'help' && event.key === '?';
     if (event.key === 'Escape' || dismissesHelp) {
         event.preventDefault();
-        uiStore.closeModal();
+        layoutStore.closeModal();
     }
     matcher.reset();
     return true;
@@ -121,27 +121,27 @@ function onKeydown(event: KeyboardEvent): void {
     </ThreePane>
 </main>
 
-{#if uiStore.activeModal === 'help'}
-    <HelpOverlay onclose={() => uiStore.closeModal()} />
+{#if layoutStore.activeModal === 'help'}
+    <HelpOverlay onclose={() => layoutStore.closeModal()} />
 {/if}
 
-{#if uiStore.activeModal === 'destinations'}
-    <DestinationsPanel onclose={() => uiStore.closeModal()} />
+{#if layoutStore.activeModal === 'destinations'}
+    <DestinationsPanel onclose={() => layoutStore.closeModal()} />
 {/if}
 
-{#if uiStore.activeModal === 'add-feed'}
-    <AddFeedModal onclose={() => uiStore.closeModal()} />
+{#if layoutStore.activeModal === 'add-feed'}
+    <AddFeedModal onclose={() => layoutStore.closeModal()} />
 {/if}
 
-{#if uiStore.activeModal === 'settings'}
-    <SettingsModal onclose={() => uiStore.closeModal()} />
+{#if layoutStore.activeModal === 'settings'}
+    <SettingsModal onclose={() => layoutStore.closeModal()} />
 {/if}
 
-{#if uiStore.activeModal === 'edit-feed' && uiStore.editFeedId !== null}
+{#if layoutStore.activeModal === 'edit-feed' && layoutStore.editFeedId !== null}
     <EditFeedModal
-        feedId={uiStore.editFeedId}
-        section={uiStore.editFeedSection}
-        onclose={() => uiStore.closeModal()}
+        feedId={layoutStore.editFeedId}
+        section={layoutStore.editFeedSection}
+        onclose={() => layoutStore.closeModal()}
     />
 {/if}
 

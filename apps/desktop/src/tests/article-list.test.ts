@@ -9,7 +9,6 @@ import { events } from '$lib/bindings';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -21,6 +20,7 @@ import {
     installIpcHarness,
     rejectWith,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 /** `count` summaries with descending ids starting at `topId`. */
 function pageOf(topId: number, count: number): ArticleSummaryDto[] {
@@ -47,7 +47,7 @@ describe('ArticleList', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });

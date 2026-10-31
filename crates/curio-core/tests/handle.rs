@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::time::Duration;
 
 use curio_core::events::{FoldedState, read_all};
@@ -397,11 +399,9 @@ async fn opml_round_trips_through_the_facade() {
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
 
-    let opml = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/opml/nested.opml"
-    ))
-    .unwrap();
+    let opml =
+        std::fs::read_to_string(common::manifest_dir().join("../../fixtures/opml/nested.opml"))
+            .unwrap();
     let imported = core.import_opml(&opml).unwrap();
     assert_eq!(imported.added, 4);
     assert_eq!(imported.skipped, 0);
@@ -505,11 +505,9 @@ async fn pocket_csv_imports_as_tagged_read_later_articles() {
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
 
-    let csv = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/import/pocket.csv"
-    ))
-    .unwrap();
+    let csv =
+        std::fs::read_to_string(common::manifest_dir().join("../../fixtures/import/pocket.csv"))
+            .unwrap();
 
     let outcome = core.import_file(ImportSource::PocketCsv, &csv).unwrap();
     // Five rows carry a URL (the blank-URL and fully-empty rows drop out).

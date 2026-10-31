@@ -6,11 +6,37 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use curio_core::content::{process, to_markdown};
 
 fn pipeline(raw_html: &str) -> String {
     let processed = process(raw_html, Some("https://example.com/posts/current"));
     to_markdown(&processed.html).unwrap()
+}
+
+fn html_fixture(name: &str) -> String {
+    std::fs::read_to_string(
+        common::manifest_dir()
+            .join("../../fixtures/html")
+            .join(name),
+    )
+    .unwrap()
+}
+
+/// insta locates `fixtures/html` (the glob base) and the committed
+/// snapshots from the workspace root. Left to itself it derives that root
+/// from the crate dir baked in at compile time, which is another worktree's
+/// when cargo reuses this binary from a shared `CARGO_TARGET_DIR` (issue
+/// #183). `.cargo/config.toml` hands it the root at run time instead.
+#[test]
+fn insta_resolves_the_workspace_root_at_run_time() {
+    let root = std::env::var_os("INSTA_WORKSPACE_ROOT")
+        .unwrap_or_else(|| panic!("INSTA_WORKSPACE_ROOT unset: .cargo/config.toml [env] sets it"));
+    assert_eq!(
+        std::path::Path::new(&root).canonicalize().unwrap(),
+        common::manifest_dir().join("../..").canonicalize().unwrap(),
+    );
 }
 
 #[test]
@@ -24,11 +50,7 @@ fn golden_html_to_markdown() {
 
 #[test]
 fn xss_corpus_output_is_inert() {
-    let raw = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/html/xss-corpus.html"
-    ))
-    .unwrap();
+    let raw = html_fixture("xss-corpus.html");
     let processed = process(&raw, Some("https://example.com/posts/current"));
     let markdown = to_markdown(&processed.html).unwrap();
 
@@ -86,11 +108,7 @@ fn xss_corpus_output_is_inert() {
 
 #[test]
 fn code_heavy_fixture_keeps_every_line() {
-    let raw = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/html/code-heavy.html"
-    ))
-    .unwrap();
+    let raw = html_fixture("code-heavy.html");
     let markdown = pipeline(&raw);
     for line in [
         "fn main() {",
@@ -105,11 +123,7 @@ fn code_heavy_fixture_keeps_every_line() {
 
 #[test]
 fn article_page_extraction_drops_chrome_keeps_story() {
-    let raw = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/html/article-page.html"
-    ))
-    .unwrap();
+    let raw = html_fixture("article-page.html");
     let markdown = pipeline(&raw);
     assert!(markdown.contains("write-ahead log"));
     assert!(markdown.contains("PRAGMA journal_mode = WAL;"));

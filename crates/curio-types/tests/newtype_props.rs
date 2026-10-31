@@ -154,9 +154,11 @@ proptest! {
 fn schema_patterns_are_pinned() {
     // The property tests above assert the *shape* the schemas' regexes
     // demand; this pins the regex literals themselves so a schema edit
-    // that loosens them shows up here.
+    // that loosens them shows up here. The crate dir is read at run time
+    // (issue #183: a shared target dir reuses binaries across worktrees).
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let events = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/events.v1.json"),
+        std::path::Path::new(&manifest_dir).join("../../schemas/events.v1.json"),
     )
     .unwrap();
     assert!(events.contains(UUID_V7_PATTERN));

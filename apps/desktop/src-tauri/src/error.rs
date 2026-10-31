@@ -138,6 +138,12 @@ impl From<OpenError> for CommandError {
 
 impl From<CoreError> for CommandError {
     fn from(error: CoreError) -> Self {
+        // Contention with another process on the profile (a busy
+        // database, or the events lock held by a CLI run) is the same
+        // story whichever layer hit it: retry once the other run ends.
+        if error.is_profile_busy() {
+            return Self::user(ErrorCode::Storage, error.to_string(), true);
+        }
         match error {
             CoreError::Storage(storage) => storage.into(),
             CoreError::Open(open) => open.into(),
@@ -244,6 +250,25 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Storage);
         assert!(error.recoverable);
         assert!(error.message.contains("another Curio process"), "{error}");
+    }
+
+    #[test]
+    fn a_held_events_lock_is_a_recoverable_user_facing_error() {
+        use curio_core::events::{EventLogError, EventsError};
+        let error = CommandError::from(CoreError::Events(EventsError::Log(
+            EventLogError::ProfileLocked {
+                path: "events.lock".into(),
+                waited_ms: 15_000,
+            },
+        )));
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::Storage);
+        assert!(error.recoverable);
+        // Any other emission failure stays internal.
+        let error = CommandError::from(CoreError::Events(EventsError::Log(EventLogError::Io(
+            std::io::Error::other("disk"),
+        ))));
+        assert_eq!(error.kind, ErrorKind::Internal);
     }
 
     #[test]

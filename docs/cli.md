@@ -13,7 +13,11 @@ future head.
   write commands return the changed/unchanged result). Parse, don't scrape.
 - Diagnostics go to stderr, driven by `RUST_LOG` (e.g.
   `RUST_LOG=curio_core=debug curio fetch`).
-- Errors exit non-zero with a one-line `error: …` on stderr.
+- Errors exit non-zero with a one-line `error: …` on stderr: status **75**
+  (`EX_TEMPFAIL`) when another Curio process — the desktop app, another cron
+  job — kept the profile busy past the wait (nothing is wrong; retry later),
+  **1** for every other failure. When the CLI and the desktop app run on one
+  profile, each event still reaches the log exactly once.
 
 ## Commands at a glance
 

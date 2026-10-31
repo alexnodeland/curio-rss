@@ -129,7 +129,7 @@ pub(crate) enum Command {
         from: ImportFormat,
     },
     /// Manage the optional Reddit API credentials (BYO OAuth, stored in
-    /// the OS keychain). Without them Reddit enrichment works
+    /// the OS keychain, one item per profile). Without them Reddit enrichment works
     /// unauthenticated at ~10 requests/min; with your own free app from
     /// reddit.com/prefs/apps it runs at the 100/min tier.
     #[command(subcommand)]

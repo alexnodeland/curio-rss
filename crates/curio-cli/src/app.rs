@@ -61,12 +61,13 @@ pub(crate) fn resolve_profile_dir(flag: Option<PathBuf>) -> anyhow::Result<PathB
         )
 }
 
-/// Loads the optional Reddit API credentials from the OS keychain into
-/// the runtime core (D15). Best-effort on purpose: a locked or missing
-/// keychain backend (headless Linux without secret-service) degrades to
-/// the unauthenticated tier with a warning, never a failed command.
+/// Loads the profile's optional Reddit API credentials from the OS
+/// keychain into the runtime core (D15). Best-effort on purpose: a
+/// locked or missing keychain backend (headless Linux without
+/// secret-service) degrades to the unauthenticated tier with a warning,
+/// never a failed command.
 fn load_reddit_credentials(core: &CoreHandle) {
-    match curio_core::secrets::load_reddit_api() {
+    match curio_core::secrets::load_reddit_api(core.profile_dir()) {
         Ok(Some(secret)) => {
             core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig::new(
                 secret.client_id,

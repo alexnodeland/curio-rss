@@ -50,11 +50,11 @@ pub async fn get_reddit_api_status(
     run_blocking(move || Ok(status_of(&core))).await
 }
 
-/// Startup: pull the keychain item (if any) into the running core.
-/// Best-effort — a locked/absent keychain backend degrades to the
+/// Startup: pull the profile's keychain item (if any) into the running
+/// core. Best-effort — a locked/absent keychain backend degrades to the
 /// unauthenticated tier with a log line, never a failed launch.
 pub fn load_credentials_at_startup(core: &CoreHandle) {
-    match secrets::load_reddit_api() {
+    match secrets::load_reddit_api(core.profile_dir()) {
         Ok(Some(secret)) => core.set_reddit_api(Some(RedditApiConfig::new(
             secret.client_id,
             secret.client_secret,
@@ -80,17 +80,20 @@ fn set_reddit_api_impl(
             "both the client id and the client secret are required",
         ));
     }
-    secrets::store_reddit_api(&RedditAppSecret {
-        client_id: client_id.clone(),
-        client_secret: client_secret.clone(),
-    })
+    secrets::store_reddit_api(
+        core.profile_dir(),
+        &RedditAppSecret {
+            client_id: client_id.clone(),
+            client_secret: client_secret.clone(),
+        },
+    )
     .map_err(|err| map_secrets(&err))?;
     core.set_reddit_api(Some(RedditApiConfig::new(client_id, client_secret)));
     Ok(status_of(core))
 }
 
 fn clear_reddit_api_impl(core: &CoreHandle) -> Result<RedditApiStatusDto, CommandError> {
-    secrets::clear_reddit_api().map_err(|err| map_secrets(&err))?;
+    secrets::clear_reddit_api(core.profile_dir()).map_err(|err| map_secrets(&err))?;
     core.set_reddit_api(None);
     Ok(status_of(core))
 }
@@ -128,10 +131,29 @@ mod tests {
         assert!(status.configured);
         assert_eq!(status.client_id.as_deref(), Some("cid123"));
 
-        // A restart-equivalent: the keychain item hydrates a fresh core.
-        let (_dir2, fresh) = temp_core();
+        // A restart-equivalent: the keychain item hydrates a fresh core
+        // on the same profile…
+        let fresh = CoreHandle::open(core.profile_dir()).unwrap();
         load_credentials_at_startup(&fresh);
         assert_eq!(fresh.reddit_api_client_id().as_deref(), Some("cid123"));
+
+        // …but never a core on another profile, which can hold its own.
+        let (_dir2, other) = temp_core();
+        load_credentials_at_startup(&other);
+        assert!(other.reddit_api_client_id().is_none());
+        set_reddit_api_impl(&other, "cid456", "hush").unwrap();
+        let (fresh, other_fresh) = (
+            CoreHandle::open(core.profile_dir()).unwrap(),
+            CoreHandle::open(other.profile_dir()).unwrap(),
+        );
+        load_credentials_at_startup(&fresh);
+        load_credentials_at_startup(&other_fresh);
+        assert_eq!(fresh.reddit_api_client_id().as_deref(), Some("cid123"));
+        assert_eq!(
+            other_fresh.reddit_api_client_id().as_deref(),
+            Some("cid456")
+        );
+        clear_reddit_api_impl(&other).unwrap();
 
         let cleared = clear_reddit_api_impl(&core).unwrap();
         assert!(!cleared.configured);

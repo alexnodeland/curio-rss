@@ -217,6 +217,14 @@ ambiguity). Design rules:
   feature. The core never reads the keychain on its own — heads load explicitly at
   startup, so opening a profile can never pop an OS prompt and hermetic tests never
   touch the real store (`CURIO_MOCK_KEYRING` swaps in the in-memory mock).
+  Items are **per profile** (account `reddit-api/<key>`, the key a truncated
+  sha256 of the canonical profile path), so two profiles can hold different
+  apps; the global `reddit-api` item of 0.4.x and earlier is claimed by the first profile
+  that loads after upgrading, then deleted.
+- **Secrets never reach `Debug`.** The credential and token types implement a
+  redacting `Debug` by hand, so a `{:?}` of the config, the token cache or the
+  whole `CoreHandle` in a log line, `dbg!` or panic message prints
+  `<redacted>`.
 - **The secret is write-only across every boundary**: IPC status returns only the client
   id; the CLI reads the secret from stdin rather than argv; nothing ever echoes it.
 - **The token grant goes through the policed client** — a new form-POST path that

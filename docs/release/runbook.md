@@ -41,8 +41,9 @@ git push origin vX.Y.Z          # → release.yml drafts the release
 
 ## 3. (Optional) other-platform bundles
 
-Linux `.deb`/`.AppImage` and Windows `.msi`/`.exe` are built by the nightly
-`bundle` matrix and downloadable as run artifacts (informational; not the
+Linux `.deb`/`.rpm`/`.AppImage`, Windows `.msi`/`.exe` and a macOS universal
+`.dmg` are built by the nightly `bundle` matrix (updater artifacts off — only
+`release.yml` holds the updater signing key) and downloadable as run artifacts (informational; not the
 shipped channel yet). Attach them to the draft only if you want them surfaced.
 
 ## 4. macOS manual verification

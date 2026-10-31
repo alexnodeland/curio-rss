@@ -141,10 +141,20 @@ same transaction. One mechanism serves three masters:
 log safely: every drain — claim the staged intents, append, fsync, delete the intents —
 runs under an exclusive advisory lock on `.curio/events.lock` (beside the contract
 directory, never inside it), and starts by catching up with the other writers (heal a
-torn tail, adopt a file they rotated to, re-read the size counter). An intent is
-therefore emitted by exactly one process, lines never interleave, and a heal never
-truncates another process's append in flight. A holder that keeps the lock past 15 s
-yields the typed, retryable `EventLogError::ProfileLocked`.
+torn tail, adopt a file they rotated to, re-read the size counter). A staged intent is
+therefore drained by one process at a time, lines never interleave, and a heal never
+truncates another process's append in flight. A lock file deleted while in use is
+noticed (file identity is re-checked on every acquire) and re-created. A holder that
+keeps the lock past 15 s yields the typed, retryable `EventLogError::ProfileLocked`.
+Delivery is **at-least-once**, as the contract already assumes: if deleting the drained
+intents fails after the fsync (a crash, or the database staying busy past its 5 s
+timeout because another process holds a long write), the next drain appends them again
+and consumers drop the duplicate by `event_id`.
+
+Not yet process-safe ([#234](https://github.com/alexnodeland/curio-rss/issues/234)):
+the destination registry is cached per process and written back whole, so one head's
+add/remove can undo another's (and the CLI's `curio.toml` reconcile re-adds a destination
+the desktop removed); and the per-feed refresh lock is in-process only.
 
 Cursor semantics are designed now (`events since <cursor>`) so the JSONL export, `curio
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.

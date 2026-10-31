@@ -73,6 +73,33 @@ consumer implementation.
   parallel. Regression test:
   `concurrent_refreshes_of_one_feed_cannot_clobber_validators`
   (tests/handle.rs — deterministically fails when the lock is removed).
+  **Caveat:** the lock is per process. The desktop app and a CLI
+  `curio fetch` refreshing the same feed at the same moment can still
+  race this way (same bounded consequence). Tracked in #234.
+- **Destinations are not process-safe yet (#234).** Each `CoreHandle`
+  loads the destination registry once at open and writes the whole
+  cached map back on `add_destination`/`remove_destination`, so a head
+  can undo a destination change another process made while it was open,
+  and the CLI's `curio.toml` reconcile (run by every command) re-adds a
+  destination the desktop app removed. #114's acceptance criterion
+  "a destination removed in the desktop stays removed after a CLI run"
+  is therefore still open. Workaround until #234: change destinations
+  from one head at a time, keep `curio.toml` in sync with what the app
+  shows, and restart the app after `curio dest add`.
+- **Event emission is at-least-once under heavy cross-process
+  contention.** A drain appends and fsyncs under the events lock, then
+  deletes the drained intents through this process's writer. If another
+  process holds a database write past the 5 s busy timeout, that delete
+  fails with `Busy` after the lines are durable; the intents stay
+  staged and the next drain (in either process) appends them again. The
+  contract requires consumers to dedupe by `event_id`, so nothing is
+  lost or corrupted, but the log can carry a duplicate line. Related:
+  the events lock is held while the delete waits behind this process's
+  queued write jobs, so a long in-process job (a vacuum, a big import)
+  stalls other processes' emits, and past 15 s they fail with the
+  retryable `ProfileLocked`. Trigger to act: a consumer that cannot
+  dedupe, or `ProfileLocked` reports from real use. The fix would be a
+  durable "appended, not yet retired" record kept under the lock.
 - **FIXED (#111): every refresh reverted hydrated/enriched full text to
   the feed excerpt and rewrote unchanged rows.** `upsert_articles`
   (`storage/repo/articles.rs`) now consults `articles.content_origin`

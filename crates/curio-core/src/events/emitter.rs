@@ -16,10 +16,22 @@
 //!
 //! Claim + append + fsync + delete is one critical section, so the claim
 //! is atomic across processes: when the desktop app and a CLI run share a
-//! profile, an intent one of them staged is drained by exactly one of
-//! them — whichever takes the lock first sees it, and the other sees it
+//! profile, an intent one of them staged is drained by one of them at a
+//! time — whichever takes the lock first sees it, and the other sees it
 //! already deleted. (Deleting at claim time instead, `DELETE … RETURNING`
 //! style, would open a crash window that *loses* the event.)
+//!
+//! Delivery is still **at-least-once**, never exactly-once: the delete in
+//! step 4 goes through this process's writer and can fail after step 3
+//! made the lines durable — a crash, or [`StorageError::Busy`] when
+//! another process holds a database write past the busy timeout. The
+//! intents then stay staged and the next drain (in either process)
+//! appends them again; consumers drop the duplicate by `event_id`, as the
+//! contract requires. The lock is also held while that delete waits
+//! behind this process's queued write jobs, so a long one (a vacuum, a
+//! big import) delays other processes' emits.
+//!
+//! [`StorageError::Busy`]: crate::storage::StorageError::Busy
 
 use std::sync::Arc;
 
@@ -37,7 +49,7 @@ impl EventEmitter {
     /// Couples a storage handle to a log and immediately replays any
     /// intents staged but never emitted — by a previous process that
     /// crashed, or by a live one about to drain them itself (the lock
-    /// makes sure exactly one of the two does).
+    /// makes sure the two never drain the same intents at once).
     ///
     /// # Errors
     ///

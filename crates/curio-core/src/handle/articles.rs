@@ -12,6 +12,7 @@ use crate::model::{
 };
 use crate::storage::ListArticles;
 
+use super::refresh::is_feed_own_url;
 use super::{CoreError, CoreHandle, SavedUrl};
 
 impl CoreHandle {
@@ -42,6 +43,12 @@ impl CoreHandle {
     /// the article unchanged. DB-local like [`Self::mark_read`] — the events
     /// contract has no article-content event, so nothing is staged.
     ///
+    /// A **link-less** feed entry (its `source_url` is the feed's own URL)
+    /// has no page to load: it is returned unchanged without a fetch, as is
+    /// any article whose fetch lands on its feed's URL (a link-less entry
+    /// stored before the feed's URL was redirect-adopted). Extracting the
+    /// feed XML as if it were the article would replace the real body.
+    ///
     /// # Errors
     ///
     /// [`CoreError::NotFound`] for an unknown article; fetch, content or
@@ -51,13 +58,23 @@ impl CoreHandle {
             .storage
             .get_article(id)?
             .ok_or(CoreError::NotFound { entity: "article" })?;
-        let allow_private_network = match article.feed_id {
-            Some(feed_id) => self
-                .storage
-                .get_feed(feed_id)?
-                .is_some_and(|feed| feed.allow_private_network),
-            None => false,
+        let feed = match article.feed_id {
+            Some(feed_id) => self.storage.get_feed(feed_id)?,
+            None => None,
         };
+        // Matched against the feed's *current* URL only: the store keeps no
+        // URL history, so a link-less row saved under a URL the feed no
+        // longer has — and that no longer redirects to it (the user edited
+        // the feed URL, say) — is not recognized and is fetched like a page.
+        // The redirect case is covered by also checking where the fetch
+        // lands, below.
+        let lands_on_feed =
+            |url: &str| feed.as_ref().is_some_and(|feed| is_feed_own_url(url, feed));
+        if lands_on_feed(&article.source_url) {
+            tracing::debug!(article = %id, "link-less feed entry: nothing to hydrate");
+            return Ok(article);
+        }
+        let allow_private_network = feed.as_ref().is_some_and(|feed| feed.allow_private_network);
         // Enrichment first (feature-gated): a source-specific provider
         // beats generic readability when it recognizes the URL. A rate
         // limit is a hard stop (no fallback fetch to the throttled
@@ -78,7 +95,7 @@ impl CoreHandle {
                 ..FetchRequest::default()
             })
             .await?;
-        if !response.is_success() {
+        if !response.is_success() || lands_on_feed(&response.final_url) {
             return Ok(article);
         }
         let raw = String::from_utf8_lossy(&response.body);

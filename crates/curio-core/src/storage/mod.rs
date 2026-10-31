@@ -13,6 +13,7 @@
 
 mod backup;
 mod migrations;
+mod netfs;
 mod open;
 mod pool;
 mod repo;
@@ -23,6 +24,9 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 pub use backup::{PreMigrationBackup, pre_migration_backups};
+pub use netfs::{
+    ALLOW_NETWORK_FS_ENV, NetworkFsKind, detect_network_fs, network_fs_override_from_env,
+};
 pub use open::OpenError;
 pub(crate) use repo::SettingsTx;
 pub use repo::{ListArticles, PendingIntent, UpsertOutcome};

@@ -10,7 +10,8 @@
 //! Mapping policy (from the build spec): `NotFound` / `UnknownDestination`
 //! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) are user-tier, as
 //! is a missing destination folder (`ExportError::DestinationMissing`, code
-//! `IO`); `Sqlite` / `WriterGone` / `JobPanicked` / `PoolTimeout` /
+//! `IO`) and a profile on network or sync-managed storage
+//! (`OpenError::NetworkFs`, code `IO`); `Sqlite` / `WriterGone` / `JobPanicked` / `PoolTimeout` /
 //! `IntegrityFailed` / other IO / a corrupt or failed-upgrade database
 //! are internal-tier.
 //!
@@ -145,6 +146,9 @@ impl From<OpenError> for CommandError {
             }
             OpenError::Locked { .. } => Self::profile_busy(&error),
             OpenError::Io { .. } => Self::internal(ErrorCode::Io, error.to_string()),
+            // The user's choice of location: they move the profile, or
+            // set the override. Retrying as-is never helps.
+            OpenError::NetworkFs { .. } => Self::user(ErrorCode::Io, error.to_string(), false),
             // Corrupt, Backup, MigrationFailed, and any class added later.
             _ => Self::internal(ErrorCode::Storage, error.to_string()),
         }
@@ -203,6 +207,7 @@ impl From<ParseDestinationNameError> for CommandError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use curio_core::storage::NetworkFsKind;
 
     #[test]
     fn not_found_maps_to_the_user_tier() {
@@ -370,6 +375,18 @@ mod tests {
 
         let wrapped = CommandError::from(OpenError::Storage(StorageError::InvalidTag));
         assert_eq!(wrapped.code, ErrorCode::InvalidInput);
+
+        let network = CommandError::from(CoreError::Open(OpenError::NetworkFs {
+            path: "/Volumes/share/curio/curio.db".into(),
+            kind: NetworkFsKind::Smb,
+        }));
+        assert_eq!(network.kind, ErrorKind::User);
+        assert_eq!(network.code, ErrorCode::Io);
+        assert!(!network.recoverable);
+        assert!(
+            network.message.contains("CURIO_ALLOW_NETWORK_FS"),
+            "{network}"
+        );
     }
 
     #[test]

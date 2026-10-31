@@ -46,6 +46,9 @@ pub fn curio(profile: &Path) -> assert_cmd::Command {
     let mut cmd = assert_cmd::Command::cargo_bin("curio").unwrap();
     cmd.arg("--profile").arg(profile);
     cmd.env_remove("BROWSER");
+    // The network-filesystem override is opted into per test, never
+    // inherited from the developer's shell.
+    cmd.env_remove("CURIO_ALLOW_NETWORK_FS");
     // Hermetic keychain: the mock store, never the real OS one.
     cmd.env("CURIO_MOCK_KEYRING", "1");
     cmd

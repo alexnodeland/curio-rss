@@ -64,6 +64,41 @@ fn a_garbage_database_is_refused_with_a_clear_message() {
     );
 }
 
+/// #112: a profile inside a synced folder is refused, untouched, until
+/// the user opts in with the flag or the environment variable.
+#[test]
+fn a_profile_in_a_synced_folder_needs_an_explicit_override() {
+    let synced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(synced.path().join(".stfolder")).unwrap();
+    let profile = synced.path().join("curio");
+    curio(&profile)
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is on a Syncthing folder"))
+        .stderr(predicate::str::contains("CURIO_ALLOW_NETWORK_FS"));
+    assert!(
+        !profile.join("curio.db").exists(),
+        "refused before creating"
+    );
+
+    curio(&profile)
+        .args(["init", "--allow-network-fs"])
+        .assert()
+        .success();
+    assert!(profile.join("curio.db").is_file());
+    curio(&profile)
+        .arg("doctor")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is on a Syncthing folder"));
+    curio(&profile)
+        .arg("doctor")
+        .env("CURIO_ALLOW_NETWORK_FS", "1")
+        .assert()
+        .success();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
     clippy::too_many_lines,

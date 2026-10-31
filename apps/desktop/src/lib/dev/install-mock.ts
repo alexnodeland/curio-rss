@@ -18,7 +18,8 @@ const DEV_STARTUP_MESSAGES: Record<StartupFailureClass, string> = {
         'database schema version 8 is newer than this build supports (7) — update Curio to open it',
     locked: `${DEV_PROFILE}/curio.db is locked by another process — close other copies of Curio and retry`,
     io: `cannot open ${DEV_PROFILE}/curio.db: unable to open database file`,
-    profile: 'event log io: Permission denied (os error 13)',
+    profile: `profile io at ${DEV_PROFILE}: Not a directory (os error 20)`,
+    network_fs: `${DEV_PROFILE}/curio.db is on iCloud Drive, where the database can be corrupted (SQLite's locking is unsafe there and sync clients copy the file mid-write) — move the profile to a local disk, or set CURIO_ALLOW_NETWORK_FS=1 to open it anyway`,
     upgrade:
         'migrating the database from schema v6 to v7 failed and was rolled back: sqlite error: disk I/O error',
     no_profile: 'the platform reports no home directory — cannot resolve profile/cache paths',
@@ -37,6 +38,7 @@ function devStartupFailure(): StartupFailureDto | null {
         hasProfile &&
         requested !== 'locked' &&
         requested !== 'profile' &&
+        requested !== 'network_fs' &&
         params.get('backup') !== '0';
     return {
         class: requested,

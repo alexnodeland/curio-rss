@@ -967,12 +967,22 @@ export type StartupFailureClass =
  */
 "io" | 
 /**
- *  The database is fine, but the rest of the profile is not usable:
- *  the profile folder, its event log or its `.gitignore` could not be
- *  created, read or written. Replacing the database cannot help, so
- *  recovery only offers to retry once the cause is fixed.
+ *  The database is not what failed: the profile folder itself could
+ *  not be created (its parent is read-only, or a file has its name).
+ *  Replacing the database cannot help, so recovery only offers to
+ *  retry once the cause is fixed. (An event log that cannot be opened
+ *  does not fail startup: the library opens with its events staged.)
  */
 "profile" | 
+/**
+ *  The profile sits on network or sync-managed storage (an SMB/NFS
+ *  share, iCloud Drive, Dropbox, Syncthing…), where the database can
+ *  be corrupted, so the open was refused before touching anything.
+ *  The database is healthy and stays put: recovery only offers to
+ *  retry, after the profile has moved to a local disk or the user has
+ *  set the override variable.
+ */
+"network_fs" | 
 /**
  *  The schema upgrade (or its pre-migration backup) failed and was
  *  rolled back.

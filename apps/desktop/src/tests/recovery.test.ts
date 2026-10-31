@@ -67,6 +67,17 @@ describe('recoveryPlan', () => {
         expect(recoveryPlan(startupFailureFixture({ class: 'profile' })).secondary).toEqual([]);
     });
 
+    it('only retries a profile on network storage — the database is healthy', () => {
+        expect(recoveryPlan(startupFailureFixture({ class: 'network_fs', backup: null }))).toEqual({
+            primary: 'retry',
+            secondary: [],
+        });
+        expect(recoveryPlan(startupFailureFixture({ class: 'network_fs' }))).toEqual({
+            primary: 'retry',
+            secondary: [],
+        });
+    });
+
     it('retries first where the cause can clear by itself', () => {
         for (const failureClass of ['io', 'upgrade', 'other'] as const) {
             expect(recoveryPlan(startupFailureFixture({ class: failureClass }))).toEqual({
@@ -94,13 +105,14 @@ describe('recovery copy and report', () => {
                 'locked',
                 'io',
                 'profile',
+                'network_fs',
                 'upgrade',
                 'no_profile',
                 'other',
             ] as const
         ).map((failureClass) => recoveryCopy(failureClass));
-        expect(new Set(keys.map((k) => k.title)).size).toBe(8);
-        expect(new Set(keys.map((k) => k.body)).size).toBe(8);
+        expect(new Set(keys.map((k) => k.title)).size).toBe(9);
+        expect(new Set(keys.map((k) => k.body)).size).toBe(9);
     });
 
     it('names a backup by its file name on either separator', () => {

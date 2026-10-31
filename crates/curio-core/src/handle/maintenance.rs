@@ -90,8 +90,9 @@ impl CoreHandle {
     }
 
     /// The "pending events" health flag: `true` once a flush to the JSONL
-    /// log failed and its intents are still staged; cleared by the next
-    /// successful drain. A cheap in-memory check — heads poll it to decide
+    /// log failed and its intents are still staged — or the log could not
+    /// be opened at all (an unwritable `.curio/events`), so nothing can be
+    /// flushed yet; cleared by the next successful drain. A cheap in-memory check — heads poll it to decide
     /// whether to call [`CoreHandle::flush_pending_events`].
     #[must_use]
     pub fn has_pending_events(&self) -> bool {
@@ -108,14 +109,18 @@ impl CoreHandle {
     /// Storage or event-log errors; the intents stay staged and the flag
     /// stays raised.
     pub fn flush_pending_events(&self) -> Result<usize, CoreError> {
-        let mut emitter = self.emitter.lock().unwrap_or_else(PoisonError::into_inner);
-        let drained = emitter.emit_pending();
-        // Under the emitter lock, so concurrent drains set the flag in
-        // the order they ran.
+        let mut events = self.events.lock().unwrap_or_else(PoisonError::into_inner);
+        // A log that could not be opened yet is retried here, so a
+        // repaired events directory drains on the next call.
+        let drained = events
+            .emitter()
+            .and_then(|emitter| Ok(emitter.emit_pending()?));
+        // Under the sink lock, so concurrent drains set the flag in the
+        // order they ran.
         self.events_backlog
             .store(drained.is_err(), Ordering::Release);
-        drop(emitter);
-        Ok(drained?)
+        drop(events);
+        drained
     }
 
     /// Deletes event-log files older than the retention window (≥ 90
@@ -135,9 +140,10 @@ impl CoreHandle {
     pub fn sweep_event_retention(&self) -> Result<Vec<PathBuf>, CoreError> {
         let today = Timestamp::now().as_datetime().date_naive();
         let removed = self
-            .emitter
+            .events
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .emitter()?
             .log_mut()
             .sweep_retention(today)
             .map_err(EventsError::Log)?;

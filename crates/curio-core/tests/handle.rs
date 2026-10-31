@@ -34,6 +34,7 @@ fn open_core(profile: &std::path::Path) -> CoreHandle {
                 politeness_delay: Duration::ZERO,
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()
@@ -51,6 +52,7 @@ fn open_core_trusting_localhost(profile: &std::path::Path) -> CoreHandle {
                 trusted_addrs: std::iter::once(std::net::IpAddr::from([127, 0, 0, 1])).collect(),
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()
@@ -1681,6 +1683,228 @@ async fn full_text_mode_hydrates_new_articles_at_refresh() {
     assert_eq!(after.word_count, article.word_count);
 }
 
+/// A page the readability scorer confidently extracts, longer than any
+/// feed stub.
+fn full_page(title: &str) -> String {
+    format!(
+        r"<html><body><article>
+        <h1>{title}</h1>
+        <p>The full body of the post that the feed only excerpted, with enough
+           genuine running prose that the readability scorer confidently keeps
+           this container as the main content of the fetched page.</p>
+        <p>A second paragraph makes the extraction unambiguous and pushes the
+           word count well past the one-line stub the feed shipped.</p>
+        </article></body></html>"
+    )
+}
+
+/// #130: a feed reusing one guid for three different posts stores three
+/// articles (not one, overwritten twice) and full-text mode hydrates each
+/// page exactly once — no duplicate hydrations queued for a shared key.
+#[tokio::test]
+async fn a_guid_reused_across_items_stores_each_and_hydrates_each_once() {
+    let server = MockServer::start().await;
+    let feed_xml = format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Reused</title><link>{0}</link>
+        <item><guid>same</guid><title>A</title><link>{0}/a</link><description>stub</description></item>
+        <item><guid>same</guid><title>B</title><link>{0}/b</link><description>stub</description></item>
+        <item><guid>same</guid><title>C</title><link>{0}/c</link><description>stub</description></item>
+        </channel></rss>"#,
+        server.uri()
+    );
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .mount(&server)
+        .await;
+    for post in ["a", "b", "c"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/{post}")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(full_page(post), "text/html"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    core.set_feed_full_text(feed.id, true).unwrap();
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(outcome.new_articles, 3);
+    let mut titles: Vec<String> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|article| article.title)
+        .collect();
+    titles.sort();
+    assert_eq!(titles, ["A", "B", "C"]);
+
+    // Stable across refreshes: the same three keys, nothing new or changed.
+    let second = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((second.new_articles, second.updated_articles), (0, 0));
+}
+
+/// #130: whether a guid counts as reused is decided per fetch, but an item
+/// keeps one article as the guid's sharing changes between fetches — no
+/// duplicate rows, and read state stays put. The first fetch lists one item
+/// under the guid, so it is stored under the plain `guid:` key, as every
+/// reused-guid feed was before `guid+link:` keys existed.
+#[tokio::test]
+async fn a_reused_guid_keeps_each_item_one_article_as_its_sharing_changes() {
+    let server = MockServer::start().await;
+    let serve = |posts: &[&str]| {
+        let items = posts
+            .iter()
+            .map(|post| {
+                format!(
+                    "<item><guid>same</guid><title>{}</title><link>{}/{post}</link>\
+                     <description>stub</description></item>",
+                    post.to_uppercase(),
+                    server.uri()
+                )
+            })
+            .collect::<Vec<_>>()
+            .concat();
+        let xml = format!(
+            r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Reused</title>{items}</channel></rss>"#
+        );
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(xml, "application/rss+xml"))
+    };
+    let titles = |core: &CoreHandle| {
+        let mut articles: Vec<(String, bool)> = core
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .into_iter()
+            .map(|article| (article.title, core.article_state(article.id).unwrap().read))
+            .collect();
+        articles.sort();
+        articles
+    };
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+
+    serve(&["c"]).mount(&server).await;
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let c = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    core.mark_read(c.id, true).unwrap();
+
+    // The guid becomes shared: c keeps its row (and read state).
+    server.reset().await;
+    serve(&["a", "b", "c"]).mount(&server).await;
+    let shared = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((shared.new_articles, shared.updated_articles), (2, 0));
+    assert_eq!(
+        titles(&core),
+        [("A".into(), false), ("B".into(), false), ("C".into(), true)]
+    );
+
+    // Unshared again, by an item other than the plain row's: b keeps its
+    // own row and never overwrites c's.
+    server.reset().await;
+    serve(&["b"]).mount(&server).await;
+    let alone = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((alone.new_articles, alone.updated_articles), (0, 0));
+
+    // And shared once more: still the same three articles.
+    server.reset().await;
+    serve(&["a", "b", "c"]).mount(&server).await;
+    let again = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((again.new_articles, again.updated_articles), (0, 0));
+    assert_eq!(
+        titles(&core),
+        [("A".into(), false), ("B".into(), false), ("C".into(), true)]
+    );
+    let c_now = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|article| article.title == "C")
+        .unwrap();
+    assert_eq!(c_now.id, c.id, "c is still the row it was first stored as");
+}
+
+/// #130: an item without a link is stored under the feed URL (the contract
+/// needs a source URI) but is never hydrated against it — not at refresh
+/// in full-text mode, and not on an explicit load-full.
+#[tokio::test]
+async fn a_link_less_item_is_never_hydrated_against_the_feed_url() {
+    let server = MockServer::start().await;
+    let feed_xml = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Link-less</title>
+        <item><guid>n1</guid><title>Note</title><description>The whole note.</description></item>
+        </channel></rss>"#;
+    // expect(1): only the refresh itself may fetch the feed URL.
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed_url = format!("{}/feed.xml", server.uri());
+    let feed = subscribe(&core, &feed_url);
+    core.set_feed_full_text(feed.id, true).unwrap();
+
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    assert_eq!(article.source_url, feed_url);
+    assert_eq!(article.content.text.trim(), "The whole note.");
+
+    let after = core.hydrate_article(article.id).await.unwrap();
+    assert_eq!(after.content, article.content, "nothing to load: unchanged");
+    server.verify().await;
+}
+
+/// #130: a stored article whose fetch lands on its feed's URL (e.g. a
+/// link-less entry stored under the feed's pre-redirect URL) keeps its
+/// body — the feed XML is never extracted as the article.
+#[tokio::test]
+async fn a_hydrate_that_lands_on_the_feed_url_changes_nothing() {
+    let server = MockServer::start().await;
+    let feed_url = format!("{}/feed.xml", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/old-feed.xml"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", feed_url.as_str()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(full_page("feed"), "text/html"))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &feed_url);
+    let mut stale = manual_article("guid:n1", "Note");
+    stale.feed_id = Some(feed.id);
+    stale.source_url = format!("{}/old-feed.xml", server.uri());
+    core.storage().upsert_articles(vec![stale]).unwrap();
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+
+    let after = core.hydrate_article(article.id).await.unwrap();
+    assert_eq!(after.content, article.content);
+}
+
 /// A feed that only ships an excerpt of one post whose source page lives
 /// at `post_path` on the mock server.
 fn excerpt_feed(server: &MockServer, post_path: &str) -> String {
@@ -2252,4 +2476,122 @@ fn the_next_mutation_drains_a_staged_backlog() {
         events[1].event,
         EventPayload::ArticleTagged { .. }
     ));
+}
+
+/// #112: an events directory that cannot be opened no longer fails the
+/// profile open. The handle comes up with the backlog flag raised, a
+/// mutation commits with its intent staged, and once the directory is
+/// repaired the next drain opens the log and emits — the intent a
+/// previous session left staged first, in order.
+#[test]
+fn an_unopenable_events_dir_does_not_block_open() {
+    let profile = tempfile::tempdir().unwrap();
+    let (article, events_dir) = {
+        let core = open_core(profile.path());
+        core.storage()
+            .upsert_articles(vec![manual_article("k1", "One")])
+            .unwrap();
+        let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+        let events_dir = break_events_dir(profile.path());
+        // Left staged by this session: its flush fails.
+        assert!(core.set_starred(article, true).unwrap());
+        assert_eq!(core.pending_intent_count().unwrap(), 1);
+        (article, events_dir)
+    };
+
+    let core = open_core(profile.path());
+    assert!(core.has_pending_events(), "nothing could be flushed");
+    assert!(core.tag_article(article, "rust").unwrap());
+    assert_eq!(core.pending_intent_count().unwrap(), 2);
+    assert!(core.article_state(article).unwrap().starred);
+    core.flush_pending_events().unwrap_err();
+    core.sweep_event_retention().unwrap_err();
+
+    repair_events_dir(&events_dir);
+    assert_eq!(core.flush_pending_events().unwrap(), 2);
+    assert!(!core.has_pending_events());
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+    assert!(matches!(
+        events[1].event,
+        EventPayload::ArticleTagged { .. }
+    ));
+    // The log stays attached: later mutations emit as usual.
+    assert!(core.set_archived(article, true).unwrap());
+    assert!(!core.has_pending_events());
+    assert_eq!(read_all(&events_dir).unwrap().len(), 3);
+    assert_eq!(
+        core.sweep_event_retention().unwrap(),
+        Vec::<std::path::PathBuf>::new()
+    );
+}
+
+/// #112: a `.curio/` that cannot hold the events directory at all (a
+/// file squats it) still opens the profile; the gitignore and the log
+/// appear once it is fixed.
+#[test]
+fn an_unusable_state_dir_does_not_block_open() {
+    let profile = tempfile::tempdir().unwrap();
+    let state_dir = profile.path().join(".curio");
+    std::fs::write(&state_dir, b"not a directory").unwrap();
+
+    let core = open_core(profile.path());
+    assert!(core.has_pending_events());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    assert!(core.set_starred(article, true).unwrap());
+    assert_eq!(core.pending_intent_count().unwrap(), 1);
+
+    std::fs::remove_file(&state_dir).unwrap();
+    assert_eq!(core.flush_pending_events().unwrap(), 1);
+    let gitignore = std::fs::read_to_string(state_dir.join(".gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line == "events/"),
+        "{gitignore}"
+    );
+    assert_eq!(read_all(&state_dir.join("events")).unwrap().len(), 1);
+}
+
+/// #112: a profile on sync-managed storage is refused before anything is
+/// created, with a typed error naming the kind; the explicit override
+/// opens it.
+#[test]
+fn a_profile_on_sync_managed_storage_needs_the_override() {
+    use curio_core::CoreError;
+    use curio_core::storage::{NetworkFsKind, OpenError};
+
+    let synced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(synced.path().join(".stfolder")).unwrap();
+    let profile = synced.path().join("curio");
+
+    let err = CoreHandle::open(&profile).unwrap_err();
+    match &err {
+        CoreError::Open(OpenError::NetworkFs { path, kind }) => {
+            assert_eq!(*kind, NetworkFsKind::Syncthing);
+            assert_eq!(*path, profile.join("curio.db"));
+        }
+        other => panic!("expected NetworkFs, got {other:?}"),
+    }
+    let message = err.to_string();
+    assert!(message.contains("Syncthing"), "{message}");
+    assert!(message.contains("CURIO_ALLOW_NETWORK_FS"), "{message}");
+    assert!(!err.is_profile_busy());
+    assert!(!profile.exists(), "a refused open creates nothing");
+
+    let core = CoreHandle::open_with(
+        &profile,
+        CoreOptions {
+            allow_network_fs: true,
+            ..CoreOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(core.db_path().is_file());
+    assert!(!core.has_pending_events());
 }

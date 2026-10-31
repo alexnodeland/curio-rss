@@ -20,7 +20,7 @@ pub(crate) fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     } else {
         OpenMode::Existing
     };
-    let mut app = App::open(cli.profile, cli.json, mode)?;
+    let mut app = App::open(cli.profile, cli.json, cli.allow_network_fs, mode)?;
     dispatch(&mut app, cli.command)
 }
 

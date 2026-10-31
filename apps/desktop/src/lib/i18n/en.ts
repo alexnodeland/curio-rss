@@ -503,7 +503,10 @@ export const en = {
     'recovery.copyFailed': 'Couldn’t copy the error',
     'recovery.title.profile': 'Curio can’t use its profile folder',
     'recovery.body.profile':
-        'Your library is fine, but Curio couldn’t create or write its other files there (such as the event log). Make sure the profile folder and everything in it is writable, then try again.',
+        'Curio couldn’t create or open its profile folder. Make sure the folder (and the one it’s in) is writable and that no file has its name, then try again. Nothing has been changed.',
+    'recovery.title.networkFs': 'Your library is on a network or synced folder',
+    'recovery.body.networkFs':
+        'Curio’s database can be damaged on a network share or in a folder a sync service manages (iCloud Drive, Dropbox…), so Curio didn’t open it. Nothing has been changed. Move the profile folder to a local disk, then try again.',
     'recovery.action.update': 'Check for updates',
     'recovery.update.current':
         'No update is available. Install the newer Curio that upgraded this library to keep using it.',

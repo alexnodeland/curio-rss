@@ -87,6 +87,13 @@ feed-rs parse → normalize (dedupe guid → link → hash(title+published),
               → content_text extraction (FTS is real) → htmd DOM-walk CommonMark
 ```
 
+Dedupe keys are unique within a fetch: a guid the feed reuses for items with
+different links is no identity, so every item sharing it is keyed
+`guid+link:` instead, and an exact repeat of an earlier item is dropped.
+Because that choice sees only one fetch, refresh then settles the keys
+against the stored rows, so an item keeps its article when the guid's
+sharing changes between fetches.
+
 This kills the sketch's stored-XSS chain at the root and fixes full-text search being a
 silent no-op in the same pass. The desktop head's strict CSP + capabilities are
 defense-in-depth, not the primary defense.
@@ -118,8 +125,20 @@ defense-in-depth, not the primary defense.
   reverted to the excerpt), skips rows already holding the incoming values (no
   `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
   `content_text` actually differ.
-- Network-filesystem guard (planned, #112): refuses to open the DB on
-  Syncthing/iCloud/NFS-class mounts without an explicit override flag.
+- Network-filesystem guard: before anything is created, the profile open probes the
+  filesystem type (`statfs` `f_type` on Linux, `f_fstypename` on macOS; UNC paths on
+  Windows), the sync-client root markers (`.stfolder`, a `.dropbox` file) and the
+  well-known sync locations (`~/Library/Mobile Documents`, `~/Library/CloudStorage`),
+  and refuses NFS/SMB/AFP/WebDAV mounts and iCloud/Dropbox/Syncthing folders with
+  `OpenError::NetworkFs` unless `CoreOptions::allow_network_fs` is set (the CLI's
+  `--allow-network-fs`, or `CURIO_ALLOW_NETWORK_FS=1` for either head). The guard
+  lives in `CoreHandle::open_with`, not `Storage::open`. The desktop gives the refusal
+  its own startup class (`network_fs`), whose recovery screen offers only Try again:
+  the database is healthy, so it is never moved aside or replaced by a backup.
+- An events directory that cannot be opened (full or read-only disk, a file in its
+  place) is an emission failure, not an open failure: the handle attaches the log
+  lazily, opens with the backlog flag raised and intents staged, and the next drain
+  retries the attach. Only events-lock contention still fails the open (as "busy").
 - Fault containment: a panicking write job replies `JobPanicked`, its open transaction
   is rolled back and the writer keeps serving; a panicking read still returns its pooled
   connection, and a read that waits too long for one fails with `PoolTimeout` rather

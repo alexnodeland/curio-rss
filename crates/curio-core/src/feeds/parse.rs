@@ -3,8 +3,11 @@
 
 use curio_types::Timestamp;
 use feed_rs::model::{Entry, Feed, Link, MediaObject};
+use url::Url;
 
 use super::dedupe_key;
+use super::image::feed_image;
+use super::keys::unique_keys;
 
 /// A feed's own metadata, as parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -22,7 +25,12 @@ pub struct ParsedFeedMeta {
 /// (sanitize-at-ingest is a pipeline invariant, D6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedEntry {
-    /// Total dedupe key (`guid → link → hash(title+published)`).
+    /// Total dedupe key (`guid → link → hash(title+published)`), unique
+    /// within its [`ParsedFeed`]: a guid the feed reuses for items with
+    /// different links is disambiguated to a `guid+link:` key, and an
+    /// exact repeat of an earlier item is dropped. That choice sees only
+    /// this fetch; [`ParsedFeed::settle_keys`] reconciles it with the keys
+    /// earlier fetches stored before anything is upserted.
     pub dedupe_key: String,
     /// The source's own id/guid, when it had one.
     pub guid: Option<String>,
@@ -32,7 +40,10 @@ pub struct ParsedEntry {
     pub link: Option<String>,
     /// First author name, if any.
     pub author: Option<String>,
-    /// Publication time, if the source carried one.
+    /// Publication time: the source's `published`, else its `updated`
+    /// (an Atom entry may legally carry only `<updated>`). This is the
+    /// source's raw value — a future date is not clamped here; storage
+    /// clamps it to the article's first-seen time.
     pub published: Option<Timestamp>,
     /// The source's own last-update time, if distinct.
     pub updated: Option<Timestamp>,
@@ -44,10 +55,14 @@ pub struct ParsedEntry {
     /// (`media:thumbnail` → `media:content` image → image `enclosure`),
     /// when the source carried one. This is the *first-class* RSS image
     /// signal; ingest falls back to the first inline `<img>` only when
-    /// this is absent. Left as the source declared it (absolute or
-    /// relative); the content pipeline's URL policing does not run over
-    /// it, so consumers treat it as untrusted and load it through the
-    /// policed image cache, never directly.
+    /// this is absent. Always an absolute `http(s)` URL. A relative
+    /// `media:content` or image enclosure is resolved by feed-rs while
+    /// parsing, against its `xml:base`, else the feed URL; a relative
+    /// `media:thumbnail` (which feed-rs leaves raw) against the entry link,
+    /// else the feed URL — the same base the entry's inline images resolve
+    /// against. The content pipeline's URL policing does not run over it,
+    /// so consumers treat it as untrusted and load it through the policed
+    /// image cache, never directly.
     pub lead_image: Option<String>,
 }
 
@@ -66,7 +81,8 @@ pub struct ParsedFeed {
 pub struct FeedParseError(#[from] feed_rs::parser::ParseFeedError);
 
 /// Parses feed bytes (RSS/Atom/JSON Feed — format auto-detected) into a
-/// [`ParsedFeed`]. `base_uri` (the fetch URL) resolves relative links.
+/// [`ParsedFeed`]. `base_uri` (the fetch URL) resolves relative links and
+/// relative lead-image references.
 ///
 /// The dedupe chain is *ours*, not feed-rs's: its id generator is
 /// disabled (it falls back to random UUIDs, which would break dedupe
@@ -83,20 +99,28 @@ pub fn parse_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, Fe
         .id_generator(|_links, _title, _uri| String::new())
         .build();
     let feed = parser.parse(bytes)?;
-    Ok(normalize(feed))
+    let base = base_uri.and_then(|uri| Url::parse(uri).ok());
+    Ok(normalize(feed, base.as_ref()))
 }
 
-fn normalize(feed: Feed) -> ParsedFeed {
+fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
     let meta = ParsedFeedMeta {
         title: feed.title.map(|t| t.content),
         site_url: best_link(&feed.links).map(ToOwned::to_owned),
         description: feed.description.map(|t| t.content),
     };
-    let entries = feed.entries.into_iter().map(normalize_entry).collect();
-    ParsedFeed { meta, entries }
+    let entries = feed
+        .entries
+        .into_iter()
+        .map(|entry| normalize_entry(entry, base))
+        .collect();
+    ParsedFeed {
+        meta,
+        entries: unique_keys(entries),
+    }
 }
 
-fn normalize_entry(entry: Entry) -> ParsedEntry {
+fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
     let guid = Some(entry.id.trim())
         .filter(|id| !id.is_empty())
         .map(ToOwned::to_owned);
@@ -111,9 +135,18 @@ fn normalize_entry(entry: Entry) -> ParsedEntry {
         .into_iter()
         .map(|person| person.name)
         .find(|name| !name.trim().is_empty());
-    let published = entry.published.map(Timestamp::new);
+    let source_published = entry.published.map(Timestamp::new);
     let updated = entry.updated.map(Timestamp::new);
-    let lead_image = feed_image(&entry.media, &entry.links);
+    let published = source_published.or(updated);
+    // A relative `media:thumbnail` resolves against the entry's own link,
+    // else the feed URL (feed-rs has already resolved the other image
+    // signals — see `feed_image`).
+    let entry_base = link.as_deref().and_then(|link| Url::parse(link).ok());
+    let lead_image = feed_image(
+        &entry.media,
+        &entry.links,
+        entry_base.as_ref().or(feed_base),
+    );
     // content → summary → media:description. YouTube (and other media feeds)
     // carry the human text only in `media:description`, leaving content and
     // summary empty, so without the last fallback the reader body is blank.
@@ -125,7 +158,10 @@ fn normalize_entry(entry: Entry) -> ParsedEntry {
         .filter(|body| !body.trim().is_empty())
         .or_else(|| media_description_html(&entry.media))
         .unwrap_or_default();
-    let dedupe_key = dedupe_key(guid.as_deref(), link.as_deref(), &title, published);
+    // The hash tier keeps hashing the source's own `published`: folding the
+    // `updated` fallback in would re-key every date-less, link-less item —
+    // once now, and again on each edit — duplicating it in the list.
+    let dedupe_key = dedupe_key(guid.as_deref(), link.as_deref(), &title, source_published);
     ParsedEntry {
         dedupe_key,
         guid,
@@ -138,58 +174,6 @@ fn normalize_entry(entry: Entry) -> ParsedEntry {
         lang: entry.language,
         lead_image,
     }
-}
-
-/// The feed's own declared lead image for an entry, if any, preferring the
-/// most explicit signal: a `media:thumbnail`, then an image `media:content`,
-/// then an image `enclosure`. Only absolute `http(s)` URLs qualify — a
-/// relative or scheme-less reference can't be fetched by the image cache
-/// (which has no base to resolve against), so it's dropped here rather than
-/// stored as an un-loadable value. The inline-`<img>` fallback lives in
-/// ingest, over the base-resolved, sanitized body.
-fn feed_image(media: &[MediaObject], links: &[Link]) -> Option<String> {
-    let thumbnail = || {
-        media
-            .iter()
-            .flat_map(|object| object.thumbnails.iter())
-            .map(|thumb| thumb.image.uri.trim())
-            .find(|uri| is_http_url(uri))
-            .map(ToOwned::to_owned)
-    };
-    let content = || {
-        media
-            .iter()
-            .flat_map(|object| object.content.iter())
-            .filter(|content| {
-                content
-                    .content_type
-                    .as_ref()
-                    .is_some_and(|mime| mime.ty().as_str() == "image")
-            })
-            .filter_map(|content| content.url.as_ref())
-            .map(ToString::to_string)
-            .find(|uri| is_http_url(uri))
-    };
-    let enclosure = || {
-        links
-            .iter()
-            .filter(|link| link.rel.as_deref() == Some("enclosure"))
-            .filter(|link| {
-                link.media_type
-                    .as_deref()
-                    .is_some_and(|mime| mime.starts_with("image/"))
-            })
-            .map(|link| link.href.trim())
-            .find(|uri| is_http_url(uri))
-            .map(ToOwned::to_owned)
-    };
-    thumbnail().or_else(content).or_else(enclosure)
-}
-
-/// Whether `uri` is an absolute `http`/`https` URL — the only shape the
-/// image cache can fetch.
-fn is_http_url(uri: &str) -> bool {
-    uri.starts_with("http://") || uri.starts_with("https://")
 }
 
 /// The first non-empty `media:description` across the entry's media objects,
@@ -355,77 +339,106 @@ mod tests {
     }
 
     #[test]
-    fn lead_image_prefers_media_thumbnail_over_enclosure() {
+    fn an_updated_only_atom_entry_takes_updated_as_its_date() {
+        // atom.xml entry 2 carries only <updated> — spec-legal Atom.
+        let feed = parse_feed(&fixture("atom.xml"), None).unwrap();
+        let two = &feed.entries[1];
+        let updated: Timestamp = "2026-07-02T11:00:00Z".parse().unwrap();
+        assert_eq!(
+            two.published,
+            Some(updated),
+            "published falls back to updated"
+        );
+        assert_eq!(two.updated, Some(updated));
+        // An entry carrying both keeps its own published.
+        let one = &feed.entries[0];
+        assert_eq!(one.published, Some("2026-07-01T09:00:00Z".parse().unwrap()));
+    }
+
+    #[test]
+    fn the_updated_fallback_never_moves_a_hash_tier_key() {
+        // No guid, no link, no published: the hash tier must hash the
+        // source's (absent) published, not the updated fallback — or every
+        // edit of the entry would re-key it into a duplicate article.
+        let atom = |updated: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title>
+<entry><title>Bare</title><updated>{updated}</updated></entry></feed>"#
+            )
+        };
+        let first = parse_feed(atom("2026-07-01T00:00:00Z").as_bytes(), None).unwrap();
+        let edited = parse_feed(atom("2026-07-09T00:00:00Z").as_bytes(), None).unwrap();
+        let entry = &first.entries[0];
+        assert!(entry.dedupe_key.starts_with("hash:"));
+        assert!(entry.published.is_some());
+        assert_eq!(entry.dedupe_key, dedupe_key(None, None, "Bare", None));
+        assert_eq!(entry.dedupe_key, edited.entries[0].dedupe_key);
+    }
+
+    #[test]
+    fn a_guid_reused_across_different_links_keeps_every_item() {
         let xml = br#"<?xml version="1.0"?>
-<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
-<channel><title>t</title>
-<item><title>a</title><guid>g1</guid>
-<media:thumbnail url="https://cdn.example.com/thumb.jpg"/>
-<enclosure url="https://cdn.example.com/clip.mp3" type="audio/mpeg" length="1"/>
-</item></channel></rss>"#;
+<rss version="2.0"><channel><title>t</title>
+<item><title>a</title><guid>same</guid><link>https://example.com/a</link></item>
+<item><title>b</title><guid>same</guid><link>https://example.com/b</link></item>
+<item><title>c</title><guid>same</guid><link>https://example.com/c</link></item>
+<item><title>d</title><guid>own</guid><link>https://example.com/d</link></item>
+</channel></rss>"#;
         let feed = parse_feed(xml, None).unwrap();
+        let keys: Vec<&str> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.dedupe_key.as_str())
+            .collect();
         assert_eq!(
-            feed.entries[0].lead_image.as_deref(),
-            Some("https://cdn.example.com/thumb.jpg"),
-            "a media:thumbnail is the strongest signal"
+            keys,
+            [
+                "guid+link:same\u{1f}https://example.com/a",
+                "guid+link:same\u{1f}https://example.com/b",
+                "guid+link:same\u{1f}https://example.com/c",
+                "guid:own",
+            ],
+            "every item of the reused guid is re-keyed (feed order can't matter); \
+             an unshared guid keeps its plain key"
         );
+        assert_eq!(feed.entries[1].guid.as_deref(), Some("same"), "guid kept");
     }
 
     #[test]
-    fn lead_image_takes_an_image_enclosure_when_no_thumbnail() {
-        // feed-rs models an RSS <enclosure> as a MediaContent, so an image
-        // enclosure surfaces through the media:content path.
+    fn an_item_listed_twice_is_kept_once() {
         let xml = br#"<?xml version="1.0"?>
-<rss version="2.0">
-<channel><title>t</title>
-<item><title>a</title><guid>g2</guid>
-<enclosure url="https://cdn.example.com/pic.jpg" type="image/jpeg" length="1"/>
-</item></channel></rss>"#;
+<rss version="2.0"><channel><title>t</title>
+<item><title>first</title><guid>g</guid><link>https://example.com/a</link></item>
+<item><title>repeat</title><guid>g</guid><link>https://example.com/a</link></item>
+<item><title>linked</title><link>https://example.com/l</link></item>
+<item><title>linked again</title><link>https://example.com/l</link></item>
+<item><title>other</title><guid>h</guid><link>https://example.com/h</link></item>
+</channel></rss>"#;
         let feed = parse_feed(xml, None).unwrap();
+        let titles: Vec<&str> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.title.as_str())
+            .collect();
         assert_eq!(
-            feed.entries[0].lead_image.as_deref(),
-            Some("https://cdn.example.com/pic.jpg")
+            titles,
+            ["first", "linked", "other"],
+            "the first listing wins"
         );
+        assert_eq!(feed.entries[0].dedupe_key, "guid:g");
     }
 
     #[test]
-    fn lead_image_ignores_a_non_image_enclosure() {
+    fn a_reused_guid_with_a_link_less_item_still_disambiguates() {
         let xml = br#"<?xml version="1.0"?>
-<rss version="2.0">
-<channel><title>t</title>
-<item><title>a</title><guid>g3</guid>
-<enclosure url="https://cdn.example.com/clip.mp3" type="audio/mpeg" length="1"/>
-</item></channel></rss>"#;
+<rss version="2.0"><channel><title>t</title>
+<item><title>a</title><guid>same</guid><link>https://example.com/a</link></item>
+<item><title>b</title><guid>same</guid></item>
+</channel></rss>"#;
         let feed = parse_feed(xml, None).unwrap();
-        assert_eq!(
-            feed.entries[0].lead_image, None,
-            "an audio enclosure is not a lead image"
-        );
-    }
-
-    #[test]
-    fn lead_image_takes_an_atom_image_enclosure_link() {
-        let xml = br#"<?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-<title>t</title>
-<entry><id>a1</id><title>a</title>
-<link rel="alternate" href="https://example.com/a"/>
-<link rel="enclosure" type="image/png" href="https://cdn.example.com/a.png"/>
-</entry></feed>"#;
-        let feed = parse_feed(xml, None).unwrap();
-        assert_eq!(
-            feed.entries[0].lead_image.as_deref(),
-            Some("https://cdn.example.com/a.png")
-        );
-    }
-
-    #[test]
-    fn is_http_url_requires_an_absolute_http_scheme() {
-        assert!(is_http_url("https://example.com/x.jpg"));
-        assert!(is_http_url("http://example.com/x.jpg"));
-        assert!(!is_http_url("/relative/x.jpg"));
-        assert!(!is_http_url("data:image/png;base64,AAAA"));
-        assert!(!is_http_url("//protocol.relative/x.jpg"));
+        assert_eq!(feed.entries.len(), 2);
+        assert_eq!(feed.entries[1].dedupe_key, "guid+link:same\u{1f}");
     }
 
     #[test]

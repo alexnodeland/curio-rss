@@ -24,10 +24,11 @@ export interface RecoveryPlan {
 /**
  * Classes where Curio may move the database aside (mirrors the backend's
  * `may_replace_database`): never while another process holds it, never when
- * the database is not what failed, never without a profile.
+ * the database is not what failed (the profile folder, or where it lives),
+ * never without a profile.
  */
 function mayReplace(failureClass: StartupFailureClass): boolean {
-    return !['locked', 'profile', 'no_profile'].includes(failureClass);
+    return !['locked', 'profile', 'network_fs', 'no_profile'].includes(failureClass);
 }
 
 /**
@@ -35,14 +36,17 @@ function mayReplace(failureClass: StartupFailureClass): boolean {
  * best fixed by updating Curio — lossless, unlike restoring a backup from
  * before the newer build's upgrade. Restoring needs a backup this build can
  * open; a retry only helps where the cause can go away (a lock, a refused
- * read or write, a failed upgrade, the unknown).
+ * read or write, a profile moved off network storage, a failed upgrade, the
+ * unknown).
  */
 export function recoveryPlan(failure: StartupFailureDto): RecoveryPlan {
     const actions: RecoveryAction[] = [];
     if (failure.class === 'too_new') {
         actions.push('update');
     }
-    const retryHelps = ['locked', 'io', 'profile', 'upgrade', 'other'].includes(failure.class);
+    const retryHelps = ['locked', 'io', 'profile', 'network_fs', 'upgrade', 'other'].includes(
+        failure.class,
+    );
     if (retryHelps) {
         actions.push('retry');
     }
@@ -62,6 +66,7 @@ const TITLES: Record<StartupFailureClass, MessageKey> = {
     locked: 'recovery.title.locked',
     io: 'recovery.title.io',
     profile: 'recovery.title.profile',
+    network_fs: 'recovery.title.networkFs',
     upgrade: 'recovery.title.upgrade',
     no_profile: 'recovery.title.noProfile',
     other: 'recovery.title.other',
@@ -73,6 +78,7 @@ const BODIES: Record<StartupFailureClass, MessageKey> = {
     locked: 'recovery.body.locked',
     io: 'recovery.body.io',
     profile: 'recovery.body.profile',
+    network_fs: 'recovery.body.networkFs',
     upgrade: 'recovery.body.upgrade',
     no_profile: 'recovery.body.noProfile',
     other: 'recovery.body.other',

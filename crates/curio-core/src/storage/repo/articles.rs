@@ -3,14 +3,14 @@
 
 use super::rows::{
     RawArticle, article_by_id, article_cols_prefixed, fts_match_expr, list_articles_query,
-    raw_article, scoped_dedupe_key,
+    parse_ts, raw_article, scoped_dedupe_key,
 };
 use super::{ARTICLE_COLS, ListArticles, UpsertOutcome, begin_write};
 use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, NewArticle};
 use crate::storage::{Storage, StorageError};
 use curio_types::{CurioId, Timestamp};
 use rusqlite::OptionalExtension as _;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Re-ingest of a row whose content is still feed/manual-sourced: every
 /// ingest column may change. The `WHERE` makes it change-aware — a row
@@ -51,6 +51,20 @@ impl Storage {
     ///   written at all (no `modified_at` bump, no FTS reindex), so
     ///   [`UpsertOutcome::updated`] counts rows that *actually changed*.
     ///
+    /// A `published_at` later than the article's first-seen time
+    /// (`saved_at`; *now* for an insert) is clamped to it: nothing is
+    /// published after Curio first saw it, and a bogus future date would
+    /// otherwise reach the reader and the exported `published` frontmatter
+    /// as-is. Clamping to the stored
+    /// `saved_at` — not to the current time — keeps the stored value stable,
+    /// so re-ingesting the same future date is still a no-op.
+    ///
+    /// The raw future value is deliberately not kept. It is a bogus date
+    /// with no reader in the app or in either contract (`published` is the
+    /// clamped value), and the feed stays its source: every refresh
+    /// re-reads it from the feed and re-clamps it, so a source that
+    /// corrects the date replaces the clamped value on the next refresh.
+    ///
     /// # Errors
     ///
     /// Database errors; the whole batch rolls back on failure.
@@ -61,18 +75,27 @@ impl Storage {
         self.write(move |conn| {
             let tx = begin_write(conn)?;
             let mut outcome = UpsertOutcome::default();
-            let now = Timestamp::now().to_string();
+            let now_ts = Timestamp::now();
+            let now = now_ts.to_string();
             for article in articles {
                 let dedupe_key = scoped_dedupe_key(article.feed_id, &article.dedupe_key);
-                let existing: Option<(i64, String)> = tx
+                let existing: Option<(i64, String, String)> = tx
                     .prepare_cached(
-                        "SELECT id, content_origin FROM articles WHERE dedupe_key = ?1",
+                        "SELECT id, content_origin, saved_at FROM articles WHERE dedupe_key = ?1",
                     )?
-                    .query_row([&dedupe_key], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .query_row([&dedupe_key], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })
                     .optional()?;
-                let published_at = article.published_at.map(|t| t.to_string());
+                let first_seen = match &existing {
+                    Some((_, _, saved_at)) => parse_ts("articles.saved_at", saved_at)?,
+                    None => now_ts,
+                };
+                let published_at = article
+                    .published_at
+                    .map(|published| published.min(first_seen).to_string());
                 let source_updated_at = article.source_updated_at.map(|t| t.to_string());
-                if let Some((id, origin)) = existing {
+                if let Some((id, origin, _)) = existing {
                     let replaceable = origin == ContentOrigin::Feed.as_str()
                         || origin == ContentOrigin::Manual.as_str();
                     let changed = if replaceable {
@@ -191,6 +214,37 @@ impl Storage {
                 .query_row([&scoped], |row| row.get::<_, i64>(0))
                 .optional()?
                 .map(ArticleId))
+        })
+    }
+
+    /// The `source_url` of each of `dedupe_keys` that has an article stored
+    /// under it within `feed_id`'s provenance scope (as for
+    /// [`Self::article_id_by_dedupe_key`]), keyed by the unscoped key — one
+    /// read for a whole fetch. Refresh settles reused-guid keys with it
+    /// ([`crate::feeds::ParsedFeed::settle_keys`]).
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn source_urls_by_dedupe_key(
+        &self,
+        feed_id: Option<FeedId>,
+        dedupe_keys: Vec<String>,
+    ) -> Result<HashMap<String, String>, StorageError> {
+        self.read(move |conn| {
+            let mut stmt =
+                conn.prepare_cached("SELECT source_url FROM articles WHERE dedupe_key = ?1")?;
+            let mut found = HashMap::new();
+            for key in dedupe_keys {
+                let scoped = scoped_dedupe_key(feed_id, &key);
+                if let Some(source_url) = stmt
+                    .query_row([&scoped], |row| row.get::<_, String>(0))
+                    .optional()?
+                {
+                    found.insert(key, source_url);
+                }
+            }
+            Ok(found)
         })
     }
 

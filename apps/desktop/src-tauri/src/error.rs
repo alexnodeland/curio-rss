@@ -133,12 +133,14 @@ impl From<CoreError> for CommandError {
             CoreError::FeedParse(_) | CoreError::Opml(_) | CoreError::Import(_) => {
                 Self::user(ErrorCode::Parse, error.to_string(), true)
             }
-            // A vanished vault (moved, renamed, unmounted) is the user's to
-            // fix — reconnect the folder or register the destination again
-            // — so its message is shown, not a generic failure.
-            CoreError::Export(ExportError::DestinationMissing { .. }) => {
-                Self::user(ErrorCode::Io, error.to_string(), true)
-            }
+            // A vanished vault (moved, renamed, unmounted), or a note whose
+            // every candidate path is taken by other files, is the user's to
+            // fix — reconnect the folder or register the destination again;
+            // rename or move the files on the named path — so its message is
+            // shown, not a generic failure.
+            CoreError::Export(
+                ExportError::DestinationMissing { .. } | ExportError::PathsTaken { .. },
+            ) => Self::user(ErrorCode::Io, error.to_string(), true),
             CoreError::Io { .. } | CoreError::Export(_) | CoreError::Events(_) => {
                 Self::internal(ErrorCode::Io, error.to_string())
             }
@@ -185,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_destination_folder_is_user_tier_and_recoverable() {
+    fn user_fixable_export_failures_are_user_tier_and_recoverable() {
         let error = CommandError::from(CoreError::Export(ExportError::DestinationMissing {
             root: "/vault".into(),
         }));
@@ -193,6 +195,16 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Io);
         assert!(error.recoverable);
         assert!(error.message.contains("missing"), "{}", error.message);
+        let taken = CommandError::from(CoreError::Export(ExportError::PathsTaken {
+            path: "curio/busy-0197b2c4.md".into(),
+        }));
+        assert_eq!(taken.kind, ErrorKind::User);
+        assert!(taken.recoverable);
+        assert!(
+            taken.message.contains("curio/busy-0197b2c4.md"),
+            "{}",
+            taken.message
+        );
         // Other export failures stay internal.
         let other = CommandError::from(CoreError::Export(ExportError::Containment {
             path: "x".into(),

@@ -4,7 +4,20 @@
 //! lines — is banned; conversion is a real DOM traversal. Input is
 //! expected to be sanitized already (this module is called on stored
 //! content at export time), but the skip list drops any script/style/
-//! boilerplate defensively anyway.
+//! embed remnant defensively anyway.
+//!
+//! `header`, `footer` and `aside` are *not* skipped: whether one of them
+//! is page chrome depends on where it sits in the page, and deciding that
+//! is the ingest pipeline's job. Both doors ([`super::process`] and
+//! [`super::process_full_page`]) drop the page-level ones before storage,
+//! so what reaches export is content — a quote's `<footer>` attribution,
+//! an article's or section's own header, an in-article callout — and
+//! converting it is the point (#128).
+//!
+//! `nav` is skipped wherever it sits: it is a block of links into the
+//! source site (breadcrumbs, a menu, an in-page table of contents whose
+//! `#anchors` mean nothing in a note), and articles stored before the
+//! full-page door stripped chrome may still carry it.
 //!
 //! Footnotes become `CommonMark` footnotes (`[^1]` / `[^1]: …`) and other
 //! in-page links keep only their text (see `footnotes`); a `pre`/`code`
@@ -22,8 +35,7 @@ use super::{ContentError, footnotes};
 /// (practically unreachable for parseable HTML).
 pub fn to_markdown(html: &str) -> Result<String, ContentError> {
     let builder = HtmlToMarkdown::builder().skip_tags(vec![
-        "script", "style", "iframe", "object", "embed", "form", "nav", "aside", "header", "footer",
-        "noscript", "svg", "canvas",
+        "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg", "canvas",
     ]);
     let converter = footnotes::register(builder, html).build();
     Ok(converter.convert(html)?.trim().to_owned())
@@ -138,6 +150,32 @@ mod tests {
     fn code_fence_keeps_its_language() {
         let md = to_markdown("<pre><code class=\"language-rust\">let x = 1;</code></pre>").unwrap();
         assert!(md.starts_with("```rust\n"), "{md}");
+    }
+
+    #[test]
+    fn sectioning_elements_left_in_stored_content_convert() {
+        let md = to_markdown(
+            "<article><header><h1>Title</h1></header><p>Body.</p>\
+             <aside><p>Callout.</p></aside>\
+             <blockquote><p>Quote.</p><footer>— Author</footer></blockquote></article>",
+        )
+        .unwrap();
+        for kept in ["# Title", "Body.", "Callout.", "> Quote.", "— Author"] {
+            assert!(md.contains(kept), "lost {kept:?}: {md}");
+        }
+    }
+
+    #[test]
+    fn nav_is_never_exported() {
+        let md = to_markdown(
+            "<article><nav><a href=\"https://e.com/blog\">Blog</a> › \
+             <a href=\"https://e.com/tech\">Tech</a></nav>\
+             <header><h1>Title</h1></header><p>Body.</p></article>",
+        )
+        .unwrap();
+        assert!(!md.contains("Blog"), "breadcrumbs exported: {md}");
+        assert!(md.contains("# Title"), "{md}");
+        assert!(md.contains("Body."), "{md}");
     }
 
     #[test]

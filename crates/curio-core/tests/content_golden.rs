@@ -8,7 +8,7 @@
 
 mod common;
 
-use curio_core::content::{process, to_markdown};
+use curio_core::content::{plain_text, process, sanitize, to_markdown};
 
 fn pipeline(raw_html: &str) -> String {
     let processed = process(raw_html, Some("https://example.com/posts/current"));
@@ -299,23 +299,52 @@ fn footnotes_fixture_round_trips_to_commonmark_footnotes() {
     }
 }
 
+/// The `dir` / `lang` that apply to the first element matching `selector`
+/// in stored HTML: its own, else the nearest ancestor's.
+fn inherited_direction(html: &str, selector: &str) -> (Option<String>, Option<String>) {
+    let doc = scraper::Html::parse_fragment(html);
+    let selector = scraper::Selector::parse(selector).unwrap();
+    let element = doc.select(&selector).next().unwrap();
+    let inherited = |name: &str| {
+        std::iter::once(element)
+            .chain(element.ancestors().filter_map(scraper::ElementRef::wrap))
+            .find_map(|el| el.value().attr(name))
+            .map(ToOwned::to_owned)
+    };
+    (inherited("dir"), inherited("lang"))
+}
+
 #[test]
 fn rtl_fixture_keeps_direction_and_language() {
-    let html = stored_html("rtl.html");
-    // Direction set only on the container survives as a wrapper around
-    // everything that inherits it — the heading and the bare paragraph.
-    assert!(
-        html.starts_with("<div dir=\"rtl\" lang=\"ar\"><h1>مقالة"),
-        "container direction lost:\n{html}"
-    );
-    assert!(html.ends_with("</div>"), "{html}");
-    for needle in [
-        "<p>هذه فقرة عربية ترث اتجاهها",
-        "<p dir=\"ltr\" lang=\"en\">",
-        "<bdi>إيان</bdi>",
-        "<bdo dir=\"rtl\">reversed</bdo>",
-    ] {
-        assert!(html.contains(needle), "{needle} missing from:\n{html}");
+    let rtl = (Some("rtl".to_owned()), Some("ar".to_owned()));
+    // Direction set only on the container must still reach everything
+    // that inherits it — the heading and the bare paragraph — both as a
+    // feed fragment and as a whole-page item the extractor runs on.
+    let fragment = stored_html("rtl.html");
+    let page = process(
+        &format!(
+            "<html><body><nav><a href=\"/\">Home</a></nav>{}</body></html>",
+            html_fixture("rtl.html")
+        ),
+        Some("https://example.com/posts/current"),
+    )
+    .html;
+    assert!(!page.contains("Home"), "not extracted:\n{page}");
+    for html in [&fragment, &page] {
+        assert_eq!(inherited_direction(html, "h1"), rtl, "heading:\n{html}");
+        assert_eq!(
+            inherited_direction(html, "p"),
+            rtl,
+            "bare paragraph:\n{html}"
+        );
+        for needle in [
+            "<p>هذه فقرة عربية ترث اتجاهها",
+            "<p dir=\"ltr\" lang=\"en\">",
+            "<bdi>إيان</bdi>",
+            "<bdo dir=\"rtl\">reversed</bdo>",
+        ] {
+            assert!(html.contains(needle), "{needle} missing from:\n{html}");
+        }
     }
     assert!(pipeline(&html_fixture("rtl.html")).contains("هذه فقرة عربية"));
 }
@@ -361,4 +390,89 @@ fn embeds_fixture_turns_every_visible_embed_into_a_link() {
         );
     }
     assert!(markdown.contains("The end."));
+}
+
+/// Feed fragments are sanitized only (#128): the stored text is exactly
+/// the sanitized input's text — no sibling block, quote attribution,
+/// figure caption or in-article aside is dropped by extraction.
+#[test]
+fn fragment_fixtures_keep_all_their_text() {
+    for (name, phrases) in [
+        (
+            "multi-section-post.html",
+            &[
+                "Why we moved the queue",
+                "deliberately the shorter",
+                "What changed after the move",
+                "on-call rotation",
+                "Ghost-style callout card",
+            ][..],
+        ),
+        (
+            "intro-wrapped-div.html",
+            &[
+                "A one-line intro that sits outside the body wrapper.",
+                "The main body lives inside a wrapper div",
+                "A second body paragraph",
+            ][..],
+        ),
+        (
+            "blockquote-attribution.html",
+            &[
+                "Simplicity is prerequisite for reliability.",
+                "— Edsger W. Dijkstra",
+                "A program, before version control.",
+                "Both the attribution and the caption",
+            ][..],
+        ),
+        (
+            "in-article-aside.html",
+            &[
+                "# Notes on backpressure",
+                "By the editors, filed under systems.",
+                "**Pull quote:** an unbounded queue",
+                "Bounding the queue",
+                "Corrections and follow-ups are welcome.",
+            ][..],
+        ),
+    ] {
+        let raw = html_fixture(name);
+        let base = Some("https://example.com/posts/current");
+        let processed = process(&raw, base);
+        assert_eq!(
+            processed.text,
+            plain_text(&sanitize(&raw, base)),
+            "{name}: extraction dropped text"
+        );
+        let markdown = to_markdown(&processed.html).unwrap();
+        for phrase in phrases {
+            assert!(
+                markdown.contains(phrase),
+                "{name}: lost {phrase:?} in:\n{markdown}"
+            );
+        }
+    }
+}
+
+/// A feed item that is a whole page still loses its chrome, but every
+/// content-bearing block around the top scorer survives (#128).
+#[test]
+fn page_fixture_drops_chrome_keeps_every_content_block() {
+    let markdown = pipeline(&html_fixture("page-split-content.html"));
+    for kept in [
+        "A short standfirst",
+        "## What shipped",
+        "release highlights",
+        "## What is next",
+        "Ship small, ship often.",
+        "— the release team",
+    ] {
+        assert!(markdown.contains(kept), "lost {kept:?} in:\n{markdown}");
+    }
+    for chrome in ["Example Blog", "Home", "Related posts", "© 2026"] {
+        assert!(
+            !markdown.contains(chrome),
+            "chrome {chrome:?} leaked:\n{markdown}"
+        );
+    }
 }

@@ -104,9 +104,9 @@ allowance carries a vector in `xss-corpus.html`):
   the source site. Markdown export turns footnotes into `[^1]` / `[^1]: …` (dropping
   the `↩` back-references) and drops the destination of any other in-page link.
 - **Direction and structure** — `dir`, `lang`, `ol[start]`, `<bdi>`/`<bdo>`, and the
-  `language-*` class on `pre`/`code` (the exported fence language). On feed items,
-  direction set only on the article container survives extraction as a
-  `<div dir lang>` wrapper.
+  `language-*` class on `pre`/`code` (the exported fence language). When a
+  whole-page feed item is extracted, direction set only on the winning container
+  survives as a `<div dir lang>` wrapper.
 - **Embeds** — iframes from known media/content hosts (YouTube, Vimeo, Spotify,
   SoundCloud, CodePen, Bluesky) or with an embed-shaped URL (`/embed`, `/player`, …,
   e.g. Mastodon) become a plain "Embedded media/content (host) ↗" link; invisible

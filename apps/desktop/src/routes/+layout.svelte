@@ -11,6 +11,7 @@ import { prefsStore } from '$lib/state/prefs.svelte';
 import { themeStore } from '$lib/state/theme.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
+import { announceLegacyProfiles } from '$lib/utils/legacy-profiles';
 import { runStartupUpdateCheck } from '$lib/utils/updates';
 import type { Snippet } from 'svelte';
 
@@ -51,6 +52,10 @@ onMount(() => {
             return;
         }
         teardowns.push(...unsubscribers);
+
+        // A library from an earlier release that startup moved, or had to
+        // leave where it is: say so once (the doctor panel keeps the why).
+        void announceLegacyProfiles();
 
         // Auto-update: check the release feed once (best-effort, off in the dev
         // browser). Auto-install relaunches; otherwise a toast points at Settings.

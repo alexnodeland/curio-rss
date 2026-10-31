@@ -333,6 +333,30 @@ export const it: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Database: {path}',
     'doctor.check.integrity': 'Verifica integrità',
     'doctor.check.fts': 'Verifica indice di ricerca',
+
+    'legacy.title': 'Librerie delle versioni precedenti',
+    'legacy.notice.moved':
+        'La tua libreria di una versione precedente di Curio è stata spostata in {path}, dove la apre anche la riga di comando.',
+    'legacy.notice.openedInPlace':
+        'La tua libreria di una versione precedente di Curio non è ancora stata spostata, quindi Curio l’ha aperta dove si trova. Dettagli: {where}.',
+    'legacy.notice.left':
+        'Una libreria di una versione precedente di Curio è rimasta in {path}. Dettagli: {where}.',
+    'legacy.detail.moved':
+        'Spostata da {path} alla posizione condivisa dall’app e dalla riga di comando.',
+    'legacy.detail.openedInPlace':
+        'Per ora Curio l’ha aperta dove si trova, quindi non manca nulla; al prossimo avvio riproverà a spostarla.',
+    'legacy.reason.defaultInUse':
+        '{path} è rimasta dov’è: la posizione condivisa contiene già una libreria e due librerie non vengono mai unite. Esporta ciò che ti serve da quella vecchia con curio --profile, poi rimuovila.',
+    'legacy.reason.ambiguous':
+        '{path} è rimasta dov’è: esiste più di una vecchia libreria. Sposta a mano in {default} quella da tenere.',
+    'legacy.reason.inUse':
+        '{path} è rimasta dov’è: un altro processo di Curio la tiene aperta. Chiudi quel processo, poi riavvia Curio per spostarla.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} è rimasta dov’è: {default} esiste già e non è vuota. Sposta lì a mano la vecchia libreria.',
+    'legacy.reason.unreadable':
+        '{path} è rimasta dov’è: non è stato possibile controllarne il database ({detail}). Spostala a mano in {default}.',
+    'legacy.reason.moveFailed':
+        '{path} è rimasta dov’è: lo spostamento non è riuscito ({detail}). Spostala a mano in {default}.',
     'feedHealth.title': 'Salute del feed',
     'feedHealth.status': 'Stato',
     'feedHealth.pause': 'Sospendi',

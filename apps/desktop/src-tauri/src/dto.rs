@@ -14,11 +14,13 @@
 //!   payloads small; only [`ArticleDto`] carries the sanitized HTML.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
     Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewFeed,
 };
+use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::ListArticles;
 use curio_core::{ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, SaveOutcome};
 use curio_types::Destination;
@@ -624,6 +626,80 @@ pub struct AppInfoDto {
     pub schema_supported: i64,
 }
 
+/// What startup did with a profile an earlier release kept outside the
+/// shared default location ([`curio_core::paths::adopt_legacy_profiles`]):
+/// the startup notice and the doctor panel render it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct LegacyProfileDto {
+    /// The legacy profile's directory — where it was, when moved (display
+    /// only).
+    pub path: String,
+    /// The default profile shared with the CLI (display only).
+    pub default_dir: String,
+    /// Moved, or why it was left where it is.
+    pub status: LegacyProfileStatusDto,
+    /// The OS / database error behind `unreadable` and `move_failed`
+    /// (engine English, display only); `null` otherwise.
+    pub detail: Option<String>,
+    /// `true` when this session opened it where it is, because a fresh
+    /// default would have stranded it (see
+    /// [`curio_core::paths::in_place_fallback`]).
+    pub opened_in_place: bool,
+}
+
+/// Mirror of [`curio_core::paths::LegacyProfile`]'s outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyProfileStatusDto {
+    /// Moved into the shared default location.
+    Moved,
+    /// The default already holds a library; never merged.
+    DefaultInUse,
+    /// More than one legacy profile exists.
+    Ambiguous,
+    /// Another process has it open.
+    InUse,
+    /// The default directory exists and is not empty.
+    DefaultNotEmpty,
+    /// Its database could not be checked.
+    Unreadable,
+    /// The move failed.
+    MoveFailed,
+}
+
+impl LegacyProfileDto {
+    /// The wire form of one outcome; `in_place` is the legacy profile this
+    /// session opened instead of the default, if any.
+    #[must_use]
+    pub fn new(outcome: &LegacyProfile, default_dir: &Path, in_place: Option<&Path>) -> Self {
+        let (path, status, detail) = match outcome {
+            LegacyProfile::Migrated { from, .. } => (from, LegacyProfileStatusDto::Moved, None),
+            LegacyProfile::Left { path, reason } => {
+                let (status, detail) = match reason {
+                    LeftReason::DefaultInUse => (LegacyProfileStatusDto::DefaultInUse, None),
+                    LeftReason::Ambiguous => (LegacyProfileStatusDto::Ambiguous, None),
+                    LeftReason::InUse => (LegacyProfileStatusDto::InUse, None),
+                    LeftReason::DefaultNotEmpty => (LegacyProfileStatusDto::DefaultNotEmpty, None),
+                    LeftReason::Unreadable(error) => {
+                        (LegacyProfileStatusDto::Unreadable, Some(error.clone()))
+                    }
+                    LeftReason::MoveFailed(error) => {
+                        (LegacyProfileStatusDto::MoveFailed, Some(error.clone()))
+                    }
+                };
+                (path, status, detail)
+            }
+        };
+        Self {
+            path: path.display().to_string(),
+            default_dir: default_dir.display().to_string(),
+            status,
+            detail,
+            opened_in_place: in_place == Some(path.as_path()),
+        }
+    }
+}
+
 /// Doctor-panel database stats.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct DbStatsDto {
@@ -650,6 +726,8 @@ pub struct PathTokenDto {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    use std::path::PathBuf;
 
     use super::*;
 
@@ -683,6 +761,66 @@ mod tests {
         assert_eq!(json, "dead");
         let json = serde_json::to_value(ExportDispositionDto::Unchanged).unwrap();
         assert_eq!(json, "unchanged");
+        let json = serde_json::to_value(LegacyProfileStatusDto::DefaultNotEmpty).unwrap();
+        assert_eq!(json, "default_not_empty");
+    }
+
+    #[test]
+    fn legacy_profile_outcomes_map_onto_the_wire() {
+        let default = Path::new("/shared");
+        let moved = LegacyProfileDto::new(
+            &LegacyProfile::Migrated {
+                from: PathBuf::from("/old"),
+                to: default.to_path_buf(),
+            },
+            default,
+            None,
+        );
+        assert_eq!(moved.path, "/old");
+        assert_eq!(moved.default_dir, "/shared");
+        assert_eq!(moved.status, LegacyProfileStatusDto::Moved);
+        assert!(!moved.opened_in_place);
+
+        let cases = [
+            (
+                LeftReason::DefaultInUse,
+                LegacyProfileStatusDto::DefaultInUse,
+                None,
+            ),
+            (
+                LeftReason::Ambiguous,
+                LegacyProfileStatusDto::Ambiguous,
+                None,
+            ),
+            (LeftReason::InUse, LegacyProfileStatusDto::InUse, None),
+            (
+                LeftReason::DefaultNotEmpty,
+                LegacyProfileStatusDto::DefaultNotEmpty,
+                None,
+            ),
+            (
+                LeftReason::Unreadable("bad".into()),
+                LegacyProfileStatusDto::Unreadable,
+                Some("bad"),
+            ),
+            (
+                LeftReason::MoveFailed("xdev".into()),
+                LegacyProfileStatusDto::MoveFailed,
+                Some("xdev"),
+            ),
+        ];
+        for (reason, status, detail) in cases {
+            let outcome = LegacyProfile::Left {
+                path: PathBuf::from("/old"),
+                reason,
+            };
+            let dto = LegacyProfileDto::new(&outcome, default, Some(Path::new("/old")));
+            assert_eq!(dto.status, status);
+            assert_eq!(dto.detail.as_deref(), detail);
+            assert!(dto.opened_in_place);
+            let elsewhere = LegacyProfileDto::new(&outcome, default, Some(Path::new("/other")));
+            assert!(!elsewhere.opened_in_place);
+        }
     }
 
     #[test]

@@ -348,6 +348,29 @@ export const en = {
     'doctor.check.integrity': 'Integrity check',
     'doctor.check.fts': 'Search index check',
 
+    'legacy.title': 'Libraries from earlier releases',
+    'legacy.notice.moved':
+        'Moved your library from an earlier Curio release to {path}, where the command line opens it too.',
+    'legacy.notice.openedInPlace':
+        'Your library from an earlier Curio release could not be moved yet, so Curio opened it where it is. See {where}.',
+    'legacy.notice.left':
+        'A library from an earlier Curio release was left at {path}. See {where}.',
+    'legacy.detail.moved': 'Moved from {path} to the location the app and the command line share.',
+    'legacy.detail.openedInPlace':
+        'Curio opened it where it is for now, so nothing is missing, and tries the move again at the next start.',
+    'legacy.reason.defaultInUse':
+        '{path} was left where it is: the shared location already holds a library, and two libraries are never merged. Export what you need from the old one with curio --profile, then remove it.',
+    'legacy.reason.ambiguous':
+        '{path} was left where it is: more than one old library exists. Move the one to keep to {default} by hand.',
+    'legacy.reason.inUse':
+        '{path} was left where it is: another Curio process has it open. Quit that process, then restart Curio to move it.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} was left where it is: {default} exists and is not empty. Move the old library there by hand.',
+    'legacy.reason.unreadable':
+        '{path} was left where it is: its database could not be checked ({detail}). Move it to {default} by hand.',
+    'legacy.reason.moveFailed':
+        '{path} was left where it is: moving it failed ({detail}). Move it to {default} by hand.',
+
     'feedHealth.title': 'Feed health',
     'feedHealth.status': 'Status',
     'feedHealth.pause': 'Pause',

@@ -9,8 +9,9 @@ use curio_core::CoreHandle;
 use tauri::State;
 
 use super::{SharedCore, run_blocking};
-use crate::dto::DbStatsDto;
+use crate::dto::{DbStatsDto, LegacyProfileDto};
 use crate::error::CommandError;
+use crate::paths::LegacyProfiles;
 
 /// `PRAGMA integrity_check` — `Ok(())` or an internal error with detail.
 #[tauri::command]
@@ -53,6 +54,17 @@ pub async fn sweep_event_retention(
 ) -> Result<Vec<String>, CommandError> {
     let core = Arc::clone(core.inner());
     run_blocking(move || sweep_event_retention_impl(&core)).await
+}
+
+/// What startup did with profiles an earlier release kept outside the
+/// shared default (moved, or left where it is and why) — the startup
+/// notice and the doctor panel. Empty when there were none.
+#[tauri::command]
+#[specta::specta]
+pub async fn legacy_profiles(
+    legacy: State<'_, LegacyProfiles>,
+) -> Result<Vec<LegacyProfileDto>, CommandError> {
+    Ok(legacy.0.clone())
 }
 
 // ------------------------------------------------------------------ impls

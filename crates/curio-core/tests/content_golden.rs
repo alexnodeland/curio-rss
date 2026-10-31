@@ -7,6 +7,8 @@
 #![allow(clippy::unwrap_used)]
 
 mod common;
+#[path = "common/inert.rs"]
+mod inert;
 
 use curio_core::content::{process, to_markdown};
 
@@ -70,48 +72,15 @@ fn xss_corpus_output_is_inert() {
     let processed = process(&raw, Some("https://example.com/posts/current"));
     let markdown = to_markdown(&processed.html).unwrap();
 
-    // Structural audit of the stored HTML: no forbidden elements, no
-    // event-handler or style attributes, http(s)-only URL attributes.
-    // (Substring scans would false-positive on inert anchor *text* like
-    // "javascript: link", which sanitization correctly leaves behind.)
-    let stored = scraper::Html::parse_fragment(&processed.html);
-    let all = scraper::Selector::parse("*").unwrap();
-    for element in stored.select(&all) {
-        let name = element.value().name();
-        assert!(
-            ![
-                "script", "svg", "iframe", "frame", "object", "embed", "form", "input", "button",
-                "style", "base", "meta", "link", "audio", "video", "math",
-            ]
-            .contains(&name),
-            "forbidden element <{name}> survived:\n{}",
-            processed.html
-        );
-        for (attr, value) in element.value().attrs() {
-            assert!(
-                !attr.starts_with("on") && attr != "style" && attr != "http-equiv",
-                "forbidden attribute {attr:?} survived on <{name}>"
-            );
-            if matches!(attr, "href" | "src") {
-                assert!(
-                    value.starts_with("http://") || value.starts_with("https://"),
-                    "non-http(s) {attr} survived on <{name}>: {value:?}"
-                );
-            }
-        }
-    }
-
-    // The markdown, which is what gets exported, carries no executable
-    // remnants: no scriptable link/image destinations, no raw HTML.
+    // Structural audit of the stored HTML, then the exported markdown
+    // (common/inert.rs — the shared definition the nasty corpus and the
+    // proptests hold every other input to).
+    inert::audit_html(&processed.html).unwrap();
+    inert::audit_markdown(&markdown).unwrap();
+    // This fixture leaves no trace of its attacks at all — not even as
+    // escaped text — and none of them reach the attacker host.
     let lower = markdown.to_lowercase();
-    for vector in [
-        "](javascript:",
-        "](data:",
-        "<script",
-        "onerror=",
-        "onload=",
-        "evil.example",
-    ] {
+    for vector in ["<script", "onerror=", "onload=", "evil.example"] {
         assert!(
             !lower.contains(vector),
             "markdown still contains {vector:?}:\n{markdown}"

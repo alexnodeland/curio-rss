@@ -68,6 +68,9 @@ url = { workspace = true }
 # Test seeding (`commands::testutil::seed_article`) needs the raw
 # storage accessor; production builds never see it.
 curio-core = { workspace = true, features = ["test-support"] }
+# "Never panics" properties over discovery's pure extraction (arbitrary
+# bytes / multi-byte text); already a workspace dev-dependency.
+proptest = { workspace = true }
 specta-typescript = "=0.0.12"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

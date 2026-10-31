@@ -4,8 +4,9 @@
 //!
 //! Given a URL the user typed, [`Discovery::discover`] fetches it once and:
 //!
-//! - if the bytes are already a feed (`<rss`/`<feed`/`<rdf`/JSON-feed
-//!   marker), returns that URL as the sole candidate;
+//! - if the bytes are already a feed (an `rss`/`feed`/`rdf:RDF` root
+//!   element, or a JSON Feed `version`), returns that URL as the sole
+//!   candidate;
 //! - otherwise parses the HTML for `<link rel="alternate" …>` feed links
 //!   (RSS/Atom/JSON) and resolves each `href` against the final URL.
 //!
@@ -189,21 +190,89 @@ fn og_title(document: &Html) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A quick structural sniff: does the head of the body look like a feed
-/// rather than an HTML page? (Content-Type is not exposed by the policed
-/// response, so we inspect the bytes.)
+/// How much of the body the feed sniff looks at. Feeds declare their root
+/// element (or JSON Feed `version`) early; scanning the whole body would
+/// misfire on HTML that quotes a feed snippet far down the page.
+const SNIFF_WINDOW: usize = 2048;
+
+/// A quick structural sniff: does the body look like a feed rather than an
+/// HTML page? (Content-Type is not exposed by the policed response, so we
+/// inspect the bytes.)
+///
+/// XML: past any BOM, whitespace, XML prolog, processing instructions,
+/// comments and `<!DOCTYPE …>`, the *root element* must be `rss`, `feed` or
+/// `rdf:RDF` (any namespace prefix, ASCII case-insensitive) — a `<feed`
+/// substring elsewhere in an HTML page does not count. JSON: the body is an
+/// object declaring a `jsonfeed.org` `version`.
 fn looks_like_feed(text: &str) -> bool {
-    // Look only at the leading window — feeds declare their root element
-    // early; scanning the whole body would misfire on HTML that quotes a
-    // feed snippet far down the page.
-    let head = &text[..text.len().min(2048)].to_ascii_lowercase();
-    let trimmed = head.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
-    // XML prolog, then a feed root; or a bare feed root; or a JSON feed.
-    trimmed.contains("<rss")
-        || trimmed.contains("<feed")
-        || trimmed.contains("<rdf:rdf")
-        || trimmed.contains("\"version\":\"https://jsonfeed.org")
-        || trimmed.contains("\"version\": \"https://jsonfeed.org")
+    // Cut on a char boundary: `text` is lossily decoded, so byte
+    // `SNIFF_WINDOW` can fall inside a multi-byte char (CJK, emoji, U+FFFD).
+    let head = &text[..text.floor_char_boundary(SNIFF_WINDOW)];
+    let head = head.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    if head.starts_with('{') {
+        return declares_json_feed_version(head);
+    }
+    root_element_name(head).is_some_and(|name| {
+        // `rsplit` always yields at least one piece; the fallback is inert.
+        let local = name.rsplit(':').next().unwrap_or(name);
+        ["rss", "feed", "rdf"]
+            .iter()
+            .any(|root| local.eq_ignore_ascii_case(root))
+    })
+}
+
+/// The name of the first element in `xml`, skipping whitespace, processing
+/// instructions (incl. the `<?xml …?>` prolog), comments and a doctype
+/// (with or without an internal subset). `None` when the window ends before
+/// a root element starts, or the head is not markup at all.
+fn root_element_name(xml: &str) -> Option<&str> {
+    let mut rest = xml;
+    loop {
+        rest = rest.trim_start();
+        if let Some(after) = rest.strip_prefix("<?") {
+            rest = &after[after.find("?>")? + "?>".len()..];
+        } else if let Some(after) = rest.strip_prefix("<!--") {
+            rest = &after[after.find("-->")? + "-->".len()..];
+        } else if let Some(after) = rest.strip_prefix("<!") {
+            rest = skip_declaration(after)?;
+        } else {
+            let after = rest.strip_prefix('<')?;
+            let end = after
+                .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                .unwrap_or(after.len());
+            let name = &after[..end];
+            return (!name.is_empty()).then_some(name);
+        }
+    }
+}
+
+/// Skips the rest of a `<!…>` declaration (`decl` starts just past the
+/// `<!`), honouring a bracketed internal subset (`<!DOCTYPE rss [ … ]>`).
+fn skip_declaration(decl: &str) -> Option<&str> {
+    let close = decl.find('>')?;
+    let close = match decl.find('[') {
+        Some(open) if open < close => {
+            let subset_end = open + decl[open..].find(']')?;
+            subset_end + decl[subset_end..].find('>')?
+        }
+        _ => close,
+    };
+    Some(&decl[close + 1..])
+}
+
+/// Whether a JSON object's head carries `"version": "http(s)://jsonfeed.org…"`
+/// (any whitespace around the colon).
+fn declares_json_feed_version(json: &str) -> bool {
+    json.match_indices("\"version\"").any(|(at, key)| {
+        json[at + key.len()..]
+            .trim_start()
+            .strip_prefix(':')
+            .map(str::trim_start)
+            .is_some_and(|value| {
+                value.starts_with("\"https://jsonfeed.org")
+                    || value.starts_with("\"http://jsonfeed.org")
+            })
+    })
 }
 
 /// `<link rel="alternate" type="…rss/atom/xml/json…" href="…">` candidates.
@@ -400,6 +469,150 @@ mod tests {
         let html = r#"<link rel="alternate" type="application/xhtml+xml" href="/amp">"#;
         let out = extract(html.as_bytes(), "https://blog.test/");
         assert_eq!(out.feeds.len(), 0);
+    }
+
+    /// An HTML page whose head declares one RSS alternate and is padded so a
+    /// 3-byte char (`日`) starts at byte `SNIFF_WINDOW - 1`, straddling the
+    /// sniff cut.
+    fn page_straddling_the_sniff_window() -> String {
+        let prefix = r#"<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"><title>"#;
+        let mut html = String::from(prefix);
+        html.push_str(&"a".repeat(SNIFF_WINDOW - 1 - prefix.len()));
+        html.push('日');
+        html.push_str("本語</title></head><body>本文</body></html>");
+        html
+    }
+
+    #[test]
+    fn a_multibyte_char_straddling_the_sniff_window_does_not_panic() {
+        let html = page_straddling_the_sniff_window();
+        assert!(
+            !html.is_char_boundary(SNIFF_WINDOW),
+            "fixture precondition: the cut falls inside a char"
+        );
+        assert!(!looks_like_feed(&html));
+        let out = extract(html.as_bytes(), "https://blog.test/");
+        assert_eq!(
+            out.feeds,
+            vec![DiscoveredFeedDto {
+                url: "https://blog.test/feed.xml".into(),
+                title: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_lossy_replacement_char_at_the_sniff_window_does_not_panic() {
+        // Invalid UTF-8 around byte SNIFF_WINDOW decodes to U+FFFD (3 bytes),
+        // which shifts the multi-byte char across the cut.
+        let mut body = b"<html><head><title>".to_vec();
+        body.resize(SNIFF_WINDOW - 1, b'x');
+        body.extend_from_slice(&[0xff, 0xfe, 0xfd]);
+        body.extend_from_slice(b"</title></head></html>");
+        let out = extract(&body, "https://blog.test/");
+        assert!(out.feeds.is_empty(), "the replacement chars are plain text");
+    }
+
+    #[test]
+    fn a_4kb_japanese_and_emoji_page_is_scanned_for_its_links() {
+        let mut html = String::from(
+            r#"<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+            <title>日本語のブログ 🎌</title>
+            <link rel="alternate" type="application/atom+xml" title="フィード 📰" href="/atom.xml">
+            </head><body>"#,
+        );
+        while html.len() < 4 * 1024 + 512 {
+            html.push_str("<p>こんにちは世界、今日はいい天気ですね。🍣🍜🗻✨👍🏽👨‍👩‍👧</p>");
+        }
+        html.push_str("</body></html>");
+        let out = extract(html.as_bytes(), "https://blog.test/ja/");
+        assert_eq!(
+            out.feeds,
+            vec![DiscoveredFeedDto {
+                url: "https://blog.test/atom.xml".into(),
+                title: Some("フィード 📰".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_4kb_japanese_and_emoji_feed_is_recognised_as_a_feed() {
+        let mut feed = String::from(
+            r#"<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>日本語 🎌</title>"#,
+        );
+        while feed.len() < 4 * 1024 + 512 {
+            feed.push_str("<entry><title>記事のタイトル 🍣👍🏽</title></entry>");
+        }
+        feed.push_str("</feed>");
+        assert!(looks_like_feed(&feed));
+        let out = extract(feed.as_bytes(), "https://blog.test/atom.xml");
+        assert_eq!(out.feeds.len(), 1);
+        assert_eq!(out.feeds[0].url, "https://blog.test/atom.xml");
+    }
+
+    #[test]
+    fn feed_roots_are_recognised_past_prolog_comments_and_doctype() {
+        let feeds = [
+            r#"<rss version="2.0"><channel/></rss>"#,
+            "\u{feff}  \n<?xml version=\"1.0\"?>\n<RSS version=\"0.91\"/>",
+            r#"<?xml version="1.0"?><?xml-stylesheet href="s.xsl"?><!-- hi --><feed xmlns="http://www.w3.org/2005/Atom"/>"#,
+            r#"<?xml version="1.0"?><!DOCTYPE rss PUBLIC "-//Netscape//DTD RSS 0.91//EN" "x.dtd"><rss/>"#,
+            r#"<!DOCTYPE rss [ <!ENTITY nbsp "&#160;"> ]><rss version="2.0"/>"#,
+            r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>"#,
+            r#"<atom:feed xmlns:atom="http://www.w3.org/2005/Atom"></atom:feed>"#,
+            "<feed>",
+            r#"{"version":"https://jsonfeed.org/version/1.1","title":"x"}"#,
+            "{\n  \"title\": \"x\",\n  \"version\" :\t\"https://jsonfeed.org/version/1\"\n}",
+        ];
+        for feed in feeds {
+            assert!(looks_like_feed(feed), "expected a feed: {feed:?}");
+        }
+    }
+
+    #[test]
+    fn html_mentioning_a_feed_tag_is_not_a_feed() {
+        // The old substring sniff misfired on any `<feed`/`<rss` in the head.
+        let pages = [
+            "<html><head><title>How to write a <feed> element</title></head></html>",
+            "<!DOCTYPE html><!-- <rss> --><html><body><rss></rss></body></html>",
+            r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><feed/></html>"#,
+            "<feedback>not a feed</feedback>",
+            r#"{"title":"not a feed","note":"\"version\":\"https://jsonfeed.org\" is quoted"}"#,
+            r#"{"version":"1.0"}"#,
+            "<!-- unterminated comment <rss>",
+            "<?xml version=\"1.0\"",
+            "<!DOCTYPE rss [ <!ENTITY x \"y\">",
+            "plain text <rss>",
+            "",
+            "<",
+        ];
+        for page in pages {
+            assert!(!looks_like_feed(page), "expected not a feed: {page:?}");
+        }
+        let out = extract(pages[0].as_bytes(), "https://blog.test/");
+        assert!(out.feeds.is_empty(), "the HTML path ran, finding no links");
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn extract_never_panics_on_arbitrary_bytes(
+            body in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..4096),
+        ) {
+            let _ = extract(&body, "https://blog.test/");
+        }
+
+        #[test]
+        fn extract_never_panics_on_arbitrary_text(body in "\\PC{0,3000}") {
+            let _ = extract(body.as_bytes(), "https://blog.test/");
+        }
+
+        #[test]
+        fn the_sniff_never_panics_on_markup_shaped_text(
+            body in "[ \u{feff}]{0,3}(<\\?[^>]{0,40}\\??>?|<!--.{0,40}(-->)?|<!DOCTYPE[^>]{0,30}(\\[.{0,30}\\]?)?>?|<[a-zA-Z:日本🎌]{0,10}|\\{.{0,40}|[日本語🎌👍🏽a]{0,700}){0,6}",
+        ) {
+            let _ = looks_like_feed(&body);
+            let _ = extract(body.as_bytes(), "https://blog.test/");
+        }
     }
 
     #[tokio::test]

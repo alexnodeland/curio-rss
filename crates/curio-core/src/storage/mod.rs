@@ -24,6 +24,7 @@ use rusqlite::Connection;
 
 pub use backup::{PreMigrationBackup, pre_migration_backups};
 pub use open::OpenError;
+pub(crate) use repo::SettingsTx;
 pub use repo::{ListArticles, PendingIntent, UpsertOutcome};
 
 use pool::ReadPool;

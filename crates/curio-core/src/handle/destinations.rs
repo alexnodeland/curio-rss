@@ -1,15 +1,27 @@
 //! Destinations: the named-destination registry and note export.
+//!
+//! **The persisted registry is the only source of truth.** Several heads
+//! (the desktop app, CLI runs, cron jobs) can have one profile open at
+//! once, so no handle caches the registry: every read goes to the
+//! settings table, and every change is a read-modify-write inside one
+//! `IMMEDIATE` transaction (`Storage::edit_settings`). A change another
+//! process made a moment ago is never overwritten with a stale copy.
+//!
+//! Three facade-owned settings keys hold it: the registry itself
+//! (`name → root`), the names that completed an export (the
+//! missing-destination check of [`CoreHandle::save_to_destination`]), and
+//! the pairs a head configuration last seeded (see
+//! [`CoreHandle::reconcile_destinations`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::sync::PoisonError;
+use std::path::{Path, PathBuf};
 
 use curio_types::{Destination, DestinationName};
 
 use crate::content;
 use crate::export::{self, ExportDisposition, ExportInput};
 use crate::model::ArticleId;
-use crate::storage::{ListArticles, Storage};
+use crate::storage::{ListArticles, SettingsTx, Storage};
 
 use super::{BulkSaveOutcome, CoreError, CoreHandle, SaveOutcome};
 
@@ -17,11 +29,9 @@ impl CoreHandle {
     /// Registers (or re-roots) a named destination and persists the
     /// registry. The only place a destination path ever enters.
     ///
-    /// The registry is persisted *inside* the write-lock critical
-    /// section, and the in-memory map only adopts the entry after the
-    /// persist succeeds — so concurrent registrations cannot clobber
-    /// each other's settings value, and a failed persist never leaves a
-    /// destination that works now but vanishes on the next open.
+    /// The registry is re-read and rewritten in one transaction, so
+    /// concurrent registrations all survive, whether they come from other
+    /// threads or from another process on the profile.
     ///
     /// (Re-)registering also starts the destination afresh for the
     /// missing-destination check of [`Self::save_to_destination`]: the
@@ -32,90 +42,117 @@ impl CoreHandle {
     ///
     /// Filesystem or settings errors.
     pub fn add_destination(&self, name: DestinationName, root: PathBuf) -> Result<(), CoreError> {
-        std::fs::create_dir_all(&root).map_err(|source| CoreError::Io {
-            path: root.clone(),
-            source,
-        })?;
-        let mut map = self.lock_destinations_mut();
-        // Forgotten first: should the registry persist below fail, the
-        // destination merely skips the missing-destination check once —
-        // never the reverse (a new root inheriting the old root's flag).
-        self.forget_exported(&name)?;
-        let mut next = map.clone();
-        next.insert(name, root);
-        self.persist_destinations(&next)?;
-        *map = next;
-        Ok(())
+        create_root(&root)?;
+        self.storage.edit_settings(move |settings| {
+            let mut registry = Registry::load(settings)?;
+            registry.register(name, root);
+            registry.store(settings)
+        })
     }
 
-    /// Re-applies a destination from a head's own configuration (the CLI's
-    /// `curio.toml`, on every invocation) without undoing the
-    /// missing-destination check — unlike [`Self::add_destination`],
-    /// which is the explicit "(re-)register this folder" act.
+    /// Applies a head's own destination configuration (the CLI's
+    /// `curio.toml`, on every invocation). `declared` is the whole set the
+    /// configuration names.
     ///
-    /// When the registry already maps `name` to `root` and the destination
-    /// has exported, this is a no-op: the root is **not** recreated (a
-    /// vanished or unmounted vault must surface as
+    /// **The configuration seeds destinations; it does not own them.**
+    /// Each `name → root` pair is applied once, and the registry remembers
+    /// that it was. Re-applying the same pair changes nothing: whatever
+    /// another head did with the destination since (removed it, re-rooted
+    /// it) stands, so a destination removed in the desktop app stays
+    /// removed after a CLI run. A pair the configuration did not declare
+    /// before (a new name, or a changed root) is applied. Dropping a name
+    /// from the configuration forgets that it was seeded, so declaring it
+    /// again later applies it afresh. `docs/design/decisions.md` (D16)
+    /// records the rule.
+    ///
+    /// Applying a pair registers it exactly as [`Self::add_destination`]
+    /// does, unless the registry already maps `name` to `root`: then the
+    /// destination is kept as it is, exported flag included. A root is
+    /// only ever created for a destination that has not exported yet, so a
+    /// vanished or unmounted vault surfaces as
     /// [`ExportError::DestinationMissing`](crate::export::ExportError::DestinationMissing)
-    /// on the next save) and the exported flag is kept. A new name, a
-    /// changed root, or a destination that has not exported yet is
-    /// registered exactly as [`Self::add_destination`] does.
+    /// on the next save instead of being recreated empty.
     ///
     /// # Errors
     ///
     /// Filesystem or settings errors.
-    pub fn reconcile_destination(
+    pub fn reconcile_destinations(
         &self,
-        name: DestinationName,
-        root: PathBuf,
+        declared: BTreeMap<DestinationName, PathBuf>,
     ) -> Result<(), CoreError> {
-        let settled = {
-            let map = self.lock_destinations();
-            map.get(&name) == Some(&root) && self.lock_exported().contains(&name)
-        };
-        if settled {
+        // The common case (every CLI command): nothing new was declared.
+        // Settle it with reads alone, so a CLI run does not take the
+        // database write lock just to find there is nothing to write.
+        let current = Registry::read(&self.storage)?;
+        if current.seeded == declared {
+            for (name, root) in &declared {
+                if current.roots.get(name) == Some(root) && !current.exported.contains(name) {
+                    create_root(root)?;
+                }
+            }
             return Ok(());
         }
-        self.add_destination(name, root)
+        // Something to apply: decide again on fresh values inside the
+        // transaction. Roots are created from the writer thread there; a
+        // few `mkdir`s are cheap.
+        self.storage.edit_settings(move |settings| {
+            let mut registry = Registry::load(settings)?;
+            registry
+                .seeded
+                .retain(|name, _| declared.contains_key(name));
+            for (name, root) in declared {
+                let registered = registry.roots.get(&name) == Some(&root);
+                let applied = registry.seeded.get(&name) == Some(&root);
+                if registered {
+                    // Already what the configuration says: keep it.
+                    if !registry.exported.contains(&name) {
+                        create_root(&root)?;
+                    }
+                } else if !applied {
+                    create_root(&root)?;
+                    registry.register(name.clone(), root.clone());
+                }
+                registry.seeded.insert(name, root);
+            }
+            registry.store(settings)
+        })
     }
 
     /// Unregisters a named destination and persists the registry.
     /// Exported notes under the old root are untouched — removal only
     /// forgets the name (the event stream already told their story).
-    /// Same persist-then-adopt discipline as [`CoreHandle::add_destination`].
+    /// Re-read and rewritten in one transaction, as in
+    /// [`Self::add_destination`].
     ///
     /// # Errors
     ///
     /// [`CoreError::UnknownDestination`] if no destination is registered
     /// under `name`; settings errors.
     pub fn remove_destination(&self, name: &DestinationName) -> Result<(), CoreError> {
-        let mut map = self.lock_destinations_mut();
-        if !map.contains_key(name) {
-            return Err(CoreError::UnknownDestination {
-                name: name.to_string(),
-            });
-        }
-        // Forgotten first, as in `add_destination`: should the registry
-        // persist below fail, the destination stays registered and merely
-        // skips the missing-destination check once.
-        self.forget_exported(name)?;
-        let mut next = map.clone();
-        next.remove(name);
-        self.persist_destinations(&next)?;
-        *map = next;
-        Ok(())
+        let name = name.clone();
+        self.storage.edit_settings(move |settings| {
+            let mut registry = Registry::load(settings)?;
+            if registry.roots.remove(&name).is_none() {
+                return Err(CoreError::UnknownDestination {
+                    name: name.to_string(),
+                });
+            }
+            registry.exported.remove(&name);
+            registry.store(settings)
+        })
     }
 
-    /// The registered destinations.
-    #[must_use]
-    pub fn destinations(&self) -> Vec<Destination> {
-        self.lock_destinations()
-            .iter()
-            .map(|(name, root)| Destination {
-                name: name.clone(),
-                root: root.clone(),
-            })
-            .collect()
+    /// The registered destinations, as persisted now — changes another
+    /// process made since this handle opened included.
+    ///
+    /// # Errors
+    ///
+    /// Storage or settings errors.
+    pub fn destinations(&self) -> Result<Vec<Destination>, CoreError> {
+        Ok(load_roots(&self.storage)?
+            .into_iter()
+            .map(|(name, root)| Destination { name, root })
+            .collect())
     }
 
     /// Exports an article to a named destination and emits the matching
@@ -141,14 +178,12 @@ impl CoreHandle {
         id: ArticleId,
         destination: &DestinationName,
     ) -> Result<SaveOutcome, CoreError> {
-        let root = self
-            .lock_destinations()
-            .get(destination)
-            .cloned()
+        let root = load_roots(&self.storage)?
+            .remove(destination)
             .ok_or_else(|| CoreError::UnknownDestination {
                 name: destination.to_string(),
             })?;
-        let exported_before = self.lock_exported().contains(destination);
+        let exported_before = load_exported(&self.storage)?.contains(destination);
         if exported_before {
             export::require_marker(&root)?;
         }
@@ -179,7 +214,7 @@ impl CoreHandle {
         };
         let dest = Destination {
             name: destination.clone(),
-            root,
+            root: root.clone(),
         };
         // Ordering: note write → event intent → manifest write. The
         // intent is staged BEFORE the manifest commit — were it the
@@ -206,7 +241,7 @@ impl CoreHandle {
         }
         let outcome = staged.commit()?;
         if !exported_before {
-            self.mark_exported(destination);
+            self.mark_exported(destination, root);
         }
         if outcome.disposition != ExportDisposition::Unchanged {
             self.emit();
@@ -241,7 +276,7 @@ impl CoreHandle {
         destination: &DestinationName,
     ) -> Result<BulkSaveOutcome, CoreError> {
         // Fail on an unknown destination before walking anything.
-        if !self.lock_destinations().contains_key(destination) {
+        if !load_roots(&self.storage)?.contains_key(destination) {
             return Err(CoreError::UnknownDestination {
                 name: destination.to_string(),
             });
@@ -271,88 +306,27 @@ impl CoreHandle {
         Ok(outcome)
     }
 
-    /// Serializes the registry into the reserved settings key. Callers
-    /// adopt the new map only after this succeeds — a failed persist must
-    /// never leave an in-memory registry that vanishes on the next open.
-    fn persist_destinations(
-        &self,
-        map: &BTreeMap<DestinationName, PathBuf>,
-    ) -> Result<(), CoreError> {
-        let serialized = serde_json::to_string(
-            &map.iter()
-                .map(|(n, p)| (n.to_string(), p.display().to_string()))
-                .collect::<BTreeMap<_, _>>(),
-        )?;
-        self.storage.set_setting(DESTINATIONS_KEY, &serialized)?;
-        Ok(())
-    }
-
-    /// Records that `name` has completed an export. Best effort: the
-    /// export itself already succeeded, and a failed persist only means the
-    /// missing-destination check stays off for this destination until the
-    /// next successful export records it.
-    fn mark_exported(&self, name: &DestinationName) {
-        let mut set = self.lock_exported_mut();
-        if set.contains(name) {
-            return;
-        }
-        let mut next = set.clone();
-        next.insert(name.clone());
-        match self.persist_exported(&next) {
-            Ok(()) => *set = next,
-            Err(err) => {
-                tracing::warn!(destination = %name, %err, "could not record the destination as exported");
+    /// Records that `name`, registered at `root`, has completed an
+    /// export. Best effort: the export itself already succeeded, and a
+    /// failed persist only means the missing-destination check stays off
+    /// for this destination until the next successful export records it.
+    fn mark_exported(&self, name: &DestinationName, root: PathBuf) {
+        let recorded = self.storage.edit_settings({
+            let name = name.clone();
+            move |settings| {
+                let mut registry = Registry::load(settings)?;
+                // Removed or re-rooted by another head while this export
+                // ran: the export says nothing about the destination now
+                // registered under the name.
+                if registry.roots.get(&name) != Some(&root) || !registry.exported.insert(name) {
+                    return Ok(());
+                }
+                registry.store(settings)
             }
+        });
+        if let Err(err) = recorded {
+            tracing::warn!(destination = %name, %err, "could not record the destination as exported");
         }
-    }
-
-    /// Clears the exported flag for `name` (re-registration, removal).
-    fn forget_exported(&self, name: &DestinationName) -> Result<(), CoreError> {
-        let mut set = self.lock_exported_mut();
-        if !set.contains(name) {
-            return Ok(());
-        }
-        let mut next = set.clone();
-        next.remove(name);
-        self.persist_exported(&next)?;
-        *set = next;
-        Ok(())
-    }
-
-    fn persist_exported(&self, set: &BTreeSet<DestinationName>) -> Result<(), CoreError> {
-        let serialized =
-            serde_json::to_string(&set.iter().map(ToString::to_string).collect::<Vec<_>>())?;
-        self.storage
-            .set_setting(EXPORTED_DESTINATIONS_KEY, &serialized)?;
-        Ok(())
-    }
-
-    fn lock_exported(&self) -> std::sync::RwLockReadGuard<'_, BTreeSet<DestinationName>> {
-        self.exported_destinations
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn lock_exported_mut(&self) -> std::sync::RwLockWriteGuard<'_, BTreeSet<DestinationName>> {
-        self.exported_destinations
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn lock_destinations(
-        &self,
-    ) -> std::sync::RwLockReadGuard<'_, BTreeMap<DestinationName, PathBuf>> {
-        self.destinations
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn lock_destinations_mut(
-        &self,
-    ) -> std::sync::RwLockWriteGuard<'_, BTreeMap<DestinationName, PathBuf>> {
-        self.destinations
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -363,21 +337,75 @@ pub(super) const DESTINATIONS_KEY: &str = "destinations";
 /// export since they were registered (JSON array of names).
 pub(super) const EXPORTED_DESTINATIONS_KEY: &str = "destinations.exported";
 
-pub(super) fn load_exported(storage: &Storage) -> Result<BTreeSet<DestinationName>, CoreError> {
-    let Some(raw) = storage.get_setting(EXPORTED_DESTINATIONS_KEY)? else {
-        return Ok(BTreeSet::new());
-    };
-    let names: Vec<String> = serde_json::from_str(&raw)?;
-    Ok(names.iter().filter_map(|name| name.parse().ok()).collect())
+/// Settings key holding the `name → root` pairs a head configuration last
+/// seeded (JSON `name → root`; see [`CoreHandle::reconcile_destinations`]).
+pub(super) const SEEDED_DESTINATIONS_KEY: &str = "destinations.seeded";
+
+/// The persisted registry: the three facade-owned settings values.
+struct Registry {
+    roots: BTreeMap<DestinationName, PathBuf>,
+    exported: BTreeSet<DestinationName>,
+    seeded: BTreeMap<DestinationName, PathBuf>,
 }
 
-pub(super) fn load_destinations(
-    storage: &Storage,
-) -> Result<BTreeMap<DestinationName, PathBuf>, CoreError> {
-    let Some(raw) = storage.get_setting(DESTINATIONS_KEY)? else {
+impl Registry {
+    /// Loads it inside an edit transaction.
+    fn load(settings: &SettingsTx<'_>) -> Result<Self, CoreError> {
+        Ok(Self {
+            roots: parse_roots(settings.get(DESTINATIONS_KEY)?.as_deref())?,
+            exported: parse_names(settings.get(EXPORTED_DESTINATIONS_KEY)?.as_deref())?,
+            seeded: parse_roots(settings.get(SEEDED_DESTINATIONS_KEY)?.as_deref())?,
+        })
+    }
+
+    /// Reads it outside any transaction — a hint only: the three values
+    /// are read one after the other, so another process can change the
+    /// registry in between.
+    fn read(storage: &Storage) -> Result<Self, CoreError> {
+        Ok(Self {
+            roots: load_roots(storage)?,
+            exported: load_exported(storage)?,
+            seeded: parse_roots(storage.get_setting(SEEDED_DESTINATIONS_KEY)?.as_deref())?,
+        })
+    }
+
+    /// (Re-)registers `name` at `root`, starting it afresh for the
+    /// missing-destination check.
+    fn register(&mut self, name: DestinationName, root: PathBuf) {
+        self.exported.remove(&name);
+        self.roots.insert(name, root);
+    }
+
+    fn store(&self, settings: &SettingsTx<'_>) -> Result<(), CoreError> {
+        settings.set(DESTINATIONS_KEY, &serialize_roots(&self.roots)?)?;
+        settings.set(EXPORTED_DESTINATIONS_KEY, &serialize_names(&self.exported)?)?;
+        settings.set(SEEDED_DESTINATIONS_KEY, &serialize_roots(&self.seeded)?)?;
+        Ok(())
+    }
+}
+
+/// Creates a destination root (and its parents) if absent.
+fn create_root(root: &Path) -> Result<(), CoreError> {
+    std::fs::create_dir_all(root).map_err(|source| CoreError::Io {
+        path: root.to_path_buf(),
+        source,
+    })
+}
+
+fn load_roots(storage: &Storage) -> Result<BTreeMap<DestinationName, PathBuf>, CoreError> {
+    parse_roots(storage.get_setting(DESTINATIONS_KEY)?.as_deref())
+}
+
+fn load_exported(storage: &Storage) -> Result<BTreeSet<DestinationName>, CoreError> {
+    parse_names(storage.get_setting(EXPORTED_DESTINATIONS_KEY)?.as_deref())
+}
+
+/// Parses a JSON `name → root` map; an absent key is an empty map.
+fn parse_roots(raw: Option<&str>) -> Result<BTreeMap<DestinationName, PathBuf>, CoreError> {
+    let Some(raw) = raw else {
         return Ok(BTreeMap::new());
     };
-    let parsed: BTreeMap<String, String> = serde_json::from_str(&raw)?;
+    let parsed: BTreeMap<String, String> = serde_json::from_str(raw)?;
     let mut map = BTreeMap::new();
     for (name, root) in parsed {
         match name.parse::<DestinationName>() {
@@ -390,4 +418,27 @@ pub(super) fn load_destinations(
         }
     }
     Ok(map)
+}
+
+fn serialize_roots(map: &BTreeMap<DestinationName, PathBuf>) -> Result<String, CoreError> {
+    Ok(serde_json::to_string(
+        &map.iter()
+            .map(|(name, root)| (name.to_string(), root.display().to_string()))
+            .collect::<BTreeMap<_, _>>(),
+    )?)
+}
+
+/// Parses a JSON array of names; an absent key is an empty set.
+fn parse_names(raw: Option<&str>) -> Result<BTreeSet<DestinationName>, CoreError> {
+    let Some(raw) = raw else {
+        return Ok(BTreeSet::new());
+    };
+    let names: Vec<String> = serde_json::from_str(raw)?;
+    Ok(names.iter().filter_map(|name| name.parse().ok()).collect())
+}
+
+fn serialize_names(set: &BTreeSet<DestinationName>) -> Result<String, CoreError> {
+    Ok(serde_json::to_string(
+        &set.iter().map(ToString::to_string).collect::<Vec<_>>(),
+    )?)
 }

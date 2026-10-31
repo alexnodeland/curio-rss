@@ -6,6 +6,7 @@
 //! `oauth.reddit.com` at the free tier's 100 QPM instead of the
 //! unauthenticated ~10 QPM.
 
+use std::fmt;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -21,10 +22,16 @@ const DEFAULT_TOKEN_URL: &str = "https://www.reddit.com/api/v1/access_token";
 const DEFAULT_API_ORIGIN: &str = "https://oauth.reddit.com";
 /// Tokens are refreshed this long before their declared expiry.
 const EXPIRY_MARGIN: Duration = Duration::from_secs(60);
+/// What the redacting `Debug` impls print in place of a secret.
+const REDACTED: &str = "<redacted>";
 
 /// A user's own Reddit API app — the BYO credentials plus the endpoints
 /// (overridable so the whole flow is hermetically testable on loopback).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is hand-written and redacts the secret, so the config — and
+/// the [`TokenManager`] / [`crate::CoreHandle`] holding it — is safe in
+/// a log line, `dbg!` or panic message.
+#[derive(Clone, PartialEq, Eq)]
 pub struct RedditApiConfig {
     /// The app's client id (from reddit.com/prefs/apps).
     pub client_id: String,
@@ -50,10 +57,31 @@ impl RedditApiConfig {
     }
 }
 
-#[derive(Debug)]
+impl fmt::Debug for RedditApiConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedditApiConfig")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &REDACTED)
+            .field("token_url", &self.token_url)
+            .field("api_origin", &self.api_origin)
+            .finish()
+    }
+}
+
 struct CachedToken {
     bearer: String,
     expires_at: Instant,
+}
+
+/// Redacts the live bearer token (it authenticates as the user's app
+/// until it expires).
+impl fmt::Debug for CachedToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CachedToken")
+            .field("bearer", &REDACTED)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -224,6 +252,26 @@ mod tests {
             )
             .is_some()
         );
+    }
+
+    #[test]
+    fn debug_redacts_the_client_secret_and_the_bearer() {
+        let config = RedditApiConfig::new("cid123", "s3cr3t-value");
+        let debug = format!("{config:?} {config:#?}");
+        assert!(debug.contains("cid123"), "{debug}");
+        assert!(debug.contains(DEFAULT_TOKEN_URL), "{debug}");
+        assert!(!debug.contains("s3cr3t-value"), "secret leaked: {debug}");
+
+        let manager = TokenManager::default();
+        manager.set_config(Some(config));
+        manager.lock().token = Some(CachedToken {
+            bearer: "b34rer-value".to_owned(),
+            expires_at: Instant::now(),
+        });
+        let debug = format!("{manager:?} {manager:#?}");
+        assert!(debug.contains(REDACTED), "{debug}");
+        assert!(!debug.contains("s3cr3t-value"), "secret leaked: {debug}");
+        assert!(!debug.contains("b34rer-value"), "bearer leaked: {debug}");
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::ErrorCode;
 
-use super::StorageError;
+use super::{NetworkFsKind, StorageError};
 
 /// Why [`Storage::open`](super::Storage::open) refused or failed.
 #[derive(Debug, thiserror::Error)]
@@ -82,6 +82,24 @@ pub enum OpenError {
         /// The failing step's error.
         #[source]
         source: Box<StorageError>,
+    },
+    /// The profile sits on network or sync-managed storage, where
+    /// `SQLite`'s locking is unsafe and a sync client can copy the database
+    /// without its WAL. Refused before anything is created or opened;
+    /// [`crate::CoreOptions::allow_network_fs`] (the
+    /// [`super::ALLOW_NETWORK_FS_ENV`] override) opens it anyway.
+    #[error(
+        "{} is on {kind}, where the database can be corrupted (SQLite's locking is unsafe there and \
+         sync clients copy the file mid-write) — move the profile to a local disk, or set \
+         {env}=1 to open it anyway",
+        path.display(),
+        env = super::ALLOW_NETWORK_FS_ENV
+    )]
+    NetworkFs {
+        /// The refused path.
+        path: PathBuf,
+        /// What kind of storage it is on.
+        kind: NetworkFsKind,
     },
     /// Any other storage failure during open (e.g. the file system
     /// refusing WAL mode).

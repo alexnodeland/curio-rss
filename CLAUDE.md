@@ -93,9 +93,26 @@ chore ci build revert`. Small, logical commits.
   `cargo-llvm-cov`, lefthook, the desktop npm deps (skipped when manifests are
   unchanged), and the git hooks — so `just ci` works from the first prompt.
   It tracks the latest stable Rust (CI floats on stable, and new clippy lints
-  land with each release), exports `CARGO_TARGET_DIR=<checkout>/target` so
-  git worktrees share one build dir, and builds with line-table-only
-  debuginfo so the workspace fits the session's disk allowance.
+  land with each release), exports `CARGO_TARGET_DIR=<main checkout>/target`
+  (resolved through the git common dir, so a session started inside a
+  worktree gets the same one) so the checkout and every git worktree share
+  one build dir, and builds with line-table-only debuginfo so the workspace
+  fits the session's disk allowance.
+
+  Sharing has a consequence: cargo fingerprints a workspace crate by its
+  source mtimes and a hash that leaves out the checkout's path, so a test
+  binary built in worktree A counts as fresh in worktree B and runs there
+  unrebuilt. Anything baked in at compile time therefore points into A — so
+  code never reads `CARGO_MANIFEST_DIR` through `env!`/`option_env!`; it
+  reads it at run time (`std::env::var_os`), which cargo sets for every
+  process it runs (`cargo test`, `cargo run`). The `compile_time_paths`
+  xtask test fails the suite on any compile-time read, and
+  `.cargo/config.toml` hands insta its workspace root
+  (`INSTA_WORKSPACE_ROOT`) at run time for the same reason (#183). The same
+  freshness rule means a concurrent build in another worktree whose sources
+  differ can leave a crate's output looking fresh to you while built from
+  that worktree's code (symptom: errors about items you just added being
+  missing); `touch` the file you edited and rebuild.
 - **PreToolUse Bash** (`guard-bash.sh`): blocks `--no-verify`, plain
   `--force` pushes, pushes to `main`, and commits on `main`.
 - **PreToolUse Edit/Write** (`guard-edit.sh`): blocks hand edits to the

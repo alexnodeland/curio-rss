@@ -190,11 +190,11 @@ fn get_unread_counts_impl(core: &CoreHandle) -> Result<UnreadCountsDto, CommandE
 }
 
 fn count_articles_impl(core: &CoreHandle) -> Result<u64, CommandError> {
-    Ok(core.storage().count_articles()?)
+    Ok(core.count_articles()?)
 }
 
 fn delete_article_impl(core: &CoreHandle, article_id: i64) -> Result<(), CommandError> {
-    Ok(core.storage().delete_article(ArticleId(article_id))?)
+    Ok(core.delete_article(ArticleId(article_id))?)
 }
 
 fn search_articles_impl(

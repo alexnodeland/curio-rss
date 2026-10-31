@@ -322,7 +322,7 @@ fn get_feed_impl(core: &CoreHandle, feed_id: i64) -> Result<Option<FeedDto>, Com
 }
 
 fn get_feed_by_url_impl(core: &CoreHandle, url: &str) -> Result<Option<FeedDto>, CommandError> {
-    Ok(core.storage().get_feed_by_url(url)?.map(FeedDto::from))
+    Ok(core.get_feed_by_url(url)?.map(FeedDto::from))
 }
 
 fn set_feed_status_impl(
@@ -330,9 +330,7 @@ fn set_feed_status_impl(
     feed_id: i64,
     status: FeedStatusDto,
 ) -> Result<(), CommandError> {
-    Ok(core
-        .storage()
-        .set_feed_status(FeedId(feed_id), FeedStatus::from(status))?)
+    Ok(core.set_feed_status(FeedId(feed_id), FeedStatus::from(status))?)
 }
 
 fn update_feed_metadata_impl(
@@ -342,9 +340,7 @@ fn update_feed_metadata_impl(
     site_url: Option<String>,
     description: Option<String>,
 ) -> Result<(), CommandError> {
-    Ok(core
-        .storage()
-        .update_feed_metadata(FeedId(feed_id), title, site_url, description)?)
+    Ok(core.update_feed_metadata(FeedId(feed_id), title, site_url, description)?)
 }
 
 fn set_feed_tags_impl(
@@ -422,7 +418,6 @@ fn recent_fetches_impl(
     limit: u32,
 ) -> Result<Vec<FetchRecordDto>, CommandError> {
     Ok(core
-        .storage()
         .recent_fetches(FeedId(feed_id), limit)?
         .into_iter()
         .map(FetchRecordDto::from)

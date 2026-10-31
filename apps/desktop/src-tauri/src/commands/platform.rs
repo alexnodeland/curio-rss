@@ -178,9 +178,9 @@ fn build_diagnostics_bundle(
         CoreHandle::version(),
         std::env::consts::OS,
         std::env::consts::ARCH,
-        core.storage().db_schema_version()?,
+        core.db_schema_version()?,
         Storage::schema_version(),
-        core.storage().count_articles()?,
+        core.count_articles()?,
     );
     let info_path = bundle.join("app-info.txt");
     std::fs::write(&info_path, info).map_err(|error| io_internal(&info_path, &error))?;

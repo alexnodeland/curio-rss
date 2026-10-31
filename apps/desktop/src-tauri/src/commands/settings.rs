@@ -62,19 +62,19 @@ fn reject_reserved(key: &str) -> Result<(), CommandError> {
 
 fn get_setting_impl(core: &CoreHandle, key: &str) -> Result<Option<String>, CommandError> {
     reject_reserved(key)?;
-    Ok(core.storage().get_setting(key)?)
+    Ok(core.get_setting(key)?)
 }
 
 fn set_setting_impl(core: &CoreHandle, key: &str, value: &str) -> Result<(), CommandError> {
     reject_reserved(key)?;
-    Ok(core.storage().set_setting(key, value)?)
+    Ok(core.set_setting(key, value)?)
 }
 
 fn get_app_info_impl(core: &CoreHandle) -> Result<AppInfoDto, CommandError> {
     Ok(AppInfoDto {
         version: CoreHandle::version().to_owned(),
         profile_dir: core.profile_dir().display().to_string(),
-        db_schema_version: core.storage().db_schema_version()?,
+        db_schema_version: core.db_schema_version()?,
         schema_supported: Storage::schema_version(),
     })
 }

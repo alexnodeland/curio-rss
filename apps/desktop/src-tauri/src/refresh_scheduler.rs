@@ -95,8 +95,7 @@ pub fn refresh_due(interval_minutes: u64, since_last: Duration) -> bool {
 /// The configured interval in minutes (`0` = disabled), defaulting to
 /// `DEFAULT_INTERVAL_MINUTES` when unset or unparseable.
 fn interval_minutes(core: &CoreHandle) -> u64 {
-    core.storage()
-        .get_setting(INTERVAL_KEY)
+    core.get_setting(INTERVAL_KEY)
         .ok()
         .flatten()
         .and_then(|value| value.parse().ok())
@@ -105,8 +104,7 @@ fn interval_minutes(core: &CoreHandle) -> u64 {
 
 /// Whether to refresh once shortly after launch (defaults to on).
 fn refresh_on_launch(core: &CoreHandle) -> bool {
-    core.storage()
-        .get_setting(ON_LAUNCH_KEY)
+    core.get_setting(ON_LAUNCH_KEY)
         .ok()
         .flatten()
         .is_none_or(|value| value != "false")

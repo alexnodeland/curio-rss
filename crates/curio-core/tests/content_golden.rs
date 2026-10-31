@@ -8,7 +8,7 @@
 
 mod common;
 
-use curio_core::content::{process, to_markdown};
+use curio_core::content::{plain_text, process, sanitize, to_markdown};
 
 fn pipeline(raw_html: &str) -> String {
     let processed = process(raw_html, Some("https://example.com/posts/current"));
@@ -147,4 +147,89 @@ fn article_page_extraction_drops_chrome_keeps_story() {
     assert!(!markdown.contains("Related posts"), "aside leaked");
     assert!(!markdown.contains("© 2026"), "footer leaked");
     assert!(!markdown.contains("Archive"), "nav leaked");
+}
+
+/// Feed fragments are sanitized only (#128): the stored text is exactly
+/// the sanitized input's text — no sibling block, quote attribution,
+/// figure caption or in-article aside is dropped by extraction.
+#[test]
+fn fragment_fixtures_keep_all_their_text() {
+    for (name, phrases) in [
+        (
+            "multi-section-post.html",
+            &[
+                "Why we moved the queue",
+                "deliberately the shorter",
+                "What changed after the move",
+                "on-call rotation",
+                "Ghost-style callout card",
+            ][..],
+        ),
+        (
+            "intro-wrapped-div.html",
+            &[
+                "A one-line intro that sits outside the body wrapper.",
+                "The main body lives inside a wrapper div",
+                "A second body paragraph",
+            ][..],
+        ),
+        (
+            "blockquote-attribution.html",
+            &[
+                "Simplicity is prerequisite for reliability.",
+                "— Edsger W. Dijkstra",
+                "A program, before version control.",
+                "Both the attribution and the caption",
+            ][..],
+        ),
+        (
+            "in-article-aside.html",
+            &[
+                "# Notes on backpressure",
+                "By the editors, filed under systems.",
+                "**Pull quote:** an unbounded queue",
+                "Bounding the queue",
+                "Corrections and follow-ups are welcome.",
+            ][..],
+        ),
+    ] {
+        let raw = html_fixture(name);
+        let base = Some("https://example.com/posts/current");
+        let processed = process(&raw, base);
+        assert_eq!(
+            processed.text,
+            plain_text(&sanitize(&raw, base)),
+            "{name}: extraction dropped text"
+        );
+        let markdown = to_markdown(&processed.html).unwrap();
+        for phrase in phrases {
+            assert!(
+                markdown.contains(phrase),
+                "{name}: lost {phrase:?} in:\n{markdown}"
+            );
+        }
+    }
+}
+
+/// A feed item that is a whole page still loses its chrome, but every
+/// content-bearing block around the top scorer survives (#128).
+#[test]
+fn page_fixture_drops_chrome_keeps_every_content_block() {
+    let markdown = pipeline(&html_fixture("page-split-content.html"));
+    for kept in [
+        "A short standfirst",
+        "## What shipped",
+        "release highlights",
+        "## What is next",
+        "Ship small, ship often.",
+        "— the release team",
+    ] {
+        assert!(markdown.contains(kept), "lost {kept:?} in:\n{markdown}");
+    }
+    for chrome in ["Example Blog", "Home", "Related posts", "© 2026"] {
+        assert!(
+            !markdown.contains(chrome),
+            "chrome {chrome:?} leaked:\n{markdown}"
+        );
+    }
 }

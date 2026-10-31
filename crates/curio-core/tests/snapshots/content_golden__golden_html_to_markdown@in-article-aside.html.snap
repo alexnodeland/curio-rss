@@ -1,0 +1,16 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/in-article-aside.html
+---
+# Notes on backpressure
+
+By the editors, filed under systems.
+
+Every queue is a promise about the future: somebody will drain it.
+
+**Pull quote:** an unbounded queue is a memory leak with good intentions.
+
+Bounding the queue turns a slow consumer into a visible signal instead of an out-of-memory crash at 3 a.m.
+
+Corrections and follow-ups are welcome.

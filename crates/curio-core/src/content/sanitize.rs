@@ -34,9 +34,10 @@ const CLEAN_CONTENT_TAGS: &[&str] = &[
 
 /// The semantic allowlist. Sectioning elements (`nav`, `header`,
 /// `footer`, `aside`, …) are deliberately *kept* here so the
-/// readability extractor still sees the document's structure — it is
-/// the extractor's job to drop boilerplate, and it can only drop what
-/// it can still recognize.
+/// pipeline after it still sees the document's structure: it tells
+/// page chrome (a `nav`, a page-level `header`) from the content's own
+/// sectioning (a quote's `<footer>`, a section's `<header>`) by position,
+/// and it can only judge what it can still recognize.
 const ALLOWED_TAGS: &[&str] = &[
     "a",
     "abbr",

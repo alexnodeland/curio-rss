@@ -1,0 +1,18 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/page-split-content.html
+---
+A short standfirst sits directly in the page body.
+
+## What shipped
+
+The first section lists the release highlights in a single paragraph.
+
+## What is next
+
+The second section is longer and outlines the roadmap for the next release, including the migration tooling and the new export targets.
+
+> Ship small, ship often.
+> 
+> — the release team

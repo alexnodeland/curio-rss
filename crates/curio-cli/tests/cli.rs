@@ -666,12 +666,17 @@ async fn open_emits_article_opened_and_launches_the_browser() {
     let curio_id = article_id_by_title(profile.path(), "With a guid");
     let short = &curio_id[curio_id.len() - 8..];
 
-    // A fake $BROWSER that records the URL it was handed.
+    // A fake $BROWSER that records the URL it was handed. It writes a
+    // sibling temp file and renames it into place, so the capture file
+    // only ever appears complete: a plain `> file` redirection creates the
+    // (empty) file before `printf` runs, and the wait loop below could read
+    // that empty file under a slow (instrumented) build (#230).
     let captured = profile.path().join("browser-arg.txt");
     let script = profile.path().join("fake-browser.sh");
     std::fs::write(
         &script,
-        "#!/bin/sh\nprintf '%s' \"$1\" > \"$CURIO_TEST_BROWSER_OUT\"\n",
+        "#!/bin/sh\nprintf '%s' \"$1\" > \"$CURIO_TEST_BROWSER_OUT.tmp\" && \
+         mv \"$CURIO_TEST_BROWSER_OUT.tmp\" \"$CURIO_TEST_BROWSER_OUT\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();

@@ -5,7 +5,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::NaiveDate;
@@ -37,9 +36,10 @@ pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// **Several processes may share one directory** (the desktop app and a
 /// CLI run on one profile). Every operation runs under an exclusive
-/// advisory lock on the sibling lock file `<dir>.lock` — kept *outside*
-/// the contract directory so consumers listing it never see it — and
-/// starts by re-syncing with whatever the other writers did meanwhile:
+/// advisory lock on a lock file the caller names at open — the profile
+/// keeps it at `.curio/events.lock`, *beside* the contract directory so
+/// consumers listing it never see it — and starts by re-syncing with
+/// whatever the other writers did meanwhile:
 /// a torn tail is healed, a file another process rotated to is adopted,
 /// and the size counter is re-read from disk. Lines from different
 /// processes therefore never interleave, never land in a stale `-N`
@@ -49,7 +49,7 @@ pub struct EventLog {
     dir: PathBuf,
     max_file_bytes: u64,
     retention_days: u32,
-    lock: Arc<FileLock>,
+    lock: FileLock,
     lock_timeout: Duration,
     current: Option<OpenFile>,
 }
@@ -85,9 +85,17 @@ struct OpenFile {
 }
 
 impl EventLog {
-    /// Opens (creating if absent) the events directory and its lock
-    /// file, waiting up to [`DEFAULT_LOCK_TIMEOUT`] for another process
-    /// holding the lock. Appending resumes on the newest existing log
+    /// Opens (creating if absent) the events directory `dir` and the
+    /// cross-process lock file `lock_file`, waiting up to
+    /// [`DEFAULT_LOCK_TIMEOUT`] for another process holding the lock.
+    /// Nothing is created anywhere but those two paths.
+    ///
+    /// Every handle on one directory must name the same lock file — the
+    /// lock is what serializes them. Keep it out of `dir` (consumers list
+    /// that) and somewhere that is not cleaned while Curio runs; a lock
+    /// file deleted anyway is noticed and re-created at the next
+    /// operation. `lock_file`'s directory must exist.
+    /// Appending resumes on the newest existing log
     /// file, so restarts continue the day's file instead of abandoning
     /// it. A torn final line left by a crash mid-append is healed here
     /// (truncated back to the last complete line — see `heal_torn_tail`)
@@ -101,8 +109,11 @@ impl EventLog {
     /// [`EventLogError::ProfileLocked`] if another process keeps the lock
     /// past the timeout; filesystem errors creating the directory or the
     /// lock file, or healing.
-    pub fn open(dir: impl Into<PathBuf>) -> Result<Self, EventLogError> {
-        Self::open_with_lock_timeout(dir, DEFAULT_LOCK_TIMEOUT)
+    pub fn open(
+        dir: impl Into<PathBuf>,
+        lock_file: impl Into<PathBuf>,
+    ) -> Result<Self, EventLogError> {
+        Self::open_with_lock_timeout(dir, lock_file, DEFAULT_LOCK_TIMEOUT)
     }
 
     /// [`EventLog::open`] with an explicit lock timeout, which also
@@ -113,11 +124,12 @@ impl EventLog {
     /// See [`EventLog::open`].
     pub fn open_with_lock_timeout(
         dir: impl Into<PathBuf>,
+        lock_file: impl Into<PathBuf>,
         lock_timeout: Duration,
     ) -> Result<Self, EventLogError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
-        let lock = Arc::new(FileLock::open(lock_path(&dir))?);
+        let lock = FileLock::open(lock_file)?;
         let mut log = Self {
             dir,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
@@ -131,7 +143,7 @@ impl EventLog {
         Ok(log)
     }
 
-    /// The cross-process lock file guarding this directory (`<dir>.lock`).
+    /// The cross-process lock file guarding this directory.
     #[must_use]
     pub fn lock_path(&self) -> &Path {
         self.lock.path()
@@ -343,19 +355,6 @@ impl EventLog {
     }
 }
 
-/// The lock file guarding `dir`: its sibling `<name>.lock`, so the
-/// contract directory itself only ever holds event files.
-fn lock_path(dir: &Path) -> PathBuf {
-    match dir.file_name() {
-        Some(name) => {
-            let mut lock_name = name.to_os_string();
-            lock_name.push(".lock");
-            dir.with_file_name(lock_name)
-        }
-        None => dir.join(".lock"),
-    }
-}
-
 /// Backwards-scan chunk size used by [`heal_torn_tail`].
 const HEAL_SCAN_CHUNK: u64 = 8192;
 
@@ -456,9 +455,15 @@ mod tests {
         }
     }
 
+    /// The lock file the tests pair with an events dir: its sibling, as
+    /// in the profile layout.
+    fn lock_of(events: &Path) -> PathBuf {
+        events.with_file_name("events.lock")
+    }
+
     /// One whole line on disk in the day's file; returns its path.
     fn one_whole_line(dir: &Path) -> PathBuf {
-        let mut log = EventLog::open(dir).unwrap();
+        let mut log = EventLog::open(dir, lock_of(dir)).unwrap();
         log.append(&opened("2026-07-03T10:00:00.000Z")).unwrap();
         log.flush().unwrap();
         dir.join("events-20260703.jsonl")
@@ -480,18 +485,66 @@ mod tests {
     }
 
     #[test]
-    fn the_lock_file_sits_beside_the_contract_directory() {
+    fn open_creates_exactly_the_events_dir_and_the_named_lock_file() {
         let dir = tempfile::tempdir().unwrap();
         let events = dir.path().join("events");
-        let log = EventLog::open(&events).unwrap();
-        assert_eq!(log.lock_path(), dir.path().join("events.lock"));
-        assert!(log.lock_path().exists());
+        let lock = dir.path().join("events.lock");
+        let log = EventLog::open(&events, &lock).unwrap();
+        assert_eq!(log.lock_path(), lock);
+        assert!(lock.exists());
         assert_eq!(
             std::fs::read_dir(&events).unwrap().count(),
             0,
             "nothing but event files ever lands in the contract dir"
         );
-        assert_eq!(lock_path(Path::new("/")), Path::new("/").join(".lock"));
+        let mut created: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        created.sort();
+        assert_eq!(created, ["events", "events.lock"]);
+    }
+
+    #[test]
+    fn a_lock_file_in_a_missing_directory_is_an_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = EventLog::open(
+            dir.path().join("events"),
+            dir.path().join("nope").join("x.lock"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, EventLogError::Io(_)), "{err:?}");
+    }
+
+    /// The events lock file deleted while a long-lived handle (the
+    /// desktop app) keeps it open, then a new handle (a CLI run) opened on
+    /// the re-created path: the two must still exclude each other, so the
+    /// old handle's heal never truncates the newcomer's append in flight.
+    #[cfg(unix)]
+    #[test]
+    fn a_deleted_events_lock_still_serializes_old_and_new_handles() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("events");
+        let path = one_whole_line(&events);
+        let mut long_lived =
+            EventLog::open_with_lock_timeout(&events, lock_of(&events), Duration::from_millis(50))
+                .unwrap();
+        std::fs::remove_file(lock_of(&events)).unwrap();
+        let mut newcomer = EventLog::open(&events, lock_of(&events)).unwrap();
+        newcomer
+            .locked(|_| {
+                start_an_append(&path);
+                let err = long_lived
+                    .locked(|_| Ok::<_, EventLogError>(()))
+                    .unwrap_err();
+                assert!(
+                    matches!(err, EventLogError::ProfileLocked { .. }),
+                    "{err:?}"
+                );
+                assert!(ends_torn(&path), "no heal under the other holder's lock");
+                Ok::<_, EventLogError>(())
+            })
+            .unwrap();
     }
 
     /// Acceptance (#114): `heal_torn_tail` never truncates while another
@@ -503,14 +556,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let events = dir.path().join("events");
         let path = one_whole_line(&events);
-        let mut holder = EventLog::open(&events).unwrap();
+        let mut holder = EventLog::open(&events, lock_of(&events)).unwrap();
         let (opened_tx, opened_rx) = mpsc::channel();
         let opener = holder
             .locked(|_| {
                 start_an_append(&path);
                 let events = events.clone();
                 let opener = std::thread::spawn(move || {
-                    let log = EventLog::open_with_lock_timeout(&events, Duration::from_secs(30));
+                    let log = EventLog::open_with_lock_timeout(
+                        &events,
+                        lock_of(&events),
+                        Duration::from_secs(30),
+                    );
                     opened_tx.send(()).unwrap();
                     log.map(|_| ())
                 });
@@ -533,12 +590,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let events = dir.path().join("events");
         let path = one_whole_line(&events);
-        let mut holder = EventLog::open(&events).unwrap();
+        let mut holder = EventLog::open(&events, lock_of(&events)).unwrap();
         holder
             .locked(|_| {
                 start_an_append(&path);
-                let err = EventLog::open_with_lock_timeout(&events, Duration::from_millis(50))
-                    .unwrap_err();
+                let err = EventLog::open_with_lock_timeout(
+                    &events,
+                    lock_of(&events),
+                    Duration::from_millis(50),
+                )
+                .unwrap_err();
                 match &err {
                     EventLogError::ProfileLocked {
                         path: lock,
@@ -560,14 +621,16 @@ mod tests {
     /// it adopts the newer file instead of growing the stale one.
     #[test]
     fn a_handle_adopts_the_file_another_handle_rotated_to() {
-        let dir = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let events = root.path().join("events");
+        let dir = events.as_path();
         let first = opened("2026-07-03T10:00:00.000Z");
         let line = u64::try_from(serde_json::to_string(&first).unwrap().len() + 1).unwrap();
         // Two lines per file.
-        let mut a = EventLog::open(dir.path())
+        let mut a = EventLog::open(dir, lock_of(dir))
             .unwrap()
             .with_max_file_bytes(line * 2);
-        let mut b = EventLog::open(dir.path())
+        let mut b = EventLog::open(dir, lock_of(dir))
             .unwrap()
             .with_max_file_bytes(line * 2);
         let events: Vec<_> = (1..=4)
@@ -579,10 +642,10 @@ mod tests {
         a.append(&events[3]).unwrap(); // must follow into -2, not overfill the base
         a.flush().unwrap();
         b.flush().unwrap();
-        let base = std::fs::read_to_string(dir.path().join("events-20260703.jsonl")).unwrap();
+        let base = std::fs::read_to_string(dir.join("events-20260703.jsonl")).unwrap();
         assert_eq!(base.lines().count(), 2, "the base file is never overfilled");
         assert_eq!(
-            crate::events::read_all(dir.path()).unwrap(),
+            crate::events::read_all(dir).unwrap(),
             events,
             "file order is append order"
         );

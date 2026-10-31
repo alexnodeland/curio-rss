@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use curio_core::events::{EventEmitter, EventLog, FoldedState, read_all};
 use curio_core::model::{ArticleContent, NewArticle};
@@ -29,6 +29,37 @@ fn opened(ts: &str, id: CurioId) -> EventEnvelope {
     )
 }
 
+/// An events directory plus its lock file, laid out like a profile's
+/// `.curio/` (lock beside the contract dir) inside one temp dir — so
+/// the lock file is cleaned up with it and never lands in the
+/// directory the tests list.
+struct LogDir {
+    root: tempfile::TempDir,
+    events: PathBuf,
+}
+
+impl LogDir {
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let events = root.path().join("events");
+        std::fs::create_dir(&events).unwrap();
+        Self { root, events }
+    }
+
+    /// The events (contract) directory.
+    fn path(&self) -> &Path {
+        &self.events
+    }
+
+    fn lock(&self) -> PathBuf {
+        self.root.path().join("events.lock")
+    }
+
+    fn open(&self) -> Result<EventLog, curio_core::events::EventLogError> {
+        EventLog::open(&self.events, self.lock())
+    }
+}
+
 fn list_files(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
@@ -42,8 +73,8 @@ fn list_files(dir: &Path) -> Vec<String> {
 
 #[test]
 fn lines_are_contract_shaped_json() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap();
     let id = CurioId::new();
     log.append(&envelope_at(
         "2026-07-03T09:15:00.123Z",
@@ -70,8 +101,8 @@ fn lines_are_contract_shaped_json() {
 
 #[test]
 fn rotates_at_utc_midnight() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap();
     let id = CurioId::new();
     log.append(&opened("2026-07-01T23:59:59.999Z", id)).unwrap();
     log.append(&opened("2026-07-02T00:00:00.000Z", id)).unwrap();
@@ -88,9 +119,9 @@ fn rotates_at_utc_midnight() {
 
 #[test]
 fn rotates_with_numeric_suffixes_at_the_size_cap() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     // Cap of 1 byte: every line overflows → one file per event.
-    let mut log = EventLog::open(dir.path()).unwrap().with_max_file_bytes(1);
+    let mut log = dir.open().unwrap().with_max_file_bytes(1);
     let id = CurioId::new();
     let events: Vec<EventEnvelope> = (0..12)
         .map(|_| opened("2026-07-03T10:00:00.000Z", id))
@@ -114,17 +145,17 @@ fn rotates_with_numeric_suffixes_at_the_size_cap() {
 
 #[test]
 fn append_resumes_the_newest_file_across_reopen() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     let id = CurioId::new();
     let first = opened("2026-07-03T10:00:00.000Z", id);
     {
-        let mut log = EventLog::open(dir.path()).unwrap();
+        let mut log = dir.open().unwrap();
         log.append(&first).unwrap();
         log.flush().unwrap();
     }
     let second = opened("2026-07-03T11:00:00.000Z", id);
     {
-        let mut log = EventLog::open(dir.path()).unwrap();
+        let mut log = dir.open().unwrap();
         log.append(&second).unwrap();
         log.flush().unwrap();
     }
@@ -140,11 +171,11 @@ fn append_resumes_the_newest_file_across_reopen() {
 /// complete line.
 #[test]
 fn a_torn_final_line_is_healed_at_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     let id = CurioId::new();
     let whole = opened("2026-07-03T10:00:00.000Z", id);
     {
-        let mut log = EventLog::open(dir.path()).unwrap();
+        let mut log = dir.open().unwrap();
         log.append(&whole).unwrap();
         log.flush().unwrap();
     }
@@ -162,7 +193,7 @@ fn a_torn_final_line_is_healed_at_open() {
 
     // Reopen and append (the replayed envelope in real life).
     let replayed = opened("2026-07-03T10:00:01.000Z", id);
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let mut log = dir.open().unwrap();
     log.append(&replayed).unwrap();
     log.flush().unwrap();
 
@@ -176,11 +207,11 @@ fn a_torn_final_line_is_healed_at_open() {
 /// after a crash).
 #[test]
 fn a_wholly_torn_file_heals_to_empty_at_open() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = LogDir::new();
     let path = dir.path().join("events-20260703.jsonl");
     std::fs::write(&path, b"{\"schema\":\"curio.eve").unwrap();
 
-    let _log = EventLog::open(dir.path()).unwrap();
+    let _log = dir.open().unwrap();
     assert_eq!(read_all(dir.path()).unwrap(), vec![]);
     assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
 }
@@ -189,8 +220,8 @@ fn a_wholly_torn_file_heals_to_empty_at_open() {
 
 #[test]
 fn retention_sweep_removes_only_files_past_the_window() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap();
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap();
     let id = CurioId::new();
     log.append(&opened("2026-01-01T12:00:00.000Z", id)).unwrap();
     log.append(&opened("2026-04-01T12:00:00.000Z", id)).unwrap();
@@ -212,8 +243,8 @@ fn retention_sweep_removes_only_files_past_the_window() {
 
 #[test]
 fn retention_cannot_be_configured_below_the_contract_floor() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut log = EventLog::open(dir.path()).unwrap().with_retention_days(7); // clamped to 90
+    let dir = LogDir::new();
+    let mut log = dir.open().unwrap().with_retention_days(7); // clamped to 90
     let id = CurioId::new();
     log.append(&opened("2026-06-01T12:00:00.000Z", id)).unwrap();
     log.flush().unwrap();
@@ -224,7 +255,7 @@ fn retention_cannot_be_configured_below_the_contract_floor() {
         log.sweep_retention(today).unwrap(),
         [] as [std::path::PathBuf; 0]
     );
-    let mut fresh = EventLog::open(dir.path()).unwrap().with_retention_days(7);
+    let mut fresh = dir.open().unwrap().with_retention_days(7);
     assert_eq!(
         fresh.sweep_retention(today).unwrap(),
         [] as [std::path::PathBuf; 0]
@@ -378,7 +409,7 @@ fn emitter_drains_intents_into_the_log() {
 
     let mut emitter = EventEmitter::new(
         std::sync::Arc::clone(&storage),
-        EventLog::open(&events_dir).unwrap(),
+        EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap(),
     )
     .unwrap();
 
@@ -419,7 +450,7 @@ fn startup_replays_intents_that_never_reached_the_log() {
     let storage = std::sync::Arc::new(Storage::open(&db).unwrap());
     let _emitter = EventEmitter::new(
         std::sync::Arc::clone(&storage),
-        EventLog::open(&events_dir).unwrap(),
+        EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -584,7 +615,7 @@ fn replay_after_partial_emission_duplicates_harmlessly() {
     // Simulate the partial emission: append + fsync, but never mark.
     {
         let pending = storage.pending_intents().unwrap();
-        let mut log = EventLog::open(&events_dir).unwrap();
+        let mut log = EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap();
         for intent in &pending {
             log.append(&intent.envelope).unwrap();
         }
@@ -596,7 +627,7 @@ fn replay_after_partial_emission_duplicates_harmlessly() {
     // Restart: the replay appends the same envelope again.
     let _emitter = EventEmitter::new(
         std::sync::Arc::clone(&storage),
-        EventLog::open(&events_dir).unwrap(),
+        EventLog::open(&events_dir, dir.path().join("events.lock")).unwrap(),
     )
     .unwrap();
     let events = read_all(&events_dir).unwrap();

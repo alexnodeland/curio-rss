@@ -294,11 +294,12 @@ impl CoreHandle {
             source,
         })?;
         let storage = Arc::new(Storage::open(profile_dir.join("curio.db"))?);
-        let events_dir = profile_dir.join(".curio").join("events");
-        let log = EventLog::open(&events_dir).map_err(EventsError::Log)?;
+        let state_dir = profile_dir.join(".curio");
+        let log = EventLog::open(state_dir.join("events"), state_dir.join(EVENTS_LOCK_FILE))
+            .map_err(EventsError::Log)?;
         // Contract: the event log is never committed to git — nor is the
         // cross-process lock file guarding it.
-        ensure_gitignore(&profile_dir.join(".curio").join(".gitignore"))?;
+        ensure_gitignore(&state_dir.join(".gitignore"))?;
         let emitter = EventEmitter::new(Arc::clone(&storage), log)?;
         let destinations = destinations::load_destinations(&storage)?;
         let exported_destinations = destinations::load_exported(&storage)?;
@@ -381,7 +382,8 @@ impl CoreHandle {
 impl CoreError {
     /// Whether this is transient contention with another process sharing
     /// the profile — the database stayed busy
-    /// ([`StorageError::Busy`]) or the events lock stayed held
+    /// ([`StorageError::Busy`], or [`OpenError::Locked`] while opening) or
+    /// the events lock stayed held
     /// ([`crate::events::EventLogError::ProfileLocked`]). Retrying the
     /// same operation once the other process finishes can succeed; heads
     /// surface it as "busy, try again" (the CLI exits with a distinct
@@ -389,8 +391,11 @@ impl CoreError {
     #[must_use]
     pub fn is_profile_busy(&self) -> bool {
         match self {
-            Self::Storage(err) | Self::Events(EventsError::Storage(err)) => err.is_busy(),
-            Self::Events(EventsError::Log(crate::events::EventLogError::ProfileLocked {
+            Self::Storage(err)
+            | Self::Events(EventsError::Storage(err))
+            | Self::Open(OpenError::Storage(err)) => err.is_busy(),
+            Self::Open(OpenError::Locked { .. })
+            | Self::Events(EventsError::Log(crate::events::EventLogError::ProfileLocked {
                 ..
             })) => true,
             _ => false,
@@ -398,9 +403,13 @@ impl CoreError {
     }
 }
 
+/// The cross-process events lock, inside `.curio/` beside (never inside)
+/// the `events/` contract directory (see [`EventLog`]).
+const EVENTS_LOCK_FILE: &str = "events.lock";
+
 /// Lines `.curio/.gitignore` must carry: the events directory and its
-/// sibling lock file (see [`EventLog`]).
-const GITIGNORE_LINES: [&str; 2] = ["events/", "events.lock"];
+/// lock file.
+const GITIGNORE_LINES: [&str; 2] = ["events/", EVENTS_LOCK_FILE];
 
 /// Writes `.curio/.gitignore`, or appends whichever required lines an
 /// existing one (from an older build, or hand-edited) lacks.
@@ -455,6 +464,24 @@ mod tests {
                 path: PathBuf::from("events.lock"),
                 waited_ms: 15_000,
             }))
+            .is_profile_busy()
+        );
+        assert!(
+            CoreError::Open(OpenError::Locked {
+                path: PathBuf::from("curio.db"),
+                source: rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    None,
+                ),
+            })
+            .is_profile_busy()
+        );
+        assert!(CoreError::Open(OpenError::Storage(busy())).is_profile_busy());
+        assert!(
+            !CoreError::Open(OpenError::TooNew {
+                found: 99,
+                supported: 8
+            })
             .is_profile_busy()
         );
         assert!(!CoreError::Storage(StorageError::WriterGone).is_profile_busy());

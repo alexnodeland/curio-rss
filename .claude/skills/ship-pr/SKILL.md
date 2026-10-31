@@ -52,7 +52,9 @@ never push empty commits, never disable a check.
 
 ## 6. Merge
 
-1. If `main` moved: `git fetch origin main && git merge origin/main` (the
+1. If `main` moved: `git fetch origin main && git merge origin/main -m
+   "chore(sync): merge origin/main into <branch>"` (the commit-msg hook
+   rejects git's default "Merge remote-tracking branch…" message; the
    squash-merge flattens it, so `main` stays linear and no force-push is
    needed), resolve conflicts, re-run the gates for the touched paths, push,
    and wait for CI to go green again on the updated head.

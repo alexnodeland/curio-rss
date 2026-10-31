@@ -124,7 +124,10 @@ defense-in-depth, not the primary defense.
   well-known sync locations (`~/Library/Mobile Documents`, `~/Library/CloudStorage`),
   and refuses NFS/SMB/AFP/WebDAV mounts and iCloud/Dropbox/Syncthing folders with
   `OpenError::NetworkFs` unless `CoreOptions::allow_network_fs` is set (the CLI's
-  `--allow-network-fs`, or `CURIO_ALLOW_NETWORK_FS=1` for either head).
+  `--allow-network-fs`, or `CURIO_ALLOW_NETWORK_FS=1` for either head). The guard
+  lives in `CoreHandle::open_with`, not `Storage::open`. The desktop gives the refusal
+  its own startup class (`network_fs`), whose recovery screen offers only Try again:
+  the database is healthy, so it is never moved aside or replaced by a backup.
 - An events directory that cannot be opened (full or read-only disk, a file in its
   place) is an emission failure, not an open failure: the handle attaches the log
   lazily, opens with the backlog flag raised and intents staged, and the next drain

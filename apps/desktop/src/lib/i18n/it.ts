@@ -483,7 +483,10 @@ export const it: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': 'Impossibile copiare l’errore',
     'recovery.title.profile': 'Curio non riesce a usare la cartella del profilo',
     'recovery.body.profile':
-        'La tua libreria è a posto, ma Curio non è riuscito a creare o scrivere lì gli altri suoi file (come il registro degli eventi). Verifica che la cartella del profilo e tutto il suo contenuto siano scrivibili, poi riprova.',
+        'Curio non è riuscito a creare o aprire la cartella del profilo. Verifica che la cartella (e quella che la contiene) sia scrivibile e che nessun file abbia il suo nome, poi riprova. Non è stato modificato nulla.',
+    'recovery.title.networkFs': 'La tua libreria è in una cartella di rete o sincronizzata',
+    'recovery.body.networkFs':
+        'Il database di Curio può danneggiarsi su una condivisione di rete o in una cartella gestita da un servizio di sincronizzazione (iCloud Drive, Dropbox…), quindi Curio non l’ha aperto. Non è stato modificato nulla. Sposta la cartella del profilo su un disco locale, poi riprova.',
     'recovery.action.update': 'Cerca aggiornamenti',
     'recovery.update.current':
         'Nessun aggiornamento disponibile. Installa la versione più recente di Curio che ha aggiornato questa libreria per continuare a usarla.',

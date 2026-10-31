@@ -95,8 +95,23 @@ folder, a Syncthing folder, or a Windows `\\server\share` path. SQLite's
 locking is unsafe there and sync clients copy the database without its
 write-ahead log, which corrupts it. Move the profile to a local disk, or
 pass the global `--allow-network-fs` flag (or set
-`CURIO_ALLOW_NETWORK_FS=1`, which the desktop app honours too) to open it
-anyway. A mapped Windows drive letter is not recognised.
+`CURIO_ALLOW_NETWORK_FS=1`) to open it anyway. A mapped Windows drive
+letter is not recognised.
+
+The desktop app applies the same guard: a refused profile opens on the
+recovery screen, which only offers Try again (the database is healthy, so
+it never offers to replace it). The app reads `CURIO_ALLOW_NETWORK_FS` as
+its override, but an app started from Finder or the Dock does not inherit
+your shell's environment, so set the variable for the launch itself:
+
+```sh
+open --env CURIO_ALLOW_NETWORK_FS=1 -a Curio   # this launch only
+launchctl setenv CURIO_ALLOW_NETWORK_FS 1      # every app launched until you log out
+```
+
+Quit Curio first: a running app keeps the environment it started with. On
+Linux and Windows, set the variable in the environment the app is started
+from.
 
 ```sh
 curio init                 # scaffold the default profile

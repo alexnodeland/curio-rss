@@ -457,7 +457,10 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': '无法复制错误',
     'recovery.title.profile': 'Curio 无法使用它的个人资料文件夹',
     'recovery.body.profile':
-        '你的资料库没有问题，但 Curio 无法在那里创建或写入其他文件（例如事件日志）。请确认个人资料文件夹及其中所有内容都可写入，然后重试。',
+        'Curio 无法创建或打开它的个人资料文件夹。请确认该文件夹（以及它所在的文件夹）可写入，并且没有同名文件，然后重试。没有做任何更改。',
+    'recovery.title.networkFs': '你的资料库位于网络或同步文件夹中',
+    'recovery.body.networkFs':
+        '在网络共享或由同步服务管理的文件夹（iCloud Drive、Dropbox 等）中，Curio 的数据库可能会损坏，因此 Curio 没有打开它。没有做任何更改。请将个人资料文件夹移到本地磁盘，然后重试。',
     'recovery.action.update': '检查更新',
     'recovery.update.current': '没有可用的更新。请安装升级了这个资料库的新版 Curio 以继续使用。',
     'recovery.update.failed': '无法检查更新。请检查网络连接，然后重试。',

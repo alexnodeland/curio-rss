@@ -458,7 +458,10 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'recovery.copyFailed': '複製唔到個錯誤',
     'recovery.title.profile': 'Curio 用唔到佢嘅個人檔案資料夾',
     'recovery.body.profile':
-        '你嘅資料庫冇事，不過 Curio 喺嗰度建立或者寫入唔到其他檔案（例如事件記錄）。睇吓個人檔案資料夾同入面所有嘢寫唔寫得入，然後再試。',
+        'Curio 建立或者開唔到佢嘅個人檔案資料夾。睇吓個資料夾（同裝住佢嘅資料夾）寫唔寫得入、有冇檔案用咗佢個名，然後再試。乜都冇改過。',
+    'recovery.title.networkFs': '你嘅資料庫喺網絡或者同步資料夾入面',
+    'recovery.body.networkFs':
+        'Curio 嘅資料庫放喺網絡共享或者同步服務管理嘅資料夾（iCloud Drive、Dropbox 等）入面可能會損壞，所以 Curio 冇開佢。乜都冇改過。將個人檔案資料夾搬去本機磁碟，然後再試。',
     'recovery.action.update': '檢查更新',
     'recovery.update.current': '冇可用嘅更新。裝返升級咗呢個資料庫嘅新版 Curio 就可以繼續用。',
     'recovery.update.failed': '檢查唔到更新。睇吓網絡連線，然後再試。',

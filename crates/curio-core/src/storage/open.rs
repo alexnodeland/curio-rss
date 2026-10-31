@@ -12,7 +12,10 @@ use rusqlite::ErrorCode;
 
 use super::{NetworkFsKind, StorageError};
 
-/// Why [`Storage::open`](super::Storage::open) refused or failed.
+/// Why a profile's database would not open: [`Storage::open`](super::Storage::open)
+/// refused or failed, or (for [`OpenError::NetworkFs`] only)
+/// [`CoreHandle::open_with`](crate::CoreHandle::open_with) refused its
+/// location first.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum OpenError {
@@ -88,6 +91,11 @@ pub enum OpenError {
     /// without its WAL. Refused before anything is created or opened;
     /// [`crate::CoreOptions::allow_network_fs`] (the
     /// [`super::ALLOW_NETWORK_FS_ENV`] override) opens it anyway.
+    ///
+    /// Only [`CoreHandle::open_with`](crate::CoreHandle::open_with) (and
+    /// so [`CoreHandle::open`](crate::CoreHandle::open)) raises it:
+    /// [`Storage::open`](super::Storage::open) never probes the location,
+    /// so code calling it directly is not guarded.
     #[error(
         "{} is on {kind}, where the database can be corrupted (SQLite's locking is unsafe there and \
          sync clients copy the file mid-write) — move the profile to a local disk, or set \

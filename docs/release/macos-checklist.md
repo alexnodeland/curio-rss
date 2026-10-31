@@ -30,6 +30,7 @@ production feed).
 - [ ] **Stored-XSS inert** — open an article built from `fixtures/html/xss-corpus.html`; confirm no alert/script runs and the content renders sanitized (via `SanitizedHtml`).
 - [ ] **Keyboard-only session** — navigate feeds/articles and read one end-to-end with only the keyboard (`j`/`k`, `o`, `s`, `l`, `m`, `p`, `/`, `?`).
 - [ ] **Promote-to-destination** — press `p`, pick a temp destination, confirm a Markdown note with valid `curio.frontmatter.v1` frontmatter is written.
+- [ ] **APFS filenames** — on an APFS destination, promote two local-feed articles titled "Café", one spelled NFC (precomposed U+00E9) and one NFD (`e` + combining U+0301): two distinct notes exist afterwards (`café.md` and `café-<id prefix>.md`) and the first one's text was not replaced.
 
 ## Gatekeeper (unsigned) sanity
 

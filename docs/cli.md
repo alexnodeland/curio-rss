@@ -196,7 +196,19 @@ rename. Export is idempotent on `(curio_id, checksum)`:
 - content changed since → `updated`, emits `article.updated`, replaces
   only the frontmatter machine keys and the managed region — everything
   you wrote outside the markers survives byte-for-byte
-- unchanged → `unchanged`, writes nothing, emits nothing
+- unchanged → `unchanged`, writes nothing, emits nothing; if the note on
+  disk is blank (emptied by a crash or a sync tool) it is quietly
+  rewritten, and if it no longer parses as a Curio note the save fails
+  with a parse error instead of claiming it is intact
+
+Notes land at `curio/<slug>.md`, where the slug is the title lowercased,
+NFC-normalized and dash-separated, capped at 100 bytes so the name fits
+every filesystem's 255-byte limit even with a dedup suffix
+(`<slug>-<id prefix>.md` when another article already owns the name).
+Titles that would be a Windows device name (`con`, `nul`, `com1`, …) get a
+`-note` suffix. Every write is flushed to disk (`fsync` on the file and
+its directory) before the manifest records it, and a failed write leaves
+no temp file behind.
 
 ## Events
 

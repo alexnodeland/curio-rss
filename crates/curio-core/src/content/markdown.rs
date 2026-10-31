@@ -4,7 +4,13 @@
 //! lines — is banned; conversion is a real DOM traversal. Input is
 //! expected to be sanitized already (this module is called on stored
 //! content at export time), but the skip list drops any script/style/
-//! boilerplate defensively anyway.
+//! embed remnant defensively anyway.
+//!
+//! Sectioning elements (`nav`, `header`, `footer`, `aside`) are *not*
+//! skipped: deciding what is page chrome is the ingest extractor's job,
+//! and by export time it has already removed it. What is left is content
+//! — a quote's `<footer>` attribution, an article's own header, an
+//! in-article callout — and converting it is the point (#128).
 
 use htmd::HtmlToMarkdown;
 
@@ -19,8 +25,7 @@ use super::ContentError;
 pub fn to_markdown(html: &str) -> Result<String, ContentError> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(vec![
-            "script", "style", "iframe", "object", "embed", "form", "nav", "aside", "header",
-            "footer", "noscript", "svg", "canvas",
+            "script", "style", "iframe", "object", "embed", "form", "noscript", "svg", "canvas",
         ])
         .build();
     Ok(converter.convert(html)?.trim().to_owned())
@@ -56,6 +61,19 @@ mod tests {
         .unwrap();
         assert!(md.contains("[link](https://e.com/a)"));
         assert!(md.contains("![pic](https://e.com/i.png)"));
+    }
+
+    #[test]
+    fn sectioning_elements_left_in_stored_content_convert() {
+        let md = to_markdown(
+            "<article><header><h1>Title</h1></header><p>Body.</p>\
+             <aside><p>Callout.</p></aside>\
+             <blockquote><p>Quote.</p><footer>— Author</footer></blockquote></article>",
+        )
+        .unwrap();
+        for kept in ["# Title", "Body.", "Callout.", "> Quote.", "— Author"] {
+            assert!(md.contains(kept), "lost {kept:?}: {md}");
+        }
     }
 
     #[test]

@@ -2,10 +2,17 @@
 //!
 //! ```text
 //! raw feed/page HTML → ammonia (strict allowlist)
-//!                    → readability extraction (main content)
+//!                    → readability extraction (whole pages only)
 //!                    → plain text (FTS `content_text`) + word count
 //!                    → htmd HTML→CommonMark at export time
 //! ```
+//!
+//! A feed item is usually a bare content fragment, and a fragment is
+//! *sanitized only*: everything the allowlist keeps is the article, so
+//! nothing is dropped for scoring lower than a sibling. Extraction runs
+//! only when the item really is a whole page — it declares `<html>` or
+//! `<body>` **and** still carries page chrome (`nav`, or a page-level
+//! `header`/`footer`/`aside`) after sanitizing.
 //!
 //! Raw HTML never reaches storage: [`process`] (feed fragments, sanitize
 //! first) and [`process_full_page`] (fetched full pages, readability-extract
@@ -49,13 +56,18 @@ pub enum ContentError {
     Readability(#[from] dom_smoothie::ReadabilityError),
 }
 
-/// The full ingest pipeline: sanitize → extract → text. `base_url`
-/// (the article's own URL) resolves relative links and images before
-/// the scheme allowlist judges them.
+/// The feed-item pipeline: sanitize → (extract, whole pages only) → text.
+/// `base_url` (the article's own URL) resolves relative links and images
+/// before the scheme allowlist judges them. A fragment keeps everything
+/// the sanitizer keeps; see the module docs for when extraction runs.
 #[must_use]
 pub fn process(raw_html: &str, base_url: Option<&str>) -> ProcessedContent {
     let clean = sanitize(raw_html, base_url);
-    let html = extract_main_content(&clean);
+    let html = if declares_document(raw_html) && extract::has_page_chrome(&clean) {
+        extract_main_content(&clean)
+    } else {
+        clean
+    };
     let text = plain_text(&html);
     let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
     ProcessedContent {
@@ -107,6 +119,24 @@ pub fn process_page(raw_html: &str, url: &str) -> Result<ProcessedPage, ContentE
             word_count,
         },
         meta,
+    })
+}
+
+/// Whether raw HTML carries an explicit `<html>` or `<body>` start tag
+/// (any case) — the mark of a whole document rather than a fragment.
+/// Checked on the *raw* input because the sanitizer strips both tags.
+fn declares_document(raw_html: &str) -> bool {
+    let bytes = raw_html.as_bytes();
+    raw_html.match_indices('<').any(|(at, _)| {
+        ["html", "body"].iter().any(|tag| {
+            let name_end = at + 1 + tag.len();
+            bytes
+                .get(at + 1..name_end)
+                .is_some_and(|name| name.eq_ignore_ascii_case(tag.as_bytes()))
+                && bytes
+                    .get(name_end)
+                    .is_none_or(|&next| next == b'>' || next == b'/' || next.is_ascii_whitespace())
+        })
     })
 }
 
@@ -210,6 +240,102 @@ mod tests {
             "output passed the sanitize gate"
         );
         assert!(processed.word_count > 20);
+    }
+
+    #[test]
+    fn fragments_are_sanitized_only() {
+        let fragment = "<p>A short intro.</p>\
+            <div><p>The longer body paragraph that would outscore the intro.</p></div>\
+            <header><p>A header the feed put in the item.</p></header>\
+            <aside><p>An aside callout.</p></aside>\
+            <footer><p>A closing footer note.</p></footer>";
+        let processed = process(fragment, None);
+        assert_eq!(
+            processed.html,
+            sanitize(fragment, None),
+            "fragment was rewritten"
+        );
+        for kept in [
+            "A short intro.",
+            "longer body",
+            "header the feed",
+            "aside callout",
+            "closing footer",
+        ] {
+            assert!(
+                processed.text.contains(kept),
+                "lost {kept:?}: {}",
+                processed.text
+            );
+        }
+    }
+
+    #[test]
+    fn a_wrapped_fragment_without_chrome_is_sanitized_only() {
+        let wrapped = "<html><body><p>A short intro.</p>\
+            <div><p>The longer body paragraph that would outscore the intro.</p></div>\
+            </body></html>";
+        let processed = process(wrapped, None);
+        assert_eq!(processed.html, sanitize(wrapped, None));
+        assert!(processed.text.contains("A short intro."));
+    }
+
+    #[test]
+    fn chrome_without_a_document_wrapper_is_not_extracted() {
+        let fragment = "<nav><p>An in-post table of contents.</p></nav><p>The body.</p>";
+        let processed = process(fragment, None);
+        assert!(
+            processed.text.contains("table of contents"),
+            "{}",
+            processed.text
+        );
+    }
+
+    #[test]
+    fn a_whole_page_item_is_extracted() {
+        let page = "<HTML><Body class=\"x\"><nav><a href=\"https://e.com/\">Home</a></nav>\
+            <p>A short intro.</p><article><p>The longer body paragraph of the post.</p>\
+            <blockquote><p>Quoted words.</p><footer>— Someone</footer></blockquote>\
+            </article><footer><p>© the site</p></footer></Body></HTML>";
+        let processed = process(page, None);
+        assert!(
+            !processed.text.contains("Home"),
+            "nav leaked: {}",
+            processed.text
+        );
+        assert!(
+            !processed.text.contains("© the site"),
+            "footer leaked: {}",
+            processed.text
+        );
+        for kept in [
+            "A short intro.",
+            "longer body",
+            "Quoted words.",
+            "— Someone",
+        ] {
+            assert!(
+                processed.text.contains(kept),
+                "lost {kept:?}: {}",
+                processed.text
+            );
+        }
+    }
+
+    #[test]
+    fn declares_document_matches_real_tags_only() {
+        assert!(declares_document("<html><p>x</p></html>"));
+        assert!(declares_document("<!DOCTYPE html>\n<HTML lang=\"en\">"));
+        assert!(declares_document("<body>"));
+        assert!(declares_document("<body\nclass=\"post\">"));
+        assert!(
+            declares_document("x<html"),
+            "a tag cut off at the end still counts"
+        );
+        assert!(!declares_document("<p>&lt;html&gt; is escaped</p>"));
+        assert!(!declares_document("<htmlish>not it</htmlish><bodyguard>"));
+        assert!(!declares_document("<p>plain</p>"));
+        assert!(!declares_document(""));
     }
 
     #[test]

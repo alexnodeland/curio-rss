@@ -209,7 +209,7 @@ impl CoreHandle {
             self.mark_exported(destination);
         }
         if outcome.disposition != ExportDisposition::Unchanged {
-            self.emit()?;
+            self.emit();
         }
         Ok(SaveOutcome {
             destination: destination.clone(),

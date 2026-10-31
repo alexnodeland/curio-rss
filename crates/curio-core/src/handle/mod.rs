@@ -12,6 +12,12 @@
 //! Every state change that the events contract cares about stages its
 //! envelope inside the storage transaction and is flushed to JSONL
 //! before the operation returns — heads never think about emission.
+//! A flush that fails (full disk, unwritable events dir) is **not** an
+//! operation failure: the change is already committed and its intent
+//! stays staged, so the operation still reports success, the handle
+//! raises [`CoreHandle::has_pending_events`], and the next mutation, a
+//! [`CoreHandle::flush_pending_events`] retry (the desktop head runs one
+//! on a timer) or the next open drains the backlog.
 //!
 //! The operation surface is one `impl CoreHandle` block per concern:
 //! `feeds`, `refresh`, `articles`, `state`, `destinations`, `imports`,
@@ -40,7 +46,8 @@ mod state;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -244,6 +251,9 @@ pub struct CoreHandle {
     profile_dir: PathBuf,
     storage: Arc<Storage>,
     emitter: Mutex<EventEmitter>,
+    /// The "pending events" health flag: set when a flush failed and
+    /// intents are left staged, cleared by the next successful drain.
+    events_backlog: AtomicBool,
     client: PolicedClient,
     destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
     /// Destinations that completed an export since they were
@@ -304,13 +314,17 @@ impl CoreHandle {
                 source,
             })?;
         }
-        let emitter = EventEmitter::new(Arc::clone(&storage), log)?;
+        // No fatal replay here: intents a previous process left staged
+        // are drained by the `emit` below, which degrades to the backlog
+        // flag instead of refusing to open a profile on a full disk.
+        let emitter = EventEmitter::attach(Arc::clone(&storage), log);
         let destinations = destinations::load_destinations(&storage)?;
         let exported_destinations = destinations::load_exported(&storage)?;
-        Ok(Self {
+        let core = Self {
             profile_dir,
             storage,
             emitter: Mutex::new(emitter),
+            events_backlog: AtomicBool::new(false),
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
             exported_destinations: RwLock::new(exported_destinations),
@@ -319,7 +333,9 @@ impl CoreHandle {
             enrich_breaker: crate::enrich::Breaker::default(),
             #[cfg(feature = "enrich-reddit")]
             reddit_auth: crate::enrich::reddit_auth::TokenManager::default(),
-        })
+        };
+        core.emit();
+        Ok(core)
     }
 
     /// The engine crate version.
@@ -366,19 +382,23 @@ impl CoreHandle {
     // ---------------------------------------------------------- private
 
     /// Drains staged event intents to the JSONL log (fsync before the
-    /// intents are deleted — the crash-safe ordering).
-    fn emit(&self) -> Result<(), CoreError> {
-        self.emitter
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .emit_pending()?;
-        Ok(())
+    /// intents are deleted — the crash-safe ordering). Non-fatal by
+    /// design: every caller has already committed its state change, so a
+    /// failure is logged and raises the backlog flag instead of turning a
+    /// stored change into a reported failure.
+    fn emit(&self) {
+        if let Err(error) = self.flush_pending_events() {
+            tracing::warn!(
+                %error,
+                "event emission failed; the intents stay staged and are retried"
+            );
+        }
     }
 
-    fn emit_if(&self, changed: bool) -> Result<bool, CoreError> {
+    fn emit_if(&self, changed: bool) -> bool {
         if changed {
-            self.emit()?;
+            self.emit();
         }
-        Ok(changed)
+        changed
     }
 }

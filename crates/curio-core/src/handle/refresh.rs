@@ -241,7 +241,7 @@ impl CoreHandle {
             // adoption stages a removed/added pair — flush it now.
             self.storage
                 .update_feed_url(id, response.final_url.clone())?;
-            self.emit()?;
+            self.emit();
         }
         self.storage.update_feed_fetch_state(
             id,

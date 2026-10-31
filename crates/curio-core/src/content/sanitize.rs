@@ -44,8 +44,11 @@ use super::lazy_images::{recover_lazy_images, resolve_http};
 /// The prefix every surviving `id` (and every fragment-only `href`) carries.
 /// Author ids live in their own namespace, so `id="main-content"` or
 /// `id="location"` in a feed can never collide with — or clobber — the
-/// reader's own elements and globals.
-pub(crate) const ID_PREFIX: &str = "curio-";
+/// reader's own elements and globals. The namespace is deliberately *not*
+/// `curio-`: the desktop app names its own DOM ids that way
+/// (`curio-custom-themes`, …), so the app must never use an id starting
+/// with this prefix — every such id belongs to feed content.
+pub(crate) const ID_PREFIX: &str = "user-content-";
 
 /// Longest `id` / fragment token kept (real footnote ids are short).
 const MAX_ID_LEN: usize = 128;
@@ -142,8 +145,7 @@ const GENERIC_ATTRIBUTES: &[&str] = &["id", "dir", "lang"];
 #[must_use]
 pub fn sanitize(raw_html: &str, base_url: Option<&str>) -> String {
     let base = base_url.and_then(|base| Url::parse(base).ok());
-    let recovered = recover_lazy_images(raw_html, base.as_ref());
-    let rewritten = rewrite_embeds(&recovered, base.as_ref());
+    let rewritten = soften(raw_html, base.as_ref());
     let mut builder = Builder::default();
     builder
         .tags(ALLOWED_TAGS.iter().copied().collect::<HashSet<_>>())
@@ -155,6 +157,16 @@ pub fn sanitize(raw_html: &str, base_url: Option<&str>) -> String {
         .url_relative(UrlRelative::Custom(Box::new(RelativeUrls { base })))
         .strip_comments(true);
     builder.clean(&rewritten).to_string()
+}
+
+/// The two pre-gate softenings (see the module docs): lazy images get
+/// their real `src`, recognized embeds become placeholder links. Both only
+/// ever hand ammonia an `http(s)` candidate to judge. Idempotent, so the
+/// full-page path can run it before readability extraction (which drops
+/// most iframes and every `<noscript>`) and [`sanitize`] again after.
+pub(super) fn soften(raw_html: &str, base: Option<&Url>) -> String {
+    let recovered = recover_lazy_images(raw_html, base);
+    rewrite_embeds(&recovered, base)
 }
 
 /// The relative-URL policy: a fragment-only reference stays in-page
@@ -363,10 +375,10 @@ mod tests {
              <ol><li id=\"fn:1\">note <a href=\"#fnref:1\">↩</a></li></ol>",
             Some("https://example.com/post"),
         );
-        assert!(out.contains("<sup id=\"curio-fnref:1\">"), "{out}");
-        assert!(out.contains("href=\"#curio-fn:1\""), "{out}");
-        assert!(out.contains("<li id=\"curio-fn:1\">"), "{out}");
-        assert!(out.contains("href=\"#curio-fnref:1\""), "{out}");
+        assert!(out.contains("<sup id=\"user-content-fnref:1\">"), "{out}");
+        assert!(out.contains("href=\"#user-content-fn:1\""), "{out}");
+        assert!(out.contains("<li id=\"user-content-fn:1\">"), "{out}");
+        assert!(out.contains("href=\"#user-content-fnref:1\""), "{out}");
         assert!(
             !out.contains("example.com/post#"),
             "fragment was absolutized: {out}"
@@ -376,7 +388,7 @@ mod tests {
     #[test]
     fn fragment_links_survive_without_a_base() {
         let out = sanitize("<a href=\"#fn1\">1</a><a href=\"/rel\">r</a>", None);
-        assert!(out.contains("href=\"#curio-fn1\""), "{out}");
+        assert!(out.contains("href=\"#user-content-fn1\""), "{out}");
         assert!(!out.contains("/rel"), "{out}");
     }
 
@@ -394,7 +406,7 @@ mod tests {
     #[test]
     fn ids_are_prefixed_once() {
         let once = sanitize("<p id=\"location\">x</p>", None);
-        assert_eq!(once, "<p id=\"curio-location\">x</p>");
+        assert_eq!(once, "<p id=\"user-content-location\">x</p>");
         assert_eq!(sanitize(&once, None), once, "re-sanitizing is idempotent");
     }
 

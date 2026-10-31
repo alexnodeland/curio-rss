@@ -40,6 +40,7 @@ fs4 = { workspace = true }
 htmd = { workspace = true }
 icu_normalizer = { workspace = true }
 keyring = { workspace = true, optional = true }
+markup5ever_rcdom = { workspace = true }
 quick-xml = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }

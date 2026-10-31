@@ -1073,6 +1073,7 @@ dependencies = [
  "insta",
  "keyring",
  "libc",
+ "markup5ever_rcdom",
  "proptest",
  "quick-xml",
  "regex",

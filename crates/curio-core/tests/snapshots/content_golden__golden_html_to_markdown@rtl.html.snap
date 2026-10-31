@@ -5,7 +5,7 @@ input_file: fixtures/html/rtl.html
 ---
 # مقالة من اليمين إلى اليسار
 
-هذه فقرة عربية يجب أن تحتفظ باتجاهها عند التخزين.
+هذه فقرة عربية ترث اتجاهها من الحاوية ويجب أن تحتفظ به عند التخزين.
 
 An embedded left-to-right paragraph keeps its own direction.
 

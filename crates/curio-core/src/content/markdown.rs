@@ -64,13 +64,13 @@ mod tests {
     #[test]
     fn footnotes_become_commonmark_footnotes() {
         let md = to_markdown(
-            "<p>Claim<sup id=\"curio-fnref1\"><a href=\"#curio-fn1\">1</a></sup> and \
-             more<sup id=\"curio-fnref2\"><a href=\"#curio-fn2\">2</a></sup>.</p>\
+            "<p>Claim<sup id=\"user-content-fnref1\"><a href=\"#user-content-fn1\">1</a></sup> and \
+             more<sup id=\"user-content-fnref2\"><a href=\"#user-content-fn2\">2</a></sup>.</p>\
              <hr><ol>\
-             <li id=\"curio-fn1\"><p>First note. <a href=\"#curio-fnref1\">↩</a></p>\
+             <li id=\"user-content-fn1\"><p>First note. <a href=\"#user-content-fnref1\">↩</a></p>\
              <p>Second paragraph.</p></li>\
-             <li id=\"curio-fn2\"><p>See <a href=\"https://e.com/src\">source</a>. \
-             <a href=\"#curio-fnref2\">↩</a></p></li></ol>",
+             <li id=\"user-content-fn2\"><p>See <a href=\"https://e.com/src\">source</a>. \
+             <a href=\"#user-content-fnref2\">↩</a></p></li></ol>",
         )
         .unwrap();
         assert!(md.contains("Claim[^1] and more[^2]."), "{md}");
@@ -86,7 +86,8 @@ mod tests {
 
     #[test]
     fn other_in_page_links_keep_their_text() {
-        let md = to_markdown("<p>Jump to <a href=\"#curio-part-2\">part two</a>.</p>").unwrap();
+        let md =
+            to_markdown("<p>Jump to <a href=\"#user-content-part-2\">part two</a>.</p>").unwrap();
         assert_eq!(md, "Jump to part two.");
     }
 
@@ -94,12 +95,43 @@ mod tests {
     fn ordinary_ordered_lists_are_untouched_in_a_footnoted_doc() {
         let md = to_markdown(
             "<ol start=\"3\"><li>three</li><li>four</li></ol>\
-             <p>x<a href=\"#curio-fn1\">1</a></p><ol><li id=\"curio-fn1\">n</li></ol>",
+             <p>x<a href=\"#user-content-fn1\">1</a></p><ol><li id=\"user-content-fn1\">n</li></ol>",
         )
         .unwrap();
         assert!(md.contains("3.  three\n4.  four"), "{md}");
         assert!(md.contains("x[^1]"), "{md}");
         assert!(md.contains("[^1]: n"), "{md}");
+    }
+
+    #[test]
+    fn deeply_nested_lists_in_a_footnoted_doc_are_walked_once() {
+        // Each list used to be walked twice (once to look for definitions,
+        // once by htmd), so export cost doubled per nesting level: 64
+        // levels would never finish. Walked once, this is instant.
+        const DEPTH: usize = 64;
+        let html = format!(
+            "<p>x<a href=\"#user-content-fn1\">1</a></p>{}deep{}\
+             <ol><li id=\"user-content-fn1\">n</li></ol>",
+            "<ol><li>".repeat(DEPTH),
+            "</li></ol>".repeat(DEPTH),
+        );
+        let md = to_markdown(&html).unwrap();
+        assert!(md.contains("deep"), "{md}");
+        assert!(md.contains("x[^1]"), "{md}");
+        assert!(md.contains("[^1]: n"), "{md}");
+    }
+
+    #[test]
+    fn in_page_links_inside_a_definition_keep_their_text() {
+        let md = to_markdown(
+            "<h2 id=\"user-content-part-2\">Part two</h2>\
+             <p>x<sup id=\"user-content-fnref1\"><a href=\"#user-content-fn1\">1</a></sup></p>\
+             <ol><li id=\"user-content-fn1\">See <a href=\"#user-content-part-2\">part two</a>. \
+             <a href=\"#user-content-fnref1\">↩</a></li></ol>",
+        )
+        .unwrap();
+        assert!(md.contains("[^1]: See part two."), "{md}");
+        assert!(!md.contains('↩'), "back-reference leaked: {md}");
     }
 
     #[test]

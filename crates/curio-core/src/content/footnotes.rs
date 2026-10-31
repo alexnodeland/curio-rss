@@ -2,21 +2,29 @@
 //!
 //! The sanitizer keeps footnote structure in-page (prefixed `id`s, and
 //! fragment-only `href`s rewritten to match). htmd would turn that into
-//! `[1](#curio-fn1)` — a dead link in a notes vault, where element ids don't
-//! exist. This module recognizes the structure every footnote generator
-//! shares (a reference `<a href="#X">` pointing at an `<li id="X">` of an
-//! `<ol>`, outside that item) and has htmd emit `CommonMark` footnotes
-//! instead: `[^1]` at each reference, `[^1]: …` definitions where the list
-//! was, back-reference links (`↩`) dropped. Any other fragment-only link
-//! keeps its text and loses the dead destination.
+//! `[1](#user-content-fn1)` — a dead link in a notes vault, where element
+//! ids don't exist. This module recognizes the structure every footnote
+//! generator shares (a reference `<a href="#X">` pointing at an
+//! `<li id="X">` of an `<ol>`, outside that item) and has htmd emit
+//! `CommonMark` footnotes instead: `[^1]` at each reference, `[^1]: …`
+//! definitions where the list was, back-reference links dropped (a link
+//! from a definition back to the element holding one of its references —
+//! the `↩`). Any other fragment-only link keeps its text and loses the
+//! dead destination.
+//!
+//! Which `<ol>`s are footnote lists is decided up front (by the id of a
+//! list's first item), so every list is walked exactly once, however
+//! deeply ordinary lists nest.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use htmd::{
-    Element, HtmlToMarkdownBuilder,
+    Element, HtmlToMarkdownBuilder, Node,
     element_handler::{HandlerResult, Handlers},
 };
+use markup5ever_rcdom::NodeData;
 use scraper::{ElementRef, Html, Selector};
 
 /// The footnote structure of one document.
@@ -24,6 +32,9 @@ use scraper::{ElementRef, Html, Selector};
 struct Footnotes {
     /// Definition `li` id → footnote label (1-based, document order).
     labels: HashMap<String, usize>,
+    /// The id of the first `li` of each footnote `<ol>` — how the `ol`
+    /// handler recognizes a footnote list without walking it.
+    list_heads: HashSet<String>,
     /// `href`s of the back-reference links inside definitions.
     backlinks: HashSet<String>,
 }
@@ -36,11 +47,16 @@ impl Footnotes {
         };
         let doc = Html::parse_fragment(html);
         let anchors: Vec<ElementRef<'_>> = doc.select(&anchor_sel).collect();
-        let referenced_from_outside = |li: &ElementRef<'_>, id: &str| {
-            anchors.iter().any(|a| {
-                a.value().attr("href").and_then(|h| h.strip_prefix('#')) == Some(id)
-                    && !a.ancestors().any(|node| node.id() == li.id())
-            })
+        // The anchors that reference `id` from outside the item `li`.
+        let references = |li: &ElementRef<'_>, id: &str| -> Vec<ElementRef<'_>> {
+            anchors
+                .iter()
+                .filter(|a| {
+                    a.value().attr("href").and_then(|h| h.strip_prefix('#')) == Some(id)
+                        && !a.ancestors().any(|node| node.id() == li.id())
+                })
+                .copied()
+                .collect()
         };
 
         let mut footnotes = Self::default();
@@ -55,10 +71,13 @@ impl Footnotes {
                 && items.iter().all(|li| {
                     li.value()
                         .id()
-                        .is_some_and(|id| referenced_from_outside(li, id))
+                        .is_some_and(|id| !references(li, id).is_empty())
                 });
             if !all_definitions {
                 continue;
+            }
+            if let Some(head) = items.first().and_then(|li| li.value().id()) {
+                footnotes.list_heads.insert(head.to_owned());
             }
             for li in items {
                 if let Some(id) = li.value().id()
@@ -66,14 +85,24 @@ impl Footnotes {
                 {
                     let label = footnotes.labels.len() + 1;
                     footnotes.labels.insert(id.to_owned(), label);
-                    definitions.push(li);
+                    definitions.push((li, id));
                 }
             }
         }
-        for li in definitions {
+        for (li, id) in definitions {
+            // What a back-reference may target: a reference anchor itself
+            // or an element around it (`<sup id="fnref1"><a href="#fn1">`).
+            let holders: HashSet<&str> = references(&li, id)
+                .iter()
+                .flat_map(|reference| {
+                    std::iter::once(*reference)
+                        .chain(reference.ancestors().filter_map(ElementRef::wrap))
+                        .filter_map(|el| el.value().id())
+                })
+                .collect();
             for a in li.select(&anchor_sel) {
                 if let Some(href) = a.value().attr("href")
-                    && !footnotes.labels.contains_key(&href[1..])
+                    && holders.contains(&href[1..])
                 {
                     footnotes.backlinks.insert(href.to_owned());
                 }
@@ -81,6 +110,29 @@ impl Footnotes {
         }
         footnotes
     }
+
+    /// Whether `list` is a footnote list: its first `li` is a list head.
+    fn is_footnote_list(&self, list: &Rc<Node>) -> bool {
+        first_item_id(list).is_some_and(|id| self.list_heads.contains(&id))
+    }
+}
+
+/// The `id` of the first `li` child of `list`, if it has one.
+fn first_item_id(list: &Rc<Node>) -> Option<String> {
+    list.children
+        .borrow()
+        .iter()
+        .find_map(|child| match &child.data {
+            NodeData::Element { name, attrs, .. } if &*name.local == "li" => Some(
+                attrs
+                    .borrow()
+                    .iter()
+                    .find(|attr| &*attr.name.local == "id")
+                    .map(|attr| attr.value.to_string()),
+            ),
+            _ => None,
+        })
+        .flatten()
 }
 
 /// Registers the footnote-aware `a`/`li`/`ol` handlers for `html` on
@@ -95,7 +147,6 @@ pub(super) fn register(builder: HtmlToMarkdownBuilder, html: &str) -> HtmlToMark
     let for_anchor = Arc::clone(&footnotes);
     let for_item = Arc::clone(&footnotes);
     let item_sink = Arc::clone(&pending);
-    let has_footnotes = !footnotes.labels.is_empty();
     builder
         .add_handler(
             vec!["a"],
@@ -112,11 +163,7 @@ pub(super) fn register(builder: HtmlToMarkdownBuilder, html: &str) -> HtmlToMark
         .add_handler(
             vec!["ol"],
             move |handlers: &dyn Handlers, element: Element<'_>| {
-                if has_footnotes {
-                    ordered_list(&pending, handlers, element)
-                } else {
-                    handlers.fallback(element)
-                }
+                ordered_list(&footnotes, &pending, handlers, element)
             },
         )
 }
@@ -178,23 +225,31 @@ fn list_item(
 }
 
 /// A footnote list → its definitions as a block; any other list → htmd.
-/// Whether this `ol` holds definitions is only known once its items have
-/// been walked, so a non-footnote list is walked once here and once more
-/// by htmd (only in documents that have footnotes at all).
+/// Which kind a list is was decided by [`Footnotes::detect`], so each list
+/// is walked exactly once (nested ordinary lists cost linear time).
 fn ordered_list(
+    footnotes: &Footnotes,
     pending: &Mutex<Vec<String>>,
     handlers: &dyn Handlers,
     element: Element<'_>,
 ) -> Option<HandlerResult> {
     let before = pending.lock().unwrap_or_else(PoisonError::into_inner).len();
-    let _ = handlers.walk_children(element.node);
-    let definitions = {
+    let take_definitions = || {
         let mut pending = pending.lock().unwrap_or_else(PoisonError::into_inner);
         let at = before.min(pending.len());
         pending.split_off(at)
     };
+    if !footnotes.is_footnote_list(element.node) {
+        let rendered = handlers.fallback(element);
+        // A definition id repeated inside an ordinary list (duplicate ids)
+        // must not leak into the next footnote list.
+        drop(take_definitions());
+        return rendered;
+    }
+    let walked = handlers.walk_children(element.node);
+    let definitions = take_definitions();
     if definitions.is_empty() {
-        return handlers.fallback(element);
+        return Some(walked);
     }
     Some(format!("\n\n{}\n\n", definitions.join("\n")).into())
 }
@@ -205,17 +260,41 @@ mod tests {
 
     use super::*;
 
-    const DOC: &str = "<p>Claim<sup id=\"curio-fnref1\"><a href=\"#curio-fn1\">1</a></sup> \
-        and again<sup><a href=\"#curio-fn2\">2</a></sup>.</p>\
-        <ol><li id=\"curio-fn1\"><p>First note. <a href=\"#curio-fnref1\">↩</a></p></li>\
-        <li id=\"curio-fn2\">Second note.</li></ol>";
+    const DOC: &str = "<p>Claim<sup id=\"user-content-fnref1\">\
+        <a href=\"#user-content-fn1\">1</a></sup> \
+        and again<sup><a href=\"#user-content-fn2\">2</a></sup>.</p>\
+        <ol><li id=\"user-content-fn1\"><p>First note. \
+        <a href=\"#user-content-fnref1\">↩</a></p></li>\
+        <li id=\"user-content-fn2\">Second note.</li></ol>";
 
     #[test]
     fn detects_definitions_and_backlinks() {
         let footnotes = Footnotes::detect(DOC);
-        assert_eq!(footnotes.labels.get("curio-fn1"), Some(&1));
-        assert_eq!(footnotes.labels.get("curio-fn2"), Some(&2));
-        assert!(footnotes.backlinks.contains("#curio-fnref1"));
+        assert_eq!(footnotes.labels.get("user-content-fn1"), Some(&1));
+        assert_eq!(footnotes.labels.get("user-content-fn2"), Some(&2));
+        assert!(footnotes.list_heads.contains("user-content-fn1"));
+        assert!(footnotes.backlinks.contains("#user-content-fnref1"));
+    }
+
+    #[test]
+    fn a_backlink_may_target_the_reference_anchor_itself() {
+        let footnotes = Footnotes::detect(
+            "<p>x<a id=\"r1\" href=\"#n1\">1</a></p>\
+             <ol><li id=\"n1\">note <a href=\"#r1\">↩</a></li></ol>",
+        );
+        assert!(footnotes.backlinks.contains("#r1"));
+    }
+
+    #[test]
+    fn other_in_page_links_inside_a_definition_are_not_backlinks() {
+        let footnotes = Footnotes::detect(
+            "<h2 id=\"part-2\">Part two</h2>\
+             <p>x<sup id=\"r1\"><a href=\"#n1\">1</a></sup></p>\
+             <ol><li id=\"n1\">See <a href=\"#part-2\">part two</a>. \
+             <a href=\"#r1\">↩</a></li></ol>",
+        );
+        assert!(footnotes.backlinks.contains("#r1"));
+        assert!(!footnotes.backlinks.contains("#part-2"));
     }
 
     #[test]
@@ -223,6 +302,7 @@ mod tests {
         // Ids alone don't make footnotes: nothing outside references them.
         let footnotes = Footnotes::detect("<ol><li id=\"a\">x</li><li id=\"b\">y</li></ol>");
         assert!(footnotes.labels.is_empty());
+        assert!(footnotes.list_heads.is_empty());
         // A list referenced only partly is not a footnote list either.
         let footnotes = Footnotes::detect(
             "<a href=\"#a\">a</a><ol><li id=\"a\">x</li><li id=\"b\">y</li></ol>",

@@ -122,8 +122,10 @@ fn xss_corpus_output_is_inert() {
                 "unexpected attribute {attr:?} survived on <{name}>"
             );
             if matches!(attr, "href" | "src") {
-                let in_page_fragment =
-                    attr == "href" && value.strip_prefix("#curio-").is_some_and(is_plain_token);
+                let in_page_fragment = attr == "href"
+                    && value
+                        .strip_prefix("#user-content-")
+                        .is_some_and(is_plain_token);
                 assert!(
                     value.starts_with("http://")
                         || value.starts_with("https://")
@@ -133,7 +135,9 @@ fn xss_corpus_output_is_inert() {
             }
             match attr {
                 "id" => assert!(
-                    value.strip_prefix("curio-").is_some_and(is_plain_token),
+                    value
+                        .strip_prefix("user-content-")
+                        .is_some_and(is_plain_token),
                     "unprefixed or unfiltered id on <{name}>: {value:?}"
                 ),
                 "dir" => assert!(
@@ -281,14 +285,14 @@ fn footnotes_fixture_round_trips_to_commonmark_footnotes() {
     // The stored HTML keeps working in-page links for the reader.
     let html = stored_html("footnotes.html");
     for needle in [
-        "href=\"#curio-fn1\"",
-        "<li id=\"curio-fn1\">",
-        "href=\"#curio-fnref1\"",
-        "<sup id=\"curio-fnref1\">",
-        "href=\"#curio-fn:2\"",
-        "<li id=\"curio-fn:2\">",
-        "<h2 id=\"curio-later\">",
-        "href=\"#curio-later\"",
+        "href=\"#user-content-fn1\"",
+        "<li id=\"user-content-fn1\">",
+        "href=\"#user-content-fnref1\"",
+        "<sup id=\"user-content-fnref1\">",
+        "href=\"#user-content-fn:2\"",
+        "<li id=\"user-content-fn:2\">",
+        "<h2 id=\"user-content-later\">",
+        "href=\"#user-content-later\"",
         "<ol start=\"3\">",
     ] {
         assert!(html.contains(needle), "{needle} missing from:\n{html}");
@@ -298,8 +302,15 @@ fn footnotes_fixture_round_trips_to_commonmark_footnotes() {
 #[test]
 fn rtl_fixture_keeps_direction_and_language() {
     let html = stored_html("rtl.html");
+    // Direction set only on the container survives as a wrapper around
+    // everything that inherits it — the heading and the bare paragraph.
+    assert!(
+        html.starts_with("<div dir=\"rtl\" lang=\"ar\"><h1>مقالة"),
+        "container direction lost:\n{html}"
+    );
+    assert!(html.ends_with("</div>"), "{html}");
     for needle in [
-        "<p dir=\"rtl\" lang=\"ar\">",
+        "<p>هذه فقرة عربية ترث اتجاهها",
         "<p dir=\"ltr\" lang=\"en\">",
         "<bdi>إيان</bdi>",
         "<bdo dir=\"rtl\">reversed</bdo>",
@@ -343,5 +354,11 @@ fn embeds_fixture_turns_every_visible_embed_into_a_link() {
         !markdown.contains("track.example.net"),
         "tracking frame leaked:\n{markdown}"
     );
+    for chrome in ["outbrain.com", "platform.twitter.com", "disqus.com"] {
+        assert!(
+            !markdown.contains(chrome),
+            "{chrome} widget became a link:\n{markdown}"
+        );
+    }
     assert!(markdown.contains("The end."));
 }

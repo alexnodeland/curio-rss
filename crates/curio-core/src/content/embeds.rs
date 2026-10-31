@@ -1,7 +1,7 @@
 //! Embed placeholders, applied to raw HTML *before* the sanitize gate.
 //!
 //! `<iframe>`s from known media/content providers, or whose URL is
-//! embed-shaped (an `embed`/`player`/`widget` path segment or host label —
+//! embed-shaped (an `embed`/`player` path segment or host label —
 //! Mastodon's `/@user/1/embed`, a maps `/embed`), plus `<video>` / `<audio>`
 //! with an `http(s)` source, are rewritten into a plain
 //! `<a href="…">▶ Embedded media (host) ↗</a>` (or `Embedded content`) link,
@@ -11,8 +11,9 @@
 //! `http(s)` source; ammonia still runs afterward and judges that `href`
 //! with the same `http`/`https`-only scheme filter as every other link, so a
 //! hostile `src` can never survive as a live link — the transform cannot
-//! weaken the gate. Invisible frames (`hidden`, 0–1px, `display:none`) and
-//! arbitrary non-embed iframes are left untouched, for ammonia to drop.
+//! weaken the gate. Invisible frames (`hidden`, 0–1px, `display:none`), ad /
+//! comment / share-button frames (`disqus.com/embed/…`) and arbitrary
+//! non-embed iframes are left untouched, for ammonia to drop.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -43,7 +44,22 @@ const CONTENT_EMBED_HOST_SUFFIXES: &[&str] = &["codepen.io", "bsky.app"];
 /// A path segment or leading host label that marks an iframe URL as an
 /// embed from a provider we don't list (Mastodon's `/@user/1/embed`,
 /// `maps…/embed`, `embed.example.org`, `…/player/…`).
-const EMBED_URL_MARKERS: &[&str] = &["embed", "embeds", "player", "widget", "widgets"];
+/// (`widget`/`widgets` is deliberately not a marker: those are ad, share
+/// and comment widgets far more often than content.)
+const EMBED_URL_MARKERS: &[&str] = &["embed", "embeds", "player"];
+
+/// Ad, recommendation, comment and share-button hosts: their iframes are
+/// page chrome, never the article's content, so they are dropped even
+/// when the URL is embed-shaped (`disqus.com/embed/comments`).
+const CHROME_HOST_SUFFIXES: &[&str] = &[
+    "outbrain.com",
+    "taboola.com",
+    "disqus.com",
+    "doubleclick.net",
+    "googlesyndication.com",
+    "addthis.com",
+    "sharethis.com",
+];
 
 /// Rewrites recognized `<iframe>`/`<video>`/`<audio>` embeds into
 /// placeholder `<a>` links, in place, before ammonia runs. Anything not
@@ -131,6 +147,9 @@ fn iframe_placeholder(block: &str, base: Option<&Url>) -> String {
     let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
         return block.to_owned();
     };
+    if host_matches(&host, CHROME_HOST_SUFFIXES) {
+        return block.to_owned();
+    }
     let kind = if host_matches(&host, MEDIA_EMBED_HOST_SUFFIXES) {
         EmbedKind::Media
     } else if host_matches(&host, CONTENT_EMBED_HOST_SUFFIXES) || is_embed_shaped(&url) {
@@ -196,7 +215,7 @@ fn is_invisible_frame(attrs: &HashMap<String, String>) -> bool {
     attrs.contains_key("hidden") || tiny("width") || tiny("height") || hidden_style
 }
 
-/// Whether an iframe URL looks like an embed: an `embed`/`player`/`widget`
+/// Whether an iframe URL looks like an embed: an `embed`/`player`
 /// path segment or leading host label.
 fn is_embed_shaped(url: &Url) -> bool {
     let is_marker = |part: &str| EMBED_URL_MARKERS.contains(&part.to_ascii_lowercase().as_str());

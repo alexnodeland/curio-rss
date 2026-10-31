@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Malformed & unescaped</title>
+    <link>https://broken.example.com/</link>
+    <item>
+      <title>Unclosed item
+      <link>https://broken.example.com/one</link>
+      <description><p>Raw <b>HTML</b> not in CDATA</description>
+    </item>
+    <item>
+      <title>Second</title>
+  </channel>

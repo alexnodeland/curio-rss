@@ -1,0 +1,21 @@
+{
+  "version": "https://jsonfeed.org/version/1",
+  "title": "JSON Feed 1.0",
+  "home_page_url": "https://json10.example.net/",
+  "author": { "name": "Old Style Author" },
+  "items": [
+    {
+      "id": "1",
+      "url": "https://json10.example.net/one",
+      "title": "Version one item",
+      "content_text": "Plain <b>text</b> content, not markup.",
+      "date_published": "2026-07-01T09:00:00+02:00"
+    },
+    {
+      "id": "2",
+      "url": "https://json10.example.net/two",
+      "content_html": "<p>No title, unparsable date.</p>",
+      "date_published": "not a date"
+    }
+  ]
+}

@@ -20,13 +20,19 @@ Current layout:
   real migrated schema. It powers the criterion cold-start bench
   (`just bench-cold-start`) and can seed a profile for manual QA.
 
+- `db/` — migration fixtures: one small `vX.Y.Z.db` per released version,
+  each written by **that release's own** storage code (the generator,
+  `db/generate.rs`, was run inside a checkout of the tag — see its header
+  for the recipe). `crates/curio-core/tests/migration_fixtures.rs` upgrades
+  every one and asserts the pre-migration backup, row counts, FTS integrity
+  and intent replay. Cutting a release adds its fixture here.
+
 Planned layout (populated from later phases, per `docs/design/roadmap.md`):
 
 - `feeds/` — real-world RSS/Atom/JSON Feed samples for the ingest pipeline
 - `nasty/` — the hostile corpus: malformed XML, encoding bombs, stored-XSS
   attempts (`<script>`, `onerror=`), oversized entries
 - `html/` — article HTML → readability → CommonMark conversion cases
-- `db/` — migration fixture databases from every released version
 
 Rule: no fixture file may exceed 1 MB — CI's blob-size guard fails the push
 (the 50k `generated/` database is ~100 MB, which is exactly why it is

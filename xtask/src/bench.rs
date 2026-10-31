@@ -38,7 +38,9 @@ const CRITERION_ERROR: &str = "Criterion.rs ERROR:";
 #[must_use]
 pub fn parse_line(line: &str) -> Option<BenchResult> {
     let rest = line.strip_prefix("test ")?;
-    let (name, after) = rest.split_once("...")?;
+    // `(.+)` is greedy: the name runs to the LAST `...` (a benchmark id may
+    // itself contain one).
+    let (name, after) = rest.rsplit_once("...")?;
     // `(.+)\s+` — a non-empty name, then at least one blank before `...`.
     if !name.ends_with(char::is_whitespace) {
         return None;
@@ -229,5 +231,14 @@ mod tests {
         // JavaScript's `\w` is ASCII-only, so the tracker skips `µs/iter`.
         assert_eq!(parse_line("test x ... bench: 1 µs/iter (+/- 1)"), None);
         assert!(parse_line("test x ... bench: 1.5 ms/iter (+/- 0.1)").is_some());
+    }
+
+    #[test]
+    fn a_name_with_dots_runs_to_the_last_ellipsis_like_the_greedy_regex() {
+        let result =
+            parse_line("test group/wait ... then/load ... bench: 7 ns/iter (+/- 1)").unwrap();
+        assert_eq!(result.name, "group/wait ... then/load");
+        let result = parse_line("test a...b ... bench: 7 ns/iter (+/- 1)").unwrap();
+        assert_eq!(result.name, "a...b");
     }
 }

@@ -77,7 +77,9 @@ boundary:
 # Supply-chain lint over .github/workflows: SHA-pinned actions, release gated
 # on CI, updater signing key in one build-free step of the updater-signing
 # environment job, SHA256SUMS/SBOM/attestation,
-# no retired runner images, and a nightly that self-validates on PRs + hard-gates
+# no retired runner images, a nightly that self-validates on PRs + hard-gates,
+# and a cold-start bench the tracker can read (stateless criterion under
+# pipefail, `xtask bench-output` before the tracker, a hard 130% alert)
 workflows:
     cargo run -p xtask -- workflows
 

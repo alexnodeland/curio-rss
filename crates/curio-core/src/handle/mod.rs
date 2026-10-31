@@ -260,7 +260,8 @@ pub struct CoreHandle {
     storage: Arc<Storage>,
     events: Mutex<sink::EventSink>,
     /// The "pending events" health flag: set when a flush failed and
-    /// intents are left staged, cleared by the next successful drain.
+    /// intents are left staged (or the log could not be opened at all),
+    /// cleared by the next successful drain.
     events_backlog: AtomicBool,
     client: PolicedClient,
     destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
@@ -342,22 +343,24 @@ impl CoreHandle {
         // Only contention is reported, as the retryable "busy".
         let mut events =
             sink::EventSink::detached(Arc::clone(&storage), profile_dir.join(".curio"));
-        if let Err(error) = events.emitter() {
-            if error.is_profile_busy() {
-                return Err(error);
+        let attached = match events.emitter() {
+            Ok(_) => true,
+            Err(error) if error.is_profile_busy() => return Err(error),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "the event log cannot be opened; events stay staged until it can"
+                );
+                false
             }
-            tracing::warn!(
-                %error,
-                "the event log cannot be opened; events stay staged until it can"
-            );
-        }
+        };
         let destinations = destinations::load_destinations(&storage)?;
         let exported_destinations = destinations::load_exported(&storage)?;
         let core = Self {
             profile_dir,
             storage,
             events: Mutex::new(events),
-            events_backlog: AtomicBool::new(false),
+            events_backlog: AtomicBool::new(!attached),
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
             exported_destinations: RwLock::new(exported_destinations),
@@ -367,7 +370,11 @@ impl CoreHandle {
             #[cfg(feature = "enrich-reddit")]
             reddit_auth: crate::enrich::reddit_auth::TokenManager::default(),
         };
-        core.emit();
+        // The startup replay: intents a previous process left staged are
+        // drained here, non-fatally (a failure raises the backlog flag).
+        if attached {
+            core.emit();
+        }
         Ok(core)
     }
 

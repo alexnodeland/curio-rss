@@ -6,7 +6,8 @@
 //!   defense; this is defense in depth, and it is what CI runs.
 //! - `workflows` — the supply-chain lint over `.github/workflows`: SHA-pinned
 //!   actions, the release gated on CI, the updater signing key confined to
-//!   one build-free step, checksums/SBOM/attestation on the draft release,
+//!   one build-free step of a job in the `updater-signing` environment,
+//!   checksums/SBOM/attestation on the draft release,
 //!   no retired runner images, and a nightly that runs on the PRs editing it
 //!   (see `xtask::workflows`).
 

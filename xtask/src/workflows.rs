@@ -19,7 +19,12 @@
 //!    background process), and up to and including it nothing writes the
 //!    runner's env/path/output files or sets a code-injecting env var
 //!    (`BASH_ENV`, `NODE_OPTIONS`, …). No `secrets: inherit` or
-//!    `toJSON(secrets)` anywhere (both hand every secret onward).
+//!    `toJSON(secrets)` anywhere (both hand every secret onward). The
+//!    signing job deploys to the `updater-signing` environment (issue #187)
+//!    — the only place the key is stored, tag-restricted and reviewer-gated —
+//!    whenever the key step runs: unconditionally, or (in a workflow that a
+//!    `workflow_dispatch` dry run also triggers) under exactly the key step's
+//!    own `if:`, so the dry run is never held at the tag-only rule.
 //! 4. **Release assets.** The draft release step ships `SHA256SUMS`, a
 //!    `CycloneDX` SBOM and the provenance attestation bundle, and its job mints
 //!    that attestation first.
@@ -41,6 +46,11 @@ use serde_yaml::Value;
 /// Secret names (prefix match) that sign updates for every user. Each
 /// reference must sit in the single signing step's `env`.
 pub const SIGNING_SECRETS: &[&str] = &["TAURI_SIGNING_PRIVATE_KEY"];
+
+/// The GitHub environment holding the updater signing secrets. Its
+/// deployment rule admits only `v*` tags and it requires a reviewer, so a
+/// workflow on any other ref, or one nobody approved, reads the key as empty.
+pub const SIGNING_ENVIRONMENT: &str = "updater-signing";
 
 /// Commands that compile or run project code. None may appear in the
 /// signing step; `cargo` may not appear anywhere in the signing job.
@@ -410,6 +420,7 @@ fn signing_isolation(parsed: &[Parsed<'_>]) -> Vec<String> {
                 && let Some(wf) = parsed.iter().find(|wf| wf.name == step_ref.workflow)
             {
                 out.extend(signing_step_is_minimal(wf, step_ref));
+                out.extend(signing_environment(wf, step_ref));
             }
         }
         _ => out.push(format!(
@@ -551,6 +562,79 @@ fn signing_step_is_minimal(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
         }
     }
     out
+}
+
+/// The signing job must deploy to [`SIGNING_ENVIRONMENT`] whenever its key
+/// step runs: the secrets live only there, behind the tag-only deployment
+/// rule and the required reviewer. A workflow with triggers besides `push`
+/// (the `workflow_dispatch` dry run) must select the environment
+/// conditionally — `${{ <cond> && 'updater-signing' || '' }}`, an empty name
+/// meaning "no environment" — where `<cond>` is exactly the key step's
+/// `if:`, so the dry run is not held at a rule it can never pass and the
+/// real key step never runs outside the environment.
+fn signing_environment(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
+    let Some(job) = wf
+        .doc
+        .get("jobs")
+        .and_then(|jobs| jobs.get(at.job.as_str()))
+    else {
+        return Vec::new();
+    };
+    let label = format!("{}: job `{}`", wf.name, at.job);
+    let declared = match job.get("environment") {
+        Some(Value::String(name)) => Some(name.as_str()),
+        Some(Value::Mapping(map)) => map.get("name").and_then(Value::as_str),
+        _ => None,
+    };
+    let Some(declared) = declared else {
+        return vec![format!(
+            "{label} holds the signing key but declares no `environment:` — the key lives only in the `{SIGNING_ENVIRONMENT}` environment (tag-restricted, reviewer-gated)"
+        )];
+    };
+    let compact = without_whitespace(declared);
+    if compact == SIGNING_ENVIRONMENT {
+        let dry_run_triggers = triggers(&wf.doc).iter().any(|t| t != "push");
+        return if dry_run_triggers {
+            vec![format!(
+                "{label} always deploys to `{SIGNING_ENVIRONMENT}`, so the `workflow_dispatch` dry run waits on (and fails) its tag-only rule — select it under the key step's `if:` (`${{{{ <cond> && '{SIGNING_ENVIRONMENT}' || '' }}}}`)"
+            )]
+        } else {
+            Vec::new()
+        };
+    }
+    let suffix = format!("&&'{SIGNING_ENVIRONMENT}'||''}}}}");
+    let Some(condition) = compact
+        .strip_prefix("${{")
+        .and_then(|rest| rest.strip_suffix(suffix.as_str()))
+    else {
+        return vec![format!(
+            "{label} deploys to `{declared}`, not `{SIGNING_ENVIRONMENT}` — the environment that holds the signing key"
+        )];
+    };
+    let key_step_if = steps(job)
+        .get(at.step)
+        .and_then(|step| step.get("if"))
+        .and_then(Value::as_str)
+        .map(|text| {
+            let compact = without_whitespace(text);
+            compact
+                .strip_prefix("${{")
+                .and_then(|rest| rest.strip_suffix("}}"))
+                .map_or_else(|| compact.clone(), str::to_owned)
+        });
+    if key_step_if.as_deref() == Some(condition) {
+        Vec::new()
+    } else {
+        vec![format!(
+            "{label} selects `{SIGNING_ENVIRONMENT}` only when `{condition}`, but the key step runs on `{}` — the key step must never run outside the environment",
+            key_step_if.as_deref().unwrap_or("every event")
+        )]
+    }
+}
+
+/// `text` with every whitespace character removed.
+fn without_whitespace(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// The entries of a job's or step's `env:` mapping.
@@ -943,6 +1027,7 @@ jobs:
   sign:
     needs: build
     runs-on: ubuntu-latest
+    environment: updater-signing
     steps:
       - uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v4.4.0
       - run: npm ci --ignore-scripts
@@ -1265,7 +1350,7 @@ jobs:
         assert_flags(&violations, "has no trailing `# <version>` comment");
 
         let bare = RELEASE.replace(&pinned, &format!("actions/setup-node@{SHA}"));
-        assert_flags(&run(CI, &bare), "release.yml:17:");
+        assert_flags(&run(CI, &bare), "release.yml:18:");
 
         let job_level = RELEASE.replace(
             "uses: ./.github/workflows/ci.yml",
@@ -1509,6 +1594,102 @@ jobs:
         assert_flags(
             &run(CI, &unsigned),
             "no workflow step receives the updater signing key",
+        );
+    }
+
+    /// The `RELEASE` fixture plus a `workflow_dispatch` dry run, its sign
+    /// job selecting `environment` (YAML text) and its key step guarded by
+    /// `key_if` (`None` = no `if:`).
+    fn with_dry_run(environment: &str, key_if: Option<&str>) -> String {
+        let key_step = key_if.map_or_else(
+            || "      - name: Sign\n".to_owned(),
+            |condition| format!("      - name: Sign\n        if: {condition}\n"),
+        );
+        RELEASE
+            .replace(
+                "  push:\n    tags: [\"v*\"]\n",
+                "  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n",
+            )
+            .replace(
+                "    environment: updater-signing\n",
+                &format!("    environment: {environment}\n"),
+            )
+            .replace("      - name: Sign\n", &key_step)
+    }
+
+    #[test]
+    fn the_signing_job_must_deploy_to_the_signing_environment() {
+        let dropped = RELEASE.replace("    environment: updater-signing\n", "");
+        assert_flags(
+            &run(CI, &dropped),
+            "job `sign` holds the signing key but declares no `environment:`",
+        );
+        let renamed = RELEASE.replace(
+            "    environment: updater-signing\n",
+            "    environment: production\n",
+        );
+        assert_flags(
+            &run(CI, &renamed),
+            "job `sign` deploys to `production`, not `updater-signing`",
+        );
+        let mapping = RELEASE.replace(
+            "    environment: updater-signing\n",
+            "    environment:\n      name: updater-signing\n      url: https://example.invalid\n",
+        );
+        assert_eq!(run(CI, &mapping), Vec::<String>::new());
+        let empty_mapping = RELEASE.replace(
+            "    environment: updater-signing\n",
+            "    environment:\n      url: https://example.invalid\n",
+        );
+        assert_flags(&run(CI, &empty_mapping), "declares no `environment:`");
+    }
+
+    #[test]
+    fn the_dry_run_selects_the_environment_exactly_when_the_key_step_runs() {
+        let push = "github.event_name == 'push'";
+        let conditional = "${{ github.event_name == 'push' && 'updater-signing' || '' }}";
+
+        // The committed shape: environment and key step share the condition,
+        // in either `if:` spelling.
+        assert_eq!(
+            run(CI, &with_dry_run(conditional, Some(push))),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            run(
+                CI,
+                &with_dry_run(conditional, Some(&format!("${{{{ {push} }}}}")))
+            ),
+            Vec::<String>::new()
+        );
+
+        // Unconditional: the dispatch run would wait on the tag-only rule.
+        assert_flags(
+            &run(CI, &with_dry_run("updater-signing", Some(push))),
+            "job `sign` always deploys to `updater-signing`, so the `workflow_dispatch` dry run",
+        );
+
+        // The key step outruns the environment: unguarded, or guarded by a
+        // different condition.
+        assert_flags(
+            &run(CI, &with_dry_run(conditional, None)),
+            "but the key step runs on `every event`",
+        );
+        assert_flags(
+            &run(CI, &with_dry_run(conditional, Some("always()"))),
+            "but the key step runs on `always()`",
+        );
+
+        // A conditional that never names the signing environment.
+        assert_flags(
+            &run(
+                CI,
+                &with_dry_run(
+                    "${{ github.event_name == 'push' && 'production' || '' }}",
+                    Some(push),
+                ),
+            ),
+            "not `updater-signing`",
         );
     }
 

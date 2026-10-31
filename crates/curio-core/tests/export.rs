@@ -350,3 +350,279 @@ fn hostile_titles_cannot_escape_the_destination() {
     assert_eq!(outcome.path, "curio/etc-passwd.md");
     assert!(dir.path().join(&outcome.path).is_file());
 }
+
+// ---- #116: a lost, stale or forked manifest must never cost a note ----
+
+fn remove_manifest(root: &Path) {
+    std::fs::remove_file(root.join(".curio/manifest.json")).unwrap();
+}
+
+fn tmp_leftovers(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                stack.push(entry.path());
+            } else if entry.file_name().to_string_lossy().contains(".curio-tmp") {
+                found.push(entry.path().display().to_string());
+            }
+        }
+    }
+    found
+}
+
+/// Acceptance: manifest deleted → exporting a same-titled second article
+/// never changes the first note's bytes.
+#[test]
+fn a_lost_manifest_never_lets_a_same_titled_article_overwrite_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let first = export_note(&dest, &input(CurioId::new(), "Weekly links", "first")).unwrap();
+    let first_abs = dir.path().join(&first.path);
+    // The user annotates the first note.
+    let annotated = format!(
+        "{}\n## My notes\n\nOnly about the first article.\n",
+        std::fs::read_to_string(&first_abs).unwrap()
+    );
+    std::fs::write(&first_abs, &annotated).unwrap();
+
+    remove_manifest(dir.path());
+    let second_id = CurioId::new();
+    let second = export_note(&dest, &input(second_id, "Weekly links", "second")).unwrap();
+
+    assert_eq!(second.disposition, ExportDisposition::Created);
+    assert_ne!(
+        second.path, first.path,
+        "the slug path belongs to the first article"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&first_abs).unwrap(),
+        annotated,
+        "the first note's bytes must not change"
+    );
+    let second_note = std::fs::read_to_string(dir.path().join(&second.path)).unwrap();
+    assert!(second_note.contains(&format!("curio_id: {second_id}")));
+    assert!(second_note.contains("\nsecond\n"));
+}
+
+/// A lost manifest + a re-export of the *same* article reconciles onto its
+/// own note (ownership proven by the note's `curio_id`), keeping the
+/// user's companion text — no duplicate note.
+#[test]
+fn a_lost_manifest_reconciles_an_article_onto_its_own_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+    let first = export_note(&dest, &input(id, "Mine", "v1")).unwrap();
+    let abs = dir.path().join(&first.path);
+    let annotated = format!("{}\nkept\n", std::fs::read_to_string(&abs).unwrap());
+    std::fs::write(&abs, &annotated).unwrap();
+
+    remove_manifest(dir.path());
+    let again = export_note(&dest, &input(id, "Mine", "v2")).unwrap();
+    assert_eq!(again.path, first.path);
+    let note = std::fs::read_to_string(&abs).unwrap();
+    assert!(
+        note.contains("\nv2\n") && note.ends_with("\nkept\n"),
+        "{note}"
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("curio")).unwrap().count(),
+        1
+    );
+}
+
+/// A stale manifest (restored from git, or reset by a sync tool) that
+/// records a path now holding *another* article's note: the export moves
+/// to a free path instead of taking that note over.
+#[test]
+fn a_stale_manifest_path_held_by_another_article_is_never_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let a = CurioId::new();
+    let b = CurioId::new();
+    let a_first = export_note(&dest, &input(a, "Shared", "a v1")).unwrap();
+    let stale = std::fs::read(dir.path().join(".curio/manifest.json")).unwrap();
+
+    // A's note goes away and B is exported into the freed slug path.
+    std::fs::remove_file(dir.path().join(&a_first.path)).unwrap();
+    remove_manifest(dir.path());
+    let b_out = export_note(&dest, &input(b, "Shared", "b v1")).unwrap();
+    assert_eq!(b_out.path, a_first.path);
+    let b_bytes = std::fs::read(dir.path().join(&b_out.path)).unwrap();
+
+    // The stale manifest comes back (it only knows A, at that path).
+    std::fs::write(dir.path().join(".curio/manifest.json"), stale).unwrap();
+    let a_again = export_note(&dest, &input(a, "Shared", "a v2")).unwrap();
+
+    assert_eq!(a_again.disposition, ExportDisposition::Updated);
+    assert_ne!(a_again.path, b_out.path);
+    assert_eq!(
+        std::fs::read(dir.path().join(&b_out.path)).unwrap(),
+        b_bytes
+    );
+    let manifest = load_manifest(dir.path()).unwrap();
+    assert_eq!(manifest.notes[&a].path, a_again.path);
+}
+
+/// A file at the slug path that is not a Curio note at all (the user's
+/// own `curio/reading-list.md`) is skipped, not rewritten or refused.
+#[test]
+fn a_foreign_file_at_the_slug_path_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("curio")).unwrap();
+    let mine = dir.path().join("curio/reading-list.md");
+    std::fs::write(&mine, "# My own list\n").unwrap();
+
+    let out = export_note(
+        &destination(dir.path()),
+        &input(CurioId::new(), "Reading list", "body"),
+    )
+    .unwrap();
+    assert_ne!(out.path, "curio/reading-list.md");
+    assert!(out.path.starts_with("curio/reading-list-"));
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), "# My own list\n");
+}
+
+/// Acceptance: 8 threads exporting 8 articles at once → 8 manifest
+/// entries, no leftover `.curio-tmp` files.
+#[test]
+fn concurrent_exports_to_one_destination_lose_no_manifest_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let barrier = std::sync::Barrier::new(8);
+    let ids: Vec<CurioId> = (0..8).map(|_| CurioId::new()).collect();
+    std::thread::scope(|scope| {
+        for (i, id) in ids.iter().enumerate() {
+            let barrier = &barrier;
+            let dest = destination(dir.path());
+            scope.spawn(move || {
+                barrier.wait();
+                export_note(&dest, &input(*id, &format!("Article {i}"), "body")).unwrap();
+            });
+        }
+    });
+
+    let manifest = load_manifest(dir.path()).unwrap();
+    assert_eq!(manifest.notes.len(), 8);
+    for id in &ids {
+        assert!(dir.path().join(&manifest.notes[id].path).is_file());
+    }
+    assert_eq!(tmp_leftovers(dir.path()), Vec::<String>::new());
+    assert!(dir.path().join(".curio/manifest.lock").is_file());
+    let gitignore = std::fs::read_to_string(dir.path().join(".curio/.gitignore")).unwrap();
+    assert!(gitignore.lines().any(|l| l == "manifest.lock"));
+}
+
+/// Acceptance: removing the destination dir then exporting →
+/// `DestinationMissing`, no recreated tree.
+#[test]
+fn a_removed_destination_is_destination_missing_and_never_recreated() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    std::fs::create_dir(&root).unwrap();
+    let dest = destination(&root);
+    export_note(&dest, &input(CurioId::new(), "Before", "body")).unwrap();
+
+    std::fs::remove_dir_all(&root).unwrap();
+    let err = export_note(&dest, &input(CurioId::new(), "After", "body")).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::export::ExportError::DestinationMissing { .. }
+        ),
+        "{err}"
+    );
+    assert!(!root.exists(), "the destination tree must not be recreated");
+}
+
+/// Acceptance: the conflict-copy fixture is detected — and its entries
+/// are merged (union, newest `exported_at` wins), then the copies go.
+#[test]
+fn manifest_conflict_copies_are_detected_and_merged() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/export/manifest-conflict");
+    let dir = tempfile::tempdir().unwrap();
+    let curio = dir.path().join(".curio");
+    std::fs::create_dir_all(&curio).unwrap();
+    for name in [
+        "manifest.json",
+        "manifest (conflicted copy).json",
+        "manifest 2.json",
+    ] {
+        std::fs::copy(fixture.join(name), curio.join(name)).unwrap();
+    }
+
+    let copies = curio_core::export::manifest_conflict_copies(dir.path()).unwrap();
+    assert_eq!(
+        copies,
+        vec![
+            curio.join("manifest (conflicted copy).json"),
+            curio.join("manifest 2.json"),
+        ]
+    );
+
+    let fresh = CurioId::new();
+    export_note(&destination(dir.path()), &input(fresh, "Fresh", "body")).unwrap();
+
+    let manifest = load_manifest(dir.path()).unwrap();
+    let id = |s: &str| -> CurioId { s.parse().unwrap() };
+    let a = &manifest.notes[&id("0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6a")];
+    assert_eq!(
+        a.exported_at,
+        "2026-07-05T09:00:00.000Z".parse().unwrap(),
+        "the newer record from the conflict copy wins"
+    );
+    let b = &manifest.notes[&id("0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6b")];
+    assert_eq!(b.path, "curio/article-b.md", "an older copy never wins");
+    assert!(
+        manifest
+            .notes
+            .contains_key(&id("0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6c"))
+    );
+    assert!(
+        manifest
+            .notes
+            .contains_key(&id("0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d"))
+    );
+    assert!(manifest.notes.contains_key(&fresh));
+    assert_eq!(manifest.notes.len(), 5);
+    assert_eq!(
+        curio_core::export::manifest_conflict_copies(dir.path()).unwrap(),
+        Vec::<std::path::PathBuf>::new(),
+        "merged copies are removed once the merged manifest is durable"
+    );
+}
+
+/// The merge persists even when the export itself is an idempotency hit.
+#[test]
+fn conflict_copies_are_merged_on_an_unchanged_export_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = destination(dir.path());
+    let id = CurioId::new();
+    export_note(&dest, &input(id, "Steady", "body")).unwrap();
+
+    let other: CurioId = "0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6c".parse().unwrap();
+    let mut copy = curio_types::ManifestV1::new();
+    copy.notes.insert(
+        other,
+        curio_types::ManifestEntry {
+            path: "curio/other.md".to_owned(),
+            checksum: region_checksum("other"),
+            exported_at: "2026-07-02T09:00:00.000Z".parse().unwrap(),
+        },
+    );
+    let copy_path = dir.path().join(".curio/manifest 2.json");
+    std::fs::write(&copy_path, copy.to_canonical_json()).unwrap();
+
+    let again = export_note(&dest, &input(id, "Steady", "body")).unwrap();
+    assert_eq!(again.disposition, ExportDisposition::Unchanged);
+    assert!(
+        load_manifest(dir.path())
+            .unwrap()
+            .notes
+            .contains_key(&other)
+    );
+    assert!(!copy_path.exists());
+}

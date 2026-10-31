@@ -16,7 +16,10 @@
 //! Markdown conversion is a DOM walk (htmd); the sketch's regex
 //! converter and render-time sanitization are banned.
 
+mod embeds;
 mod extract;
+mod footnotes;
+mod lazy_images;
 mod markdown;
 mod readable;
 mod sanitize;
@@ -210,6 +213,31 @@ mod tests {
             "output passed the sanitize gate"
         );
         assert!(processed.word_count > 20);
+    }
+
+    #[test]
+    fn process_full_page_keeps_the_code_fence_language() {
+        // The extractor strips classes by default; the language class has
+        // to survive it to reach the sanitizer (which keeps only it).
+        let page = r#"<html><body><article>
+              <h1>Query planning</h1>
+              <p>This is the first substantial paragraph of the genuine article body,
+                 written with enough real sentences that a readability scorer prefers
+                 this region over anything else on the page around it.</p>
+              <pre class="highlight"><code class="hljs language-sql">SELECT 1;</code></pre>
+              <p>A second full paragraph continues the argument with more meaningful
+                 prose, cementing this container as the densest block of text.</p>
+            </article></body></html>"#;
+        let processed = process_full_page(page, "https://example.com/post").unwrap();
+        assert!(
+            processed
+                .html
+                .contains("<code class=\"language-sql\">SELECT 1;</code>"),
+            "{}",
+            processed.html
+        );
+        assert!(!processed.html.contains("hljs"), "{}", processed.html);
+        assert!(!processed.html.contains("highlight"), "{}", processed.html);
     }
 
     #[test]

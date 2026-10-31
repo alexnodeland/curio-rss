@@ -17,6 +17,23 @@
 <form action="javascript:alert(1)"><input name="q" value="x"><button>go</button></form>
 <style>body { background: url("javascript:alert(1)"); }</style>
 <meta http-equiv="refresh" content="0;url=https://evil.example/">
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="vbscript:msgbox(1)" data-lazy-src="data:text/html,<script>alert(1)</script>" alt="hostile lazy src">
+<img srcset="javascript:alert(1) 2x, data:text/html;base64,PHNjcmlwdD4= 3x" data-srcset="vbscript:msgbox(1) 1x" alt="hostile srcset">
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="placeholder"><noscript><img src="javascript:alert(1)" onerror="alert(1)"><script>alert(1)</script><p onclick="alert(1)">noscript text</p></noscript>
+<noscript><img src="x" alt="</noscript><script>alert(1)</script>"></noscript>
+<img data-src="https://example.com/lazy.png" onerror="alert(1)" style="x" alt="lazy with handler">
+<p id="location" dir="rtl onmouseover=alert(1)" lang="en&quot; onclick=&quot;alert(1)">Hostile id, dir and lang.</p>
+<p id="x&quot; onclick=&quot;alert(1)" class="language-js" dir="ltr" lang="en">Hostile quoted id.</p>
+<a href="#&quot; onclick=&quot;alert(1)">quoted fragment</a>
+<a href="#alert(document.cookie)">fragment with parens</a>
+<a href="#">bare fragment</a>
+<pre class="language-js onerror=alert(1)"><code class="x language-&quot;&gt;&lt;script&gt; language-js">code</code></pre>
+<ol start="1 onclick=alert(1)" onclick="alert(1)"><li id="__proto__">clobber attempt</li></ol>
+<iframe src="javascript:alert(1)//embed"></iframe>
+<iframe src="data:text/html,<script>alert(1)</script>/embed/"></iframe>
+<iframe src="https://evil.example/embed/hidden" hidden></iframe>
+<iframe src="https://evil.example/player/pixel" width="0" height="0"></iframe>
+<video src="javascript:alert(1)"></video>
 <p>Legitimate <strong>content</strong> around the attacks
 <a href="https://example.com/fine">survives</a>.</p>
 </article>

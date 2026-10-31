@@ -1,0 +1,12 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/rtl.html
+---
+# مقالة من اليمين إلى اليسار
+
+هذه فقرة عربية يجب أن تحتفظ باتجاهها عند التخزين.
+
+An embedded left-to-right paragraph keeps its own direction.
+
+Mixed text with an isolated name: إيان and an override: reversed.

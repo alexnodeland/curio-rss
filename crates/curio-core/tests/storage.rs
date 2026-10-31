@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use curio_core::model::{
     ArticleContent, ArticleId, FeedId, FeedStatus, FetchRecord, FetchStatus, NewArticle, NewFeed,
 };
-use curio_core::storage::{ListArticles, Storage, StorageError};
+use curio_core::storage::{ListArticles, OpenError, Storage, StorageError};
 use curio_types::{EventPayload, Timestamp};
 
 fn temp_storage() -> (tempfile::TempDir, Storage) {
@@ -101,10 +101,79 @@ fn refuses_a_database_from_a_newer_build() {
         conn.pragma_update(None, "user_version", 9999).unwrap();
     }
     let err = Storage::open(&path).unwrap_err();
-    assert!(matches!(
-        err,
-        StorageError::SchemaTooNew { found: 9999, .. }
-    ));
+    assert!(matches!(err, OpenError::TooNew { found: 9999, .. }));
+}
+
+/// The two "cannot use this file" cases a head must tell apart: a file
+/// that is not a database at all, and a database from a newer build.
+#[test]
+fn garbage_and_too_new_databases_are_distinct_typed_errors() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let garbage = dir.path().join("garbage.db");
+    std::fs::write(
+        &garbage,
+        "this is a text file, not a SQLite database\n".repeat(64),
+    )
+    .unwrap();
+    let err = Storage::open(&garbage).unwrap_err();
+    assert!(matches!(err, OpenError::Corrupt { .. }), "{err:?}");
+    assert!(err.to_string().contains("garbage.db"), "{err}");
+    // Refused, not "repaired": the file is byte-for-byte untouched.
+    assert!(
+        std::fs::read_to_string(&garbage)
+            .unwrap()
+            .starts_with("this is a text file")
+    );
+
+    let newer = dir.path().join("newer.db");
+    drop(Storage::open(&newer).unwrap());
+    {
+        let conn = rusqlite::Connection::open(&newer).unwrap();
+        conn.pragma_update(None, "user_version", Storage::schema_version() + 1)
+            .unwrap();
+    }
+    let err = Storage::open(&newer).unwrap_err();
+    assert!(
+        matches!(err, OpenError::TooNew { found, supported }
+            if found == Storage::schema_version() + 1 && supported == Storage::schema_version()),
+        "{err:?}"
+    );
+    // A refused open writes no backup.
+    assert!(
+        std::fs::read_dir(dir.path()).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".bak"))
+    );
+}
+
+#[test]
+fn an_unopenable_path_is_a_typed_io_error() {
+    let dir = tempfile::tempdir().unwrap();
+    // The parent directory does not exist: SQLite cannot create the file.
+    let err = Storage::open(dir.path().join("missing").join("curio.db")).unwrap_err();
+    assert!(matches!(err, OpenError::Io { .. }), "{err:?}");
+}
+
+#[test]
+fn a_database_locked_by_another_process_is_a_typed_locked_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    // Another process (here: connection) in rollback-journal mode holding
+    // an exclusive lock: switching to WAL needs that lock, so the open
+    // waits out the busy timeout, then reports `Locked`.
+    let holder = rusqlite::Connection::open(&path).unwrap();
+    holder
+        .execute_batch(
+            "CREATE TABLE squatter (x); BEGIN EXCLUSIVE; INSERT INTO squatter VALUES (1);",
+        )
+        .unwrap();
+    let err = Storage::open(&path).unwrap_err();
+    assert!(matches!(err, OpenError::Locked { .. }), "{err:?}");
+    assert!(err.to_string().contains("locked"), "{err}");
+    holder.execute_batch("ROLLBACK").unwrap();
 }
 
 #[test]

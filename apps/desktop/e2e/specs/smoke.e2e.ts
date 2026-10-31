@@ -136,6 +136,22 @@ describe('Curio desktop — smoke', () => {
     //    content around them survives; no dialog fired and nothing navigated.
     it('renders the xss-corpus inert through SanitizedHtml', async () => {
         const appUrl = await browser.getUrl();
+        // Sentinel: trap the dialog primitives the corpus reaches for before it
+        // renders, so a payload that fires (even one the driver auto-dismisses)
+        // leaves a record. A navigation or reload would drop the trap — the
+        // `null` read-back below catches that too.
+        await browser.execute(() => {
+            const tripped: string[] = [];
+            Object.defineProperty(window, '__curioXssTripped', { value: tripped });
+            for (const name of ['alert', 'confirm', 'prompt']) {
+                Object.defineProperty(window, name, {
+                    configurable: true,
+                    value: (...args: unknown[]) => {
+                        tripped.push(`${name}(${args.map(String).join(', ')})`);
+                    },
+                });
+            }
+        });
         await $(`${feedRow(`${stubBase}${SEED_FEED_PATH}`)} .feed-select`).click();
         await openArticle(SEEDED_TITLES[0]);
 
@@ -178,6 +194,11 @@ describe('Curio desktop — smoke', () => {
             dialog = null; // "no such alert" — the expected outcome
         }
         expect(dialog).toBeNull();
+        const tripped = await browser.execute(
+            () =>
+                (window as Window & { __curioXssTripped?: string[] }).__curioXssTripped ?? null,
+        );
+        expect(tripped).toEqual([]);
         expect(await browser.getUrl()).toBe(appUrl);
     });
 

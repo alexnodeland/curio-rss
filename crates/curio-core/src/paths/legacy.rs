@@ -222,17 +222,36 @@ fn db_in_use(dir: &Path) -> Result<bool, rusqlite::Error> {
     if !wal.exists() {
         return Ok(false);
     }
+    match checkpoint_and_close(&dir.join(DB_FILE)) {
+        Ok(()) => Ok(wal.exists()),
+        // Another process holds a lock the probe could not wait out: it is
+        // in use, whatever the log says.
+        Err(error)
+            if matches!(
+                error.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+            ) =>
+        {
+            Ok(true)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Opens the database at `db`, folds its write-ahead log in and closes it.
+fn checkpoint_and_close(db: &Path) -> Result<(), rusqlite::Error> {
     let conn = rusqlite::Connection::open_with_flags(
-        dir.join(DB_FILE),
+        db,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
+    // Only a short wait: a lock held longer than this means a live holder.
+    conn.busy_timeout(std::time::Duration::from_millis(250))?;
     // A read opens the log (replaying a stale one left by a process that
     // exited without closing); the checkpoint folds it into the database.
-    // A busy checkpoint is no error here: the log check below answers.
+    // A busy checkpoint is no error here: the log check afterwards answers.
     conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))?;
     let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
-    conn.close().map_err(|(_, error)| error)?;
-    Ok(wal.exists())
+    conn.close().map_err(|(_, error)| error)
 }
 
 #[cfg(test)]
@@ -415,6 +434,26 @@ mod tests {
         );
         assert!(!default.join("curio.db-wal").exists(), "checkpointed away");
         assert_eq!(read_row(&default), "kept", "the log's writes survive");
+    }
+
+    #[test]
+    fn a_legacy_database_locked_by_another_process_is_in_use() {
+        let tmp = tempfile::tempdir().unwrap();
+        let legacy = tmp.path().join("old");
+        std::fs::create_dir_all(&legacy).unwrap();
+        // A rollback-journal database (beside a leftover log) whose holder
+        // keeps an exclusive lock: the probe cannot even read it.
+        let holder = rusqlite::Connection::open(legacy.join(DB_FILE)).unwrap();
+        holder
+            .execute_batch("CREATE TABLE t (v TEXT); BEGIN EXCLUSIVE; INSERT INTO t VALUES ('x');")
+            .unwrap();
+        std::fs::write(legacy.join("curio.db-wal"), b"").unwrap();
+        let default = tmp.path().join("new");
+
+        let outcome = adopt_legacy_profiles(&default, std::slice::from_ref(&legacy));
+        assert_left(&outcome, &legacy, &LeftReason::InUse);
+        assert!(!default.exists());
+        holder.execute_batch("ROLLBACK").unwrap();
     }
 
     #[test]

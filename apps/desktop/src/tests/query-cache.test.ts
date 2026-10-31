@@ -98,6 +98,47 @@ describe('query cache', () => {
         expect(query.loaded).toBe(true);
     });
 
+    it('whenLoaded on a brand-new entry resolves with its data', async () => {
+        const query = ensureQuery('destinations', () =>
+            Promise.resolve({ status: 'ok' as const, data: ['vault'] }),
+        );
+        // No flush: the creation refetch is still only a queued microtask.
+        await query.whenLoaded();
+        expect(query.loaded).toBe(true);
+        expect(query.data).toEqual(['vault']);
+    });
+
+    it('whenLoaded waits past a superseded refetch for the one that lands', async () => {
+        const pending: ((value: CommandResult<string>) => void)[] = [];
+        const query = ensureQuery(
+            'feeds',
+            () => new Promise<CommandResult<string>>((resolve) => pending.push(resolve)),
+        );
+        await flushIpc(); // the creation refetch is now in flight (pending[0])
+        void query.refetch(); // supersedes it (pending[1])
+
+        let settled = false;
+        const waiting = query.whenLoaded().then(() => {
+            settled = true;
+        });
+        pending[0]({ status: 'ok', data: 'stale' });
+        await flushIpc();
+        expect(settled).toBe(false); // the superseded result landed nothing
+        expect(query.loaded).toBe(false);
+
+        pending[1]({ status: 'ok', data: 'fresh' });
+        await waiting;
+        expect(query.data).toBe('fresh');
+    });
+
+    it('whenLoaded is immediate (no refetch) once an entry has loaded', async () => {
+        const fetcher = countingFetcher(() => 'feeds');
+        const query = ensureQuery('feeds', fetcher.fetch);
+        await flushIpc();
+        await query.whenLoaded();
+        expect(fetcher.calls()).toBe(1);
+    });
+
     it('invalidatePrefix refetches only matching keys', async () => {
         const feeds = countingFetcher(() => 'feeds');
         const tags = countingFetcher(() => 'tags');

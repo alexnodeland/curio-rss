@@ -319,6 +319,7 @@ export async function promoteSelected(): Promise<void> {
     if (articleId === null) {
         return;
     }
+    await destinationsStore.ensureLoaded();
     const target = destinationsStore.promoteTarget;
     if (target === null) {
         uiStore.openModal('destinations');

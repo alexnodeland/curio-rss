@@ -33,6 +33,17 @@ export class DestinationsStore {
         void this.#query;
     }
 
+    /**
+     * Resolves once the registry has loaded at least once. Nothing primes it
+     * at launch (only the destinations panel does), so a decision that reads
+     * {@link promoteTarget} must await this first — otherwise the first `p`
+     * of a session sees an empty registry and opens the picker even though a
+     * sole destination exists.
+     */
+    ensureLoaded(): Promise<void> {
+        return this.#query.whenLoaded();
+    }
+
     get destinations(): DestinationDto[] {
         return this.#query.data ?? [];
     }

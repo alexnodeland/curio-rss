@@ -23,7 +23,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use curio_types::{ArticleFrontmatter, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
+use curio_types::{ArticleFrontmatter, CurioId, MANAGED_REGION_BEGIN_V1, MANAGED_REGION_END_V1};
 
 use super::ExportError;
 
@@ -158,6 +158,20 @@ pub(crate) fn parse_note(
         message: format!("frontmatter does not parse as curio.frontmatter.v1: {err}"),
     })?;
     Ok((parts, frontmatter))
+}
+
+/// The `curio_id` an existing note's frontmatter claims — which article
+/// owns the file. A path is only ever rewritten for the article that owns
+/// it: with a lost or stale manifest, the slug path of a same-titled
+/// article belongs to someone else.
+///
+/// # Errors
+///
+/// [`ExportError::NoteParse`] when the note is not an accountable
+/// `curio.frontmatter.v1` note (same rules as [`parse_note`]).
+pub(crate) fn note_owner(existing: &str, path: &Path) -> Result<CurioId, ExportError> {
+    let (_, frontmatter) = parse_note(existing, path)?;
+    Ok(frontmatter.curio_id)
 }
 
 /// Rewrites an existing note: new machine keys + new region body, user

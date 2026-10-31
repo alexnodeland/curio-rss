@@ -30,6 +30,7 @@ future head.
 | `curio dest add <name> <path>` | Register a save destination |
 | `curio save <id> --dest <name>` | Export a note per `curio.frontmatter.v1` |
 | `curio import <file> --from <service>` | Import subscriptions + saved articles from a third-party export (idempotent) |
+| `curio reddit login\|status\|logout` | Manage the optional BYO Reddit API credentials (OS keychain, per profile) |
 | `curio events tail [-n N]` | Watch the behavioral event stream |
 | `curio doctor` | DB integrity, FTS sync, events-log health |
 
@@ -53,6 +54,7 @@ All state lives in one profile directory:
 | `curio.db` | WAL SQLite: feeds, articles, state, FTS index |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
 | `.curio/.gitignore` | scaffolded so the events log is never committed |
+| `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
 
 The default location is the platform data directory —
 `~/.local/share/curio` on Linux (XDG-respecting: `XDG_DATA_HOME` wins),
@@ -142,6 +144,26 @@ This override is hard-coded in the engine (not a `curio.toml` knob) and is
 disclosed in [PRIVACY.md](../PRIVACY.md); every other host keeps rustls + the
 honest `curio/<version>` UA and the default 500 ms delay.
 
+**Reddit API credentials (optional).** Reddit enrichment works
+unauthenticated, slowly. Bring your own free app from reddit.com/prefs/apps
+(type "script") and Curio uses the authenticated API at the faster tier:
+
+```sh
+curio reddit login --client-id <id>   # reads the secret from stdin (keeps it out of shell history)
+curio reddit status                   # configured? and the client id — never the secret
+curio reddit logout                   # remove them; back to unauthenticated
+```
+
+The credentials live in the OS keychain, **one item per profile**: `--profile`
+(or `CURIO_PROFILE`) selects whose app a command — including a cron
+`curio fetch` — uses, and two profiles can hold different apps. Note that the
+CLI's default profile is not the desktop app's, so credentials saved in the
+app are not seen by a bare `curio fetch` unless you point `--profile` at the
+app's profile directory. The keychain item is keyed by the id in
+`.curio/profile-id`, so moving a profile directory keeps its credentials.
+Upgrading from 0.4.x, the old shared item is copied into each profile the
+first time it opens; `reddit logout` removes it.
+
 ## Reading
 
 ```sh
@@ -220,6 +242,40 @@ different `curio_id`). Titles that would be a Windows device name (`con`,
 and a failed write leaves no temp file behind. On filesystems that cannot
 flush at all (some network shares, exFAT, FUSE mounts) the flush is
 skipped rather than failing the save.
+
+The manifest is a file in your folder, so Curio never trusts it alone:
+
+- **A note is only rewritten for the article it belongs to** — the
+  note's own frontmatter `curio_id` decides. If the manifest was lost,
+  reset or restored from an old commit, a second "Weekly links" article
+  gets `curio/weekly-links-<id-prefix>.md` instead of taking over the first
+  one's note, and a file of your own at a slug path is never touched
+  (a blank one — empty or whitespace only — holds nothing to keep, so it
+  counts as free).
+  An article whose own note is already there is reconciled onto it and
+  reported as `updated` (never a second `created`).
+- **One export per destination at a time**, across threads and processes
+  (the CLI next to the desktop app): exports queue on an advisory lock,
+  `.curio/manifest.lock` (gitignored, never deleted — it holds no data).
+  An `unchanged` export writes nothing and takes no lock, so it works on
+  a read-only folder too; on a network or FUSE mount without advisory
+  locks Curio warns and serializes within its own process only.
+- **A vanished vault is refused, not recreated.** If the destination
+  folder is gone — or, once it has been exported to, its `.curio/` folder
+  is — `save` fails with "destination folder … is missing" instead of
+  re-exporting everything into an empty folder at the old path. Every
+  command re-applies `curio.toml`'s destinations, but that never
+  recreates such a folder. Reconnect the drive, or run `curio dest add
+  <name> <path>` again (new or same path) to start the destination
+  afresh; changing a destination's path in `curio.toml` does the same.
+- **Sync-tool conflict copies** of the manifest (`manifest (conflicted
+  copy).json`, iCloud's `manifest 2.json`, Syncthing's
+  `manifest.sync-conflict-….json`, OneDrive's `manifest-HOSTNAME.json`)
+  are merged back on the next export — union of the entries, the newest
+  `exported_at` wins — and then removed. If the union gives one note path
+  to two articles, the note's own `curio_id` keeps its entry; the other
+  article gets a path of its own on its next export. Other files in
+  `.curio/` (a `manifest.backup.json` of your own) are never touched.
 
 ## Events
 

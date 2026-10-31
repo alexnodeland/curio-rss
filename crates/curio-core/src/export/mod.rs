@@ -18,19 +18,39 @@
 //!   never a dangling manifest entry.
 //! - **Idempotency** on `(curio_id, checksum)`: unchanged → no write.
 //!
+//! Safety beyond the contract text, because the manifest is a file in
+//! the user's folder and can be lost, reset, stale, or forked by a sync
+//! tool:
+//!
+//! - **Ownership**: an existing file is only rewritten when its own
+//!   frontmatter `curio_id` is the article being exported. A path held by
+//!   another article (or by a file that is not a Curio note) is skipped
+//!   for the next deterministic candidate — never overwritten.
+//! - **Serialization**: one export per destination at a time, across
+//!   threads and processes (an in-process queue plus an advisory lock on
+//!   `.curio/manifest.lock`); temp files are unique per write.
+//! - **No resurrection**: a missing destination root is
+//!   [`ExportError::DestinationMissing`], never recreated.
+//! - **Conflict copies** of the manifest are merged back in (see
+//!   [`manifest_conflict_copies`]).
+//!
 //! Event emission (`article.saved` / `article.updated`) is wired by the
 //! [`crate::CoreHandle`] facade, which owns the storage + events pair;
 //! this module reports the [`ExportDisposition`] the facade maps onto
 //! the contract events.
 
+mod lock;
 mod manifest;
 mod note;
 mod slug;
 
-pub use manifest::{load_manifest, write_manifest};
+pub use manifest::{load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use lock::DestinationLock;
 
 use icu_normalizer::ComposingNormalizerBorrowed;
 use slug::slugify;
@@ -128,6 +148,29 @@ pub enum ExportError {
         /// The offending relative path.
         path: String,
     },
+    /// The destination's root directory (or, for a destination that has
+    /// exported before, its `.curio/` marker) is gone — moved, renamed or
+    /// unmounted. Curio refuses to recreate it empty at the old path and
+    /// re-export everything into it.
+    #[error(
+        "destination folder {root} is missing, or no longer holds Curio's .curio/ folder \
+         (moved, renamed or unmounted?) — reconnect it, or register the destination again \
+         to start it afresh"
+    )]
+    DestinationMissing {
+        /// The registered destination root.
+        root: PathBuf,
+    },
+    /// Every candidate path for the note is held by another article's
+    /// note or by a file that is not a Curio note — refusing to
+    /// overwrite either.
+    #[error(
+        "every candidate note path up to {path:?} is taken by another file — refusing to overwrite it"
+    )]
+    PathsTaken {
+        /// The last candidate tried (relative to the destination root).
+        path: String,
+    },
 }
 
 /// A note whose bytes are already durably on disk but whose manifest
@@ -137,23 +180,34 @@ pub enum ExportError {
 /// Ordering: note → event intent → manifest. Staging the intent before
 /// the manifest write means no crash window can lose the contract
 /// event: with no intent and no manifest entry, the next export re-runs
-/// as Created/Updated and stages then; with an intent but no manifest
+/// (as `Updated` once the article's own note is on disk) and stages then; with an intent but no manifest
 /// entry, startup replay emits it (at worst a consumer later sees a
 /// duplicate snapshot for the same `curio_id`, which folds
 /// idempotently). Were the manifest written first, its
 /// `(curio_id, checksum)` idempotency hit would suppress the event on
 /// every retry — losing it forever.
+///
+/// A staged export that writes holds the destination's export lock until
+/// it is committed or dropped, so keep the window short: another export to
+/// the same destination (any thread, any process) waits for it. The pure
+/// idempotency hit writes nothing and takes no lock — an unchanged export
+/// still works on a read-only destination.
 #[derive(Debug)]
 #[must_use = "call commit() — the manifest write is still pending"]
 pub struct StagedExport {
     outcome: ExportOutcome,
     pending: Option<PendingManifest>,
+    /// Held from the manifest load through the manifest commit; `None`
+    /// for the lock-free idempotency hit.
+    _lock: Option<DestinationLock>,
 }
 
 #[derive(Debug)]
 struct PendingManifest {
     root: PathBuf,
     manifest: curio_types::ManifestV1,
+    /// Conflict copies folded into `manifest`; removed once it is durable.
+    merged_copies: Vec<PathBuf>,
 }
 
 impl StagedExport {
@@ -172,9 +226,177 @@ impl StagedExport {
     pub fn commit(self) -> Result<ExportOutcome, ExportError> {
         if let Some(pending) = self.pending {
             write_manifest(&pending.root, &pending.manifest)?;
+            for copy in pending.merged_copies {
+                // Its entries are in the durable manifest now; a copy
+                // that refuses to go is merged again (idempotently) next
+                // time, so this is worth a log line, not a failed export.
+                if let Err(err) = std::fs::remove_file(&copy)
+                    && err.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(path = %copy.display(), %err, "could not remove a merged manifest conflict copy");
+                }
+            }
         }
         Ok(self.outcome)
     }
+}
+
+/// What occupies a candidate note path.
+enum Occupant {
+    /// Nothing — or a blank file (empty, whitespace-only, the NUL fill a
+    /// crash mid-write can leave) that carries none of the user's bytes.
+    /// A fresh note goes here.
+    Vacant,
+    /// This article's own note; carries its current bytes.
+    Ours(String),
+    /// Another article's note.
+    OtherArticle,
+    /// A file Curio cannot account for (not a Curio note, not UTF-8, a
+    /// directory…); carries the diagnosis.
+    Unaccountable(ExportError),
+}
+
+fn occupant(abs_path: &Path, curio_id: CurioId) -> Result<Occupant, ExportError> {
+    let unaccountable = |message: &str| {
+        Occupant::Unaccountable(ExportError::NoteParse {
+            path: abs_path.to_path_buf(),
+            message: message.to_owned(),
+        })
+    };
+    if abs_path.is_dir() {
+        return Ok(unaccountable("a directory sits at the note path"));
+    }
+    let content = match read_existing_note(abs_path) {
+        Ok(Some(content)) => content,
+        Ok(None) => return Ok(Occupant::Vacant),
+        Err(err @ ExportError::NoteParse { .. }) => return Ok(Occupant::Unaccountable(err)),
+        Err(err) => return Err(err),
+    };
+    Ok(match note::note_owner(&content, abs_path) {
+        Ok(owner) if owner == curio_id => Occupant::Ours(content),
+        Ok(_) => Occupant::OtherArticle,
+        Err(err) => Occupant::Unaccountable(err),
+    })
+}
+
+/// Where this export writes, and how.
+struct Target {
+    rel_path: String,
+    disposition: ExportDisposition,
+    /// `None` = nothing to write (the idempotency hit).
+    write: Option<NoteWrite>,
+}
+
+enum NoteWrite {
+    /// Render a fresh note.
+    Fresh,
+    /// Managed-region surgery on this article's existing note bytes.
+    Replace(String),
+}
+
+/// Decides the target for an article the manifest already records.
+fn recorded_target(
+    root: &Path,
+    manifest: &curio_types::ManifestV1,
+    input: &ExportInput,
+    entry: &ManifestEntry,
+    checksum: Checksum,
+) -> Result<Target, ExportError> {
+    let unchanged = entry.checksum == checksum;
+    let changed = if unchanged {
+        ExportDisposition::Unchanged
+    } else {
+        ExportDisposition::Updated
+    };
+    let abs_path = contained_path(root, &entry.path)?;
+    let (rel_path, disposition, write) = match occupant(&abs_path, input.curio_id)? {
+        // The idempotency hit: the manifest is trusted only while the note
+        // on disk is still this article's note.
+        Occupant::Ours(_) if unchanged => (entry.path.clone(), changed, None),
+        Occupant::Ours(old) => (entry.path.clone(), changed, Some(NoteWrite::Replace(old))),
+        // The note was deleted, or blanked (power loss under an unflushed
+        // write, a sync tool truncating it): write it back where the
+        // manifest says.
+        Occupant::Vacant => (entry.path.clone(), changed, Some(NoteWrite::Fresh)),
+        // Refuse to rewrite a file it cannot account for byte-by-byte —
+        // and, even with an unchanged checksum, refuse to report it as
+        // exported: the failure surfaces instead of being skipped silently.
+        Occupant::Unaccountable(err) => return Err(err),
+        // A stale manifest: the recorded path now holds another
+        // article's note. Never touch it — move to a free path.
+        Occupant::OtherArticle => {
+            return unrecorded_target(root, manifest, input, ExportDisposition::Updated);
+        }
+    };
+    Ok(Target {
+        rel_path,
+        disposition,
+        write,
+    })
+}
+
+/// Decides the target for an article the manifest does not (truthfully)
+/// record: the first free deterministic candidate path, or this article's
+/// own note when one is already on disk (a lost or stale manifest).
+///
+/// `fresh` is the disposition of a brand-new note — `Created` for an
+/// article the manifest never knew, `Updated` for one whose recorded path
+/// turned out to hold another article's note. Finding the article's own
+/// note is `Updated`, never `Created`: the note proves an earlier export,
+/// so a second `article.saved` would be a lie. Nor is it `Unchanged`
+/// (no event), even when the note already carries this checksum — the
+/// note may be the leftover of an export that crashed before staging its
+/// event intent, and suppressing the event here would lose it for good.
+/// `article.updated` carries the same full snapshot and folds
+/// idempotently. Either way the manifest records the note again.
+fn unrecorded_target(
+    root: &Path,
+    manifest: &curio_types::ManifestV1,
+    input: &ExportInput,
+    fresh: ExportDisposition,
+) -> Result<Target, ExportError> {
+    let (rel_path, existing) = unique_note_path(root, manifest, input)?;
+    let (disposition, write) = match existing {
+        None => (fresh, Some(NoteWrite::Fresh)),
+        Some(old) => (ExportDisposition::Updated, Some(NoteWrite::Replace(old))),
+    };
+    Ok(Target {
+        rel_path,
+        disposition,
+        write,
+    })
+}
+
+/// The idempotency hit, decided without the destination lock: it writes
+/// nothing, so it needs no serialization (manifest and note are replaced
+/// by atomic renames — a concurrent reader sees one version or the
+/// other), and it keeps working where the lock cannot be taken (a
+/// read-only destination). Anything short of a clean hit — no entry, a
+/// changed checksum, a moved or missing note, pending conflict copies —
+/// is `None`, and the caller redoes the decision under the lock.
+fn unlocked_idempotency_hit(
+    root: &Path,
+    input: &ExportInput,
+    checksum: Checksum,
+) -> Result<Option<ExportOutcome>, ExportError> {
+    if !root.is_dir() {
+        // The locked path reports the missing destination.
+        return Ok(None);
+    }
+    let manifest = load_manifest(root)?;
+    let Some(entry) = manifest.notes.get(&input.curio_id) else {
+        return Ok(None);
+    };
+    if entry.checksum != checksum || !manifest_conflict_copies(root)?.is_empty() {
+        return Ok(None);
+    }
+    let target = recorded_target(root, &manifest, input, entry, checksum)?;
+    let hit = target.write.is_none() && target.rel_path == entry.path;
+    Ok(hit.then_some(ExportOutcome {
+        path: target.rel_path,
+        checksum,
+        disposition: ExportDisposition::Unchanged,
+    }))
 }
 
 /// Exports one article into a destination, per the contract flow:
@@ -211,77 +433,100 @@ pub fn stage_export_note(
     let body = note::neutralize_markers(input.markdown.trim_end());
     let body = body.as_ref();
     let checksum = region_checksum(body);
-    let mut manifest = load_manifest(&destination.root)?;
-
-    let existing = manifest.notes.get(&input.curio_id).cloned();
-    let (rel_path, disposition) = match &existing {
-        Some(entry) => {
-            let unchanged = entry.checksum == checksum;
-            (
-                entry.path.clone(),
-                if unchanged {
-                    ExportDisposition::Unchanged
-                } else {
-                    ExportDisposition::Updated
-                },
-            )
-        }
-        None => (
-            unique_note_path(&destination.root, &manifest, input)?,
-            ExportDisposition::Created,
-        ),
-    };
-
-    let abs_path = contained_path(&destination.root, &rel_path)?;
-    let old = read_existing_note(&abs_path)?;
-
-    // The idempotency hit trusts the manifest only while the note on disk
-    // is still a note: a blank file (power loss under a pre-fsync write,
-    // a sync tool truncating it) falls through and is rewritten fresh,
-    // and a non-blank one that no longer parses surfaces as NoteParse
-    // instead of being silently reported as exported.
-    if let (ExportDisposition::Unchanged, Some(old)) = (disposition, &old) {
-        note::parse_note(old, &abs_path)?;
+    let root = &destination.root;
+    if let Some(outcome) = unlocked_idempotency_hit(root, input, checksum)? {
         return Ok(StagedExport {
-            outcome: ExportOutcome {
-                path: rel_path,
-                checksum,
-                disposition,
-            },
+            outcome,
             pending: None,
+            _lock: None,
         });
     }
+    // One export per destination at a time, from the manifest load
+    // through the manifest commit — across threads and processes.
+    let lock = DestinationLock::acquire(root)?;
+    let mut manifest = load_manifest(root)?;
+    let merged_copies = manifest::merge_conflict_copies(root, &mut manifest)?;
 
-    // Build the note: fresh, or a managed-region/machine-key replacement
-    // that preserves user content byte-for-byte.
-    let content = match &old {
-        Some(old) => note::replace_managed(old, &frontmatter(input, checksum), body, &abs_path)?,
-        None => render_note(&frontmatter(input, checksum), body)?,
+    let target = match manifest.notes.get(&input.curio_id) {
+        Some(entry) => recorded_target(root, &manifest, input, entry, checksum)?,
+        None => unrecorded_target(root, &manifest, input, ExportDisposition::Created)?,
+    };
+    // Every target but the idempotency hit (whose manifest entry already
+    // says exactly this) is (re-)recorded — also when the note on disk
+    // turns out to be current already and its write is skipped.
+    let record = target.write.is_some();
+    let outcome = ExportOutcome {
+        path: target.rel_path,
+        checksum,
+        disposition: target.disposition,
     };
 
-    // Contract write ordering: note first…
-    write_atomic(&destination.root, &abs_path, content.as_bytes())?;
-    // …manifest second — held back so the caller can stage its event
-    // intent between the two writes (see [`StagedExport`]).
-    manifest.notes.insert(
-        input.curio_id,
-        ManifestEntry {
-            path: rel_path.clone(),
-            checksum,
-            exported_at: Timestamp::now(),
-        },
-    );
+    if let Some(write) = target.write {
+        // Build the note: fresh, or a managed-region/machine-key
+        // replacement that preserves user content byte-for-byte.
+        let abs_path = contained_path(root, &outcome.path)?;
+        let fm = frontmatter(input, checksum);
+        let (content, current) = match write {
+            NoteWrite::Replace(old) => {
+                let content = note::replace_managed(&old, &fm, body, &abs_path)?;
+                let current = content == old;
+                (content, current)
+            }
+            NoteWrite::Fresh => (render_note(&fm, body)?, false),
+        };
+        // Contract write ordering: note first (skipped when the note on
+        // disk already has exactly these bytes)…
+        if !current {
+            write_atomic(root, &abs_path, content.as_bytes())?;
+        }
+    }
+    if record {
+        // …manifest second — held back so the caller can stage its event
+        // intent between the two writes (see [`StagedExport`]).
+        manifest.notes.insert(
+            input.curio_id,
+            ManifestEntry {
+                path: outcome.path.clone(),
+                checksum,
+                exported_at: Timestamp::now(),
+            },
+        );
+    } else if merged_copies.is_empty() {
+        // The pure idempotency hit: nothing to write at all.
+        return Ok(StagedExport {
+            outcome,
+            pending: None,
+            _lock: Some(lock),
+        });
+    }
     Ok(StagedExport {
-        outcome: ExportOutcome {
-            path: rel_path,
-            checksum,
-            disposition,
-        },
+        outcome,
         pending: Some(PendingManifest {
-            root: destination.root.clone(),
+            root: root.clone(),
             manifest,
+            merged_copies,
         }),
+        _lock: Some(lock),
     })
+}
+
+/// Checks that a destination which has exported before is still there:
+/// its root and the `.curio/` marker the first export created. Callers
+/// that know the destination has exported (the facade records it) run
+/// this before [`stage_export_note`]; a fresh destination has no marker
+/// yet, and the export creates it.
+///
+/// # Errors
+///
+/// [`ExportError::DestinationMissing`] when either is gone.
+pub fn require_marker(root: &Path) -> Result<(), ExportError> {
+    if root.join(".curio").is_dir() {
+        Ok(())
+    } else {
+        Err(ExportError::DestinationMissing {
+            root: root.to_path_buf(),
+        })
+    }
 }
 
 /// sha256 over exactly the managed-region bytes (the trimmed markdown
@@ -311,26 +556,24 @@ fn frontmatter(input: &ExportInput, checksum: Checksum) -> ArticleFrontmatter {
     }
 }
 
-/// `curio/<slug>.md`, deduplicated against paths owned by *other*
-/// articles by suffixing a `curio_id` prefix (deterministic, no counters).
+/// `curio/<slug>.md`, deduplicated by suffixing a `curio_id` prefix, then
+/// the whole `curio_id` (deterministic, no counters). A candidate is
+/// skipped when the manifest gives it to *another* article, and when the
+/// file on disk is not this article's own note — another article's note
+/// (the manifest that would have said so is lost or stale) or a file that
+/// is not a Curio note at all. Returns the path plus, when it holds this
+/// article's note already (a lost manifest), that note's current bytes.
 ///
-/// A path counts as owned by another article when the manifest says so —
-/// compared NFC-normalized, because manifests written before slugs were
-/// normalized can hold an NFD spelling that names the same file on
-/// APFS/HFS+ — or when the note already on disk at that path parses with
-/// a different `curio_id`. The disk check catches every other way two
-/// byte-distinct names can resolve to one file (case folding the slug's
-/// lowercasing does not cover, a manifest lost or rolled back by a sync
-/// tool), so a new article never takes over another one's note.
-///
-/// # Errors
-///
-/// [`ExportError::Io`] when an existing candidate note cannot be read.
+/// Manifest paths compare NFC-normalized: manifests written before slugs
+/// were normalized can hold an NFD spelling that names the same file on
+/// APFS/HFS+. The disk check catches every other way two byte-distinct
+/// names can resolve to one file (case folding the slug's lowercasing
+/// does not cover, a manifest lost or rolled back by a sync tool).
 fn unique_note_path(
     root: &Path,
     manifest: &curio_types::ManifestV1,
     input: &ExportInput,
-) -> Result<String, ExportError> {
+) -> Result<(String, Option<String>), ExportError> {
     let nfc = ComposingNormalizerBorrowed::new_nfc();
     let slug = slugify(&input.title, &input.curio_id);
     let id = input.curio_id.to_string();
@@ -338,38 +581,26 @@ fn unique_note_path(
     let candidates = [
         format!("curio/{slug}.md"),
         format!("curio/{slug}-{short}.md"),
+        format!("curio/{slug}-{id}.md"),
     ];
-    for candidate in candidates {
-        let in_manifest = manifest.notes.iter().any(|(owner, entry)| {
-            *owner != input.curio_id && nfc.normalize(&entry.path) == candidate
-        });
-        if !in_manifest && !owned_on_disk_by_another(root, &candidate, &input.curio_id)? {
-            return Ok(candidate);
+    let recorded_for_other = |path: &str| {
+        manifest
+            .notes
+            .iter()
+            .any(|(other, entry)| *other != input.curio_id && nfc.normalize(&entry.path) == path)
+    };
+    for candidate in &candidates {
+        if recorded_for_other(candidate) {
+            continue;
+        }
+        match occupant(&contained_path(root, candidate)?, input.curio_id)? {
+            Occupant::Vacant => return Ok((candidate.clone(), None)),
+            Occupant::Ours(existing) => return Ok((candidate.clone(), Some(existing))),
+            Occupant::OtherArticle | Occupant::Unaccountable(_) => {}
         }
     }
-    // The full id is unique by construction (lowercase hex, so no case
-    // folding can merge two of them).
-    Ok(format!("curio/{slug}-{id}.md"))
-}
-
-/// Whether the note at `rel` under `root` is another article's: it exists,
-/// is not blank, and its frontmatter names a different `curio_id`. A note
-/// that does not parse is left to the export itself, which refuses it.
-fn owned_on_disk_by_another(
-    root: &Path,
-    rel: &str,
-    curio_id: &CurioId,
-) -> Result<bool, ExportError> {
-    let path = contained_path(root, rel)?;
-    let existing = match read_existing_note(&path) {
-        Ok(Some(existing)) => existing,
-        // Absent, blank, or not even UTF-8: no other article's identity
-        // to protect here.
-        Ok(None) | Err(ExportError::NoteParse { .. }) => return Ok(false),
-        Err(err) => return Err(err),
-    };
-    Ok(note::parse_note(&existing, &path)
-        .is_ok_and(|(_, frontmatter)| frontmatter.curio_id != *curio_id))
+    let [.., last] = candidates;
+    Err(ExportError::PathsTaken { path: last })
 }
 
 /// Joins a relative note path under the root, refusing traversal. This
@@ -394,28 +625,36 @@ fn contained_path(root: &Path, rel: &str) -> Result<PathBuf, ExportError> {
 /// NUL fill some filesystems leave after a crash mid-write. A blank note
 /// carries none of the user's bytes, so it is rewritten fresh rather than
 /// refused as unparseable.
+///
+/// # Errors
+///
+/// [`ExportError::NoteParse`] for a file that is not UTF-8 (stale blocks
+/// a crash left behind are no more a note than a garbled header),
+/// [`ExportError::Io`] for any other read failure.
 fn read_existing_note(path: &Path) -> Result<Option<String>, ExportError> {
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let content = std::fs::read_to_string(path).map_err(|source| {
-        // Stale blocks a crash left behind are no more a note than a
-        // garbled header: report them as unparseable, not as an I/O fault.
-        if source.kind() == std::io::ErrorKind::InvalidData {
-            ExportError::NoteParse {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+            return Err(ExportError::NoteParse {
                 path: path.to_path_buf(),
-                message: format!("not valid UTF-8: {source}"),
-            }
-        } else {
-            ExportError::Io {
+                message: format!("the file is not UTF-8 text: {err}"),
+            });
+        }
+        Err(source) => {
+            return Err(ExportError::Io {
                 path: path.to_path_buf(),
                 source,
-            }
+            });
         }
-    })?;
+    };
     let blank = content.chars().all(|c| c == '\0' || c.is_whitespace());
     Ok((!blank).then_some(content))
 }
+
+/// Per-process sequence for temp-file names: the pid alone collides
+/// between two writes of one process.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Temp-file + atomic-rename write in the target's own directory,
 /// with realpath containment under `root`: after the parent directories
@@ -432,8 +671,11 @@ fn read_existing_note(path: &Path) -> Result<Option<String>, ExportError> {
 /// never the zero-length file a journaled rename of unflushed data can
 /// leave behind. That is what makes the contract's note-then-manifest
 /// ordering hold across a crash. A filesystem that cannot `fsync` at all
-/// is written without it (see [`tolerate_unsupported_sync`]). Any failure removes the temp file, so no `.curio-tmp-*`
-/// stray is left for a sync tool to pick up.
+/// is written without it (see [`tolerate_unsupported_sync`]). Any failure
+/// removes the temp file, so no `.curio-tmp-*` stray is left for a sync
+/// tool to pick up. Temp names are unique per write (pid + a per-process
+/// sequence) and created exclusively, so concurrent writes never share
+/// one.
 pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
     let io_err = |source| ExportError::Io {
         path: path.to_path_buf(),
@@ -460,15 +702,12 @@ pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_default();
-    let tmp = dir.join(format!(".{file_name}.curio-tmp-{}", std::process::id()));
-    if let Err(source) = write_synced(&tmp, bytes) {
-        discard_temp(&tmp);
-        return Err(ExportError::Io { path: tmp, source });
-    }
-    if let Err(source) = std::fs::rename(&tmp, path) {
-        discard_temp(&tmp);
-        return Err(io_err(source));
-    }
+    let tmp = dir.join(format!(
+        ".{file_name}.curio-tmp-{}-{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    land_via_temp(&tmp, path, bytes)?;
     sync_dir(dir).map_err(io_err)?;
     for created in dir
         .ancestors()
@@ -481,12 +720,40 @@ pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
     Ok(())
 }
 
-/// Writes `bytes` to a new file at `path` and flushes them to stable
-/// storage before returning — as far as the filesystem can: one that
-/// cannot `fsync` at all is tolerated (see [`tolerate_unsupported_sync`]).
+/// Writes `bytes` to the fresh temp file `tmp`, flushes it, and renames
+/// it over `path`. On failure the temp file is removed again — unless it
+/// could not be created because something already sits at that name,
+/// which is not ours to delete.
+fn land_via_temp(tmp: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
+    if let Err(source) = write_synced(tmp, bytes) {
+        if source.kind() != std::io::ErrorKind::AlreadyExists {
+            discard_temp(tmp);
+        }
+        return Err(ExportError::Io {
+            path: tmp.to_path_buf(),
+            source,
+        });
+    }
+    if let Err(source) = std::fs::rename(tmp, path) {
+        discard_temp(tmp);
+        return Err(ExportError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(())
+}
+
+/// Writes `bytes` to a new file at `path` — never one that already
+/// exists — and flushes them to stable storage before returning, as far
+/// as the filesystem can: one that cannot `fsync` at all is tolerated
+/// (see [`tolerate_unsupported_sync`]).
 fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
-    let mut file = std::fs::File::create(path)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
     file.write_all(bytes)?;
     tolerate_unsupported_sync(file.sync_all(), path)
 }
@@ -607,24 +874,35 @@ mod tests {
         );
     }
 
-    /// Injected temp-write failure: the temp name itself is occupied by a
-    /// directory, so creating the file fails. The error names the temp
-    /// path, and the cleanup (which cannot remove a directory with
-    /// `remove_file`) is best-effort rather than masking the real error.
+    /// Injected temp-write failure: the temp name itself is occupied (by a
+    /// directory, and by a file), so creating the temp file fails. The
+    /// error names the temp path, nothing lands at the target, and the
+    /// squatter — not ours — is left exactly as it was.
     #[test]
     fn a_failed_temp_write_reports_the_temp_path() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("curio");
         let target = dir.join("note.md");
-        let tmp = dir.join(format!(".note.md.curio-tmp-{}", std::process::id()));
+        let tmp = dir.join(".note.md.curio-tmp-squatted");
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let err = write_atomic(root.path(), &target, b"bytes").unwrap_err();
+        let err = land_via_temp(&tmp, &target, b"bytes").unwrap_err();
         assert!(
             matches!(&err, ExportError::Io { path, .. } if *path == tmp),
             "{err}"
         );
         assert!(!target.exists());
+        assert!(tmp.is_dir(), "the squatting directory is untouched");
+
+        std::fs::remove_dir(&tmp).unwrap();
+        std::fs::write(&tmp, b"someone else's").unwrap();
+        let err = land_via_temp(&tmp, &target, b"bytes").unwrap_err();
+        assert!(
+            matches!(&err, ExportError::Io { path, .. } if *path == tmp),
+            "{err}"
+        );
+        assert!(!target.exists());
+        assert_eq!(std::fs::read(&tmp).unwrap(), b"someone else's");
     }
 
     #[test]
@@ -698,5 +976,103 @@ mod tests {
             contained_path(root, "a/../../b.md"),
             Err(ExportError::Containment { .. })
         ));
+    }
+
+    fn sample_input(curio_id: CurioId, title: &str) -> ExportInput {
+        ExportInput {
+            curio_id,
+            title: title.to_owned(),
+            source: "https://example.com/a".to_owned(),
+            feed: None,
+            feed_title: None,
+            author: None,
+            published: None,
+            saved: Timestamp::now(),
+            tags: vec![],
+            lang: None,
+            word_count: None,
+            markdown: "body".to_owned(),
+        }
+    }
+
+    #[test]
+    fn occupant_classifies_every_kind_of_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = CurioId::new();
+        let path = dir.path().join("n.md");
+        assert!(matches!(occupant(&path, id).unwrap(), Occupant::Vacant));
+
+        let ours = render_note(
+            &frontmatter(&sample_input(id, "T"), region_checksum("b")),
+            "b",
+        )
+        .unwrap();
+        std::fs::write(&path, &ours).unwrap();
+        assert!(matches!(occupant(&path, id).unwrap(), Occupant::Ours(c) if c == ours));
+        assert!(matches!(
+            occupant(&path, CurioId::new()).unwrap(),
+            Occupant::OtherArticle
+        ));
+
+        for bytes in [&b"# just markdown\n"[..], &[0xff, 0xfe, 0x00][..]] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(matches!(
+                occupant(&path, id).unwrap(),
+                Occupant::Unaccountable(ExportError::NoteParse { .. })
+            ));
+        }
+
+        let sub = dir.path().join("sub.md");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(matches!(
+            occupant(&sub, id).unwrap(),
+            Occupant::Unaccountable(ExportError::NoteParse { .. })
+        ));
+    }
+
+    #[test]
+    fn every_candidate_taken_is_refused_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = sample_input(CurioId::new(), "Busy");
+        let id = input.curio_id.to_string();
+        std::fs::create_dir_all(dir.path().join("curio")).unwrap();
+        for name in [
+            "busy.md".to_owned(),
+            format!("busy-{}.md", &id[..8]),
+            format!("busy-{id}.md"),
+        ] {
+            std::fs::write(dir.path().join("curio").join(name), "mine\n").unwrap();
+        }
+        let err =
+            unique_note_path(dir.path(), &curio_types::ManifestV1::new(), &input).unwrap_err();
+        assert!(matches!(err, ExportError::PathsTaken { .. }), "{err}");
+    }
+
+    #[test]
+    fn require_marker_wants_the_curio_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            require_marker(dir.path()),
+            Err(ExportError::DestinationMissing { .. })
+        ));
+        std::fs::create_dir(dir.path().join(".curio")).unwrap();
+        assert!(require_marker(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn a_failed_atomic_write_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // The rename target is a non-empty directory: the rename fails
+        // after the temp file was written.
+        let target = dir.path().join("note.md");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("keep"), "x").unwrap();
+        assert!(write_atomic(dir.path(), &target, b"bytes").is_err());
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().contains(".curio-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 }

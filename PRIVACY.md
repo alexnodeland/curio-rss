@@ -33,9 +33,11 @@ classes of request the app can make; there are no others:
    `www.reddit.com/api/v1/access_token` and loads full posts from
    `oauth.reddit.com` at the faster authenticated rate (~85 requests per
    minute). The secret is stored in your operating system's keychain — never
-   in Curio's config, database, or logs — and is sent to no host other than
-   Reddit. Removing the credentials returns Curio to the unauthenticated
-   behavior above; nothing else changes.
+   in Curio's config, database, or logs (debug output redacts it and the
+   access token) — and is sent to no host other than Reddit. Each profile
+   keeps its own keychain item, so separate profiles can use separate Reddit
+   apps. Removing the credentials returns that profile to the
+   unauthenticated behavior above; nothing else changes.
 
 2. **Favicons.** *Add feed* fetches the page you typed to discover its feeds
    and reads its declared icon (or the site's own `/favicon.ico`) —

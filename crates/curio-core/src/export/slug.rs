@@ -22,8 +22,8 @@ use icu_normalizer::ComposingNormalizerBorrowed;
 /// Byte budget of a slug, before any dedup suffix and the `.md` extension.
 /// Longest final name: 100 + `-` + 36-byte UUID + `.md` = 140 bytes. The
 /// longest name actually *created* is the write's temp file,
-/// `.{name}.curio-tmp-{pid}`: 1 + 140 + 11 + up to 10 pid digits = 162
-/// bytes. Both stay well under the 255-byte `NAME_MAX` of ext4/APFS/NTFS
+/// `.{name}.curio-tmp-{pid}-{seq}`: 1 + 140 + 11 + up to 10 pid digits +
+/// 1 + up to 20 sequence digits = 183 bytes. Both stay well under the 255-byte `NAME_MAX` of ext4/APFS/NTFS
 /// (NTFS counts UTF-16 units, never more than UTF-8 bytes) — and it was
 /// the temp name that overflowed before this cap existed.
 pub(crate) const SLUG_MAX_BYTES: usize = 100;
@@ -140,8 +140,8 @@ mod tests {
             let file_name = format!("{slug}-{id}.md");
             assert!(file_name.len() <= 255, "{} bytes", file_name.len());
             // …and the longest one a write creates: its temp file, with
-            // the widest possible pid.
-            let temp_name = format!(".{file_name}.curio-tmp-{}", u32::MAX);
+            // the widest possible pid and sequence number.
+            let temp_name = format!(".{file_name}.curio-tmp-{}-{}", u32::MAX, u64::MAX);
             assert!(temp_name.len() <= 255, "{} bytes", temp_name.len());
         }
         // 200 CJK chars = 600 bytes; the cap lands on a char boundary.

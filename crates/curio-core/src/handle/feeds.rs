@@ -1,8 +1,9 @@
-//! Feed subscriptions: add, remove, list, per-feed settings, ordering.
+//! Feed subscriptions: add, remove, list, lookup, per-feed settings,
+//! lifecycle status, fetch-filled metadata, ordering, and the fetch log.
 
 use std::sync::PoisonError;
 
-use crate::model::{Feed, FeedId, NewFeed};
+use crate::model::{Feed, FeedId, FeedStatus, FetchRecord, NewFeed};
 
 use super::{CoreError, CoreHandle};
 
@@ -121,6 +122,58 @@ impl CoreHandle {
         description: Option<String>,
     ) -> Result<(), CoreError> {
         Ok(self.storage.set_feed_metadata(id, site_url, description)?)
+    }
+
+    /// Looks a feed up by its subscription URL (exact match).
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn get_feed_by_url(&self, url: &str) -> Result<Option<Feed>, CoreError> {
+        Ok(self.storage.get_feed_by_url(url)?)
+    }
+
+    /// Sets a feed's lifecycle status (pause, dead-on-410, reactivate).
+    /// DB-local, no contract event: feed status is a local scheduling
+    /// concern, not part of the published contract.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::Storage`] wrapping `NotFound` for an unknown feed;
+    /// storage errors.
+    pub fn set_feed_status(&self, id: FeedId, status: FeedStatus) -> Result<(), CoreError> {
+        Ok(self.storage.set_feed_status(id, status)?)
+    }
+
+    /// Fills in feed metadata learned from a fetch, without clobbering
+    /// anything already set (human edits win over parsed values) — the
+    /// fetch-fill counterpart to [`Self::set_feed_metadata`]. DB-local, no
+    /// contract event.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::Storage`] wrapping `NotFound` for an unknown feed;
+    /// storage errors.
+    pub fn update_feed_metadata(
+        &self,
+        id: FeedId,
+        title: Option<String>,
+        site_url: Option<String>,
+        description: Option<String>,
+    ) -> Result<(), CoreError> {
+        Ok(self
+            .storage
+            .update_feed_metadata(id, title, site_url, description)?)
+    }
+
+    /// The most recent fetch attempts for a feed (the `fetch_log`),
+    /// newest first.
+    ///
+    /// # Errors
+    ///
+    /// Database or stored-value corruption errors.
+    pub fn recent_fetches(&self, id: FeedId, limit: u32) -> Result<Vec<FetchRecord>, CoreError> {
+        Ok(self.storage.recent_fetches(id, limit)?)
     }
 
     /// Rewrites the sidebar feed order to `ordered` (drag-to-reorder). The

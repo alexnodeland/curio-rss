@@ -1366,3 +1366,152 @@ async fn save_url_rejects_non_http_input() {
         );
     }
 }
+
+// ------------------------------------------- the storage-free facade (#178)
+//
+// Heads never reach `CoreHandle::storage()` (it only exists under the
+// test-support feature); these are the facade methods that replaced it.
+
+#[tokio::test]
+async fn feed_lookup_status_metadata_and_fetch_log_go_through_the_facade() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let url = format!("{}/feed.xml", server.uri());
+    let feed = subscribe(&core, &url);
+
+    // get_feed_by_url: exact URL match, None otherwise.
+    assert_eq!(core.get_feed_by_url(&url).unwrap().unwrap().id, feed.id);
+    assert!(
+        core.get_feed_by_url("https://nope.test/")
+            .unwrap()
+            .is_none()
+    );
+
+    // set_feed_status: pause, reactivate; unknown id is NotFound.
+    core.set_feed_status(feed.id, FeedStatus::Paused).unwrap();
+    assert_eq!(
+        core.get_feed(feed.id).unwrap().unwrap().status,
+        FeedStatus::Paused
+    );
+    core.set_feed_status(feed.id, FeedStatus::Active).unwrap();
+    assert_eq!(
+        core.get_feed(feed.id).unwrap().unwrap().status,
+        FeedStatus::Active
+    );
+    let unknown = curio_core::model::FeedId(feed.id.0 + 1000);
+    assert!(matches!(
+        core.set_feed_status(unknown, FeedStatus::Paused),
+        Err(curio_core::CoreError::Storage(
+            curio_core::storage::StorageError::NotFound { .. }
+        ))
+    ));
+
+    // update_feed_metadata only fills NULL fields — a human edit wins.
+    core.set_feed_title(feed.id, Some("Mine".to_owned()))
+        .unwrap();
+    core.update_feed_metadata(
+        feed.id,
+        Some("Parsed".to_owned()),
+        Some("https://site.test/".to_owned()),
+        Some("About".to_owned()),
+    )
+    .unwrap();
+    let filled = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(filled.title.as_deref(), Some("Mine"));
+    assert_eq!(filled.site_url.as_deref(), Some("https://site.test/"));
+    assert_eq!(filled.description.as_deref(), Some("About"));
+    assert!(
+        core.update_feed_metadata(unknown, None, None, None)
+            .is_err()
+    );
+
+    // recent_fetches: empty before a refresh, one record (newest first) after.
+    assert_eq!(
+        core.recent_fetches(feed.id, 10).unwrap(),
+        [] as [curio_core::model::FetchRecord; 0]
+    );
+    core.refresh_feed(feed.id).await.unwrap();
+    let log = core.recent_fetches(feed.id, 10).unwrap();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].feed_id, feed.id);
+    assert_eq!(log[0].http_status, Some(503));
+}
+
+#[test]
+fn article_count_delete_and_tag_vocabulary_go_through_the_facade() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    assert_eq!(core.count_articles().unwrap(), 0);
+    assert_eq!(core.list_tags().unwrap(), [] as [String; 0]);
+
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    assert_eq!(core.count_articles().unwrap(), 2);
+
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    core.tag_article(articles[0].id, "rust").unwrap();
+    core.tag_article(articles[1].id, "async").unwrap();
+    assert_eq!(core.list_tags().unwrap(), ["async", "rust"]);
+
+    core.delete_article(articles[0].id).unwrap();
+    assert_eq!(core.count_articles().unwrap(), 1);
+    assert!(core.get_article(articles[0].id).unwrap().is_none());
+    assert!(matches!(
+        core.delete_article(articles[0].id),
+        Err(curio_core::CoreError::Storage(
+            curio_core::storage::StorageError::NotFound { .. }
+        ))
+    ));
+}
+
+#[test]
+fn settings_round_trip_through_the_facade_and_survive_a_reopen() {
+    let profile = tempfile::tempdir().unwrap();
+    {
+        let core = open_core(profile.path());
+        assert_eq!(core.get_setting("ui.theme").unwrap(), None);
+        core.set_setting("ui.theme", "dark").unwrap();
+        core.set_setting("ui.theme", "light").unwrap();
+        assert_eq!(
+            core.get_setting("ui.theme").unwrap().as_deref(),
+            Some("light")
+        );
+    }
+    let core = open_core(profile.path());
+    assert_eq!(
+        core.get_setting("ui.theme").unwrap().as_deref(),
+        Some("light")
+    );
+}
+
+#[test]
+fn database_health_probes_go_through_the_facade() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    assert_eq!(core.db_path(), profile.path().join("curio.db"));
+    assert!(core.db_path().is_file());
+    assert_eq!(
+        core.db_schema_version().unwrap(),
+        curio_core::storage::Storage::schema_version()
+    );
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    core.integrity_check().unwrap();
+    core.fts_integrity_check().unwrap();
+    core.vacuum().unwrap();
+    core.integrity_check().unwrap();
+    // Every facade operation flushes its staged intents before returning.
+    let feed = subscribe(&core, "https://example.com/feed.xml");
+    core.set_feed_tags(feed.id, vec!["x".to_owned()]).unwrap();
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+}

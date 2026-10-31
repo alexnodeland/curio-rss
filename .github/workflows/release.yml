@@ -233,10 +233,12 @@ jobs:
           if-no-files-found: error
 
   sbom:
-    # CycloneDX SBOMs for what ships: the Rust dependency graph of the desktop
-    # crate (one per darwin arch the universal binary contains) and the npm
-    # lockfile that the bundled frontend is compiled from. `cargo cyclonedx`
-    # reads `cargo metadata` only — nothing is compiled here.
+    # CycloneDX SBOMs: the Rust dependency graph of the desktop crate (one per
+    # darwin arch the universal binary contains) and the WHOLE npm lockfile
+    # the bundled frontend is compiled from — dev dependencies included on
+    # purpose, since the build toolchain (vite, the svelte compiler, whose
+    # runtime is inlined into the bundle) is part of what produced the app.
+    # `cargo cyclonedx` reads `cargo metadata` only — nothing is compiled here.
     name: SBOM (CycloneDX)
     needs: gate
     runs-on: ubuntu-latest

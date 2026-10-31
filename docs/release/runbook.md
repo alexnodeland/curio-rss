@@ -37,7 +37,8 @@ Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
    plugins, no npm lifecycle scripts). It writes the updater manifest
    `latest.json`.
 4. **`sbom`** writes CycloneDX SBOMs: the Rust graph per darwin arch and the
-   npm lockfile.
+   whole npm lockfile (dev dependencies included — the build toolchain that
+   compiled the frontend bundle).
 5. **`release`** writes `SHA256SUMS` over every asset, mints a build-provenance
    attestation for them (`actions/attest-build-provenance`), and creates a
    **draft** GitHub release with the DMG (under the cask's stable name,
@@ -48,8 +49,10 @@ Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
 Nothing is public — and neither `brew` nor the in-app updater sees anything —
 until you publish the draft in §5. `cargo run -p xtask -- workflows` (`just
 workflows`, a CI job) fails the build if this shape regresses: an unpinned
-action, a job that skips the gate, the signing key in a second step, or a
-missing checksum/SBOM/attestation asset.
+action, a job that skips the gate (or runs on `always()` / `failure()` /
+`cancelled()` past it), the signing key in a second step, anything ahead of
+the key step that runs project code, backgrounds a process or writes
+`GITHUB_ENV`/`GITHUB_PATH`, or a missing checksum/SBOM/attestation asset.
 
 **Dry run first (recommended).** Actions → `release` → **Run workflow** on
 `main` runs all of the above except the publish steps: it signs with a

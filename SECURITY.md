@@ -55,9 +55,12 @@ passes on the tagged commit, and carries:
   `gh attestation verify Curio-universal.dmg --repo alexnodeland/curio-rss`.
 - **CycloneDX SBOMs** — `Curio-rust-<arch>.cdx.json` (the Rust dependency
   graph of the app, per macOS architecture) and `Curio-npm.cdx.json` (the
-  frontend's npm lockfile).
+  frontend's whole npm lockfile — runtime packages and the build toolchain
+  that compiled the bundle, dev dependencies included).
 - **A minisign signature** on the updater archive (`Curio.app.tar.gz.sig`),
   which the in-app updater checks against the public key compiled into the
   app before installing anything. The private key is used in exactly one CI
-  step, which runs no build scripts; `cargo run -p xtask -- workflows` fails
-  the build if that ever changes.
+  step, which runs no build scripts, in a job where nothing ahead of it runs
+  project code, starts a background process or rewrites the step's
+  environment; `cargo run -p xtask -- workflows` fails the build if that ever
+  changes.

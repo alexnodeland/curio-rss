@@ -1,0 +1,11 @@
+# Workspace cargo config.
+
+[env]
+# insta (the content_golden snapshots) finds `fixtures/html` and the
+# committed `.snap` files from the workspace root. Without this it derives
+# the root from the crate dir baked into the test binary at compile time —
+# another worktree's when agent sessions share one CARGO_TARGET_DIR and
+# cargo reuses that worktree's binary as fresh (issue #183). Cargo passes
+# [env] to the test processes it runs, and insta reads this variable at run
+# time first; `relative` resolves it against this checkout's root.
+INSTA_WORKSPACE_ROOT = { value = ".", relative = true }

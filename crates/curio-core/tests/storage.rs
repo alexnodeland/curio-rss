@@ -3,6 +3,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -111,8 +113,7 @@ fn refuses_a_database_from_a_newer_build() {
 fn fresh_database_schema_matches_the_committed_golden() {
     let (_dir, storage) = temp_storage();
     let dump = storage.schema_dump().unwrap();
-    let golden_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/schema_v1.txt");
+    let golden_path = common::manifest_dir().join("tests/golden/schema_v1.txt");
     if std::env::var_os("REGEN_GOLDEN").is_some() {
         std::fs::write(&golden_path, &dump).unwrap();
         return;
@@ -1226,7 +1227,7 @@ fn storage_handle_is_send_and_sync() {
 fn writer_mutations_use_immediate_transactions() {
     // Every file of the `storage::repo` module (one per table family), read
     // from disk so a section added later is covered without editing this.
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/storage/repo");
+    let dir = common::manifest_dir().join("src/storage/repo");
     let mut scanned = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();

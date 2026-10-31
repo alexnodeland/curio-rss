@@ -39,8 +39,11 @@ if ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
     >/dev/null
 fi
 
-# 2. Rust components: clippy + rustfmt for the lint floor, llvm-tools for the
-#    coverage gate (`just cov`).
+# 2. Rust toolchain: CI floats on the latest stable (dtolnay/rust-toolchain
+#    @stable), and each stable release adds clippy lints — a stale local
+#    toolchain passes `-D warnings` that CI then fails. Track stable here too.
+#    Components: clippy + rustfmt (lint floor), llvm-tools (`just cov`).
+rustup update stable --no-self-update >/dev/null 2>&1
 rustup component add clippy rustfmt llvm-tools-preview >/dev/null 2>&1
 
 # 3. Cargo-installed tools the justfile calls. Compiled once, then cached in
@@ -92,6 +95,11 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
       common=$(git rev-parse --path-format=absolute --git-common-dir)
       echo "export CARGO_TARGET_DIR=\"$(dirname "$common")/target\""
     fi
+    # Cloud sessions have a fixed disk allowance; full debuginfo makes the
+    # workspace build (tauri + tests) ~15 GB, line tables alone ~5 GB, and
+    # backtraces keep their file:line.
+    echo 'export CARGO_PROFILE_DEV_DEBUG=line-tables-only'
+    echo 'export CARGO_PROFILE_TEST_DEBUG=line-tables-only'
   } >>"$CLAUDE_ENV_FILE"
 fi
 

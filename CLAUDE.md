@@ -84,8 +84,10 @@ chore ci build revert`. Small, logical commits.
   webview system packages, Rust components, `just`/`cargo-deny`/
   `cargo-llvm-cov`, lefthook, the desktop npm deps (skipped when manifests are
   unchanged), and the git hooks — so `just ci` works from the first prompt.
-  It also exports `CARGO_TARGET_DIR=<checkout>/target` so git worktrees share
-  one build dir (a per-worktree `target/` costs ~5 GB and a cold build).
+  It tracks the latest stable Rust (CI floats on stable, and new clippy lints
+  land with each release), exports `CARGO_TARGET_DIR=<checkout>/target` so
+  git worktrees share one build dir, and builds with line-table-only
+  debuginfo so the workspace fits the session's disk allowance.
 - **PreToolUse Bash** (`guard-bash.sh`): blocks `--no-verify`, plain
   `--force` pushes, pushes to `main`, and commits on `main`.
 - **PreToolUse Edit/Write** (`guard-edit.sh`): blocks hand edits to the

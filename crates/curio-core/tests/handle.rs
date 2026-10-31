@@ -77,8 +77,6 @@ fn manual_article(key: &str, title: &str) -> NewArticle {
     }
 }
 
-/// Subscribes to the mock feed with the W1 exemption set (the fixture
-/// lives on 127.0.0.1 — this is also the proof the exemption works).
 /// Reconciles a one-destination head configuration.
 fn reconcile(
     core: &CoreHandle,
@@ -88,6 +86,8 @@ fn reconcile(
     core.reconcile_destinations([(name.clone(), root.to_path_buf())].into())
 }
 
+/// Subscribes to the mock feed with the W1 exemption set (the fixture
+/// lives on 127.0.0.1 — this is also the proof the exemption works).
 fn subscribe(core: &CoreHandle, url: &str) -> curio_core::model::Feed {
     let feed = core
         .add_feed(NewFeed {
@@ -986,6 +986,31 @@ fn reconciling_an_exported_destination_never_recreates_it() {
     assert_eq!(core.destinations().unwrap()[0].root, moved);
     let saved = core.save_to_destination(ids[1], &dest).unwrap();
     assert!(moved.join(&saved.path).is_file());
+}
+
+/// A declared root that cannot be created fails the reconcile before
+/// anything is registered or recorded as seeded (roots are created ahead
+/// of the settings transaction, as `add_destination` does): fixing the
+/// path and running again applies it as new.
+#[test]
+fn a_root_that_cannot_be_created_registers_nothing() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let blocker = parent.path().join("not-a-dir");
+    std::fs::write(&blocker, "a file, not a directory").unwrap();
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+
+    let err = reconcile(&core, &dest, &blocker.join("vault")).unwrap_err();
+    assert!(matches!(err, curio_core::CoreError::Io { .. }), "{err:?}");
+    assert_eq!(core.destinations().unwrap(), [] as [Destination; 0]);
+
+    // Not recorded as seeded either: the same declaration, once its path
+    // can be created, registers.
+    std::fs::remove_file(&blocker).unwrap();
+    reconcile(&core, &dest, &blocker.join("vault")).unwrap();
+    assert!(blocker.join("vault").is_dir());
+    assert_eq!(core.destinations().unwrap()[0].root, blocker.join("vault"));
 }
 
 /// Removing a destination clears its exported flag too: a destination

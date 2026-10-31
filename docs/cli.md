@@ -20,10 +20,13 @@ future head.
 - The CLI and the desktop app can run on one profile at the same time: state
   changes and the event log are serialized between them (an event is never
   lost, and lines never interleave; a rare duplicate line can appear, which
-  consumers drop by `event_id`). Destinations are shared live: one added
-  or removed in either head shows up in the other at once, and a
-  destination removed in the desktop app stays removed even though
-  `curio.toml` still lists it (see `curio.toml` below).
+  consumers drop by `event_id`). Both heads share one destination
+  registry: a destination added or removed in the desktop app is seen by
+  the next CLI command, and one removed there stays removed even though
+  `curio.toml` still lists it (see `curio.toml` below). The desktop app
+  loads its destinations list once per session and again after its own
+  changes, so a destination `curio dest add` registers while the app is
+  open shows up there once the app restarts (#256).
   Refreshes of the same feed from both heads take turns.
 
 ## Commands at a glance
@@ -135,11 +138,12 @@ vault = "/home/you/notes/reading"
 allow_private_network = true    # contract W1 — see below
 ```
 
-Ownership split: feeds, articles, and reading state live in `curio.db`
-(the engine's domain — don't edit); `curio.toml` owns what a human should
-be able to change with a text editor. On every run the CLI reconciles the
-file into the engine: per-feed overrides are applied, and destinations
-are **seeded**. Each `name = "path"` line is applied once (it registers
+Ownership split: feeds, articles, reading state and the destination
+registry live in `curio.db` (the engine's domain — don't edit);
+`curio.toml` holds what a human should be able to change with a text
+editor: settings, per-feed overrides, and the destinations to seed. On
+every run the CLI reconciles the file into the engine: per-feed
+overrides are applied, and destinations are **seeded**. Each `name = "path"` line is applied once (it registers
 the destination, as `curio dest add` would). After that the line is
 left alone: if the desktop app removes the destination or moves it to
 another folder, the next CLI run keeps that change rather than undo it.

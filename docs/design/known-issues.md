@@ -92,10 +92,12 @@ consumer implementation.
   (tests/handle.rs) and
   `a_destination_removed_in_the_desktop_stays_removed_after_a_cli_run`
   (curio-cli tests/cli.rs). One gap is left by design: the seeding
-  record starts empty on upgrade, so a destination removed in the
-  desktop app *before* upgrading comes back once on the first CLI run
-  if `curio.toml` still lists it, and stays removed after the user
-  removes it again.
+  record starts empty on upgrade, so a change made in the desktop app
+  *before* upgrading to a destination `curio.toml` still lists is
+  undone once on the first CLI run: a removed destination comes back,
+  and a re-rooted one returns to its `curio.toml` root (starting afresh
+  for the missing-destination check). Repeating the change after that
+  sticks.
 - **Event emission is at-least-once under heavy cross-process
   contention.** A drain appends and fsyncs under the events lock, then
   deletes the drained intents through this process's writer. If another

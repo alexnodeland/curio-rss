@@ -274,6 +274,8 @@ and each can change the destination registry. **Resolved:**
   app, which the next CLI run would revert; remembering what was seeded covers both
   with one record.
 
-Upgrade gap, accepted: the seeding record starts empty, so a destination removed in the
-app before the upgrade comes back once on the first CLI run if `curio.toml` still lists
-it; removing it again sticks.
+Upgrade gap, accepted: the seeding record starts empty, so a change made in the app before
+the upgrade to a destination `curio.toml` still lists is undone once on the first CLI run
+(the pre-upgrade behaviour): a removed destination comes back, and a re-rooted one goes
+back to its `curio.toml` root and starts afresh for the missing-destination check.
+Repeating the change after that sticks.

@@ -71,7 +71,9 @@ impl CoreHandle {
     /// only ever created for a destination that has not exported yet, so a
     /// vanished or unmounted vault surfaces as
     /// [`ExportError::DestinationMissing`](crate::export::ExportError::DestinationMissing)
-    /// on the next save instead of being recreated empty.
+    /// on the next save instead of being recreated empty. Roots are
+    /// created outside the settings transaction, so a slow mount never
+    /// holds the database write lock.
     ///
     /// # Errors
     ///
@@ -80,42 +82,55 @@ impl CoreHandle {
         &self,
         declared: BTreeMap<DestinationName, PathBuf>,
     ) -> Result<(), CoreError> {
-        // The common case (every CLI command): nothing new was declared.
-        // Settle it with reads alone, so a CLI run does not take the
-        // database write lock just to find there is nothing to write.
+        // Roots are created outside any transaction, as in
+        // `add_destination`: a slow or hung mount must not stall this
+        // process's writer thread or hold the database write lock other
+        // processes wait on. They are created up front from a plain read,
+        // so a root that cannot be created fails the run before anything
+        // is registered.
         let current = Registry::read(&self.storage)?;
+        let mut created = BTreeSet::new();
+        for root in current.roots_to_create(&declared) {
+            create_root(root)?;
+            created.insert(root.clone());
+        }
+        // The common case (every CLI command): nothing new was declared.
+        // Settled with reads alone, so a CLI run does not take the
+        // database write lock just to find there is nothing to write.
         if current.seeded == declared {
-            for (name, root) in &declared {
-                if current.roots.get(name) == Some(root) && !current.exported.contains(name) {
-                    create_root(root)?;
-                }
-            }
             return Ok(());
         }
         // Something to apply: decide again on fresh values inside the
-        // transaction. Roots are created from the writer thread there; a
-        // few `mkdir`s are cheap.
-        self.storage.edit_settings(move |settings| {
+        // transaction. Another head may have changed the registry since
+        // the read above, so a root the fresh decision needs that was not
+        // created up front is created once the transaction has committed.
+        let to_create = self.storage.edit_settings(move |settings| {
             let mut registry = Registry::load(settings)?;
+            let to_create: Vec<PathBuf> = registry
+                .roots_to_create(&declared)
+                .into_iter()
+                .cloned()
+                .collect();
             registry
                 .seeded
                 .retain(|name, _| declared.contains_key(name));
             for (name, root) in declared {
                 let registered = registry.roots.get(&name) == Some(&root);
                 let applied = registry.seeded.get(&name) == Some(&root);
-                if registered {
-                    // Already what the configuration says: keep it.
-                    if !registry.exported.contains(&name) {
-                        create_root(&root)?;
-                    }
-                } else if !applied {
-                    create_root(&root)?;
+                // Already what the configuration says: keep it as it is.
+                // Otherwise a pair not applied before registers.
+                if !registered && !applied {
                     registry.register(name.clone(), root.clone());
                 }
                 registry.seeded.insert(name, root);
             }
-            registry.store(settings)
-        })
+            registry.store(settings)?;
+            Ok::<_, CoreError>(to_create)
+        })?;
+        for root in to_create.iter().filter(|root| !created.contains(*root)) {
+            create_root(root)?;
+        }
+        Ok(())
     }
 
     /// Unregisters a named destination and persists the registry.
@@ -367,6 +382,28 @@ impl Registry {
             exported: load_exported(storage)?,
             seeded: parse_roots(storage.get_setting(SEEDED_DESTINATIONS_KEY)?.as_deref())?,
         })
+    }
+
+    /// The roots of `declared` that reconciling it needs on disk: a
+    /// pair not yet applied (it is about to register, as
+    /// `add_destination` would), and a registered destination that has
+    /// not exported yet. An exported destination's root is never created,
+    /// so a vanished vault is refused rather than recreated empty.
+    fn roots_to_create<'a>(
+        &self,
+        declared: &'a BTreeMap<DestinationName, PathBuf>,
+    ) -> Vec<&'a PathBuf> {
+        declared
+            .iter()
+            .filter(|(name, root)| {
+                if self.roots.get(*name) == Some(*root) {
+                    !self.exported.contains(*name)
+                } else {
+                    self.seeded.get(*name) != Some(*root)
+                }
+            })
+            .map(|(_, root)| root)
+            .collect()
     }
 
     /// (Re-)registers `name` at `root`, starting it afresh for the

@@ -235,35 +235,6 @@ jobs:
           else
             npm test
           fi
-      - name: "TEMP diagnose: boot the app with remote debugging"
-        if: failure() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'target\debug\curio-desktop.exe'
-          function Probe([string]$label, [hashtable]$vars) {
-            Write-Host "===== $label"
-            Get-Process -Name curio-desktop, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force
-            Start-Sleep -Seconds 2
-            $dir = Join-Path $env:RUNNER_TEMP "diag-$label"
-            New-Item -ItemType Directory -Force $dir | Out-Null
-            $env:CURIO_PROFILE = Join-Path $dir 'profile'
-            Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue
-            foreach ($k in $vars.Keys) { Set-Item -Path "Env:$k" -Value $vars[$k]; Write-Host "  $k=$($vars[$k])" }
-            $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
-            Start-Sleep -Seconds 20
-            Write-Host "  app alive: $(-not $p.HasExited)"
-            try { Write-Host ("  devtools: " + (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:9222/json/version).Content) } catch { Write-Host "  devtools: none ($_)" }
-            Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -notmatch '--type=' } | ForEach-Object { Write-Host "  browser cmdline: $($_.CommandLine)" }
-            Write-Host "  webview procs: $((Get-Process -Name msedgewebview2 -ErrorAction SilentlyContinue | Measure-Object).Count)"
-            Get-ChildItem -Recurse -Path $dir, (Join-Path $env:LOCALAPPDATA 'io.github.alexnodeland.curio') -Filter DevToolsActivePort -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  DevToolsActivePort at $($_.FullName)" }
-            Get-ChildItem -Recurse (Join-Path $dir 'profile\logs') -File -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName | Select-Object -Last 15 | ForEach-Object { Write-Host "  log: $_" } }
-            Get-Content "$dir\err.txt" -ErrorAction SilentlyContinue | Select-Object -Last 15 | ForEach-Object { Write-Host "  stderr: $_" }
-            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-          }
-          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'curio|msedge|driver' } | ForEach-Object { Write-Host "leftover: $($_.Name) $($_.CommandLine)" }
-          Probe 'port' @{ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222' }
-          Probe 'port-udf' @{ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'; WEBVIEW2_USER_DATA_FOLDER = (Join-Path $env:RUNNER_TEMP 'diag-udf') }
-          Probe 'port-udd' @{ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = ('--remote-debugging-port=9222 --user-data-dir=' + (Join-Path $env:RUNNER_TEMP 'diag-udd')) }
       - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -197,9 +197,16 @@ impl CoreHandle {
         id: FeedId,
         feed: &Feed,
         response: &crate::fetch::FetchResponse,
-        parsed: crate::feeds::ParsedFeed,
+        mut parsed: crate::feeds::ParsedFeed,
         now: Timestamp,
     ) -> Result<(RefreshOutcome, Vec<ArticleId>), CoreError> {
+        // A reused guid's keys are chosen per fetch; settle them against
+        // what earlier fetches stored so no item changes key (and splits
+        // into a duplicate article) when the guid's sharing changes.
+        let stored = self
+            .storage
+            .source_urls_by_dedupe_key(Some(id), parsed.settle_lookups())?;
+        parsed.settle_keys(&feed.url, |key| stored.get(key).map(String::as_str));
         let articles: Vec<NewArticle> = parsed
             .entries
             .into_iter()

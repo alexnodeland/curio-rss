@@ -5,7 +5,8 @@
 //! `guid → link → hash(title + published)` — every entry gets a stable
 //! key, no matter how sloppy the feed — and the keys are unique within one
 //! fetch (a guid reused across different links falls back to a `guid+link`
-//! key). Content here is still *raw*
+//! key; [`ParsedFeed::settle_keys`] keeps an item's key stable across
+//! fetches). Content here is still *raw*
 //! source HTML: sanitization happens in [`crate::content`] before
 //! anything reaches storage.
 //!
@@ -16,6 +17,7 @@
 //! lossless after one normalization.
 
 mod image;
+mod keys;
 mod opml;
 mod parse;
 

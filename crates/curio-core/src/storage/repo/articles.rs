@@ -10,7 +10,7 @@ use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, Ne
 use crate::storage::{Storage, StorageError};
 use curio_types::{CurioId, Timestamp};
 use rusqlite::OptionalExtension as _;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Re-ingest of a row whose content is still feed/manual-sourced: every
 /// ingest column may change. The `WHERE` makes it change-aware — a row
@@ -58,6 +58,12 @@ impl Storage {
     /// as-is. Clamping to the stored
     /// `saved_at` — not to the current time — keeps the stored value stable,
     /// so re-ingesting the same future date is still a no-op.
+    ///
+    /// The raw future value is deliberately not kept. It is a bogus date
+    /// with no reader in the app or in either contract (`published` is the
+    /// clamped value), and the feed stays its source: every refresh
+    /// re-reads it from the feed and re-clamps it, so a source that
+    /// corrects the date replaces the clamped value on the next refresh.
     ///
     /// # Errors
     ///
@@ -208,6 +214,37 @@ impl Storage {
                 .query_row([&scoped], |row| row.get::<_, i64>(0))
                 .optional()?
                 .map(ArticleId))
+        })
+    }
+
+    /// The `source_url` of each of `dedupe_keys` that has an article stored
+    /// under it within `feed_id`'s provenance scope (as for
+    /// [`Self::article_id_by_dedupe_key`]), keyed by the unscoped key — one
+    /// read for a whole fetch. Refresh settles reused-guid keys with it
+    /// ([`crate::feeds::ParsedFeed::settle_keys`]).
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn source_urls_by_dedupe_key(
+        &self,
+        feed_id: Option<FeedId>,
+        dedupe_keys: Vec<String>,
+    ) -> Result<HashMap<String, String>, StorageError> {
+        self.read(move |conn| {
+            let mut stmt =
+                conn.prepare_cached("SELECT source_url FROM articles WHERE dedupe_key = ?1")?;
+            let mut found = HashMap::new();
+            for key in dedupe_keys {
+                let scoped = scoped_dedupe_key(feed_id, &key);
+                if let Some(source_url) = stmt
+                    .query_row([&scoped], |row| row.get::<_, String>(0))
+                    .optional()?
+                {
+                    found.insert(key, source_url);
+                }
+            }
+            Ok(found)
         })
     }
 

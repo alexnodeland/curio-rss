@@ -1491,6 +1491,92 @@ async fn a_guid_reused_across_items_stores_each_and_hydrates_each_once() {
     assert_eq!((second.new_articles, second.updated_articles), (0, 0));
 }
 
+/// #130: whether a guid counts as reused is decided per fetch, but an item
+/// keeps one article as the guid's sharing changes between fetches — no
+/// duplicate rows, and read state stays put. The first fetch lists one item
+/// under the guid, so it is stored under the plain `guid:` key, as every
+/// reused-guid feed was before `guid+link:` keys existed.
+#[tokio::test]
+async fn a_reused_guid_keeps_each_item_one_article_as_its_sharing_changes() {
+    let server = MockServer::start().await;
+    let serve = |posts: &[&str]| {
+        let items = posts
+            .iter()
+            .map(|post| {
+                format!(
+                    "<item><guid>same</guid><title>{}</title><link>{}/{post}</link>\
+                     <description>stub</description></item>",
+                    post.to_uppercase(),
+                    server.uri()
+                )
+            })
+            .collect::<Vec<_>>()
+            .concat();
+        let xml = format!(
+            r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Reused</title>{items}</channel></rss>"#
+        );
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(xml, "application/rss+xml"))
+    };
+    let titles = |core: &CoreHandle| {
+        let mut articles: Vec<(String, bool)> = core
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .into_iter()
+            .map(|article| (article.title, core.article_state(article.id).unwrap().read))
+            .collect();
+        articles.sort();
+        articles
+    };
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+
+    serve(&["c"]).mount(&server).await;
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let c = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    core.mark_read(c.id, true).unwrap();
+
+    // The guid becomes shared: c keeps its row (and read state).
+    server.reset().await;
+    serve(&["a", "b", "c"]).mount(&server).await;
+    let shared = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((shared.new_articles, shared.updated_articles), (2, 0));
+    assert_eq!(
+        titles(&core),
+        [("A".into(), false), ("B".into(), false), ("C".into(), true)]
+    );
+
+    // Unshared again, by an item other than the plain row's: b keeps its
+    // own row and never overwrites c's.
+    server.reset().await;
+    serve(&["b"]).mount(&server).await;
+    let alone = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((alone.new_articles, alone.updated_articles), (0, 0));
+
+    // And shared once more: still the same three articles.
+    server.reset().await;
+    serve(&["a", "b", "c"]).mount(&server).await;
+    let again = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((again.new_articles, again.updated_articles), (0, 0));
+    assert_eq!(
+        titles(&core),
+        [("A".into(), false), ("B".into(), false), ("C".into(), true)]
+    );
+    let c_now = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|article| article.title == "C")
+        .unwrap();
+    assert_eq!(c_now.id, c.id, "c is still the row it was first stored as");
+}
+
 /// #130: an item without a link is stored under the feed URL (the contract
 /// needs a source URI) but is never hydrated against it — not at refresh
 /// in full-text mode, and not on an explicit load-full.

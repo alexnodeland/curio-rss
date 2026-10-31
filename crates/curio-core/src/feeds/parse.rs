@@ -1,14 +1,13 @@
 //! feed-rs wiring: RSS 0.x/1.0/2.0, Atom and JSON Feed → normalized
 //! entries with total dedupe keys.
 
-use std::collections::{HashMap, HashSet};
-
 use curio_types::Timestamp;
 use feed_rs::model::{Entry, Feed, Link, MediaObject};
 use url::Url;
 
+use super::dedupe_key;
 use super::image::feed_image;
-use super::{dedupe_key, guid_link_key};
+use super::keys::unique_keys;
 
 /// A feed's own metadata, as parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -29,7 +28,9 @@ pub struct ParsedEntry {
     /// Total dedupe key (`guid → link → hash(title+published)`), unique
     /// within its [`ParsedFeed`]: a guid the feed reuses for items with
     /// different links is disambiguated to a `guid+link:` key, and an
-    /// exact repeat of an earlier item is dropped.
+    /// exact repeat of an earlier item is dropped. That choice sees only
+    /// this fetch; [`ParsedFeed::settle_keys`] reconciles it with the keys
+    /// earlier fetches stored before anything is upserted.
     pub dedupe_key: String,
     /// The source's own id/guid, when it had one.
     pub guid: Option<String>,
@@ -54,12 +55,14 @@ pub struct ParsedEntry {
     /// (`media:thumbnail` → `media:content` image → image `enclosure`),
     /// when the source carried one. This is the *first-class* RSS image
     /// signal; ingest falls back to the first inline `<img>` only when
-    /// this is absent. Always an absolute `http(s)` URL: a relative
-    /// reference is resolved against its `xml:base` (where feed-rs applies
-    /// one), else the entry link, else the feed URL. The content
-    /// pipeline's URL policing does not run over it, so consumers treat it
-    /// as untrusted and load it through the policed image cache, never
-    /// directly.
+    /// this is absent. Always an absolute `http(s)` URL. A relative
+    /// `media:content` or image enclosure is resolved by feed-rs while
+    /// parsing, against its `xml:base`, else the feed URL; a relative
+    /// `media:thumbnail` (which feed-rs leaves raw) against the entry link,
+    /// else the feed URL — the same base the entry's inline images resolve
+    /// against. The content pipeline's URL policing does not run over it,
+    /// so consumers treat it as untrusted and load it through the policed
+    /// image cache, never directly.
     pub lead_image: Option<String>,
 }
 
@@ -117,44 +120,6 @@ fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
     }
 }
 
-/// Makes every dedupe key unique within one fetch. Without this the upsert
-/// writes each same-key item over the previous one (the feed collapses to
-/// one article) and full-text mode queues the survivor for hydration once
-/// per duplicate.
-///
-/// - A guid the feed reuses for items with **different links** (a broken
-///   id generator, a constant guid) is no identity: *every* item in that
-///   group — the first included, so the keys don't depend on feed order —
-///   is re-keyed `guid+link`.
-/// - Items whose keys still match (same guid and link, same link, same
-///   title + date) are one item listed twice: the first wins.
-fn unique_keys(entries: Vec<ParsedEntry>) -> Vec<ParsedEntry> {
-    let mut links_by_guid: HashMap<&str, HashSet<Option<&str>>> = HashMap::new();
-    for entry in &entries {
-        if let Some(guid) = entry.guid.as_deref() {
-            links_by_guid
-                .entry(guid)
-                .or_default()
-                .insert(entry.link.as_deref());
-        }
-    }
-    let reused: HashSet<String> = links_by_guid
-        .into_iter()
-        .filter(|(_, links)| links.len() > 1)
-        .map(|(guid, _)| guid.to_owned())
-        .collect();
-    let mut seen = HashSet::new();
-    entries
-        .into_iter()
-        .filter_map(|mut entry| {
-            if let Some(guid) = entry.guid.as_deref().filter(|guid| reused.contains(*guid)) {
-                entry.dedupe_key = guid_link_key(guid, entry.link.as_deref());
-            }
-            seen.insert(entry.dedupe_key.clone()).then_some(entry)
-        })
-        .collect()
-}
-
 fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
     let guid = Some(entry.id.trim())
         .filter(|id| !id.is_empty())
@@ -173,8 +138,9 @@ fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
     let source_published = entry.published.map(Timestamp::new);
     let updated = entry.updated.map(Timestamp::new);
     let published = source_published.or(updated);
-    // A relative image reference resolves against the entry's own link,
-    // else the feed URL.
+    // A relative `media:thumbnail` resolves against the entry's own link,
+    // else the feed URL (feed-rs has already resolved the other image
+    // signals — see `feed_image`).
     let entry_base = link.as_deref().and_then(|link| Url::parse(link).ok());
     let lead_image = feed_image(
         &entry.media,

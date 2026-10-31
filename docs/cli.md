@@ -206,6 +206,15 @@ full-text mode, or Reddit enrichment) keeps that body: later refreshes of
 a feed still listing the item update its title and metadata, never revert
 it to the feed's excerpt.
 
+Sloppy feeds are normalized on the way in. An entry with no publication
+date takes its last-updated date, and a date in the future is clamped to
+when Curio first saw the article. Items that reuse one guid for different
+links are stored as separate articles, and an item listed twice is stored
+once. Relative lead images (`media:thumbnail`, image enclosures) are
+resolved against `xml:base`, the entry link or the feed URL. An entry with
+no link of its own records the feed URL as its source, and full-text mode
+never fetches it.
+
 ```sh
 curio opml import subscriptions.opml   # folders become tags; known URLs skipped
 curio opml export backup.opml          # "-" writes to stdout

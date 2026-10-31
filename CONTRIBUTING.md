@@ -7,8 +7,9 @@ PRs are welcome; coordinate before starting anything large.
 
 > **CI:** every push and PR runs the fast gate (`.github/workflows/ci.yml`);
 > `just ci` runs the same suite locally (including the blob guard), so nothing
-> lands without it being green. One of its jobs has no `just ci` twin: the
-> MSRV check (`msrv`, locally `just msrv`). The heavy tier (3-OS bundles, e2e
+> lands without it being green. Two of its jobs have no `just ci` twin: the
+> engine + CLI tests on macOS and Windows (`test-cross-os`), and the MSRV
+> check (`msrv`, locally `just msrv`). The heavy tier (3-OS bundles, e2e
 > smoke, cold-start bench) runs nightly and on demand (`nightly.yml`).
 
 Everything goes through [`just`](https://github.com/casey/just) — run `just`

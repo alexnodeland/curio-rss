@@ -51,6 +51,7 @@ All state lives in one profile directory:
 |------|----------|
 | `curio.toml` | human-editable configuration (below) |
 | `curio.db` | WAL SQLite: feeds, articles, state, FTS index |
+| `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (two newest kept; see [Upgrades and backups](#upgrades-and-backups)) |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
 | `.curio/.gitignore` | scaffolded so the events log is never committed |
 
@@ -220,6 +221,23 @@ curio doctor [--json]
 
 Health probes over the durable surfaces, exit code 1 if any fail:
 schema version, `PRAGMA integrity_check`, FTS5-index/content sync,
-events-log parseability, the events `.gitignore` scaffold, and staged
+events-log parseability, the events `.gitignore` scaffold, staged
 event intents (a non-empty set means a crash interrupted emission; the
-next open replays them).
+next open replays them), and quarantined intents (`dead-intents`: staged
+rows whose envelope no longer decoded — they are moved to `curio.db`'s
+`event_intents_dead` table so they stop blocking every open and emit,
+and their events never reached the log).
+
+## Upgrades and backups
+
+Opening a profile whose database was written by an older Curio upgrades
+it in place, after first writing a consistent snapshot next to it:
+`curio.db.pre-vN.bak`, where `N` is the schema version being upgraded
+to (the two newest are kept). The upgrade runs as one transaction: if
+any step fails, the database stays exactly at its old version and the
+open fails with a message naming the backup. A database written by a
+*newer* Curio is refused untouched (update Curio instead), as is a file
+that is not a Curio database at all.
+
+To roll back by hand: quit every Curio process, delete `curio.db-wal`
+and `curio.db-shm` if present, then copy the backup over `curio.db`.

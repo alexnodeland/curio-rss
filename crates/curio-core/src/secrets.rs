@@ -110,10 +110,13 @@ pub fn store_reddit_api(profile_dir: &Path, secret: &RedditAppSecret) -> Result<
 /// **Migration:** earlier releases kept one global item (account
 /// `reddit-api`) shared by every profile. When this profile has no item
 /// of its own but the global one exists, the credentials are *copied*
-/// into this profile's item and the global item is kept — the CLI's and
-/// the desktop app's default profiles are different directories, and
-/// each profile that loads after upgrading gets its own copy, just as
-/// every profile used the global item before. Only an explicit
+/// into this profile's item and the global item is kept — a user may run
+/// several profiles (`--profile` / `CURIO_PROFILE`, or a library from an
+/// earlier release left outside the shared default), and each profile
+/// that loads after upgrading gets its own copy, just as every profile
+/// used the global item before. (The item is keyed by `.curio/profile-id`,
+/// which moves with a profile directory, so the one-time move onto the
+/// shared default keeps its credentials.) Only an explicit
 /// [`clear_reddit_api`] retires the global item. A failed copy is
 /// logged and the credentials are still returned (the next load
 /// retries).

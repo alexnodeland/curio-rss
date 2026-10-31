@@ -86,12 +86,26 @@ library.
 **Upgrading from 0.4 or earlier.** Older CLIs used
 `~/Library/Application Support/curio` on macOS (and the Windows app kept
 its library in Roaming AppData). The first run of either head on the
-default profile moves a lone old profile into the shared location. If both
-locations already hold a library — or the old one looks open in another
-process — nothing is moved or merged: every command prints a warning and
-`curio doctor` fails its `legacy-profile` check until you reconcile by
-hand (open the old one with `--profile` to export what you need, then
-remove it).
+default profile moves a lone old profile into the shared location — a
+same-volume rename, so the library moves whole or not at all. Nothing is
+ever merged:
+
+- **The shared location already holds a library.** The old one stays where
+  it is; every command prints a warning and `curio doctor` fails its
+  `legacy-profile` check until you reconcile by hand (open the old one with
+  `--profile` to export what you need, then remove it).
+- **The old library can't be moved yet** — another curio process still has
+  it open (a stale `curio.db-wal` left by an app that exited is not enough:
+  the move checks whether any process is attached), there are two old
+  libraries, or the move fails. A fresh empty library would strand the old
+  one for good, so neither head creates one: every CLI command (`init`
+  included) exits 1 naming the old library — quit the other process and run
+  curio again, or open it with `--profile` — and the desktop app opens the
+  old library where it is for that session and tries the move again at the
+  next start.
+
+The desktop app reports what it did once at startup and keeps the
+explanation under Settings › Advanced.
 
 ## `curio.toml`
 

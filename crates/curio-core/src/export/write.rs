@@ -1,6 +1,8 @@
 //! Contained, durable, atomic note and manifest writes: lexical
 //! containment of a relative note path, then temp-file + fsync + atomic
 //! rename with realpath containment under the destination root.
+//! [`write_file_atomic`] is the same temp + rename without the containment,
+//! for the heads' single-file exports (OPML, themes) to a user-picked path.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -69,16 +71,7 @@ pub(super) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
             path: path.display().to_string(),
         });
     }
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_default();
-    let tmp = dir.join(format!(
-        ".{file_name}.curio-tmp-{}-{}",
-        std::process::id(),
-        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    land_via_temp(&tmp, path, bytes)?;
+    land_via_temp(&temp_path(dir, path), path, bytes)?;
     sync_dir(dir).map_err(io_err)?;
     for created in dir
         .ancestors()
@@ -91,42 +84,96 @@ pub(super) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
     Ok(())
 }
 
+/// Atomically replaces the file at `path` with `bytes`: they go to a
+/// fresh temp file in the same directory, are `fsync`ed, and the temp file
+/// is renamed over `path` (then the directory is flushed). A crash or a
+/// failed write at any point leaves the previous file exactly as it was —
+/// never truncated — and no temp file behind. Unlike the destination
+/// writes there is no containment check: `path` is one the user picked.
+/// The parent directory must already exist. A symlink at `path` is
+/// replaced, not written through.
+///
+/// # Errors
+///
+/// The I/O error of the failed step (temp write, rename, or flush).
+pub fn write_file_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    write_file_atomic_with(path, |file| file.write_all(bytes))
+}
+
+/// [`write_file_atomic`] with the temp file's contents produced by `fill` —
+/// the seam the injected-failure tests use to fail mid-write.
+fn write_file_atomic_with(
+    path: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let dir = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    land_with(&temp_path(dir, path), path, fill).map_err(|(_, source)| source)?;
+    sync_dir(dir)
+}
+
+/// A temp-file name next to `path` in `dir`, unique per write (pid + a
+/// per-process sequence) and dot-prefixed so file browsers hide it.
+fn temp_path(dir: &Path, path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    dir.join(format!(
+        ".{file_name}.curio-tmp-{}-{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
 /// Writes `bytes` to the fresh temp file `tmp`, flushes it, and renames
-/// it over `path`. On failure the temp file is removed again — unless it
-/// could not be created because something already sits at that name,
-/// which is not ours to delete.
+/// it over `path` (see [`land_with`]).
 fn land_via_temp(tmp: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
-    if let Err(source) = write_synced(tmp, bytes) {
+    use std::io::Write as _;
+    land_with(tmp, path, |file| file.write_all(bytes))
+        .map_err(|(path, source)| ExportError::Io { path, source })
+}
+
+/// Fills the fresh temp file `tmp` via `fill`, flushes it, and renames it
+/// over `path`. On failure the temp file is removed again — unless it could
+/// not be created because something already sits at that name, which is not
+/// ours to delete. The error names the path that failed: the temp file for
+/// a failed write, the target for a failed rename.
+fn land_with(
+    tmp: &Path,
+    path: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> Result<(), (PathBuf, std::io::Error)> {
+    if let Err(source) = write_synced(tmp, fill) {
         if source.kind() != std::io::ErrorKind::AlreadyExists {
             discard_temp(tmp);
         }
-        return Err(ExportError::Io {
-            path: tmp.to_path_buf(),
-            source,
-        });
+        return Err((tmp.to_path_buf(), source));
     }
     if let Err(source) = std::fs::rename(tmp, path) {
         discard_temp(tmp);
-        return Err(ExportError::Io {
-            path: path.to_path_buf(),
-            source,
-        });
+        return Err((path.to_path_buf(), source));
     }
     Ok(())
 }
 
-/// Writes `bytes` to a new file at `path` — never one that already
-/// exists — and flushes them to stable storage before returning, as far
+/// Creates a new file at `path` — never one that already exists — fills it
+/// via `fill`, and flushes it to stable storage before returning, as far
 /// as the filesystem can: one that cannot `fsync` at all is tolerated
 /// (see [`tolerate_unsupported_sync`]).
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let mut file = std::fs::OpenOptions::new()
+fn write_synced(
+    path: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut handle = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)?;
-    file.write_all(bytes)?;
-    tolerate_unsupported_sync(file.sync_all(), path)
+    fill(&mut handle)?;
+    tolerate_unsupported_sync(handle.sync_all(), path)
 }
 
 /// Whether an `fsync` failure only says the filesystem cannot flush this
@@ -265,6 +312,52 @@ mod tests {
         );
         assert!(!target.exists());
         assert_eq!(std::fs::read(&tmp).unwrap(), b"someone else's");
+    }
+
+    #[test]
+    fn write_file_atomic_replaces_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("subs.opml");
+        std::fs::write(&target, b"old").unwrap();
+        write_file_atomic(&target, b"new").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert_eq!(temp_strays(dir.path()), Vec::<String>::new());
+    }
+
+    /// Injected failure half-way through the write: the export over an
+    /// existing file errors, the previous file is byte-for-byte intact (not
+    /// truncated, as a plain `fs::write` would leave it), and the half-written
+    /// temp file is cleaned up.
+    #[test]
+    fn a_failed_write_file_atomic_keeps_the_previous_file() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("subs.opml");
+        std::fs::write(&target, b"<opml>the user's previous export</opml>").unwrap();
+
+        let err = write_file_atomic_with(&target, |file| {
+            file.write_all(b"<opml>half")?;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                "injected: disk full mid-write",
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::StorageFull);
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"<opml>the user's previous export</opml>"
+        );
+        assert_eq!(temp_strays(dir.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn write_file_atomic_into_a_missing_directory_fails_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("gone").join("subs.opml");
+        let err = write_file_atomic(&target, b"bytes").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(!target.exists());
     }
 
     #[test]

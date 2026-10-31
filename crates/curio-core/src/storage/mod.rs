@@ -31,16 +31,44 @@ use writer::WriterHandle;
 /// Default number of read-only connections in the pool.
 pub const DEFAULT_READ_POOL_SIZE: usize = 4;
 
+/// How long any connection waits on another connection's lock (in this
+/// process or another head sharing the profile) before the statement
+/// fails with [`StorageError::Busy`].
+pub(crate) const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Storage-layer errors.
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
     /// An underlying `SQLite` error.
     #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-    /// The writer thread has shut down (or panicked) and can no longer
-    /// accept commands.
+    Sqlite(#[source] rusqlite::Error),
+    /// The database stayed locked by another connection for longer than
+    /// the busy timeout — typically another Curio process (the desktop
+    /// app and a CLI run) writing to the same profile. Transient: the
+    /// same operation succeeds once the other writer finishes.
+    #[error(
+        "the profile database is busy — another Curio process (the desktop app or a CLI run) \
+         is writing to it; try again in a moment"
+    )]
+    Busy(#[source] rusqlite::Error),
+    /// The writer thread has shut down and can no longer accept
+    /// commands.
     #[error("the storage writer thread is gone")]
     WriterGone,
+    /// A write job panicked. The writer rolled back whatever the job left
+    /// open and keeps serving later writes; only this one failed.
+    #[error("a storage write panicked: {message}")]
+    JobPanicked {
+        /// The panic message.
+        message: String,
+    },
+    /// No pooled read connection freed up in time — every connection is
+    /// stuck behind a long-running read.
+    #[error("no database read connection became free within {waited_ms} ms")]
+    PoolTimeout {
+        /// How long the read waited.
+        waited_ms: u64,
+    },
     /// The database refused to enter WAL mode.
     #[error("could not enable WAL journal mode (got {mode:?})")]
     WalUnavailable {
@@ -78,6 +106,29 @@ pub enum StorageError {
     /// events and frontmatter that fail the schemas Curio publishes.
     #[error("invalid tag: tags must contain non-whitespace characters")]
     InvalidTag,
+}
+
+impl From<rusqlite::Error> for StorageError {
+    /// Lock contention (`SQLITE_BUSY` / `SQLITE_LOCKED` after the busy
+    /// timeout) becomes the typed, user-actionable [`StorageError::Busy`];
+    /// every other `SQLite` failure stays [`StorageError::Sqlite`].
+    fn from(err: rusqlite::Error) -> Self {
+        match err.sqlite_error_code() {
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
+                Self::Busy(err)
+            }
+            _ => Self::Sqlite(err),
+        }
+    }
+}
+
+impl StorageError {
+    /// Whether this is transient contention with another connection or
+    /// process ([`StorageError::Busy`]) — retrying later can succeed.
+    #[must_use]
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Busy(_))
+    }
 }
 
 /// The storage handle: one writer thread + a read-only pool over a single
@@ -127,7 +178,7 @@ impl Storage {
         // Before the first statement, so a lock held elsewhere is waited
         // out (then reported as `OpenError::Locked`) rather than failing
         // at once.
-        conn.busy_timeout(std::time::Duration::from_secs(5))
+        conn.busy_timeout(BUSY_TIMEOUT)
             .map_err(|e| classify(e.into()))?;
         // The first statement that reads the file header — a garbage file
         // fails here with SQLITE_NOTADB (→ `Corrupt`) — and a pure read: a
@@ -137,7 +188,8 @@ impl Storage {
         configure_write_connection(&conn).map_err(&classify)?;
         migrations::apply(&mut conn, &path)?;
         let writer = WriterHandle::spawn(conn);
-        let pool = ReadPool::open(&path, read_pool_size.max(1)).map_err(classify)?;
+        let pool = ReadPool::open(&path, read_pool_size.max(1), pool::DEFAULT_POOL_TIMEOUT)
+            .map_err(classify)?;
         Ok(Self { writer, pool, path })
     }
 
@@ -280,9 +332,59 @@ fn configure_write_connection(conn: &Connection) -> Result<(), StorageError> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::panic)]
+
+    use std::time::Duration;
 
     use super::*;
+
+    /// A real lock conflict: another connection (standing in for another
+    /// process) holds an exclusive transaction past our busy timeout.
+    #[test]
+    fn lock_contention_is_the_typed_busy_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(dir.path().join("curio.db")).unwrap();
+        let other = Connection::open(storage.path()).unwrap();
+        other.execute_batch("BEGIN EXCLUSIVE").unwrap();
+
+        let ours = Connection::open(storage.path()).unwrap();
+        ours.busy_timeout(Duration::from_millis(20)).unwrap();
+        let err = StorageError::from(ours.execute_batch("BEGIN IMMEDIATE; COMMIT;").unwrap_err());
+        assert!(err.is_busy(), "{err:?}");
+        assert!(err.to_string().contains("another Curio process"), "{err}");
+        assert!(std::error::Error::source(&err).is_some());
+        other.execute_batch("COMMIT").unwrap();
+    }
+
+    #[test]
+    fn other_sqlite_failures_stay_generic() {
+        let conn = Connection::open_in_memory().unwrap();
+        let err = StorageError::from(conn.execute_batch("NOT SQL").unwrap_err());
+        assert!(matches!(err, StorageError::Sqlite(_)), "{err:?}");
+        assert!(!err.is_busy());
+        let locked = StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_LOCKED),
+            None,
+        ));
+        assert!(locked.is_busy(), "SQLITE_LOCKED is contention too");
+    }
+
+    #[test]
+    fn a_panicking_write_through_storage_is_followed_by_a_successful_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(dir.path().join("curio.db")).unwrap();
+        let err = storage
+            .write(|_conn| -> Result<(), StorageError> { panic!("bug in a mutation") })
+            .unwrap_err();
+        assert!(matches!(err, StorageError::JobPanicked { .. }), "{err:?}");
+        assert!(err.to_string().contains("bug in a mutation"), "{err}");
+        // The writer survived: a real mutation goes through.
+        storage.vacuum().unwrap();
+        assert_eq!(
+            storage.db_schema_version().unwrap(),
+            Storage::schema_version()
+        );
+    }
 
     /// #118: the writer's commits must be durable before the emitter
     /// fsyncs their events — `synchronous = FULL` (2), not `NORMAL` (1).

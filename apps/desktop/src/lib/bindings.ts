@@ -583,6 +583,13 @@ export type ErrorCode =
 "PARSE" | 
 /**  The storage layer failed. */
 "STORAGE" | 
+/**
+ *  Another Curio process (a CLI run, a cron job) holds the profile —
+ *  its database stayed busy or its events lock stayed held. Retrying
+ *  once it finishes succeeds. The UI shows its own localized message
+ *  for this code; `message` is the English diagnostic.
+ */
+"PROFILE_BUSY" | 
 /**  Filesystem IO failed. */
 "IO" | 
 /**  Anything else — a bug, not a state. */

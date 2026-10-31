@@ -122,13 +122,16 @@ impl CoreHandle {
     /// days — the `curio.events.v1` floor), measured from today (UTC).
     /// Returns the removed paths.
     ///
-    /// Facade-owned on purpose: the event log is single-writer and the
-    /// handle owns that writer, so heads must never open their own
+    /// Facade-owned on purpose: the handle owns this process's log
+    /// writer (other processes on the profile are fenced off by the
+    /// events lock), so heads must never open their own
     /// [`crate::events::EventLog`] to sweep.
     ///
     /// # Errors
     ///
-    /// Filesystem errors scanning or deleting log files.
+    /// [`crate::events::EventLogError::ProfileLocked`] while another
+    /// process holds the events lock; filesystem errors scanning or
+    /// deleting log files.
     pub fn sweep_event_retention(&self) -> Result<Vec<PathBuf>, CoreError> {
         let today = Timestamp::now().as_datetime().date_naive();
         let removed = self

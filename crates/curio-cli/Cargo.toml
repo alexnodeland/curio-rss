@@ -33,6 +33,9 @@ assert_cmd = { workspace = true }
 axum = { workspace = true }
 jsonschema = { workspace = true }
 predicates = { workspace = true }
+# Holds a write lock on a profile's curio.db from the test process — the
+# stand-in for a concurrent desktop app (already in the graph via core).
+rusqlite = { workspace = true }
 serde_yaml = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -11,6 +11,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'app.tagline': 'Vos lectures, dans vos notes',
     'app.loading': 'Chargement…',
     'app.error.internal': 'Une erreur est survenue. Réessayer peut aider.',
+    'app.error.profileBusy':
+        'Un autre processus Curio (une commande lancée dans le terminal, par exemple) utilise ce profil en ce moment. Réessayer dans un instant.',
     'a11y.skipToContent': 'Aller au contenu',
     'shell.feeds.loading': 'Chargement des abonnements…',
     'shell.feeds.empty': 'Aucun abonnement pour l’instant',

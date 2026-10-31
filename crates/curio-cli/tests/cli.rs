@@ -837,3 +837,31 @@ fn the_default_profile_is_the_shared_data_dir() {
         .unwrap();
     assert_eq!(legacy["ok"], true);
 }
+
+/// Another process holding the profile database (the desktop app
+/// mid-write) is reported as what it is — busy, retry — with its own exit
+/// status (75, `EX_TEMPFAIL`), not a generic `sqlite error` exit 1.
+#[test]
+fn a_busy_profile_says_so_and_exits_75() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    let other = rusqlite::Connection::open(profile.path().join("curio.db")).unwrap();
+    other.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let vault = profile.path().join("vault");
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .code(75)
+        .stderr(predicate::str::contains("busy"))
+        .stderr(predicate::str::contains("another Curio process"));
+    other.execute_batch("ROLLBACK").unwrap();
+
+    // Once the other writer is done, the same command just works.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+}

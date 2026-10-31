@@ -11,6 +11,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'app.tagline': 'Deine Lektüre, in deinen Notizen',
     'app.loading': 'Wird geladen…',
     'app.error.internal': 'Etwas ist schiefgelaufen. Ein erneuter Versuch kann helfen.',
+    'app.error.profileBusy':
+        'Ein anderer Curio-Prozess (etwa ein Kommandozeilenaufruf) nutzt dieses Profil gerade. Bitte gleich erneut versuchen.',
     'a11y.skipToContent': 'Zum Inhalt springen',
     'shell.feeds.loading': 'Abonnements werden geladen…',
     'shell.feeds.empty': 'Noch keine Abonnements',

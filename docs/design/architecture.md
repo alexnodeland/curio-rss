@@ -118,6 +118,12 @@ defense-in-depth, not the primary defense.
   `content_text` actually differ.
 - Network-filesystem guard (planned, #112): refuses to open the DB on
   Syncthing/iCloud/NFS-class mounts without an explicit override flag.
+- Fault containment: a panicking write job replies `JobPanicked`, its open transaction
+  is rolled back and the writer keeps serving; a panicking read still returns its pooled
+  connection, and a read that waits too long for one fails with `PoolTimeout` rather
+  than hanging. Lock contention with another process on the profile surfaces as the
+  typed, retryable `StorageError::Busy` (CLI exit status 75), never a bare
+  `sqlite error`.
 
 ### `events/` — event-sourced article state
 
@@ -130,6 +136,27 @@ same transaction. One mechanism serves three masters:
    checkpointing, daily rotation, file + webhook sinks).
 3. The substrate for any future sync — server head, client mode, or file-based journal
    merge — as a deterministic merge problem instead of a retrofit.
+
+**Several heads on one profile** (the desktop app plus a CLI cron job) share the JSONL
+log safely: every drain — claim the staged intents, append, fsync, delete the intents —
+runs under an exclusive advisory lock on `.curio/events.lock` (beside the contract
+directory, never inside it), and starts by catching up with the other writers (heal a
+torn tail, adopt a file they rotated to, re-read the size counter). A staged intent is
+therefore drained by one process at a time, lines never interleave, and a heal never
+truncates another process's append in flight. A lock file deleted while in use is
+noticed (file identity is re-checked on every acquire) and re-created. A holder that
+keeps the lock past 15 s yields the typed, retryable `EventLogError::ProfileLocked`
+(at open; a mutation's drain treats it like any emission failure and leaves the
+events staged for the next drain).
+Delivery is **at-least-once**, as the contract already assumes: if deleting the drained
+intents fails after the fsync (a crash, or the database staying busy past its 5 s
+timeout because another process holds a long write), the next drain appends them again
+and consumers drop the duplicate by `event_id`.
+
+Not yet process-safe ([#234](https://github.com/alexnodeland/curio-rss/issues/234)):
+the destination registry is cached per process and written back whole, so one head's
+add/remove can undo another's (and the CLI's `curio.toml` reconcile re-adds a destination
+the desktop removed); and the per-feed refresh lock is in-process only.
 
 Cursor semantics are designed now (`events since <cursor>`) so the JSONL export, `curio
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.

@@ -13,6 +13,8 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'app.tagline': '你睇嘅嘢，融入你嘅筆記',
     'app.loading': '載入緊…',
     'app.error.internal': '出咗啲問題，再試一次或者得。',
+    'app.error.profileBusy':
+        '有另一個 Curio 程序（例如喺命令列行緊嘅指令）而家用緊呢個設定檔，等一陣再試吓。',
     'a11y.skipToContent': '跳去內容',
     'shell.feeds.loading': '載入緊訂閱…',
     'shell.feeds.empty': '仲未有訂閱',

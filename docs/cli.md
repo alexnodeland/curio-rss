@@ -13,7 +13,20 @@ future head.
   write commands return the changed/unchanged result). Parse, don't scrape.
 - Diagnostics go to stderr, driven by `RUST_LOG` (e.g.
   `RUST_LOG=curio_core=debug curio fetch`).
-- Errors exit non-zero with a one-line `error: …` on stderr.
+- Errors exit non-zero with a one-line `error: …` on stderr: status **75**
+  (`EX_TEMPFAIL`) when another Curio process — the desktop app, another cron
+  job — kept the profile busy past the wait (nothing is wrong; retry later),
+  **1** for every other failure.
+- The CLI and the desktop app can run on one profile at the same time: state
+  changes and the event log are serialized between them (an event is never
+  lost, and lines never interleave; a rare duplicate line can appear, which
+  consumers drop by `event_id`). Two things are **not process-safe yet**
+  ([#234](https://github.com/alexnodeland/curio-rss/issues/234)): a
+  destination removed in the desktop app comes back on the next CLI command
+  if `curio.toml` still lists it, and adding or removing a destination in one
+  head while the other is open can undo the other's change (restart the app
+  after `curio dest add`). Refreshing the same feed from both heads at
+  once is harmless but can cost one extra full download.
 
 ## Commands at a glance
 
@@ -54,7 +67,8 @@ All state lives in one profile directory:
 | `curio.db` | WAL SQLite: feeds, articles, state, FTS index |
 | `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (the latest one plus the highest-numbered other kept; see [Upgrades and backups](#upgrades-and-backups)) |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
-| `.curio/.gitignore` | scaffolded so the events log is never committed |
+| `.curio/events.lock` | the lock that lets several Curio processes share the events log (holds no data; safe to ignore, never commit) |
+| `.curio/.gitignore` | scaffolded so the events log and its lock file are never committed |
 | `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
 
 The default profile is **shared with the desktop app** — the CLI and the

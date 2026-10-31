@@ -33,6 +33,7 @@ pub mod feeds;
 pub mod fetch;
 mod handle;
 pub mod import;
+mod lock;
 pub mod model;
 pub mod paths;
 #[cfg(feature = "keychain")]

@@ -92,8 +92,11 @@ pub enum OpenError {
 /// Sorts a raw storage failure during open into its typed class. Errors
 /// that fit no class stay [`OpenError::Storage`].
 pub(crate) fn classify(path: &Path, error: StorageError) -> OpenError {
-    let StorageError::Sqlite(source) = error else {
-        return OpenError::Storage(error);
+    // `Busy` is lock contention the `From<rusqlite::Error>` conversion
+    // already recognised; at open it is the same `Locked` class.
+    let source = match error {
+        StorageError::Sqlite(source) | StorageError::Busy(source) => source,
+        other => return OpenError::Storage(other),
     };
     let path = path.to_path_buf();
     match source.sqlite_error_code() {
@@ -153,6 +156,13 @@ mod tests {
             classify(path, sqlite(rusqlite::ffi::SQLITE_LOCKED)),
             OpenError::Locked { .. }
         ));
+        // ...including when the `?` conversion already typed it as Busy.
+        let busy = StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ));
+        assert!(busy.is_busy());
+        assert!(matches!(classify(path, busy), OpenError::Locked { .. }));
         for code in [
             rusqlite::ffi::SQLITE_CANTOPEN,
             rusqlite::ffi::SQLITE_PERM,

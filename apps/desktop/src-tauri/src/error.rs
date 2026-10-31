@@ -9,10 +9,12 @@
 //!
 //! Mapping policy (from the build spec): `NotFound` / `UnknownDestination`
 //! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) / a database
-//! locked by another process are user-tier, as is a missing destination
-//! folder (`ExportError::DestinationMissing`, code `IO`); `Sqlite` /
-//! `WriterGone` / `IntegrityFailed` / other IO / a corrupt or
-//! failed-upgrade database are internal-tier.
+//! locked by another process are user-tier, and so is `Busy` (another
+//! Curio process holds the profile — recoverable by retrying), as is a
+//! missing destination folder (`ExportError::DestinationMissing`, code
+//! `IO`); `Sqlite` / `WriterGone` / `JobPanicked` / `PoolTimeout` /
+//! `IntegrityFailed` / other IO / a corrupt or failed-upgrade database
+//! are internal-tier.
 
 use curio_core::CoreError;
 use curio_core::export::ExportError;
@@ -104,8 +106,13 @@ impl From<StorageError> for CommandError {
             StorageError::InvalidTag => {
                 Self::user(ErrorCode::InvalidInput, error.to_string(), true)
             }
+            // Another Curio process (a CLI run) is writing to the
+            // profile: tell the user why, and that a retry will work.
+            StorageError::Busy(_) => Self::user(ErrorCode::Storage, error.to_string(), true),
             StorageError::Sqlite(_)
             | StorageError::WriterGone
+            | StorageError::JobPanicked { .. }
+            | StorageError::PoolTimeout { .. }
             | StorageError::WalUnavailable { .. }
             | StorageError::Corrupt { .. }
             | StorageError::IntegrityFailed { .. }
@@ -225,6 +232,32 @@ mod tests {
             path: "x".into(),
         }));
         assert_eq!(other.kind, ErrorKind::Internal);
+    }
+
+    #[test]
+    fn a_busy_profile_is_a_recoverable_user_facing_error() {
+        let error = CommandError::from(StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        )));
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::Storage);
+        assert!(error.recoverable);
+        assert!(error.message.contains("another Curio process"), "{error}");
+    }
+
+    #[test]
+    fn panicked_jobs_and_pool_timeouts_are_internal() {
+        for storage in [
+            StorageError::JobPanicked {
+                message: "bug".into(),
+            },
+            StorageError::PoolTimeout { waited_ms: 30_000 },
+        ] {
+            let error = CommandError::from(storage);
+            assert_eq!(error.kind, ErrorKind::Internal);
+            assert_eq!(error.code, ErrorCode::Storage);
+        }
     }
 
     #[test]

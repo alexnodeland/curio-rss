@@ -1098,6 +1098,7 @@ dependencies = [
  "curio-types",
  "directories",
  "proptest",
+ "rusqlite",
  "scraper",
  "serde",
  "serde_json",

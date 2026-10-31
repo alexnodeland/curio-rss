@@ -51,16 +51,17 @@ jobs:
             bundle: target/universal-apple-darwin/release/bundle
           - { name: windows-x64, os: windows-latest, bundle: target/release/bundle }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.targets }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "."
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -97,7 +98,7 @@ jobs:
             --config "$GITHUB_WORKSPACE/apps/desktop/src-tauri/tauri.nightly.conf.json" \
             ${{ matrix.args }}
       - name: Upload the bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: curio-${{ matrix.name }}
           # src-tauri is a workspace member, so cargo/tauri emit to the
@@ -132,12 +133,14 @@ jobs:
       # must not change it underneath us. Bump deliberately.
       TAURI_DRIVER_VERSION: 2.1.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -229,16 +232,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # The rolling benchmark baseline, persisted between nightly runs via the
       # Actions cache instead of a gh-pages branch. A per-run key always writes
       # a fresh cache; `restore-keys` pulls the most recent prior baseline to
       # compare against. The first run finds none, seeds the file, and — with
       # no previous point — cannot alert.
       - name: Restore the rolling benchmark baseline
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ./.bench-cache
           key: bench-cold-start-${{ github.run_id }}
@@ -254,7 +259,7 @@ jobs:
           cargo bench -p curio-fixtures --bench cold_start -- --output-format bencher \
             | tee bench-output.txt
       - name: Track against the trailing baseline (alert at 130%)
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           name: cold-start (open + first page @50k)
           tool: cargo

@@ -1224,11 +1224,43 @@ fn storage_handle_is_send_and_sync() {
 /// `parallel_readers_stay_consistent_during_writes` flake in CI.
 #[test]
 fn writer_mutations_use_immediate_transactions() {
-    let repo = include_str!("../src/storage/repo.rs");
-    assert!(
-        !repo.contains("conn.transaction()"),
-        "writer mutations must use begin_write() (IMMEDIATE), not the deferred conn.transaction()",
-    );
+    // Every file of the `storage::repo` module (one per table family), read
+    // from disk so a section added later is covered without editing this.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/storage/repo");
+    let mut scanned = Vec::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let source = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                !source.contains("conn.transaction()"),
+                "{}: writer mutations must use begin_write() (IMMEDIATE), not the deferred \
+                 conn.transaction()",
+                path.display(),
+            );
+            scanned.push(path.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    scanned.sort();
+    // Guard against a vacuous pass: the scan (which is not recursive) must see
+    // every section file, so one moved or renamed out of the directory fails
+    // here instead of silently dropping out of the check.
+    for expected in [
+        "articles.rs",
+        "feeds.rs",
+        "fetch_log.rs",
+        "intents.rs",
+        "mod.rs",
+        "rows.rs",
+        "settings.rs",
+        "state.rs",
+        "tags.rs",
+    ] {
+        assert!(
+            scanned.iter().any(|name| name == expected),
+            "repo module scan missed {expected}; saw {scanned:?}",
+        );
+    }
 }
 
 #[test]

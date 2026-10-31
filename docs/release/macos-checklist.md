@@ -34,6 +34,33 @@ production feed).
 
 - [ ] **Per-profile Reddit credentials (real Keychain)** — `curio --profile /tmp/a reddit login --client-id a` and `curio --profile /tmp/b reddit login --client-id b` (any secrets); Keychain Access shows two `Curio` items with accounts `reddit-api/<key>`, `reddit status` reports `a` / `b` per profile, and `reddit logout` on one leaves the other configured. Moving a profile (`mv /tmp/a /tmp/a2`) keeps its credentials. Upgrading from 0.4.x: the old single `reddit-api` item is copied into each profile that opens (both the CLI and the desktop app come up authenticated) and stays in Keychain Access until a `reddit logout`.
 
+## Startup recovery (do each on the built .app)
+
+A bundled app has no visible stderr, so a profile that won't open must land
+on the recovery screen, never a bouncing icon that vanishes. Use a
+throwaway profile — `open -a` starts the app through LaunchServices, which
+does not pass on your shell's environment, so hand the variable over with
+`--env` (and `export` it so the later steps can use it):
+
+```sh
+export CURIO_PROFILE="$(mktemp -d)"
+open --env CURIO_PROFILE="$CURIO_PROFILE" -a Curio   # quit it, then break the profile
+# or run the one executable inside the bundle, which inherits the environment:
+# /Applications/Curio.app/Contents/MacOS/*
+```
+
+Relaunch the same way after each step, and check that the profile the app
+reports (Settings, or the recovery screen's error details) is the temp
+directory, never your real one.
+
+- [ ] **Corrupt DB → recovery screen** — `printf 'garbage, not sqlite' > "$CURIO_PROFILE/curio.db"`, relaunch: the window opens on "Curio can't read its database" (no crash, no silent exit), and `logs/curio.log.*` in the profile has an `ERROR … startup failed` line naming the class.
+- [ ] **Start fresh** — on that screen, Start fresh → confirm: the app opens into an empty reader after "Open Curio", and the garbage file sits untouched in `set-aside/<timestamp>/curio.db`.
+- [ ] **Restore backup** — with a profile from the previous release (so the upgrade wrote `curio.db.pre-vN.bak`), corrupt `curio.db` again and relaunch: "Restore backup" is offered, and restoring brings back the feeds.
+- [ ] **Too-new DB** — `sqlite3 "$CURIO_PROFILE/curio.db" 'PRAGMA user_version = 999'`: the screen says the database is from a newer Curio and leads with Check for updates (which reports no newer version, or installs one).
+- [ ] **Unwritable event log** — on a healthy profile, `chmod 000 "$CURIO_PROFILE/.curio/events"` and relaunch: the screen says Curio can't use its profile folder and offers only Try again (no Restore, no Start fresh); `chmod 755` it, Try again, and the library opens with its feeds.
+- [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
+- [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
+
 ## Shared default profile (real macOS only — CI can't point the app at a temp `~/Library`)
 
 Use a throwaway macOS user account, or move your real

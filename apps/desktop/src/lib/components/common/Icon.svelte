@@ -34,7 +34,8 @@ export type IconName =
     | 'dot'
     | 'circle-dot'
     | 'chevron'
-    | 'article';
+    | 'article'
+    | 'alert';
 </script>
 
 <script lang="ts">
@@ -172,5 +173,9 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
         <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path
             d="M14 3v6h6"
         /><path d="M8 13h8M8 17h5" />
+    {:else if name === 'alert'}
+        <path
+            d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
+        /><path d="M12 9v4" /><path d="M12 17h.01" />
     {/if}
 </svg>

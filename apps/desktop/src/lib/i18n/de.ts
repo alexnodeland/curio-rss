@@ -442,4 +442,57 @@ export const de: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Hilfe zu Tastenkürzeln',
     'shortcut.addFeed': 'Feed hinzufügen',
     'shortcut.settings': 'Einstellungen öffnen',
+
+    'recovery.title.corrupt': 'Curio kann seine Datenbank nicht lesen',
+    'recovery.title.tooNew': 'Diese Datenbank stammt von einem neueren Curio',
+    'recovery.title.locked': 'Eine andere Curio-Instanz verwendet die Datenbank',
+    'recovery.title.io': 'Curio kann nicht auf seine Daten zugreifen',
+    'recovery.title.upgrade': 'Curio konnte seine Datenbank nicht aktualisieren',
+    'recovery.title.noProfile': 'Curio hat keinen Ort für seine Daten',
+    'recovery.title.other': 'Curio konnte deine Bibliothek nicht öffnen',
+    'recovery.body.corrupt':
+        'Die Datenbankdatei ist beschädigt oder keine Curio-Datenbank. Sie wurde nicht verändert.',
+    'recovery.body.tooNew':
+        'Eine neuere Curio-Version hat sie aktualisiert. Installiere das neueste Curio, um sie weiter zu verwenden.',
+    'recovery.body.locked': 'Beende die andere Curio-Instanz und versuche es dann erneut.',
+    'recovery.body.io':
+        'Das System hat das Lesen oder Schreiben der Curio-Dateien verweigert. Prüfe, ob auf dem Datenträger Platz frei ist und der Profilordner beschreibbar ist, und versuche es dann erneut.',
+    'recovery.body.upgrade':
+        'Die Aktualisierung wurde zurückgesetzt, deine Bibliothek ist unverändert. Versuche es gleich noch einmal.',
+    'recovery.body.noProfile':
+        'Das System meldet keinen Benutzerordner, daher gibt es keinen Ort für deine Bibliothek.',
+    'recovery.body.other':
+        'Etwas Unerwartetes hat das Öffnen deiner Bibliothek verhindert. Es wurde nichts gelöscht.',
+    'recovery.backup': 'Sicherung von vor der letzten Aktualisierung: {name}',
+    'recovery.safety':
+        'Wiederherstellen oder Neu beginnen verschiebt die aktuelle Datenbank zuerst in einen beiseitegelegten Ordner in deinem Profil. Es wird nichts gelöscht.',
+    'recovery.details': 'Fehlerdetails',
+    'recovery.profile': 'Profil: {path}',
+    'recovery.action.retry': 'Erneut versuchen',
+    'recovery.action.restore': 'Sicherung wiederherstellen',
+    'recovery.action.fresh': 'Neu beginnen',
+    'recovery.action.reveal': 'Profilordner anzeigen',
+    'recovery.action.copy': 'Fehler kopieren',
+    'recovery.action.quit': 'Beenden',
+    'recovery.action.open': 'Curio öffnen',
+    'recovery.action.cancel': 'Abbrechen',
+    'recovery.working': 'Wird ausgeführt…',
+    'recovery.confirm.restore':
+        'Die aktuelle Datenbank durch die Sicherung ersetzen? Was seit dieser Aktualisierung hinzukam, bleibt in der beiseitegelegten Kopie, nicht in deiner Bibliothek.',
+    'recovery.confirm.fresh':
+        'Mit einer leeren Bibliothek beginnen? Deine Feeds und Artikel bleiben in der beiseitegelegten Kopie der Datenbank.',
+    'recovery.stillFailing': 'Das hat das Problem nicht behoben.',
+    'recovery.copied': 'Fehler in die Zwischenablage kopiert',
+    'recovery.copyFailed': 'Fehler konnte nicht kopiert werden',
+    'recovery.title.profile': 'Curio kann seinen Profilordner nicht verwenden',
+    'recovery.body.profile':
+        'Deine Bibliothek ist in Ordnung, aber Curio konnte seine übrigen Dateien dort (etwa das Ereignisprotokoll) nicht anlegen oder schreiben. Prüfe, ob der Profilordner und alles darin beschreibbar ist, und versuche es dann erneut.',
+    'recovery.action.update': 'Nach Updates suchen',
+    'recovery.update.current':
+        'Es ist kein Update verfügbar. Installiere die neuere Curio-Version, die diese Bibliothek aktualisiert hat, um sie weiter zu verwenden.',
+    'recovery.update.failed':
+        'Die Suche nach Updates ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.',
+    'recovery.recovered.title': 'Curio ist bereit',
+    'recovery.recovered.body': 'Deine Bibliothek wurde geöffnet.',
+    'recovery.recovered.setAside': 'Die vorherige Datenbank wurde nach {path} verschoben.',
 };

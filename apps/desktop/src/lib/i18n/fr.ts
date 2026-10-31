@@ -444,4 +444,57 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Aide sur les raccourcis clavier',
     'shortcut.addFeed': 'Ajouter un flux',
     'shortcut.settings': 'Ouvrir les paramètres',
+
+    'recovery.title.corrupt': 'Curio ne peut pas lire sa base de données',
+    'recovery.title.tooNew': 'Cette base de données vient d’un Curio plus récent',
+    'recovery.title.locked': 'Une autre copie de Curio utilise la base de données',
+    'recovery.title.io': 'Curio ne peut pas accéder à ses données',
+    'recovery.title.upgrade': 'Curio n’a pas pu mettre à niveau sa base de données',
+    'recovery.title.noProfile': 'Curio n’a nulle part où garder ses données',
+    'recovery.title.other': 'Curio n’a pas pu ouvrir votre bibliothèque',
+    'recovery.body.corrupt':
+        'Le fichier de la base de données est endommagé ou n’est pas une base Curio. Il n’a pas été modifié.',
+    'recovery.body.tooNew':
+        'Une version plus récente de Curio l’a mise à niveau. Installez le dernier Curio pour continuer à l’utiliser.',
+    'recovery.body.locked': 'Quittez l’autre copie de Curio, puis réessayez.',
+    'recovery.body.io':
+        'Le système a refusé de lire ou d’écrire les fichiers de Curio. Vérifiez que le disque a de l’espace libre et que le dossier du profil est accessible en écriture, puis réessayez.',
+    'recovery.body.upgrade':
+        'La mise à niveau a été annulée : votre bibliothèque est restée telle quelle. Réessayez dans un instant.',
+    'recovery.body.noProfile':
+        'Le système n’indique aucun dossier personnel : il n’y a nulle part où garder votre bibliothèque.',
+    'recovery.body.other':
+        'Un problème inattendu a empêché l’ouverture de votre bibliothèque. Rien n’a été supprimé.',
+    'recovery.backup': 'Sauvegarde d’avant la dernière mise à niveau : {name}',
+    'recovery.safety':
+        'Restaurer ou repartir de zéro déplace d’abord la base de données actuelle dans un dossier mis de côté dans votre profil. Rien n’est supprimé.',
+    'recovery.details': 'Détails de l’erreur',
+    'recovery.profile': 'Profil : {path}',
+    'recovery.action.retry': 'Réessayer',
+    'recovery.action.restore': 'Restaurer la sauvegarde',
+    'recovery.action.fresh': 'Repartir de zéro',
+    'recovery.action.reveal': 'Afficher le dossier du profil',
+    'recovery.action.copy': 'Copier l’erreur',
+    'recovery.action.quit': 'Quitter',
+    'recovery.action.open': 'Ouvrir Curio',
+    'recovery.action.cancel': 'Annuler',
+    'recovery.working': 'En cours…',
+    'recovery.confirm.restore':
+        'Remplacer la base de données actuelle par la sauvegarde ? Ce qui a été ajouté depuis cette mise à niveau reste dans la copie mise de côté, pas dans votre bibliothèque.',
+    'recovery.confirm.fresh':
+        'Repartir avec une bibliothèque vide ? Vos flux et articles restent dans la copie mise de côté de la base de données.',
+    'recovery.stillFailing': 'Cela n’a pas résolu le problème.',
+    'recovery.copied': 'Erreur copiée dans le presse-papiers',
+    'recovery.copyFailed': 'Impossible de copier l’erreur',
+    'recovery.title.profile': 'Curio ne peut pas utiliser le dossier de son profil',
+    'recovery.body.profile':
+        'Votre bibliothèque est intacte, mais Curio n’a pas pu y créer ou écrire ses autres fichiers (comme le journal des événements). Vérifiez que le dossier du profil et tout son contenu sont accessibles en écriture, puis réessayez.',
+    'recovery.action.update': 'Rechercher des mises à jour',
+    'recovery.update.current':
+        'Aucune mise à jour n’est disponible. Installez la version plus récente de Curio qui a mis à niveau cette bibliothèque pour continuer à l’utiliser.',
+    'recovery.update.failed':
+        'Impossible de rechercher des mises à jour. Vérifiez votre connexion, puis réessayez.',
+    'recovery.recovered.title': 'Curio est prêt',
+    'recovery.recovered.body': 'Votre bibliothèque s’est ouverte.',
+    'recovery.recovered.setAside': 'L’ancienne base de données a été déplacée dans {path}.',
 };

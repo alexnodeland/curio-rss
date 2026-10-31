@@ -2,7 +2,8 @@
 //! workspace suite goes red the moment an edit un-pins an action, ungates the
 //! release, or widens the updater signing key's reach (issue #174) — or puts
 //! the nightly back on a retired runner, softens its gate, or stops it from
-//! running on the PRs that edit it (issue #175).
+//! running on the PRs that edit it (issue #175), or lets criterion keep the
+//! state that made the bench log unparseable (issue #185).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -265,5 +266,48 @@ fn softening_the_real_nightly_is_flagged() {
             "          if-no-files-found: warn\n",
         ),
         "uploads without `if-no-files-found: error`",
+    );
+}
+
+/// The real bench runs criterion without state of its own (issue #185): put
+/// it back on its default, cached home or let it keep a baseline, and the
+/// lint fails — that is the shape that split the tracked line in two.
+#[test]
+fn a_stateful_criterion_in_the_real_bench_is_flagged() {
+    assert_flagged(
+        &lint_nightly_edit(
+            "        env:\n          CRITERION_HOME: ${{ runner.temp }}/criterion\n",
+            "",
+        ),
+        "job `bench` step 5 runs `cargo bench` without `CRITERION_HOME` on a `runner.temp` dir",
+    );
+    assert_flagged(
+        &lint_nightly_edit(" --noplot --discard-baseline", " --noplot"),
+        "runs `cargo bench` without `--discard-baseline`",
+    );
+    assert_flagged(
+        &lint_nightly_edit("          set -o pipefail\n", ""),
+        "pipes `cargo bench` without `set -o pipefail`",
+    );
+}
+
+/// The real bench log is checked before tracking, and the 130% alert stays a
+/// hard failure — the fix makes the result parseable, it never softens the
+/// gate.
+#[test]
+fn an_unchecked_or_soft_real_bench_is_flagged() {
+    assert_flagged(
+        &lint_nightly_edit(
+            "          cargo run -p xtask -- bench-output bench-output.txt\n",
+            "          echo skipped\n",
+        ),
+        "has no `xtask -- bench-output` step between the bench and the tracker",
+    );
+    assert_flagged(
+        &lint_nightly_edit(
+            "          fail-on-alert: true\n",
+            "          fail-on-alert: false\n",
+        ),
+        "tracks the bench without `fail-on-alert: true`",
     );
 }

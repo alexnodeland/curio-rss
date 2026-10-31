@@ -37,6 +37,12 @@
 //!    nightly is caught before merge, not the next morning), sets no
 //!    `continue-on-error` (it is a hard gate), and its unconditional
 //!    artifact uploads fail on an empty bundle and cover Linux + Windows.
+//! 6. **A bench the tracker can read** (issue #185). The nightly's bencher-
+//!    format `cargo bench` runs criterion statelessly — `CRITERION_HOME` on a
+//!    per-job `runner.temp` dir (never the cached `target/`) and
+//!    `--discard-baseline` — under `pipefail`; `xtask bench-output` checks
+//!    the log before `github-action-benchmark` reads it; and the tracker
+//!    keeps its `alert-threshold` with `fail-on-alert: true`.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -189,6 +195,7 @@ pub fn lint(files: &[WorkflowFile<'_>]) -> Vec<String> {
     }
     if let Some(nightly) = parsed.iter().find(|wf| wf.name == NIGHTLY_WORKFLOW) {
         out.extend(nightly_tier(nightly));
+        out.extend(bench_tracking(nightly));
     } else {
         out.push(format!("{NIGHTLY_WORKFLOW}: missing"));
     }
@@ -979,6 +986,128 @@ fn nightly_tier(nightly: &Parsed<'_>) -> Vec<String> {
     out
 }
 
+// ── 6. a bench the tracker can read ────────────────────────────────────────
+
+/// The action that keeps the trailing baseline and raises the 130% alert.
+const BENCH_TRACKER: &str = "benchmark-action/github-action-benchmark@";
+
+/// Is this step the bencher-format criterion run the tracker consumes?
+fn is_bencher_run(step: &Value) -> bool {
+    step.get("run")
+        .and_then(Value::as_str)
+        .is_some_and(|run| run.contains("cargo bench") && run.contains("--output-format bencher"))
+}
+
+/// A step's or its job's `env` value for `key`, step first.
+fn env_value<'v>(job: &'v Value, step: &'v Value, key: &str) -> Option<&'v str> {
+    [step, job]
+        .into_iter()
+        .find_map(|node| node.get("env").and_then(|env| env.get(key)))
+        .and_then(Value::as_str)
+}
+
+/// Does a step's script fail when any stage of a pipe fails? GitHub runs
+/// `shell: bash` as `bash -eo pipefail`, but the default shell (no `shell:`)
+/// is plain `bash -e`.
+fn fails_on_pipe(job: &Value, step: &Value) -> bool {
+    let run = step.get("run").and_then(Value::as_str).unwrap_or_default();
+    if !run.contains('|') || run.contains("pipefail") {
+        return true;
+    }
+    let shell = step.get("shell").or_else(|| {
+        job.get("defaults")
+            .and_then(|defaults| defaults.get("run"))
+            .and_then(|run| run.get("shell"))
+    });
+    shell.and_then(Value::as_str) == Some("bash")
+}
+
+/// Is a `with:` flag literally on (`true` or `"true"`)?
+fn is_on(node: Option<&Value>) -> bool {
+    match node {
+        Some(Value::Bool(on)) => *on,
+        Some(Value::String(text)) => text == "true",
+        _ => false,
+    }
+}
+
+fn bench_tracking(nightly: &Parsed<'_>) -> Vec<String> {
+    let name = nightly.name;
+    let mut out = Vec::new();
+    let mut found = false;
+    for (job_id, job) in jobs(&nightly.doc) {
+        let steps = steps(job);
+        let Some(bench_at) = steps.iter().position(is_bencher_run) else {
+            continue;
+        };
+        found = true;
+        let step = &steps[bench_at];
+        let at = format!("{name}: job `{job_id}` step {}", bench_at + 1);
+        let run = step.get("run").and_then(Value::as_str).unwrap_or_default();
+        if !run.contains("--discard-baseline") {
+            out.push(format!(
+                "{at} runs `cargo bench` without `--discard-baseline` — criterion compares against (and saves) its own baseline, and a stale one breaks the line the tracker parses"
+            ));
+        }
+        if !env_value(job, step, "CRITERION_HOME").is_some_and(|home| home.contains("runner.temp"))
+        {
+            out.push(format!(
+                "{at} runs `cargo bench` without `CRITERION_HOME` on a `runner.temp` dir — criterion's default home is the cached `target/criterion`, where a stale `base/` breaks the line the tracker parses"
+            ));
+        }
+        if !fails_on_pipe(job, step) {
+            out.push(format!(
+                "{at} pipes `cargo bench` without `set -o pipefail` (or `shell: bash`) — a crashed bench passes through `tee`"
+            ));
+        }
+
+        let later = &steps[bench_at + 1..];
+        let tracker_at = later.iter().position(|later_step| {
+            later_step
+                .get("uses")
+                .and_then(Value::as_str)
+                .is_some_and(|uses| uses.starts_with(BENCH_TRACKER))
+        });
+        let checked = later[..tracker_at.unwrap_or(later.len())]
+            .iter()
+            .any(|check| {
+                check
+                    .get("run")
+                    .and_then(Value::as_str)
+                    .is_some_and(|run| run.contains("xtask -- bench-output"))
+            });
+        if !checked {
+            out.push(format!(
+                "{name}: job `{job_id}` has no `xtask -- bench-output` step between the bench and the tracker — an untrackable log fails as a bare \"No benchmark result was found\""
+            ));
+        }
+        let Some(tracker_at) = tracker_at else {
+            out.push(format!(
+                "{name}: job `{job_id}` runs the bench but no later `{BENCH_TRACKER}…` step tracks it — no regression alert"
+            ));
+            continue;
+        };
+        let with = later[tracker_at].get("with");
+        let flag = |key: &str| with.and_then(|with| with.get(key));
+        if !is_on(flag("fail-on-alert")) {
+            out.push(format!(
+                "{name}: job `{job_id}` tracks the bench without `fail-on-alert: true` — a regression past the threshold would stay green"
+            ));
+        }
+        if flag("alert-threshold").and_then(Value::as_str).is_none() {
+            out.push(format!(
+                "{name}: job `{job_id}` tracks the bench without an `alert-threshold`"
+            ));
+        }
+    }
+    if !found {
+        out.push(format!(
+            "{name}: no step runs `cargo bench … --output-format bencher` — the cold-start gate never runs"
+        ));
+    }
+    out
+}
+
 /// Does a `pull_request.paths` filter trigger on `path`? GitHub's rule: the
 /// last pattern that matches decides, and a `!pattern` excludes.
 fn paths_filter_covers(patterns: &[&str], path: &str) -> bool {
@@ -1174,6 +1303,24 @@ jobs:
         uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567 # v4.6.2
         with:
           if-no-files-found: ignore
+  bench:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - env:
+          CRITERION_HOME: ${{ runner.temp }}/criterion
+        run: |
+          set -o pipefail
+          cargo bench -p curio-fixtures --bench cold_start -- \
+            --output-format bencher --noplot --discard-baseline \
+            | tee bench-output.txt
+      - run: cargo run -p xtask -- bench-output bench-output.txt
+      - uses: benchmark-action/github-action-benchmark@0123456789abcdef0123456789abcdef01234567 # v1.22.2
+        with:
+          tool: cargo
+          output-file-path: bench-output.txt
+          alert-threshold: "130%"
+          fail-on-alert: true
 "#;
 
     fn run(ci: &str, release: &str) -> Vec<String> {
@@ -1386,6 +1533,98 @@ jobs:
         let violations = run_nightly(&no_bundle_upload);
         assert_flags(&violations, "on a Linux");
         assert!(!violations.iter().any(|v| v.contains("if-no-files-found")));
+    }
+
+    /// The reference bench step without its env block.
+    const BENCH_ENV: &str =
+        "      - env:\n          CRITERION_HOME: ${{ runner.temp }}/criterion\n        run: |\n";
+
+    #[test]
+    fn the_bench_must_run_criterion_statelessly() {
+        // Issue #185's shape: criterion on its default (cached) home,
+        // comparing against whatever baseline it finds there.
+        let stateful = NIGHTLY
+            .replace(BENCH_ENV, "      - run: |\n")
+            .replace(" --noplot --discard-baseline", "");
+        let violations = run_nightly(&stateful);
+        assert_flags(
+            &violations,
+            "job `bench` step 1 runs `cargo bench` without `--discard-baseline`",
+        );
+        assert_flags(
+            &violations,
+            "job `bench` step 1 runs `cargo bench` without `CRITERION_HOME` on a `runner.temp` dir",
+        );
+
+        // A home inside the cached target dir is no fresher than the default.
+        let cached_home = NIGHTLY.replace(
+            "CRITERION_HOME: ${{ runner.temp }}/criterion",
+            "CRITERION_HOME: target/criterion",
+        );
+        assert_flags(&run_nightly(&cached_home), "without `CRITERION_HOME`");
+
+        // Job-level env counts.
+        let job_env = NIGHTLY.replace(BENCH_ENV, "      - run: |\n").replace(
+            "    runs-on: ubuntu-22.04\n    steps:\n      - run: |\n",
+            "    runs-on: ubuntu-22.04\n    env:\n      CRITERION_HOME: ${{ runner.temp }}/criterion\n    steps:\n      - run: |\n",
+        );
+        assert_eq!(run_nightly(&job_env), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_bench_pipe_must_fail_when_the_bench_does() {
+        let no_pipefail = NIGHTLY.replace("          set -o pipefail\n", "");
+        assert_flags(
+            &run_nightly(&no_pipefail),
+            "pipes `cargo bench` without `set -o pipefail`",
+        );
+        // `shell: bash` is `bash -eo pipefail` on GitHub.
+        let bash = no_pipefail.replace(
+            "      - env:\n          CRITERION_HOME",
+            "      - shell: bash\n        env:\n          CRITERION_HOME",
+        );
+        assert_eq!(run_nightly(&bash), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_bench_log_is_checked_and_tracked_with_a_hard_alert() {
+        let unchecked = NIGHTLY.replace(
+            "      - run: cargo run -p xtask -- bench-output bench-output.txt\n",
+            "",
+        );
+        assert_flags(
+            &run_nightly(&unchecked),
+            "job `bench` has no `xtask -- bench-output` step between the bench and the tracker",
+        );
+
+        let soft = NIGHTLY.replace("fail-on-alert: true", "fail-on-alert: false");
+        assert_flags(
+            &run_nightly(&soft),
+            "tracks the bench without `fail-on-alert: true`",
+        );
+        let quoted = NIGHTLY.replace("fail-on-alert: true", "fail-on-alert: \"true\"");
+        assert_eq!(run_nightly(&quoted), Vec::<String>::new());
+
+        let no_threshold = NIGHTLY.replace("          alert-threshold: \"130%\"\n", "");
+        assert_flags(
+            &run_nightly(&no_threshold),
+            "tracks the bench without an `alert-threshold`",
+        );
+
+        let untracked = NIGHTLY.replace(
+            "      - uses: benchmark-action/github-action-benchmark@0123456789abcdef0123456789abcdef01234567 # v1.22.2\n        with:\n          tool: cargo\n          output-file-path: bench-output.txt\n          alert-threshold: \"130%\"\n          fail-on-alert: true\n",
+            "",
+        );
+        assert_flags(
+            &run_nightly(&untracked),
+            "no later `benchmark-action/github-action-benchmark@…` step",
+        );
+
+        let no_bench = NIGHTLY.replace("--output-format bencher", "--output-format criterion");
+        assert_flags(
+            &run_nightly(&no_bench),
+            "no step runs `cargo bench … --output-format bencher`",
+        );
     }
 
     #[test]

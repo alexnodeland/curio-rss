@@ -108,7 +108,15 @@ chore ci build revert`. Small, logical commits.
   process it runs (`cargo test`, `cargo run`). The `compile_time_paths`
   xtask test fails the suite on any compile-time read, and
   `.cargo/config.toml` hands insta its workspace root
-  (`INSTA_WORKSPACE_ROOT`) at run time for the same reason (#183). The same
+  (`INSTA_WORKSPACE_ROOT`) at run time for the same reason (#183). The guard
+  only sees this repo's sources: a dependency macro that expands to a
+  compile-time read (as insta's does) needs its own run-time fix like that
+  one. Cargo finds `.cargo/config.toml` from its working directory, so run
+  cargo from inside the checkout (`--manifest-path` from elsewhere leaves
+  insta on its fallback), and since cargo merges every config up the
+  directory tree, a worktree under `.claude/worktrees/` on a branch older
+  than that file inherits the main checkout's root — its golden tests read
+  and write the main checkout's snapshots until it rebases onto main. The same
   freshness rule means a concurrent build in another worktree whose sources
   differ can leave a crate's output looking fresh to you while built from
   that worktree's code (symptom: errors about items you just added being

@@ -11,6 +11,12 @@
 //! files). Cargo also sets `CARGO_MANIFEST_DIR` in the environment of every
 //! process it runs (`cargo test`, `cargo run`), so the run-time read is
 //! always the current worktree's.
+//!
+//! The guard scans this repo's sources only. A dependency macro that
+//! expands to the same compile-time read is invisible to it and needs its
+//! own run-time fix: insta's workspace-root lookup is one, handled by
+//! `INSTA_WORKSPACE_ROOT` in `.cargo/config.toml` and pinned by the
+//! `content_golden` suite in curio-core.
 
 use std::path::{Path, PathBuf};
 

@@ -91,6 +91,24 @@ This kills the sketch's stored-XSS chain at the root and fixes full-text search 
 silent no-op in the same pass. The desktop head's strict CSP + capabilities are
 defense-in-depth, not the primary defense.
 
+The allowlist is strict but not lossy where it matters (`content/sanitize.rs`
+documents each rule; `fixtures/html/` pins each with a golden fixture, and every
+allowance carries a vector in `xss-corpus.html`):
+
+- **Lazy images** — `data-src` / `data-lazy-src` / the widest `srcset` candidate is
+  promoted to `src`, and a `<noscript>` fallback image is lifted out when its visible
+  sibling is only a placeholder; the promoted `src` still faces the http(s)-only check.
+- **Footnotes and in-page links** — `id`s survive as `curio-<id>` (no clobbering of the
+  reader's DOM) and fragment-only `href`s are kept in the same namespace instead of being
+  absolutized to the source site. Markdown export turns footnotes into `[^1]` /
+  `[^1]: …` and drops the destination of any other in-page link.
+- **Direction and structure** — `dir`, `lang`, `ol[start]`, `<bdi>`/`<bdo>`, and the
+  `language-*` class on `pre`/`code` (the exported fence language).
+- **Embeds** — iframes from known media/content hosts (YouTube, Vimeo, Spotify,
+  SoundCloud, CodePen, Bluesky) or with an embed-shaped URL (`/embed`, `/player`, …,
+  e.g. Mastodon) become a plain "Embedded media/content (host) ↗" link; invisible
+  tracking frames and arbitrary iframes are dropped.
+
 ### `store/` — WAL SQLite behind an async facade
 
 - WAL mode + `busy_timeout`; a **dedicated writer thread** (channel-fed, all mutations

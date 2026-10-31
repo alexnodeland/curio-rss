@@ -1,5 +1,6 @@
 //! The key/value settings store heads keep their preferences in.
 
+use super::destinations::DESTINATIONS_KEY;
 use super::{CoreError, CoreHandle};
 
 impl CoreHandle {
@@ -10,22 +11,35 @@ impl CoreHandle {
     ///
     /// # Errors
     ///
-    /// Storage errors.
+    /// [`CoreError::ReservedSettingKey`] for the facade-owned
+    /// `"destinations"` key (its raw paths never cross the facade — read
+    /// the registry with [`Self::destinations`]); storage errors.
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, CoreError> {
+        reject_reserved(key)?;
         Ok(self.storage.get_setting(key)?)
     }
 
     /// Writes (upserts) a settings value.
     ///
-    /// The `"destinations"` key holds the facade-owned destination
-    /// registry; heads change that only through
-    /// [`Self::add_destination`] / [`Self::remove_destination`] and
-    /// refuse it as a raw key.
-    ///
     /// # Errors
     ///
-    /// Storage errors.
+    /// [`CoreError::ReservedSettingKey`] for the facade-owned
+    /// `"destinations"` key — the destination registry changes only
+    /// through [`Self::add_destination`] / [`Self::remove_destination`];
+    /// storage errors.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
+        reject_reserved(key)?;
         Ok(self.storage.set_setting(key, value)?)
     }
+}
+
+/// Refuses the settings keys the facade owns, so no head can read or
+/// clobber them as raw values.
+fn reject_reserved(key: &str) -> Result<(), CoreError> {
+    if key == DESTINATIONS_KEY {
+        return Err(CoreError::ReservedSettingKey {
+            key: key.to_owned(),
+        });
+    }
+    Ok(())
 }

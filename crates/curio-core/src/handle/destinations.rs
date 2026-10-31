@@ -242,7 +242,7 @@ impl CoreHandle {
 }
 
 /// Settings key holding the destination registry (JSON `name → root`).
-const DESTINATIONS_KEY: &str = "destinations";
+pub(super) const DESTINATIONS_KEY: &str = "destinations";
 
 pub(super) fn load_destinations(
     storage: &Storage,

@@ -24,7 +24,10 @@
 //! Heads reach storage only through these methods. The raw `storage()`
 //! accessor exists only under the `test-support` feature, which test code
 //! enables through `[dev-dependencies]`, so a production head that
-//! bypasses the facade does not compile.
+//! bypasses the facade does not compile. (Builds that include test
+//! targets unify that feature into every head; `just check-prod` — a CI
+//! step — type-checks libs + bins alone so the bypass is caught per
+//! commit.)
 
 mod articles;
 mod destinations;
@@ -95,6 +98,13 @@ pub enum CoreError {
     UnknownDestination {
         /// The name that was looked up.
         name: String,
+    },
+    /// The settings key is owned by the facade (the `"destinations"`
+    /// registry) and cannot be read or written as a raw value.
+    #[error("the {key:?} settings key is facade-owned — use the destination operations")]
+    ReservedSettingKey {
+        /// The refused key.
+        key: String,
     },
     /// A row referenced by the caller does not exist.
     #[error("{entity} not found")]

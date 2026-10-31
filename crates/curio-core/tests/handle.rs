@@ -1494,6 +1494,39 @@ fn settings_round_trip_through_the_facade_and_survive_a_reopen() {
 }
 
 #[test]
+fn the_facade_refuses_its_reserved_destinations_setting_both_ways() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let name: DestinationName = "vault".parse().unwrap();
+    {
+        let core = open_core(profile.path());
+        core.add_destination(name.clone(), vault.path().to_path_buf())
+            .unwrap();
+
+        let refused_write = core.set_setting("destinations", "{}").unwrap_err();
+        assert!(
+            matches!(
+                &refused_write,
+                curio_core::CoreError::ReservedSettingKey { key } if key == "destinations"
+            ),
+            "{refused_write:?}"
+        );
+        assert!(refused_write.to_string().contains("facade-owned"));
+        assert!(matches!(
+            core.get_setting("destinations"),
+            Err(curio_core::CoreError::ReservedSettingKey { .. })
+        ));
+        // The registry the refused write would have clobbered is intact.
+        assert_eq!(core.destinations().len(), 1);
+    }
+    // ... and still intact on disk after a reopen.
+    let core = open_core(profile.path());
+    let registered = core.destinations();
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].name, name);
+}
+
+#[test]
 fn database_health_probes_go_through_the_facade() {
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
@@ -1513,5 +1546,15 @@ fn database_health_probes_go_through_the_facade() {
     // Every facade operation flushes its staged intents before returning.
     let feed = subscribe(&core, "https://example.com/feed.xml");
     core.set_feed_tags(feed.id, vec!["x".to_owned()]).unwrap();
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+
+    // A storage-level state change stages its intent without flushing
+    // (the crash window the startup replay closes) — the count sees it.
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    core.storage().star_article(article).unwrap().unwrap();
+    assert_eq!(core.pending_intent_count().unwrap(), 1);
+    drop(core);
+    // Reopening replays the staged intent into the log.
+    let core = open_core(profile.path());
     assert_eq!(core.pending_intent_count().unwrap(), 0);
 }

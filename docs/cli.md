@@ -20,13 +20,11 @@ future head.
 - The CLI and the desktop app can run on one profile at the same time: state
   changes and the event log are serialized between them (an event is never
   lost, and lines never interleave; a rare duplicate line can appear, which
-  consumers drop by `event_id`). Two things are **not process-safe yet**
-  ([#234](https://github.com/alexnodeland/curio-rss/issues/234)): a
-  destination removed in the desktop app comes back on the next CLI command
-  if `curio.toml` still lists it, and adding or removing a destination in one
-  head while the other is open can undo the other's change (restart the app
-  after `curio dest add`). Refreshing the same feed from both heads at
-  once is harmless but can cost one extra full download.
+  consumers drop by `event_id`). Destinations are shared live: one added
+  or removed in either head shows up in the other at once, and a
+  destination removed in the desktop app stays removed even though
+  `curio.toml` still lists it (see `curio.toml` below).
+  Refreshes of the same feed from both heads take turns.
 
 ## Commands at a glance
 
@@ -140,8 +138,14 @@ allow_private_network = true    # contract W1 — see below
 Ownership split: feeds, articles, and reading state live in `curio.db`
 (the engine's domain — don't edit); `curio.toml` owns what a human should
 be able to change with a text editor. On every run the CLI reconciles the
-file into the engine: destinations are (re-)registered and per-feed
-overrides are applied.
+file into the engine: per-feed overrides are applied, and destinations
+are **seeded**. Each `name = "path"` line is applied once (it registers
+the destination, as `curio dest add` would). After that the line is
+left alone: if the desktop app removes the destination or moves it to
+another folder, the next CLI run keeps that change rather than undo it.
+Editing a line to a new path applies it again, and so does deleting a
+line and adding it back later. `curio dest add` always registers,
+whatever happened before.
 
 **Contract W1 (`allow_private_network`).** The fetch client is
 SSRF-guarded by default: it refuses to touch loopback, RFC 1918, and

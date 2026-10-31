@@ -155,10 +155,15 @@ intents fails after the fsync (a crash, or the database staying busy past its 5 
 timeout because another process holds a long write), the next drain appends them again
 and consumers drop the duplicate by `event_id`.
 
-Not yet process-safe ([#234](https://github.com/alexnodeland/curio-rss/issues/234)):
-the destination registry is cached per process and written back whole, so one head's
-add/remove can undo another's (and the CLI's `curio.toml` reconcile re-adds a destination
-the desktop removed); and the per-feed refresh lock is in-process only.
+The **destination registry** has one source of truth, the settings table: no handle
+caches it, reads go to the database, and every change is a read-modify-write inside one
+`IMMEDIATE` transaction, so a head never writes back a stale copy over another head's
+change. The CLI's `curio.toml` *seeds* destinations rather than owning them (D16): a
+destination the desktop app removed stays removed after a CLI run. **Refreshes of one
+feed** are serialized across processes by a lock file per feed under `.curio/locks/`
+(gitignored), taken after the in-process per-feed mutex so tasks of one process still
+queue cheaply; a holder stuck past twice the longest possible fetch is skipped with an
+error outcome instead of waited on forever.
 
 Cursor semantics are designed now (`events since <cursor>`) so the JSONL export, `curio
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.

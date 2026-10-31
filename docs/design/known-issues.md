@@ -73,19 +73,29 @@ consumer implementation.
   parallel. Regression test:
   `concurrent_refreshes_of_one_feed_cannot_clobber_validators`
   (tests/handle.rs — deterministically fails when the lock is removed).
-  **Caveat:** the lock is per process. The desktop app and a CLI
-  `curio fetch` refreshing the same feed at the same moment can still
-  race this way (same bounded consequence). Tracked in #234.
-- **Destinations are not process-safe yet (#234).** Each `CoreHandle`
-  loads the destination registry once at open and writes the whole
-  cached map back on `add_destination`/`remove_destination`, so a head
-  can undo a destination change another process made while it was open,
-  and the CLI's `curio.toml` reconcile (run by every command) re-adds a
-  destination the desktop app removed. #114's acceptance criterion
-  "a destination removed in the desktop stays removed after a CLI run"
-  is therefore still open. Workaround until #234: change destinations
-  from one head at a time, keep `curio.toml` in sync with what the app
-  shows, and restart the app after `curio dest add`.
+  Across processes too since #234 (the desktop app and a CLI
+  `curio fetch` refreshing the same feed at the same moment): after the
+  in-process mutex, a refresh takes the feed's lock file under
+  `.curio/locks/`. Regression test:
+  `concurrent_refreshes_from_two_handles_cannot_clobber_validators`.
+- **FIXED (#114 / #234): destinations were not process-safe.** Each
+  `CoreHandle` loaded the destination registry once at open and wrote
+  the whole cached map back on `add_destination`/`remove_destination`,
+  so a head could undo a destination change another process made while
+  it was open, and the CLI's `curio.toml` reconcile (run by every
+  command) re-added a destination the desktop app had removed. The
+  settings table is now the only copy (every change a read-modify-write
+  in one `IMMEDIATE` transaction) and `curio.toml` seeds destinations
+  instead of owning them (D16). Regression tests:
+  `a_destination_removed_by_another_head_stays_removed_after_a_cli_run`,
+  `a_destination_added_through_another_handle_is_never_erased`
+  (tests/handle.rs) and
+  `a_destination_removed_in_the_desktop_stays_removed_after_a_cli_run`
+  (curio-cli tests/cli.rs). One gap is left by design: the seeding
+  record starts empty on upgrade, so a destination removed in the
+  desktop app *before* upgrading comes back once on the first CLI run
+  if `curio.toml` still lists it, and stays removed after the user
+  removes it again.
 - **Event emission is at-least-once under heavy cross-process
   contention.** A drain appends and fsyncs under the events lock, then
   deletes the drained intents through this process's writer. If another

@@ -73,6 +73,19 @@ consumer implementation.
   parallel. Regression test:
   `concurrent_refreshes_of_one_feed_cannot_clobber_validators`
   (tests/handle.rs — deterministically fails when the lock is removed).
+- **FIXED (#111): every refresh reverted hydrated/enriched full text to
+  the feed excerpt and rewrote unchanged rows.** `upsert_articles`
+  (`storage/repo/articles.rs`) now consults `articles.content_origin`
+  (migration 0007): hydrated (`full_text`) and `enriched` bodies take
+  title/metadata updates only, and every update is change-aware — an
+  identical entry writes nothing, so `updated` counts real changes, the
+  next export stays `unchanged`, and the FTS row is untouched (the
+  `articles_fts_au` trigger also gained a `WHEN` value-change guard).
+  Rows already reverted before the upgrade carry no provenance and keep
+  the excerpt until loaded in full again. Regression tests:
+  `hydrated_full_text_survives_refresh_and_re_export_is_unchanged`,
+  `enriched_reddit_body_survives_a_refresh_of_its_feed` (tests/handle.rs),
+  `re_upserting_identical_entries_writes_nothing` (tests/storage.rs).
 - **CRLF-rewritten notes still refuse re-export** (diagnostic fixed —
   the error now names line endings and the remedy; see
   `split_names_crlf_line_endings_in_its_refusal`). Accepting CRLF

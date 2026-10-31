@@ -34,7 +34,7 @@ future head.
 | Command | What it does |
 |---------|--------------|
 | `curio init [dir]` | Scaffold a profile (`curio.toml`, `curio.db`, events log) |
-| `curio feed add <url> [--tags …]` | Subscribe (autodiscovers the feed on a site URL) |
+| `curio feed add <url> [--tags …]` | Subscribe — to a feed URL, or the validated feed autodiscovered from a site, page or bare domain |
 | `curio feed list` / `curio feed rm <id>` | List / unsubscribe |
 | `curio fetch` | Refresh every feed; reports new-article counts |
 | `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
@@ -190,10 +190,36 @@ for you). Nothing in feed content can ever set it.
 
 ```sh
 curio feed add https://example.com/feed.xml --tags rust,databases
+curio feed add example.com                     # bare domain → https://example.com/
+curio feed add https://github.com/rust-lang/rust   # → its releases.atom
 curio feed add http://127.0.0.1:8787/digest.xml --allow-private-network
+curio feed add https://example.com/beta --no-validate   # as given, unfetched
 curio feed list [--json]
 curio feed rm example.com          # by id, exact URL, or unique substring
 ```
+
+`feed add` never subscribes to something a refresh could not parse. It
+takes whatever you typed — a feed URL, a site or page URL, or a bare
+domain (given `https://`; a legacy `feed://` link works too) — and
+autodiscovers the feed before subscribing:
+
+1. **Known sites, no scraping.** reddit `/r/<sub>` and `/user/<name>`,
+   GitHub `<owner>/<repo>` (its releases feed), YouTube playlists and
+   `/channel/UC…` pages, Mastodon `@user` profiles and Substack
+   publications map straight to their feed URL.
+2. **The page itself.** If the URL is a feed, that's it. Otherwise its
+   declared `<link rel="alternate">` feeds count — RSS, Atom and JSON Feed
+   only; oEmbed and REST-API alternates are ignored, and comment feeds are
+   dropped when the page also declares its main feed.
+3. **Probing**, only when nothing is declared: feed-shaped links on the
+   page, then `/feed`, `/feed.xml`, `/index.xml`, `/rss.xml`, `/atom.xml`
+   and `/rss` — at most six requests, all on the page's own origin.
+
+Every candidate is fetched and parsed before it is offered; the first one
+is subscribed (the others are listed). A page with no feed is refused with
+a hint — `--no-validate` subscribes the URL as given, without fetching it.
+`--allow-private-network` also lets discovery reach the private address,
+and is recorded under the feed URL actually subscribed.
 
 `feed add` emits `feed.added` (with the tags — tags-in-payload rule);
 `feed rm` emits the `feed.removed` negation and keeps the articles.

@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::path::Path;
 
 use curio_core::export::{
@@ -604,8 +606,7 @@ fn a_removed_destination_is_destination_missing_and_never_recreated() {
 /// are merged (union, newest `exported_at` wins), then the copies go.
 #[test]
 fn manifest_conflict_copies_are_detected_and_merged() {
-    let fixture =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/export/manifest-conflict");
+    let fixture = common::manifest_dir().join("../../fixtures/export/manifest-conflict");
     let dir = tempfile::tempdir().unwrap();
     let curio = dir.path().join(".curio");
     std::fs::create_dir_all(&curio).unwrap();

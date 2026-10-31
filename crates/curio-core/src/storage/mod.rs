@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
+pub use backup::{PreMigrationBackup, pre_migration_backups};
 pub use open::OpenError;
 pub use repo::{ListArticles, PendingIntent, UpsertOutcome};
 

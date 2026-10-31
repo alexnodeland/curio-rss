@@ -395,6 +395,8 @@ export const commands = {
 	 *  this build can open. `None` = nothing to restore.
 	 */
 	backup: string | null,
+	/**  The running Curio version, for the "Copy error" report. */
+	app_version: string,
 } | null, CommandError>(__TAURI_INVOKE("get_startup_failure")),
 	/**
 	 *  Opens the profile again unchanged (after quitting another copy, or
@@ -410,7 +412,11 @@ export const commands = {
 	startFreshProfile: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("start_fresh_profile")),
 	/**  Shows the failed profile's database (or folder) in the file manager. */
 	revealProfileFolder: () => typedError<null, CommandError>(__TAURI_INVOKE("reveal_profile_folder")),
-	/**  Quits the app (the recovery screen's last resort). */
+	/**
+	 *  Quits the app (the recovery screen's last resort). Waits for a
+	 *  recovery action in flight to finish first, so a quit never lands
+	 *  between two file moves.
+	 */
 	quitApp: () => typedError<null, CommandError>(__TAURI_INVOKE("quit_app")),
 };
 
@@ -905,10 +911,17 @@ export type StartupFailureClass =
 /**  Another process holds the database. */
 "locked" | 
 /**
- *  The OS refused a read or write (permissions, disk full, read-only
- *  media), for the database or the event log.
+ *  The OS refused a read or write of the database file (permissions,
+ *  disk full, read-only media).
  */
 "io" | 
+/**
+ *  The database is fine, but the rest of the profile is not usable:
+ *  the profile folder, its event log or its `.gitignore` could not be
+ *  created, read or written. Replacing the database cannot help, so
+ *  recovery only offers to retry once the cause is fixed.
+ */
+"profile" | 
 /**
  *  The schema upgrade (or its pre-migration backup) failed and was
  *  rolled back.
@@ -932,6 +945,8 @@ export type StartupFailureDto = {
 	 *  this build can open. `None` = nothing to restore.
 	 */
 	backup: string | null,
+	/**  The running Curio version, for the "Copy error" report. */
+	app_version: string,
 };
 
 /**

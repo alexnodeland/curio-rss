@@ -3,8 +3,13 @@
 //! they are the only commands that work when the profile did not open.
 //! Every action except reveal and quit is refused once the app is running
 //! normally, so a healthy database can never be moved aside.
+//!
+//! A recovery action holds the [`StartupGate`]'s lock while it moves files
+//! and re-opens the profile (which can run a whole upgrade), so every
+//! command that touches the gate does so on a blocking worker, never on an
+//! async runtime thread.
 
-use tauri::{AppHandle, Manager as _, State};
+use tauri::{AppHandle, Manager as _};
 
 use super::run_blocking;
 use crate::error::{CommandError, ErrorCode};
@@ -15,9 +20,9 @@ use crate::startup::{self, RecoveryAction, RecoveryOutcomeDto, StartupFailureDto
 #[tauri::command]
 #[specta::specta]
 pub async fn get_startup_failure(
-    gate: State<'_, StartupGate>,
+    app: AppHandle,
 ) -> Result<Option<StartupFailureDto>, CommandError> {
-    gate.current()
+    with_gate(app, |_, gate| gate.current()).await
 }
 
 /// Opens the profile again unchanged (after quitting another copy, or
@@ -46,21 +51,27 @@ pub async fn start_fresh_profile(app: AppHandle) -> Result<RecoveryOutcomeDto, C
 /// Shows the failed profile's database (or folder) in the file manager.
 #[tauri::command]
 #[specta::specta]
-pub async fn reveal_profile_folder(gate: State<'_, StartupGate>) -> Result<(), CommandError> {
-    let target = gate.reveal_target()?;
-    run_blocking(move || {
+pub async fn reveal_profile_folder(app: AppHandle) -> Result<(), CommandError> {
+    with_gate(app, |_, gate| {
+        let target = gate.reveal_target()?;
         tauri_plugin_opener::reveal_item_in_dir(&target)
             .map_err(|error| CommandError::user(ErrorCode::Io, error.to_string(), true))
     })
     .await
 }
 
-/// Quits the app (the recovery screen's last resort).
+/// Quits the app (the recovery screen's last resort). Waits for a
+/// recovery action in flight to finish first, so a quit never lands
+/// between two file moves.
 #[tauri::command]
 #[specta::specta]
 pub async fn quit_app(app: AppHandle) -> Result<(), CommandError> {
-    app.exit(0);
-    Ok(())
+    with_gate(app, |app, gate| {
+        let _idle = gate.wait_idle()?;
+        app.exit(0);
+        Ok(())
+    })
+    .await
 }
 
 /// Runs `action` off the IPC reactor (it moves files and opens the
@@ -69,12 +80,25 @@ async fn run_recovery(
     app: AppHandle,
     action: RecoveryAction,
 ) -> Result<RecoveryOutcomeDto, CommandError> {
+    with_gate(app, move |app, gate| {
+        let recovery = startup::recover(gate, action)?;
+        startup::finish(app, gate, recovery)
+    })
+    .await
+}
+
+/// Runs `job` against the managed [`StartupGate`] on a blocking worker:
+/// the gate's lock can be held for as long as a recovery action takes.
+async fn with_gate<T, F>(app: AppHandle, job: F) -> Result<T, CommandError>
+where
+    F: FnOnce(&AppHandle, &StartupGate) -> Result<T, CommandError> + Send + 'static,
+    T: Send + 'static,
+{
     run_blocking(move || {
         let gate = app.try_state::<StartupGate>().ok_or_else(|| {
             CommandError::internal(ErrorCode::Internal, "the startup gate is not managed")
         })?;
-        let recovery = startup::recover(&gate, action)?;
-        startup::finish(&app, &gate, recovery)
+        job(&app, &gate)
     })
     .await
 }

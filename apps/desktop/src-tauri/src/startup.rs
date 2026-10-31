@@ -33,9 +33,16 @@ use crate::commands::{self, SharedCore};
 use crate::error::{CommandError, ErrorCode};
 use crate::{image_cache, paths, refresh_scheduler};
 
-/// The database file inside a profile, followed by the `SQLite` sidecars
-/// that must travel with it.
-const DB_FILES: [&str; 3] = ["curio.db", "curio.db-wal", "curio.db-shm"];
+/// The database file inside a profile.
+const DB_FILE: &str = "curio.db";
+
+/// The database and the `SQLite` sidecars that must travel with it, in the
+/// order they are moved aside: sidecars first, the database last. A move
+/// that stops part-way then leaves the database in place with whatever it
+/// still needs, never a `-wal` without its database (`SQLite` deletes an
+/// orphaned WAL the next time it creates the file, losing its
+/// un-checkpointed transactions).
+const MOVE_ORDER: [&str; 3] = ["curio.db-wal", "curio.db-shm", DB_FILE];
 
 /// Where recovery moves a database it replaces, inside the profile.
 pub const SET_ASIDE_DIR: &str = "set-aside";
@@ -50,9 +57,14 @@ pub enum StartupFailureClass {
     TooNew,
     /// Another process holds the database.
     Locked,
-    /// The OS refused a read or write (permissions, disk full, read-only
-    /// media), for the database or the event log.
+    /// The OS refused a read or write of the database file (permissions,
+    /// disk full, read-only media).
     Io,
+    /// The database is fine, but the rest of the profile is not usable:
+    /// the profile folder, its event log or its `.gitignore` could not be
+    /// created, read or written. Replacing the database cannot help, so
+    /// recovery only offers to retry once the cause is fixed.
+    Profile,
     /// The schema upgrade (or its pre-migration backup) failed and was
     /// rolled back.
     Upgrade,
@@ -66,6 +78,9 @@ impl StartupFailureClass {
     /// Sorts a core open failure into its class.
     #[must_use]
     pub fn of(error: &CoreError) -> Self {
+        if error.is_profile_busy() {
+            return Self::Locked;
+        }
         match error {
             CoreError::Open(open) => match open {
                 OpenError::Corrupt { .. } => Self::Corrupt,
@@ -76,16 +91,20 @@ impl StartupFailureClass {
                 // `Storage`, and any class a later core adds.
                 _ => Self::Other,
             },
-            CoreError::Io { .. } | CoreError::Events(_) => Self::Io,
+            // Raised outside `Storage::open` — creating the profile folder,
+            // opening the event log, scaffolding `.gitignore`: the
+            // database itself is not the cause.
+            CoreError::Io { .. } | CoreError::Events(_) => Self::Profile,
             _ => Self::Other,
         }
     }
 
     /// Whether recovery may move the database aside. Never while another
-    /// process holds it, and never without a profile.
+    /// process holds it, never when the database is not what failed, and
+    /// never without a profile.
     #[must_use]
     pub fn may_replace_database(self) -> bool {
-        !matches!(self, Self::Locked | Self::NoProfile)
+        !matches!(self, Self::Locked | Self::Profile | Self::NoProfile)
     }
 }
 
@@ -138,6 +157,7 @@ impl StartupFailure {
                 .as_deref()
                 .map(|path| path.display().to_string()),
             backup,
+            app_version: CoreHandle::version().to_owned(),
         }
     }
 }
@@ -154,6 +174,8 @@ pub struct StartupFailureDto {
     /// The pre-migration backup "Restore" would bring back: the newest one
     /// this build can open. `None` = nothing to restore.
     pub backup: Option<String>,
+    /// The running Curio version, for the "Copy error" report.
+    pub app_version: String,
 }
 
 /// What a recovery action did.
@@ -274,8 +296,19 @@ impl StartupGate {
     pub fn reveal_target(&self) -> Result<PathBuf, CommandError> {
         let guard = self.lock()?;
         let profile = failed_profile(guard.as_ref())?;
-        let db = profile.join(DB_FILES[0]);
+        let db = profile.join(DB_FILE);
         Ok(if db.exists() { db } else { profile })
+    }
+
+    /// Blocks until no recovery action is in flight (they hold the lock
+    /// throughout), and keeps new ones out while the guard lives — quit
+    /// holds it so it never lands between two file moves.
+    ///
+    /// # Errors
+    ///
+    /// Internal error if the gate's lock is poisoned.
+    pub fn wait_idle(&self) -> Result<MutexGuard<'_, Option<StartupFailure>>, CommandError> {
+        self.lock()
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Option<StartupFailure>>, CommandError> {
@@ -334,24 +367,32 @@ pub struct Recovery {
 /// would move a database another process holds, or there is no backup
 /// to restore; internal error when moving files fails.
 pub fn recover(gate: &StartupGate, action: RecoveryAction) -> Result<Recovery, CommandError> {
+    recover_with(gate, action, &fs_rename)
+}
+
+/// [`recover`] over an injectable file move, so tests can fail one.
+fn recover_with(
+    gate: &StartupGate,
+    action: RecoveryAction,
+    rename: &impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<Recovery, CommandError> {
     let mut slot = gate.lock()?;
     let profile = failed_profile(slot.as_ref())?;
-    let replaces_database = action != RecoveryAction::Retry;
-    if replaces_database
-        && slot
-            .as_ref()
-            .is_some_and(|f| !f.class.may_replace_database())
+    let class = slot.as_ref().map(|failure| failure.class);
+    if action != RecoveryAction::Retry
+        && let Some(class) = class.filter(|class| !class.may_replace_database())
     {
-        return Err(CommandError::user(
-            ErrorCode::Storage,
-            "the database is in use by another copy of Curio; quit it and try again",
-            true,
-        ));
+        let reason = if class == StartupFailureClass::Locked {
+            "the database is in use by another copy of Curio; quit it and try again"
+        } else {
+            "the database is not what failed, so it is left in place; fix the cause and try again"
+        };
+        return Err(CommandError::user(ErrorCode::Storage, reason, true));
     }
     let set_aside = match action {
         RecoveryAction::Retry => None,
-        RecoveryAction::RestoreBackup => restore_backup(&profile)?,
-        RecoveryAction::StartFresh => set_aside(&profile)?,
+        RecoveryAction::RestoreBackup => restore_backup(&profile, rename)?,
+        RecoveryAction::StartFresh => set_aside(&profile, rename)?.map(|aside| aside.dir),
     };
     let set_aside = set_aside.map(|dir| dir.display().to_string());
     match open_profile(&profile) {
@@ -403,35 +444,94 @@ pub fn finish(
 /// The newest pre-migration backup of `profile`'s database that this
 /// build can open.
 fn restorable_backup(profile: &Path) -> Option<PreMigrationBackup> {
-    pre_migration_backups(&profile.join(DB_FILES[0]))
+    pre_migration_backups(&profile.join(DB_FILE))
         .into_iter()
         .find(PreMigrationBackup::opens_in_this_build)
 }
 
+/// Files moved into a `set-aside/` folder, in the order they moved.
+#[derive(Debug)]
+struct SetAside {
+    dir: PathBuf,
+    moved: Vec<&'static str>,
+}
+
+impl SetAside {
+    /// Moves everything back into `profile`, last-moved first (so the
+    /// database returns before its sidecars), and removes the folder once
+    /// it is empty. Nothing is deleted: a file that cannot move back stays
+    /// in the folder, and the error names both places.
+    fn roll_back(
+        self,
+        profile: &Path,
+        rename: &impl Fn(&Path, &Path) -> std::io::Result<()>,
+    ) -> Result<(), CommandError> {
+        for name in self.moved.iter().rev() {
+            let from = self.dir.join(name);
+            rename(&from, &profile.join(name)).map_err(|error| {
+                io_error(&format!(
+                    "moving {} back into {} (the files moved so far are in {}): {error}",
+                    from.display(),
+                    profile.display(),
+                    self.dir.display()
+                ))
+            })?;
+        }
+        remove_empty_dir(&self.dir);
+        Ok(())
+    }
+}
+
+/// The real file move.
+fn fs_rename(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// Moves the database and its sidecars into a new
-/// `<profile>/set-aside/<timestamp>/` folder. Returns that folder, or
-/// `None` when there was nothing to move.
-fn set_aside(profile: &Path) -> Result<Option<PathBuf>, CommandError> {
-    let present: Vec<&str> = DB_FILES
+/// `<profile>/set-aside/<timestamp>/` folder, sidecars first (see
+/// [`MOVE_ORDER`]). All or nothing: if a move fails, the files already
+/// moved go back. Returns `None` when there was nothing to move.
+fn set_aside(
+    profile: &Path,
+    rename: &impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<Option<SetAside>, CommandError> {
+    let present: Vec<&'static str> = MOVE_ORDER
         .into_iter()
         .filter(|name| profile.join(name).symlink_metadata().is_ok())
         .collect();
     if present.is_empty() {
         return Ok(None);
     }
-    let dest = claim_set_aside_dir(profile)?;
+    let mut aside = SetAside {
+        dir: claim_set_aside_dir(profile)?,
+        moved: Vec::with_capacity(present.len()),
+    };
     for name in present {
         let from = profile.join(name);
-        std::fs::rename(&from, dest.join(name)).map_err(|error| {
-            io_error(&format!(
+        if let Err(error) = rename(&from, &aside.dir.join(name)) {
+            let failed = io_error(&format!(
                 "moving {} into {}: {error}",
                 from.display(),
-                dest.display()
-            ))
-        })?;
+                aside.dir.display()
+            ));
+            return Err(match aside.roll_back(profile, rename) {
+                Ok(()) => failed,
+                Err(rollback) => rollback,
+            });
+        }
+        aside.moved.push(name);
     }
-    tracing::warn!(set_aside = %dest.display(), "moved the profile database aside");
-    Ok(Some(dest))
+    tracing::warn!(set_aside = %aside.dir.display(), "moved the profile database aside");
+    Ok(Some(aside))
+}
+
+/// Best-effort removal of a set-aside folder that ended up empty.
+fn remove_empty_dir(dir: &Path) {
+    // `remove_dir` refuses a non-empty folder, so this can never delete
+    // a moved file.
+    if let Err(error) = std::fs::remove_dir(dir) {
+        tracing::warn!(dir = %dir.display(), %error, "could not remove an empty set-aside folder");
+    }
 }
 
 /// Creates (atomically claims) a fresh timestamped folder under
@@ -466,8 +566,13 @@ fn claim_set_aside_dir(profile: &Path) -> Result<PathBuf, CommandError> {
 }
 
 /// Puts the newest openable backup in place of the database, moving the
-/// database aside first. The backup itself is copied, never moved.
-fn restore_backup(profile: &Path) -> Result<Option<PathBuf>, CommandError> {
+/// database aside first. The backup itself is copied, never moved. All or
+/// nothing: if the copy cannot be put in place, the database moves back,
+/// so a failed restore leaves the profile as it found it.
+fn restore_backup(
+    profile: &Path,
+    rename: &impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<Option<PathBuf>, CommandError> {
     let backup = restorable_backup(profile).ok_or_else(|| {
         CommandError::user(
             ErrorCode::NotFound,
@@ -475,23 +580,42 @@ fn restore_backup(profile: &Path) -> Result<Option<PathBuf>, CommandError> {
             false,
         )
     })?;
-    let db = profile.join(DB_FILES[0]);
+    let db = profile.join(DB_FILE);
     // Stage the copy first: if it fails, nothing has been moved yet.
-    let staging = profile.join("curio.db.restoring");
+    let staging = profile.join(STAGING_FILE);
     std::fs::copy(&backup.path, &staging)
         .map_err(|error| io_error(&format!("copying {}: {error}", backup.path.display())))?;
-    let aside = match set_aside(profile) {
+    let aside = match set_aside(profile, rename) {
         Ok(aside) => aside,
         Err(error) => {
-            // Best-effort cleanup; the error that matters is the move.
-            let _ = std::fs::remove_file(&staging);
+            discard_staging(&staging);
             return Err(error);
         }
     };
-    std::fs::rename(&staging, &db)
-        .map_err(|error| io_error(&format!("moving the restored copy into place: {error}")))?;
+    if let Err(error) = rename(&staging, &db) {
+        discard_staging(&staging);
+        let failed = io_error(&format!("moving the restored copy into place: {error}"));
+        return Err(match aside.map(|aside| aside.roll_back(profile, rename)) {
+            Some(Err(rollback)) => rollback,
+            Some(Ok(())) | None => failed,
+        });
+    }
     tracing::warn!(backup = %backup.path.display(), "restored a pre-migration backup");
-    Ok(aside)
+    Ok(aside.map(|aside| aside.dir))
+}
+
+/// Where a restore stages its copy of the backup, inside the profile.
+const STAGING_FILE: &str = "curio.db.restoring";
+
+/// Best-effort removal of the staged restore copy (a copy of a backup that
+/// still exists, so nothing is lost); the error that matters is the
+/// caller's.
+fn discard_staging(staging: &Path) {
+    if let Err(error) = std::fs::remove_file(staging)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(path = %staging.display(), %error, "could not remove the staged restore copy");
+    }
 }
 
 fn io_error(detail: &str) -> CommandError {
@@ -614,13 +738,34 @@ mod tests {
             path: "events".into(),
             source: std::io::Error::other("read-only"),
         };
-        assert_eq!(StartupFailureClass::of(&io), StartupFailureClass::Io);
+        assert_eq!(StartupFailureClass::of(&io), StartupFailureClass::Profile);
+        assert_eq!(
+            class(OpenError::Io {
+                path: "curio.db".into(),
+                source: rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                    None,
+                ),
+            }),
+            StartupFailureClass::Io
+        );
+        // A database busy past the open (another process mid-write) is a
+        // lock, whatever layer reports it.
+        let busy = CoreError::Storage(curio_core::storage::StorageError::Busy(
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                None,
+            ),
+        ));
+        assert_eq!(StartupFailureClass::of(&busy), StartupFailureClass::Locked);
         assert_eq!(
             StartupFailureClass::of(&CoreError::NotFound { entity: "feed" }),
             StartupFailureClass::Other
         );
         assert!(!StartupFailureClass::Locked.may_replace_database());
+        assert!(!StartupFailureClass::Profile.may_replace_database());
         assert!(StartupFailureClass::Corrupt.may_replace_database());
+        assert!(StartupFailureClass::Io.may_replace_database());
     }
 
     #[test]
@@ -752,8 +897,185 @@ mod tests {
         assert!(first.is_dir() && second.is_dir());
         // Nothing to move is not an error, and leaves no folder behind.
         let empty = tempfile::tempdir().unwrap();
-        assert_eq!(set_aside(empty.path()).unwrap(), None);
+        assert!(set_aside(empty.path(), &fs_rename).unwrap().is_none());
         assert!(!empty.path().join(SET_ASIDE_DIR).exists());
+    }
+
+    /// A `rename` that refuses any move whose source file is named `name`
+    /// (and records every move it was asked for).
+    fn failing_rename<'a>(
+        name: &'static str,
+        log: &'a std::cell::RefCell<Vec<String>>,
+    ) -> impl Fn(&Path, &Path) -> std::io::Result<()> + 'a {
+        move |from, to| {
+            let file = from.file_name().unwrap().to_string_lossy().into_owned();
+            log.borrow_mut().push(file.clone());
+            if file == name {
+                return Err(std::io::Error::other("sharing violation"));
+            }
+            std::fs::rename(from, to)
+        }
+    }
+
+    /// `profile` holds a healthy database (one feed) and an event log the
+    /// core cannot open: `.curio/events` is a file, not a folder.
+    fn unusable_events_profile() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join("profile");
+        let core = CoreHandle::open(&profile).unwrap();
+        core.add_feed(NewFeed {
+            url: "https://example.test/feed.xml".into(),
+            title: Some("Kept".into()),
+            tags: Vec::new(),
+        })
+        .unwrap();
+        drop(core);
+        let events = profile.join(".curio").join("events");
+        if events.exists() {
+            std::fs::remove_dir_all(&events).unwrap();
+        }
+        std::fs::write(&events, b"not a folder").unwrap();
+        (dir, profile)
+    }
+
+    #[test]
+    fn an_unusable_event_log_only_offers_retry_and_never_moves_the_database() {
+        let (_dir, profile) = unusable_events_profile();
+        // Even with a backup on disk, Restore is not offered.
+        write_backup_with_a_feed(&profile);
+        let gate = gate_for(&profile);
+        let shown = gate.current().unwrap().unwrap();
+        assert_eq!(shown.class, StartupFailureClass::Profile);
+        assert_eq!(shown.backup, None);
+
+        for action in [RecoveryAction::RestoreBackup, RecoveryAction::StartFresh] {
+            let error = recover(&gate, action).unwrap_err();
+            assert!(error.recoverable);
+            assert!(
+                error.message.contains("not what failed"),
+                "{}",
+                error.message
+            );
+        }
+        assert!(!profile.join(SET_ASIDE_DIR).exists());
+        assert!(profile.join(DB_FILE).is_file(), "the database stays put");
+
+        // Still broken: Retry reports it again, and moves nothing.
+        let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
+        assert_eq!(
+            recovery.outcome.failure.unwrap().class,
+            StartupFailureClass::Profile
+        );
+        // Fixed: Retry opens the same library, data intact.
+        std::fs::remove_file(profile.join(".curio").join("events")).unwrap();
+        let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
+        let feeds = recovery.core.unwrap().list_feeds().unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].title.as_deref(), Some("Kept"));
+    }
+
+    #[test]
+    fn sidecars_move_aside_before_the_database() {
+        let (_dir, profile) = garbage_profile();
+        std::fs::write(profile.join("curio.db-wal"), b"wal").unwrap();
+        std::fs::write(profile.join("curio.db-shm"), b"shm").unwrap();
+        let log = std::cell::RefCell::new(Vec::new());
+        let aside = set_aside(&profile, &failing_rename("none", &log))
+            .unwrap()
+            .unwrap();
+        assert_eq!(*log.borrow(), ["curio.db-wal", "curio.db-shm", "curio.db"]);
+        assert_eq!(aside.moved, MOVE_ORDER);
+    }
+
+    #[test]
+    fn a_set_aside_that_fails_part_way_puts_everything_back() {
+        let (_dir, profile) = garbage_profile();
+        let gate = gate_for(&profile);
+        std::fs::write(profile.join("curio.db-wal"), b"wal bytes").unwrap();
+        let log = std::cell::RefCell::new(Vec::new());
+        let error = recover_with(
+            &gate,
+            RecoveryAction::StartFresh,
+            &failing_rename(DB_FILE, &log),
+        )
+        .unwrap_err();
+        assert!(
+            error.message.contains("sharing violation"),
+            "{}",
+            error.message
+        );
+        // The WAL went back next to its database; the empty folder is gone.
+        assert_eq!(std::fs::read(profile.join(DB_FILE)).unwrap(), GARBAGE);
+        assert_eq!(
+            std::fs::read(profile.join("curio.db-wal")).unwrap(),
+            b"wal bytes"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(profile.join(SET_ASIDE_DIR))
+            .unwrap()
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        // The gate still shows the original failure.
+        assert_eq!(
+            gate.current().unwrap().unwrap().class,
+            StartupFailureClass::Corrupt
+        );
+    }
+
+    #[test]
+    fn a_restore_whose_copy_cannot_be_placed_restores_the_old_database() {
+        let (_dir, profile) = garbage_profile();
+        write_backup_with_a_feed(&profile);
+        let gate = gate_for(&profile);
+        std::fs::write(profile.join("curio.db-wal"), b"wal bytes").unwrap();
+        let log = std::cell::RefCell::new(Vec::new());
+        let error = recover_with(
+            &gate,
+            RecoveryAction::RestoreBackup,
+            &failing_rename(STAGING_FILE, &log),
+        )
+        .unwrap_err();
+        assert!(error.message.contains("into place"), "{}", error.message);
+        assert_eq!(std::fs::read(profile.join(DB_FILE)).unwrap(), GARBAGE);
+        assert_eq!(
+            std::fs::read(profile.join("curio.db-wal")).unwrap(),
+            b"wal bytes"
+        );
+        assert!(!profile.join(STAGING_FILE).exists());
+        // So a following Retry reports the same failure instead of opening
+        // an empty database.
+        let recovery = recover(&gate, RecoveryAction::Retry).unwrap();
+        assert!(recovery.core.is_none());
+        assert_eq!(
+            recovery.outcome.failure.unwrap().class,
+            StartupFailureClass::Corrupt
+        );
+    }
+
+    #[test]
+    fn a_rollback_that_fails_names_where_the_files_are() {
+        let (_dir, profile) = garbage_profile();
+        let aside = set_aside(&profile, &fs_rename).unwrap().unwrap();
+        let dir = aside.dir.clone();
+        let log = std::cell::RefCell::new(Vec::new());
+        let error = aside
+            .roll_back(&profile, &failing_rename(DB_FILE, &log))
+            .unwrap_err();
+        assert!(
+            error.message.contains(&dir.display().to_string()),
+            "{}",
+            error.message
+        );
+        // Nothing was deleted: the database is still in the folder.
+        assert_eq!(std::fs::read(dir.join(DB_FILE)).unwrap(), GARBAGE);
+    }
+
+    #[test]
+    fn quit_waits_on_the_same_lock_recovery_holds() {
+        let gate = StartupGate::default();
+        let idle = gate.wait_idle().unwrap();
+        assert!(gate.failure.try_lock().is_err(), "held while quitting");
+        drop(idle);
+        assert_eq!(gate.current().unwrap(), None);
     }
 
     #[test]
@@ -763,6 +1085,7 @@ mod tests {
             message: "newer".into(),
             profile_dir: None,
             backup: None,
+            app_version: "0.4.0".into(),
         };
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["class"], "too_new");

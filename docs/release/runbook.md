@@ -65,6 +65,13 @@ the key step that runs project code, backgrounds a process or writes
 `GITHUB_ENV`/`GITHUB_PATH`, a signing job that drops its `updater-signing`
 environment (or selects it under any condition other than the key step's own
 `if:`), or a missing checksum/SBOM/attestation asset.
+It holds the nightly tier §0 relies on too: no retired runner image, no
+`continue-on-error`, bundle uploads that fail when empty, and a cold-start
+`bench` the tracker can read — criterion run statelessly (`CRITERION_HOME`
+under `runner.temp`, `--discard-baseline`) under `pipefail`, its log checked
+by `cargo run -p xtask -- bench-output` before `github-action-benchmark`
+reads it, and the 130% alert kept as a hard failure (`fail-on-alert: true`).
+`just bench-cold-start-ci` runs that bench + check locally.
 
 ### The `updater-signing` environment (one-time setup)
 

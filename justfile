@@ -77,7 +77,9 @@ boundary:
 # Supply-chain lint over .github/workflows: SHA-pinned actions, release gated
 # on CI, updater signing key in one build-free step of the updater-signing
 # environment job, SHA256SUMS/SBOM/attestation,
-# no retired runner images, and a nightly that self-validates on PRs + hard-gates
+# no retired runner images, a nightly that self-validates on PRs + hard-gates,
+# and a cold-start bench the tracker can read (stateless criterion under
+# pipefail, `xtask bench-output` before the tracker, a hard 130% alert)
 workflows:
     cargo run -p xtask -- workflows
 
@@ -149,6 +151,20 @@ fixtures *ARGS:
 # fixture (target < 1.5s). Generates the fixture once, then times the open.
 bench-cold-start:
     cargo bench -p curio-fixtures --bench cold_start
+
+# The nightly `bench` job's run, locally: bencher output from a stateless
+# criterion (fresh CRITERION_HOME, --discard-baseline), written to
+# bench-output.txt (gitignored), then the parse check the job runs before
+# github-action-benchmark reads that file.
+bench-cold-start-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    home="$(mktemp -d)"
+    trap 'rm -rf "$home"' EXIT
+    CRITERION_HOME="$home" cargo bench -p curio-fixtures --bench cold_start -- \
+      --output-format bencher --noplot --discard-baseline | tee bench-output.txt
+    cargo run -q -p xtask -- bench-output bench-output.txt \
+      --expect cold_start/open_and_first_page_50k
 
 # Blob-size guard: fail if any git object in history exceeds 1MB
 # (mirrors CI's blob-guard job — catches the blob BEFORE it is pushed

@@ -6,19 +6,50 @@ use super::rows::{
     raw_article, scoped_dedupe_key,
 };
 use super::{ARTICLE_COLS, ListArticles, UpsertOutcome, begin_write};
-use crate::model::{Article, ArticleContent, ArticleId, FeedId, NewArticle};
+use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, NewArticle};
 use crate::storage::{Storage, StorageError};
 use curio_types::{CurioId, Timestamp};
 use rusqlite::OptionalExtension as _;
 use std::collections::BTreeMap;
+
+/// Re-ingest of a row whose content is still feed/manual-sourced: every
+/// ingest column may change. The `WHERE` makes it change-aware — a row
+/// already holding every incoming value matches nothing, so it is not
+/// written (no `modified_at` bump, no FTS trigger, 0 rows changed).
+const UPDATE_ALL_IF_CHANGED: &str = "UPDATE articles SET title = ?2, source_url = ?3, \
+     author = ?4, published_at = ?5, content_html = ?6, content_text = ?7, lang = ?8, \
+     word_count = ?9, lead_image = ?10, source_updated_at = ?11, modified_at = ?12 \
+     WHERE id = ?1 AND (title IS NOT ?2 OR source_url IS NOT ?3 OR author IS NOT ?4 \
+     OR published_at IS NOT ?5 OR content_html IS NOT ?6 OR content_text IS NOT ?7 \
+     OR lang IS NOT ?8 OR word_count IS NOT ?9 OR lead_image IS NOT ?10 \
+     OR source_updated_at IS NOT ?11)";
+
+/// Re-ingest of a row holding hydrated/enriched content: the feed's
+/// excerpt must never replace it, so only title and metadata are taken —
+/// change-aware exactly like [`UPDATE_ALL_IF_CHANGED`].
+const UPDATE_METADATA_IF_CHANGED: &str = "UPDATE articles SET title = ?2, source_url = ?3, \
+     author = ?4, published_at = ?5, lang = ?6, lead_image = ?7, source_updated_at = ?8, \
+     modified_at = ?9 \
+     WHERE id = ?1 AND (title IS NOT ?2 OR source_url IS NOT ?3 OR author IS NOT ?4 \
+     OR published_at IS NOT ?5 OR lang IS NOT ?6 OR lead_image IS NOT ?7 \
+     OR source_updated_at IS NOT ?8)";
 
 impl Storage {
     /// Batch-upserts articles in a single transaction (one fsync per
     /// batch, not per row). Identity: existing rows are matched by the
     /// **feed-scoped** dedupe key (`f<feed_id>:`/`m:` prefix) — colliding
     /// guids from different feeds are different articles, never
-    /// overwrites. An update refreshes content columns but never touches
-    /// `curio_id` or `saved_at`.
+    /// overwrites. An update never touches `curio_id` or `saved_at`.
+    ///
+    /// Updates are **provenance-aware** and **change-aware**:
+    ///
+    /// - content (`content_html`, `content_text`, `word_count`) is replaced
+    ///   only while the stored [`ContentOrigin`] is `feed`/`manual`; a
+    ///   hydrated (`full_text`) or `enriched` body is never reverted to the
+    ///   feed excerpt — such a row only takes title/metadata changes;
+    /// - a row whose columns already hold the incoming values is not
+    ///   written at all (no `modified_at` bump, no FTS reindex), so
+    ///   [`UpsertOutcome::updated`] counts rows that *actually changed*.
     ///
     /// # Errors
     ///
@@ -33,39 +64,59 @@ impl Storage {
             let now = Timestamp::now().to_string();
             for article in articles {
                 let dedupe_key = scoped_dedupe_key(article.feed_id, &article.dedupe_key);
-                let existing: Option<i64> = tx
-                    .prepare_cached("SELECT id FROM articles WHERE dedupe_key = ?1")?
-                    .query_row([&dedupe_key], |row| row.get(0))
-                    .optional()?;
-                if let Some(id) = existing {
-                    tx.prepare_cached(
-                        "UPDATE articles SET title = ?2, source_url = ?3, author = ?4, \
-                         published_at = ?5, content_html = ?6, content_text = ?7, lang = ?8, \
-                         word_count = ?9, lead_image = ?10, source_updated_at = ?11, \
-                         modified_at = ?12 WHERE id = ?1",
+                let existing: Option<(i64, String)> = tx
+                    .prepare_cached(
+                        "SELECT id, content_origin FROM articles WHERE dedupe_key = ?1",
                     )?
-                    .execute((
-                        id,
-                        &article.title,
-                        &article.source_url,
-                        &article.author,
-                        article.published_at.map(|t| t.to_string()),
-                        &article.content.html,
-                        &article.content.text,
-                        &article.lang,
-                        article.word_count,
-                        &article.lead_image,
-                        article.source_updated_at.map(|t| t.to_string()),
-                        &now,
-                    ))?;
-                    outcome.updated += 1;
+                    .query_row([&dedupe_key], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .optional()?;
+                let published_at = article.published_at.map(|t| t.to_string());
+                let source_updated_at = article.source_updated_at.map(|t| t.to_string());
+                if let Some((id, origin)) = existing {
+                    let replaceable = origin == ContentOrigin::Feed.as_str()
+                        || origin == ContentOrigin::Manual.as_str();
+                    let changed = if replaceable {
+                        tx.prepare_cached(UPDATE_ALL_IF_CHANGED)?.execute((
+                            id,
+                            &article.title,
+                            &article.source_url,
+                            &article.author,
+                            &published_at,
+                            &article.content.html,
+                            &article.content.text,
+                            &article.lang,
+                            article.word_count,
+                            &article.lead_image,
+                            &source_updated_at,
+                            &now,
+                        ))?
+                    } else {
+                        tx.prepare_cached(UPDATE_METADATA_IF_CHANGED)?.execute((
+                            id,
+                            &article.title,
+                            &article.source_url,
+                            &article.author,
+                            &published_at,
+                            &article.lang,
+                            &article.lead_image,
+                            &source_updated_at,
+                            &now,
+                        ))?
+                    };
+                    outcome.updated += u64::try_from(changed).unwrap_or_default();
                 } else {
+                    let origin = if article.feed_id.is_some() {
+                        ContentOrigin::Feed
+                    } else {
+                        ContentOrigin::Manual
+                    };
                     tx.prepare_cached(
                         "INSERT INTO articles (curio_id, feed_id, dedupe_key, title, \
                          source_url, author, published_at, content_html, content_text, lang, \
-                         word_count, lead_image, saved_at, source_updated_at, modified_at) \
+                         word_count, lead_image, saved_at, source_updated_at, modified_at, \
+                         content_origin) \
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
-                         ?15)",
+                         ?15, ?16)",
                     )?
                     .execute((
                         CurioId::new().to_string(),
@@ -74,15 +125,16 @@ impl Storage {
                         &article.title,
                         &article.source_url,
                         &article.author,
-                        article.published_at.map(|t| t.to_string()),
+                        &published_at,
                         &article.content.html,
                         &article.content.text,
                         &article.lang,
                         article.word_count,
                         &article.lead_image,
                         &now,
-                        article.source_updated_at.map(|t| t.to_string()),
+                        &source_updated_at,
                         &now,
+                        origin.as_str(),
                     ))?;
                     outcome.inserted += 1;
                 }
@@ -252,10 +304,13 @@ impl Storage {
     }
 
     /// Replaces an article's stored content in place — the readability
-    /// "hydrate full article" write. Unlike [`Self::upsert_articles`]
-    /// (dedupe-key ingest of new rows), this is a by-id overwrite of the
-    /// content columns of an existing row; the `articles_fts_au` trigger
-    /// reindexes on the `content_text` change automatically.
+    /// "hydrate full article" / enrichment write. Unlike
+    /// [`Self::upsert_articles`] (dedupe-key ingest), this is a by-id
+    /// overwrite of the content columns of an existing row, recording
+    /// `origin` as the content's provenance: a [`ContentOrigin::FullText`]
+    /// or [`ContentOrigin::Enriched`] body is then never reverted by a
+    /// later refresh upsert. The `articles_fts_au` trigger reindexes on
+    /// the `content_text` change automatically.
     ///
     /// # Errors
     ///
@@ -265,6 +320,7 @@ impl Storage {
         id: ArticleId,
         content: &ArticleContent,
         word_count: Option<u32>,
+        origin: ContentOrigin,
     ) -> Result<(), StorageError> {
         let html = content.html.clone();
         let text = content.text.clone();
@@ -272,9 +328,16 @@ impl Storage {
             let n = conn
                 .prepare_cached(
                     "UPDATE articles SET content_html = ?2, content_text = ?3, \
-                     word_count = ?4, modified_at = ?5 WHERE id = ?1",
+                     word_count = ?4, modified_at = ?5, content_origin = ?6 WHERE id = ?1",
                 )?
-                .execute((id.0, html, text, word_count, Timestamp::now().to_string()))?;
+                .execute((
+                    id.0,
+                    html,
+                    text,
+                    word_count,
+                    Timestamp::now().to_string(),
+                    origin.as_str(),
+                ))?;
             if n == 0 {
                 return Err(StorageError::NotFound { entity: "article" });
             }

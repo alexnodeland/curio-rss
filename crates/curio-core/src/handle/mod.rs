@@ -12,6 +12,12 @@
 //! Every state change that the events contract cares about stages its
 //! envelope inside the storage transaction and is flushed to JSONL
 //! before the operation returns — heads never think about emission.
+//! A flush that fails (full disk, unwritable events dir) is **not** an
+//! operation failure: the change is already committed and its intent
+//! stays staged, so the operation still reports success, the handle
+//! raises [`CoreHandle::has_pending_events`], and the next mutation, a
+//! [`CoreHandle::flush_pending_events`] retry (the desktop head runs one
+//! on a timer) or the next open drains the backlog.
 //!
 //! The operation surface is one `impl CoreHandle` block per concern:
 //! `feeds`, `refresh`, `articles`, `state`, `destinations`, `imports`,
@@ -38,9 +44,10 @@ mod refresh;
 mod settings;
 mod state;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -53,11 +60,15 @@ use crate::feeds::{FeedParseError, OpmlError};
 use crate::fetch::{FetchConfig, FetchError, PolicedClient};
 use crate::import::ImportError;
 use crate::model::{Article, FeedId, FetchStatus};
-use crate::storage::{Storage, StorageError};
+use crate::storage::{OpenError, Storage, StorageError};
 
 /// Facade-level errors: every engine subsystem, plus facade concerns.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// The profile database could not be opened — typed so heads can act
+    /// on the class (corrupt, too new, locked, IO, failed upgrade).
+    #[error(transparent)]
+    Open(#[from] OpenError),
     /// Storage failed.
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -100,7 +111,8 @@ pub enum CoreError {
         name: String,
     },
     /// The settings key is owned by the facade (the `"destinations"`
-    /// registry) and cannot be read or written as a raw value.
+    /// registry, `"destinations.exported"`) and cannot be read or
+    /// written as a raw value.
     #[error("the {key:?} settings key is facade-owned — use the destination operations")]
     ReservedSettingKey {
         /// The refused key.
@@ -155,7 +167,8 @@ pub struct RefreshOutcome {
     pub http_status: Option<u16>,
     /// Articles inserted by this refresh.
     pub new_articles: u64,
-    /// Existing articles refreshed by this refresh.
+    /// Existing articles this refresh actually changed (identical
+    /// re-listed entries are not counted).
     pub updated_articles: u64,
     /// Error detail for [`FetchStatus::Error`].
     pub error: Option<String>,
@@ -238,8 +251,15 @@ pub struct CoreHandle {
     profile_dir: PathBuf,
     storage: Arc<Storage>,
     emitter: Mutex<EventEmitter>,
+    /// The "pending events" health flag: set when a flush failed and
+    /// intents are left staged, cleared by the next successful drain.
+    events_backlog: AtomicBool,
     client: PolicedClient,
     destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
+    /// Destinations that completed an export since they were
+    /// (re-)registered: their root and `.curio/` marker must still exist
+    /// (see [`CoreHandle::save_to_destination`]).
+    exported_destinations: RwLock<BTreeSet<DestinationName>>,
     /// Per-feed refresh serialization (see [`CoreHandle::refresh_feed`]).
     /// Bounded by the subscription count; `remove_feed` drops entries.
     refresh_locks: Mutex<HashMap<FeedId, Arc<AsyncMutex<()>>>>,
@@ -271,7 +291,9 @@ impl CoreHandle {
     ///
     /// # Errors
     ///
-    /// [`CoreError`] on filesystem, storage or event-log failures.
+    /// [`CoreError::Open`] when the database cannot be opened (match the
+    /// inner [`OpenError`] for the failure class); other [`CoreError`]s
+    /// on filesystem, storage or event-log failures.
     pub fn open_with(
         profile_dir: impl AsRef<Path>,
         options: CoreOptions,
@@ -292,20 +314,28 @@ impl CoreHandle {
                 source,
             })?;
         }
-        let emitter = EventEmitter::new(Arc::clone(&storage), log)?;
+        // No fatal replay here: intents a previous process left staged
+        // are drained by the `emit` below, which degrades to the backlog
+        // flag instead of refusing to open a profile on a full disk.
+        let emitter = EventEmitter::attach(Arc::clone(&storage), log);
         let destinations = destinations::load_destinations(&storage)?;
-        Ok(Self {
+        let exported_destinations = destinations::load_exported(&storage)?;
+        let core = Self {
             profile_dir,
             storage,
             emitter: Mutex::new(emitter),
+            events_backlog: AtomicBool::new(false),
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
+            exported_destinations: RwLock::new(exported_destinations),
             refresh_locks: Mutex::new(HashMap::new()),
             #[cfg(feature = "enrich-reddit")]
             enrich_breaker: crate::enrich::Breaker::default(),
             #[cfg(feature = "enrich-reddit")]
             reddit_auth: crate::enrich::reddit_auth::TokenManager::default(),
-        })
+        };
+        core.emit();
+        Ok(core)
     }
 
     /// The engine crate version.
@@ -352,19 +382,23 @@ impl CoreHandle {
     // ---------------------------------------------------------- private
 
     /// Drains staged event intents to the JSONL log (fsync before the
-    /// intents are deleted — the crash-safe ordering).
-    fn emit(&self) -> Result<(), CoreError> {
-        self.emitter
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .emit_pending()?;
-        Ok(())
+    /// intents are deleted — the crash-safe ordering). Non-fatal by
+    /// design: every caller has already committed its state change, so a
+    /// failure is logged and raises the backlog flag instead of turning a
+    /// stored change into a reported failure.
+    fn emit(&self) {
+        if let Err(error) = self.flush_pending_events() {
+            tracing::warn!(
+                %error,
+                "event emission failed; the intents stay staged and are retried"
+            );
+        }
     }
 
-    fn emit_if(&self, changed: bool) -> Result<bool, CoreError> {
+    fn emit_if(&self, changed: bool) -> bool {
         if changed {
-            self.emit()?;
+            self.emit();
         }
-        Ok(changed)
+        changed
     }
 }

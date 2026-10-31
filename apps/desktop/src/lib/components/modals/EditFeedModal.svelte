@@ -23,8 +23,8 @@ import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
 import { markAllRead, selectView, toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import type { EditFeedSection } from '$lib/state/ui.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import type { EditFeedSection } from '$lib/state/layout.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { copyText } from '$lib/utils/clipboard';
 import { openExternal } from '$lib/utils/external';
 
@@ -111,7 +111,7 @@ async function copyFeedUrl(): Promise<void> {
         return;
     }
     const ok = await copyText(feed.url);
-    uiStore.showToast(
+    toastStore.showToast(
         t(ok ? 'editFeed.url.copied' : 'app.error.internal'),
         ok ? 'success' : 'error',
     );

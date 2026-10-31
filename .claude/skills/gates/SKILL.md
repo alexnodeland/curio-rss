@@ -25,7 +25,7 @@ caught is wasted wall-clock.
 | `apps/desktop/src-tauri/**` | `cargo test -p curio-desktop` · if a `#[tauri::command]`, DTO or event type changed: `just bindings` and commit the regenerated `bindings.ts` (`just bindings-check` must be clean) |
 | `apps/desktop/src/**` | `just frontend-bans` · `just desktop-lint` · `just desktop-npm-test` (70% floor on state/utils) · the visual-check skill for anything a user can see |
 | `Cargo.toml` / `Cargo.lock` / new deps | `just deny` · `just boundary` (curio-core stays webview-free) · `just msrv` (every crate builds on its declared `rust-version`; needs `jq`, downloads the pinned toolchains) |
-| `.github/workflows/**`, `.github/dependabot.yml` | `just workflows` (every action SHA-pinned with a `# vX.Y.Z` comment, release gated on `ci.yml`, updater signing key in exactly one build-free step, draft release carries SHA256SUMS/SBOM/attestation) · `cargo test -p xtask` · a `release.yml` change also gets a `workflow_dispatch` dry run after merge (runbook §2) |
+| `.github/workflows/**`, `.github/dependabot.yml` | `just workflows` (every action SHA-pinned with a `# vX.Y.Z` comment, release gated on `ci.yml`, updater signing key in exactly one build-free step of a job deployed to the `updater-signing` environment, draft release carries SHA256SUMS/SBOM/attestation) · `cargo test -p xtask` · a `release.yml` change also gets a `workflow_dispatch` dry run after merge (runbook §2) |
 | docs / rustdoc comments | `just doc` (rustdoc `-D warnings`) |
 | anything added to git | `just blob-guard` (no object over 1 MB, ever) |
 
@@ -41,3 +41,9 @@ caught is wasted wall-clock.
   (see commit 7627c87 for the house style), not a retry loop.
 - Shared build dirs: concurrent worktrees may share a `CARGO_TARGET_DIR`;
   "Blocking waiting for file lock" is normal — wait, don't delete the dir.
+  Cargo reuses a test binary built in another worktree as fresh, so tests
+  resolve paths at run time (`std::env::var_os("CARGO_MANIFEST_DIR")`),
+  never through `env!` — `cargo test -p xtask` fails on a compile-time read
+  (#183). If a build reports items you just added as missing, another
+  worktree's build of that crate looks fresh: `touch` the edited file and
+  rebuild.

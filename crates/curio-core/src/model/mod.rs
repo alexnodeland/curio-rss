@@ -130,6 +130,37 @@ pub struct ArticleContent {
     pub text: String,
 }
 
+/// Where an article's stored content (`content_html`, `content_text`,
+/// `word_count`) came from. A refresh upsert writes [`Self::Feed`] (or
+/// [`Self::Manual`] for feedless saves) and only ever replaces content of
+/// those two origins; [`Self::FullText`] and [`Self::Enriched`] bodies are
+/// never reverted to the feed excerpt by a later refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentOrigin {
+    /// The feed entry's own body (refresh ingest).
+    Feed,
+    /// A feedless save: a save-URL clip or an import.
+    Manual,
+    /// The readability extract of the source page (load-full, per-feed
+    /// full-text mode).
+    FullText,
+    /// A source-specific enrichment provider's body (e.g. reddit JSON).
+    Enriched,
+}
+
+impl ContentOrigin {
+    /// The stored TEXT form (`articles.content_origin`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Feed => "feed",
+            Self::Manual => "manual",
+            Self::FullText => "full_text",
+            Self::Enriched => "enriched",
+        }
+    }
+}
+
 /// Input for inserting (or re-ingesting) an article.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewArticle {

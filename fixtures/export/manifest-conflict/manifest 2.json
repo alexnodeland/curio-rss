@@ -1,0 +1,7 @@
+{
+  "schema": "curio.manifest.v1",
+  "notes": {
+    "0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6b": {"checksum": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "exported_at": "2026-06-30T09:00:00.000Z", "path": "curio/article-b-stale.md"},
+    "0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d": {"checksum": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "exported_at": "2026-07-03T09:00:00.000Z", "path": "curio/article-d.md"}
+  }
+}

@@ -99,12 +99,25 @@ defense-in-depth, not the primary defense.
   async-over-sync is handled, so the blocking-in-async bug class cannot recur in head code.
 - Articles get an `INTEGER PRIMARY KEY` rowid alias with **UUIDv7** as a unique column —
   stable FTS5 external-content mapping and insert locality at 100k rows.
-- Numbered embedded migrations: transactional, forward-only, automatic pre-migration
-  backup; tested against fixture DBs from every released version.
+- Numbered embedded migrations: forward-only, and the whole pending set runs in **one**
+  `IMMEDIATE` transaction (a failing step leaves the file at its old version, never
+  half-way). An existing database is first snapshotted with `VACUUM INTO` to
+  `curio.db.pre-vN.bak` (that one plus the highest-numbered other kept) — no backup, no migration. Upgrade-tested
+  against fixture DBs written by every released version (`fixtures/db/`).
+- Opening is typed: `OpenError` separates corrupt / too-new / locked / IO / failed-backup /
+  failed-migration so heads act on the class instead of parsing `SQLite` messages. A
+  staged event intent whose envelope no longer decodes is quarantined to
+  `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
-- Network-filesystem guard: refuses to open the DB on Syncthing/iCloud/NFS-class mounts
-  without an explicit override flag.
+- Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
+  (`feed | manual | full_text | enriched`) records where the stored body came from; a
+  refresh upsert replaces only `feed`/`manual` bodies (hydrated or enriched text is never
+  reverted to the excerpt), skips rows already holding the incoming values (no
+  `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
+  `content_text` actually differ.
+- Network-filesystem guard (planned, #112): refuses to open the DB on
+  Syncthing/iCloud/NFS-class mounts without an explicit override flag.
 
 ### `events/` — event-sourced article state
 
@@ -122,6 +135,29 @@ Cursor semantics are designed now (`events since <cursor>`) so the JSONL export,
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.
 Envelope, event types, negation rule (ULID `event_id`, tags-in-payload, non-monotone
 histories) are fixed by [contracts-draft.md](contracts-draft.md).
+
+**Emission durability (as built).** Each state change commits together with a
+write-ahead *intent* row; the emitter then appends the envelope to the JSONL log,
+fsyncs, and only then deletes the intent — a crash can duplicate a line (consumers
+dedupe by `event_id`), never lose one. Three failure modes are closed explicitly:
+
+- *Power loss:* the writer connection runs `PRAGMA synchronous = FULL`, so a commit
+  that returned is on disk before its event is fsynced. Under WAL + `NORMAL` the
+  commit could roll back on power loss and leave an `article.starred` line whose
+  state change the database forgot, with no negation ever following. The cost is
+  one WAL fsync per mutation.
+- *Disk full / I/O error mid-append:* the log truncates back to its last whole
+  line and reopens through the torn-tail heal, so a retry never extends a partial
+  line; lines already appended in that batch are fsynced and retired, the rest
+  stay staged.
+- *Unwritable events directory:* a failed flush is not a failed mutation — the
+  change is stored, so the operation reports success, the handle raises its
+  pending-events flag (`CoreHandle::has_pending_events`), and the next mutation,
+  the desktop head's once-a-minute retry (`flush_pending_events`), or the next open
+  drains the backlog. `curio doctor` reports staged intents.
+
+Readers that must keep going past damage use `events::read_all_lenient`, which
+skips and reports invalid lines; `read_all` stays strict.
 
 ### `export/` — the strategic seam
 

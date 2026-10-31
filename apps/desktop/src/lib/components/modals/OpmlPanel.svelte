@@ -11,7 +11,7 @@
 import { commands, type ImportSourceDto } from '$lib/bindings';
 import { type MessageKey, t } from '$lib/i18n';
 import { importFromFile, toastCommandError } from '$lib/state/actions';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 
 const SOURCES: readonly ImportSourceDto[] = [
     'opml',
@@ -47,7 +47,7 @@ async function runExport(): Promise<void> {
             return;
         }
         if (picked.data === null) {
-            uiStore.showToast(t('opml.cancelled'), 'info');
+            toastStore.showToast(t('opml.cancelled'), 'info');
             return;
         }
         const result = await commands.exportOpml(picked.data.token);
@@ -55,9 +55,9 @@ async function runExport(): Promise<void> {
             toastCommandError(result.error);
             return;
         }
-        uiStore.showToast(t('opml.exported'), 'success');
+        toastStore.showToast(t('opml.exported'), 'success');
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         exporting = false;
     }

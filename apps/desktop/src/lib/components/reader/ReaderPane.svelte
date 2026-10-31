@@ -26,7 +26,7 @@ import {
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { typographyStore } from '$lib/state/typography.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
 import Icon from '$components/common/Icon.svelte';
@@ -289,19 +289,19 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <div
                 class="reader-scroll"
                 tabindex="-1"
-                data-reading-theme={uiStore.readingTheme}
+                data-reading-theme={typographyStore.readingTheme}
             >
                 <article
                     class="reader-article"
-                    class:justify={uiStore.textAlign === 'justify'}
-                    class:hyphenate={uiStore.hyphenate}
-                    style:font-size="{uiStore.fontSize}px"
-                    style:line-height={uiStore.lineHeight}
-                    style:max-width="{uiStore.measure}px"
-                    style:font-family={uiStore.readerFontStack}
-                    style:font-weight={uiStore.fontWeight}
-                    style:letter-spacing="{uiStore.letterSpacing}em"
-                    style:--para-spacing={uiStore.paragraphSpacing}
+                    class:justify={typographyStore.textAlign === 'justify'}
+                    class:hyphenate={typographyStore.hyphenate}
+                    style:font-size="{typographyStore.fontSize}px"
+                    style:line-height={typographyStore.lineHeight}
+                    style:max-width="{typographyStore.measure}px"
+                    style:font-family={typographyStore.readerFontStack}
+                    style:font-weight={typographyStore.fontWeight}
+                    style:letter-spacing="{typographyStore.letterSpacing}em"
+                    style:--para-spacing={typographyStore.paragraphSpacing}
                 >
                     <header class="reader-header">
                         {#if feedTitle(current) !== null}

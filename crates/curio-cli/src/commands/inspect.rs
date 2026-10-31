@@ -95,6 +95,7 @@ pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
         events_check(app),
         gitignore_check(app),
         intents_check(core),
+        dead_intents_check(core),
     ];
     if app.is_default_profile {
         checks.push(legacy_check(&curio_core::paths::legacy_profile_dirs()));
@@ -202,6 +203,22 @@ fn intents_check(core: &CoreHandle) -> Check {
         match core.pending_intent_count() {
             Ok(0) => Ok("no staged intents".to_owned()),
             Ok(pending) => Err(format!("{pending} staged intent(s) not yet flushed")),
+            Err(err) => Err(err.to_string()),
+        },
+    )
+}
+
+/// Intents whose envelope no longer decoded were moved aside so they stop
+/// blocking emission; their events never reached the log.
+fn dead_intents_check(core: &CoreHandle) -> Check {
+    Check::from_result(
+        "dead-intents",
+        match core.quarantined_intent_count() {
+            Ok(0) => Ok("none quarantined".to_owned()),
+            Ok(dead) => Err(format!(
+                "{dead} undecodable intent(s) quarantined in curio.db's event_intents_dead \
+                 — those events never reached the log"
+            )),
             Err(err) => Err(err.to_string()),
         },
     )

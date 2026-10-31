@@ -1,6 +1,7 @@
 //! `curio reddit …` — the optional BYO Reddit OAuth credentials (D15).
 //!
-//! Credentials live in the OS keychain; the runtime core is updated in
+//! Credentials live in the OS keychain, one item per profile (so
+//! `--profile` selects whose app is used); the runtime core is updated in
 //! the same breath so the change takes effect without a restart. The
 //! secret is write-only: `status` reports the client id and nothing
 //! else, and `login` prefers reading the secret from stdin over a shell
@@ -52,10 +53,13 @@ fn login(app: &App, client_id: &str, client_secret: Option<String>) -> anyhow::R
     .to_owned();
     anyhow::ensure!(!client_secret.is_empty(), "client secret must not be empty");
 
-    secrets::store_reddit_api(&RedditAppSecret {
-        client_id: client_id.clone(),
-        client_secret: client_secret.clone(),
-    })?;
+    secrets::store_reddit_api(
+        app.core.profile_dir(),
+        &RedditAppSecret {
+            client_id: client_id.clone(),
+            client_secret: client_secret.clone(),
+        },
+    )?;
     app.core
         .set_reddit_api(Some(RedditApiConfig::new(client_id.clone(), client_secret)));
     if app.json {
@@ -94,7 +98,7 @@ fn status(app: &App) -> anyhow::Result<ExitCode> {
 }
 
 fn logout(app: &App) -> anyhow::Result<ExitCode> {
-    secrets::clear_reddit_api()?;
+    secrets::clear_reddit_api(app.core.profile_dir())?;
     app.core.set_reddit_api(None);
     if app.json {
         emit_json(&RedditStatusView {

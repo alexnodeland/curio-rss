@@ -17,8 +17,8 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { allFolderPaths, folderPathsForTags } from '$lib/state/folder-ops';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
-import type { EditFeedSection } from '$lib/state/ui.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import type { EditFeedSection } from '$lib/state/layout.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { copyText } from '$lib/utils/clipboard';
 import { openExternal } from '$lib/utils/external';
 
@@ -102,7 +102,10 @@ function onRenameKeydown(event: KeyboardEvent): void {
 // ─── context menu ────────────────────────────────────────────────────────────
 async function copyUrl(): Promise<void> {
     const ok = await copyText(feed.url);
-    uiStore.showToast(t(ok ? 'sidebar.urlCopied' : 'app.error.internal'), ok ? 'success' : 'error');
+    toastStore.showToast(
+        t(ok ? 'sidebar.urlCopied' : 'app.error.internal'),
+        ok ? 'success' : 'error',
+    );
 }
 
 async function unsubscribe(): Promise<void> {
@@ -111,7 +114,7 @@ async function unsubscribe(): Promise<void> {
         toastCommandError(result.error);
         return;
     }
-    uiStore.showToast(t('feed.unsubscribed', { name: label }), 'info');
+    toastStore.showToast(t('feed.unsubscribed', { name: label }), 'info');
 }
 
 /** A unique default name for a fresh top-level folder (matches Sidebar.newFolder). */

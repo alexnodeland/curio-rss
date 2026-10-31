@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use std::time::Duration;
 
 use curio_core::events::{FoldedState, read_all};
@@ -397,11 +399,9 @@ async fn opml_round_trips_through_the_facade() {
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
 
-    let opml = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/opml/nested.opml"
-    ))
-    .unwrap();
+    let opml =
+        std::fs::read_to_string(common::manifest_dir().join("../../fixtures/opml/nested.opml"))
+            .unwrap();
     let imported = core.import_opml(&opml).unwrap();
     assert_eq!(imported.added, 4);
     assert_eq!(imported.skipped, 0);
@@ -505,11 +505,9 @@ async fn pocket_csv_imports_as_tagged_read_later_articles() {
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
 
-    let csv = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/import/pocket.csv"
-    ))
-    .unwrap();
+    let csv =
+        std::fs::read_to_string(common::manifest_dir().join("../../fixtures/import/pocket.csv"))
+            .unwrap();
 
     let outcome = core.import_file(ImportSource::PocketCsv, &csv).unwrap();
     // Five rows carry a URL (the blank-URL and fully-empty rows drop out).
@@ -589,10 +587,11 @@ async fn updated_content_re_export_emits_article_updated() {
     let first = core.save_to_destination(article.id, &dest).unwrap();
     assert_eq!(first.disposition, ExportDisposition::Created);
 
-    // Second refresh updates the article in place (same dedupe key).
+    // Second refresh updates the revised article in place (same dedupe
+    // key); the two unchanged entries are not rewritten or counted.
     let second_refresh = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(second_refresh.new_articles, 0);
-    assert_eq!(second_refresh.updated_articles, 3);
+    assert_eq!(second_refresh.updated_articles, 1);
 
     let second = core.save_to_destination(article.id, &dest).unwrap();
     assert_eq!(second.disposition, ExportDisposition::Updated);
@@ -695,8 +694,10 @@ fn a_crash_before_the_manifest_write_never_loses_article_saved() {
     );
 
     // And the next save re-converges the manifest without losing anything.
+    // The article's own note is already on disk, so the retry is an
+    // update — never a second article.saved.
     let saved = core.save_to_destination(article_id, &dest_name).unwrap();
-    assert_eq!(saved.disposition, ExportDisposition::Created);
+    assert_eq!(saved.disposition, ExportDisposition::Updated);
     let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
     assert_eq!(folded.articles[&curio_id].path, saved.path);
 }
@@ -790,6 +791,156 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
     assert!(vault.path().join(&note_path).is_file());
     let core = open_core(profile.path());
     assert!(core.destinations().is_empty(), "removal survives reopen");
+}
+
+/// #116: once a destination has exported, a vault that moved or was
+/// unmounted is refused — not recreated empty at the old path and fully
+/// re-exported. The marker check survives a reopen; registering the
+/// destination again is the recovery path.
+#[test]
+fn an_exported_destination_that_vanished_is_destination_missing() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    let dest: DestinationName = "vault".parse().unwrap();
+    let (first, second) = {
+        let core = open_core(profile.path());
+        core.add_destination(dest.clone(), root.clone()).unwrap();
+        core.storage()
+            .upsert_articles(vec![
+                manual_article("k1", "One"),
+                manual_article("k2", "Two"),
+            ])
+            .unwrap();
+        let ids: Vec<_> = core
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        core.save_to_destination(ids[0], &dest).unwrap();
+        (ids[0], ids[1])
+    };
+    let is_missing = |err: curio_core::CoreError| {
+        matches!(
+            err,
+            curio_core::CoreError::Export(
+                curio_core::export::ExportError::DestinationMissing { .. }
+            )
+        )
+    };
+
+    // The whole folder goes away (unmounted / moved): refused, and the
+    // tree is never recreated.
+    std::fs::remove_dir_all(&root).unwrap();
+    let core = open_core(profile.path());
+    assert!(is_missing(
+        core.save_to_destination(second, &dest).unwrap_err()
+    ));
+    assert!(!root.exists(), "the old path must not be recreated");
+
+    // An empty directory back at the path (an unmounted mount point) is
+    // no better: the `.curio/` marker of the earlier exports is missing.
+    std::fs::create_dir(&root).unwrap();
+    assert!(is_missing(
+        core.save_to_destination(second, &dest).unwrap_err()
+    ));
+    assert!(std::fs::read_dir(&root).unwrap().next().is_none());
+
+    // Registering it again starts the destination afresh.
+    core.add_destination(dest.clone(), root.clone()).unwrap();
+    let saved = core.save_to_destination(first, &dest).unwrap();
+    assert_eq!(saved.disposition, ExportDisposition::Created);
+    assert!(root.join(&saved.path).is_file());
+}
+
+/// A head re-applying its own configuration (the CLI's curio.toml, on
+/// every invocation) through `reconcile_destination` never undoes the
+/// missing-destination check: an unchanged, exported destination is left
+/// alone — root not recreated, flag kept — while a new name, a new root or
+/// a not-yet-exported destination registers as `add_destination` does.
+#[test]
+fn reconciling_an_exported_destination_never_recreates_it() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+    // Not registered yet: reconciling registers it and creates the root.
+    core.reconcile_destination(dest.clone(), root.clone())
+        .unwrap();
+    assert!(root.is_dir());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .iter()
+        .map(|a| a.id)
+        .collect();
+    core.save_to_destination(ids[0], &dest).unwrap();
+
+    std::fs::remove_dir_all(&root).unwrap();
+    drop(core);
+    let core = open_core(profile.path());
+    core.reconcile_destination(dest.clone(), root.clone())
+        .unwrap();
+    assert!(!root.exists(), "reconciling must not recreate the root");
+    assert!(matches!(
+        core.save_to_destination(ids[1], &dest).unwrap_err(),
+        curio_core::CoreError::Export(curio_core::export::ExportError::DestinationMissing { .. })
+    ));
+
+    // A changed root is a new destination: registered and started afresh.
+    let moved = parent.path().join("moved");
+    core.reconcile_destination(dest.clone(), moved.clone())
+        .unwrap();
+    assert_eq!(core.destinations()[0].root, moved);
+    let saved = core.save_to_destination(ids[1], &dest).unwrap();
+    assert!(moved.join(&saved.path).is_file());
+}
+
+/// Removing a destination clears its exported flag too: a destination
+/// later registered under the same name starts afresh.
+#[test]
+fn a_removed_then_re_added_destination_starts_afresh() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("vault");
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+    core.add_destination(dest.clone(), root.clone()).unwrap();
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let id = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    core.save_to_destination(id, &dest).unwrap();
+
+    core.remove_destination(&dest).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+    core.reconcile_destination(dest.clone(), root.clone())
+        .unwrap();
+    assert!(root.is_dir(), "a fresh registration creates its root");
+    core.save_to_destination(id, &dest).unwrap();
+}
+
+/// The exported-destinations record is facade-owned like the registry.
+#[test]
+fn the_facade_refuses_its_reserved_exported_destinations_setting() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    assert!(matches!(
+        core.set_setting("destinations.exported", "[]"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
+    assert!(matches!(
+        core.get_setting("destinations.exported"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
 }
 
 /// The retention sweep is facade-owned (single-writer event log): expired
@@ -986,12 +1137,20 @@ async fn authenticated_reddit_enrichment_grants_once_and_sends_the_bearer() {
 
     let profile = tempfile::tempdir().unwrap();
     let core = open_core_trusting_localhost(profile.path());
-    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+    let config = curio_core::enrich::reddit_auth::RedditApiConfig {
         client_id: "cid".to_owned(),
-        client_secret: "sec".to_owned(),
+        client_secret: "s3cr3t-value".to_owned(),
         token_url: format!("{}/api/v1/access_token", server.uri()),
         api_origin: server.uri(),
-    }));
+    };
+    // The secret never reaches a `{:?}` of the config (log lines,
+    // panic messages)…
+    let config_debug = format!("{config:?}");
+    assert!(
+        !config_debug.contains("s3cr3t-value"),
+        "secret leaked: {config_debug}"
+    );
+    core.set_reddit_api(Some(config));
     assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid"));
 
     let mk = |key: &str, comments_id: &str| {
@@ -1019,6 +1178,19 @@ async fn authenticated_reddit_enrichment_grants_once_and_sends_the_bearer() {
             hydrated.content.text
         );
     }
+
+    // …nor does it — or the live, cached bearer — reach a `{:?}` of the
+    // handle holding both.
+    let core_debug = format!("{core:?} {core:#?}");
+    assert!(core_debug.contains("<redacted>"), "{core_debug}");
+    assert!(
+        !core_debug.contains("s3cr3t-value"),
+        "secret leaked: {core_debug}"
+    );
+    assert!(
+        !core_debug.contains("tok123"),
+        "bearer leaked: {core_debug}"
+    );
 
     // Clearing credentials reports unconfigured again.
     core.set_reddit_api(None);
@@ -1242,8 +1414,141 @@ async fn full_text_mode_hydrates_new_articles_at_refresh() {
         article.content.text
     );
 
-    // A second refresh sees no new items and fetches no pages (expect(1)).
+    // A second refresh sees no new items and fetches no pages (expect(1))
+    // — and must not revert the hydrated body to the feed's stub excerpt
+    // (#111), nor count the unchanged, re-listed item as updated.
+    let second = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((second.new_articles, second.updated_articles), (0, 0));
+    let after = core.get_article(article.id).unwrap().unwrap();
+    assert_eq!(after.content, article.content, "full text survives refresh");
+    assert_eq!(after.word_count, article.word_count);
+}
+
+/// A feed that only ships an excerpt of one post whose source page lives
+/// at `post_path` on the mock server.
+fn excerpt_feed(server: &MockServer, post_path: &str) -> String {
+    format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Excerpts</title><link>{0}</link>
+        <item><guid>p1</guid><title>Post One</title><link>{0}{post_path}</link>
+        <description>Just a stub excerpt.</description></item>
+        </channel></rss>"#,
+        server.uri()
+    )
+}
+
+/// #111: a manual load-full, then a refresh of the same (unchanged) feed
+/// XML. The hydrated body must survive, the refresh must change nothing,
+/// and the bulk export afterwards must be a pure idempotency hit — no
+/// rewritten note, no `article.updated` carrying the excerpt to the vault.
+#[tokio::test]
+async fn hydrated_full_text_survives_refresh_and_re_export_is_unchanged() {
+    let server = MockServer::start().await;
+    let page = r"<html><body><article>
+        <h1>Post One</h1>
+        <p>The full body of the post that the feed only excerpted, with enough
+           genuine running prose that the readability scorer confidently keeps
+           this container as the main content of the fetched page.</p>
+        <p>A second paragraph makes the extraction unambiguous and pushes the
+           word count well past the one-line stub the feed shipped.</p>
+        </article></body></html>";
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(excerpt_feed(&server, "/post"), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/post"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(page, "text/html"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    let dest: DestinationName = "vault".parse().unwrap();
+    core.add_destination(dest.clone(), vault.path().to_path_buf())
+        .unwrap();
+
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let stub = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    let hydrated = core.hydrate_article(stub.id).await.unwrap();
+    assert!(hydrated.content.text.contains("full body of the post"));
+    let first = core.save_to_destination(hydrated.id, &dest).unwrap();
+    assert_eq!(first.disposition, ExportDisposition::Created);
+
+    let refresh = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((refresh.new_articles, refresh.updated_articles), (0, 0));
+    let after = core.get_article(hydrated.id).unwrap().unwrap();
+    assert_eq!(
+        after.content, hydrated.content,
+        "full text survives refresh"
+    );
+    assert_eq!(after.word_count, hydrated.word_count);
+    // The FTS index still serves the hydrated body.
+    assert_eq!(core.search_articles("readability", 5).unwrap().len(), 1);
+    core.fts_integrity_check().unwrap();
+
+    let bulk = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!((bulk.created, bulk.updated, bulk.unchanged), (0, 0, 1));
+    let events = read_all(&profile.path().join(".curio/events")).unwrap();
+    assert!(
+        events
+            .iter()
+            .all(|e| e.event.event_type() != "article.updated"),
+        "no article.updated after an unchanged refresh"
+    );
+}
+
+/// #111 for the enrichment path: a reddit post's enriched full selftext
+/// survives a refresh of the feed that still lists the post.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn enriched_reddit_body_survives_a_refresh_of_its_feed() {
+    let server = MockServer::start().await;
+    let post_path = "/r/rust/comments/abc123/title/";
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(excerpt_feed(&server, post_path), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    let post_json = include_str!("../../../fixtures/feeds/reddit_post.json");
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/abc123/title.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(post_json, "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
     core.refresh_feed(feed.id).await.unwrap();
+    let stub = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    let enriched = core.hydrate_article(stub.id).await.unwrap();
+    assert!(enriched.content.text.contains("cut compile times in half"));
+
+    let refresh = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((refresh.new_articles, refresh.updated_articles), (0, 0));
+    let after = core.get_article(enriched.id).unwrap().unwrap();
+    assert_eq!(after.content, enriched.content, "enriched body survives");
+    core.fts_integrity_check().unwrap();
 }
 
 #[tokio::test]
@@ -1557,4 +1862,137 @@ fn database_health_probes_go_through_the_facade() {
     // Reopening replays the staged intent into the log.
     let core = open_core(profile.path());
     assert_eq!(core.pending_intent_count().unwrap(), 0);
+}
+
+/// A hand-edited note that no longer parses stops a bulk export at that
+/// article (as the CLI guide documents), even when its content is
+/// unchanged: the export never claims a note it cannot account for is
+/// intact. Notes already written stay, and once the user repairs (here:
+/// deletes) the note, re-running the bulk export completes.
+#[tokio::test]
+async fn bulk_export_stops_at_a_note_that_no_longer_parses() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let dest: DestinationName = "vault".parse().unwrap();
+    core.add_destination(dest.clone(), vault.path().to_path_buf())
+        .unwrap();
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "First note"),
+            manual_article("k2", "Second note"),
+        ])
+        .unwrap();
+    let first = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!(first.created, 2);
+
+    let garbled = vault.path().join("curio/second-note.md");
+    std::fs::write(&garbled, "markers and frontmatter gone\n").unwrap();
+    let err = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::CoreError::Export(curio_core::export::ExportError::NoteParse { .. })
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&garbled).unwrap(),
+        "markers and frontmatter gone\n",
+        "the unparseable note is never rewritten"
+    );
+    assert!(vault.path().join("curio/first-note.md").is_file());
+
+    std::fs::remove_file(&garbled).unwrap();
+    let repaired = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!(repaired.total(), 2);
+    assert!(garbled.is_file(), "the deleted note is healed");
+}
+
+/// Makes the profile's events dir unwritable for every user (root
+/// included, unlike a permission bit): a regular file squats its path.
+fn break_events_dir(profile: &std::path::Path) -> std::path::PathBuf {
+    let events_dir = profile.join(".curio/events");
+    std::fs::remove_dir_all(&events_dir).unwrap();
+    std::fs::write(&events_dir, b"not a directory").unwrap();
+    events_dir
+}
+
+fn repair_events_dir(events_dir: &std::path::Path) {
+    std::fs::remove_file(events_dir).unwrap();
+    std::fs::create_dir(events_dir).unwrap();
+}
+
+/// #118: a failed flush must not turn a committed change into a reported
+/// failure. The intent stays staged, the health flag goes up, and the
+/// next emission drains it.
+#[test]
+fn a_failed_event_flush_is_not_a_failed_mutation() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    let events_dir = break_events_dir(profile.path());
+    assert!(!core.has_pending_events());
+
+    assert!(
+        core.set_starred(article, true).unwrap(),
+        "the star persisted"
+    );
+    assert!(core.article_state(article).unwrap().starred);
+    assert_eq!(core.pending_intent_count().unwrap(), 1);
+    assert!(core.has_pending_events());
+    // A user retry is an idempotent no-op — and still not an error.
+    assert!(!core.set_starred(article, true).unwrap());
+    // The explicit retry reports the failure honestly.
+    core.flush_pending_events().unwrap_err();
+    assert!(core.has_pending_events());
+
+    repair_events_dir(&events_dir);
+    assert_eq!(core.flush_pending_events().unwrap(), 1);
+    assert!(!core.has_pending_events());
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+}
+
+/// The backlog also drains on the next mutation's own flush, in order.
+#[test]
+fn the_next_mutation_drains_a_staged_backlog() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    let events_dir = break_events_dir(profile.path());
+    assert!(core.set_starred(article, true).unwrap());
+    assert!(core.has_pending_events());
+
+    repair_events_dir(&events_dir);
+    assert!(core.tag_article(article, "rust").unwrap());
+    assert!(!core.has_pending_events());
+    assert_eq!(core.pending_intent_count().unwrap(), 0);
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+    assert!(matches!(
+        events[1].event,
+        EventPayload::ArticleTagged { .. }
+    ));
 }

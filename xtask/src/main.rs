@@ -9,8 +9,9 @@
 //!   one build-free step of a job in the `updater-signing` environment,
 //!   checksums/SBOM/attestation on the draft release,
 //!   no retired runner images, a nightly that runs on the PRs editing it,
-//!   and a cold-start bench the regression tracker can parse (see
-//!   `xtask::workflows`).
+//!   a cold-start bench the regression tracker can parse (see
+//!   `xtask::workflows`), and a bounded nightly run of every cargo-fuzz
+//!   target in `fuzz/` (see `xtask::fuzz`).
 //! - `bench-output <file> [--expect <bench-id>]…` — check a bencher-format
 //!   `cargo bench` log before the nightly hands it to the regression tracker:
 //!   no criterion error line, a result line the tracker can parse, and each
@@ -100,17 +101,31 @@ fn workflows() -> ExitCode {
     // The repo root comes from the run-time CARGO_MANIFEST_DIR: a binary
     // reused from another worktree's shared target dir must lint this
     // worktree's workflows, not that one's (issue #183).
-    let dir = match xtask::paths::repo_root() {
-        Ok(root) => root.join(".github/workflows"),
+    let root = match xtask::paths::repo_root() {
+        Ok(root) => root,
         Err(err) => {
             eprintln!("xtask workflows: {err}");
             return ExitCode::FAILURE;
         }
     };
-    match xtask::workflows::lint_dir(&dir) {
+    let dir = root.join(".github/workflows");
+    let fuzz = match xtask::fuzz::lint_repo(&root) {
+        Ok(violations) => violations,
+        Err(err) => {
+            eprintln!(
+                "xtask workflows: cannot read the nightly or {}: {err}",
+                xtask::fuzz::FUZZ_MANIFEST
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    match xtask::workflows::lint_dir(&dir).map(|mut violations| {
+        violations.extend(fuzz);
+        violations
+    }) {
         Ok(violations) if violations.is_empty() => {
             println!(
-                "xtask workflows: OK — actions SHA-pinned, release gated on CI, signing key isolated, release assets complete, no retired runners, nightly self-validating, bench trackable"
+                "xtask workflows: OK — actions SHA-pinned, release gated on CI, signing key isolated, release assets complete, no retired runners, nightly self-validating, bench trackable, every fuzz target fuzzed nightly"
             );
             ExitCode::SUCCESS
         }

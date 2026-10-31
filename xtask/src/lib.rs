@@ -8,6 +8,7 @@
 //! (`paths`, issue #183) has one scanner.
 
 pub mod bench;
+pub mod fuzz;
 pub mod paths;
 pub mod workflows;
 

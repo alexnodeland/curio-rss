@@ -83,6 +83,15 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     # Plain output in tool results; no ANSI noise.
     echo 'export CARGO_TERM_COLOR=never'
     echo 'export NO_COLOR=1'
+    # One build dir for the checkout and every git worktree of it (agents
+    # fan out into worktrees; a target/ per worktree is ~5 GB and a cold
+    # rebuild each). Cargo's build-dir lock serialises concurrent builds.
+    # Resolve the main checkout even when this session starts inside a
+    # worktree: its git common dir is <main checkout>/.git.
+    if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+      common=$(git rev-parse --path-format=absolute --git-common-dir)
+      echo "export CARGO_TARGET_DIR=\"$(dirname "$common")/target\""
+    fi
   } >>"$CLAUDE_ENV_FILE"
 fi
 

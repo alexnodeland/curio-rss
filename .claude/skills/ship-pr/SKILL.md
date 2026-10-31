@@ -1,6 +1,6 @@
 ---
 name: ship-pr
-description: Land a change trunk-based — short-lived branch off main, small green commits, PR from the template, wait for CI and fix in a loop, rebase on main, squash-merge. Use whenever work is ready to leave the local machine, or when asked to open, babysit, or merge a PR.
+description: Land a change trunk-based — short-lived branch off main, small green commits, PR from the template, wait for CI and fix in a loop, sync with main, squash-merge. Use whenever work is ready to leave the local machine, or when asked to open, babysit, or merge a PR.
 ---
 
 # Ship a PR (trunk-based)
@@ -52,9 +52,10 @@ never push empty commits, never disable a check.
 
 ## 6. Merge
 
-1. If `main` moved: `git fetch origin main && git rebase origin/main`, re-run
-   the gates for the touched paths, `git push --force-with-lease`, and wait
-   for CI to go green again on the rebased head.
+1. If `main` moved: `git fetch origin main && git merge origin/main` (the
+   squash-merge flattens it, so `main` stays linear and no force-push is
+   needed), resolve conflicts, re-run the gates for the touched paths, push,
+   and wait for CI to go green again on the updated head.
 2. Squash-merge with the PR title as the commit title (history reads as one
    conventional commit per PR, `(#NNN)` suffix).
 3. Confirm the linked issue closed; delete the branch.

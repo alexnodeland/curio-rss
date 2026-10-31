@@ -70,7 +70,7 @@ chore ci build revert`. Small, logical commits.
 | Skill | Use for |
 |---|---|
 | `gates` | which local checks a change needs before push |
-| `ship-pr` | branch → PR → CI loop → rebase → squash-merge |
+| `ship-pr` | branch → PR → CI loop → sync with main → squash-merge |
 | `visual-check` | screenshot-driven validation of desktop UI changes |
 | `contract-change` | anything touching `schemas/`, frontmatter keys, event types, the manifest |
 | `add-source` | a new feed format / site layout / enrichment provider in curio-core |
@@ -84,6 +84,8 @@ chore ci build revert`. Small, logical commits.
   webview system packages, Rust components, `just`/`cargo-deny`/
   `cargo-llvm-cov`, lefthook, the desktop npm deps (skipped when manifests are
   unchanged), and the git hooks — so `just ci` works from the first prompt.
+  It also exports `CARGO_TARGET_DIR=<checkout>/target` so git worktrees share
+  one build dir (a per-worktree `target/` costs ~5 GB and a cold build).
 - **PreToolUse Bash** (`guard-bash.sh`): blocks `--no-verify`, plain
   `--force` pushes, pushes to `main`, and commits on `main`.
 - **PreToolUse Edit/Write** (`guard-edit.sh`): blocks hand edits to the

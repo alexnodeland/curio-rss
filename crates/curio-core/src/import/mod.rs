@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(items[0].title.as_deref(), Some("Rust, revisited"));
         assert_eq!(items[0].tags, vec!["rust", "systems"]);
         assert!(items[0].saved_at.is_some());
-        assert!(items[1].tags.is_empty());
+        assert_eq!(items[1].tags, [] as [std::string::String; 0]);
     }
 
     #[test]

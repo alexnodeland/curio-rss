@@ -194,7 +194,10 @@ fn feed_lifecycle_round_trips_and_stages_events() {
         &removed.event,
         EventPayload::FeedRemoved { feed } if feed == "https://example.com/feed.xml"
     ));
-    assert!(storage.list_feeds().unwrap().is_empty());
+    assert_eq!(
+        storage.list_feeds().unwrap(),
+        [] as [curio_core::model::Feed; 0]
+    );
     assert!(matches!(
         storage.remove_feed(feed.id),
         Err(StorageError::NotFound { entity: "feed" })
@@ -298,7 +301,10 @@ fn adopting_a_redirect_stages_the_removed_added_pair() {
     storage
         .update_feed_url(feed.id, "https://old.example/feed.xml".to_owned())
         .unwrap();
-    assert!(storage.pending_intents().unwrap().is_empty());
+    assert_eq!(
+        storage.pending_intents().unwrap(),
+        [] as [curio_core::storage::PendingIntent; 0]
+    );
 
     // Real adoption: removed{old} then added{new} with title + tags.
     storage
@@ -620,13 +626,13 @@ fn list_articles_filters_by_read_state_flags() {
         }),
         vec!["m:k0".to_owned()]
     );
-    assert!(
+    assert_eq!(
         list(ListArticles {
             read: Some(false),
             starred: Some(true),
             ..ListArticles::default()
-        })
-        .is_empty()
+        }),
+        [] as [std::string::String; 0]
     );
 }
 
@@ -689,14 +695,14 @@ fn list_articles_filters_by_tag_without_reordering_the_keyset() {
     assert!(page1.last().unwrap().id > page2[0].id);
 
     // Unknown tag → empty, not an error.
-    assert!(
+    assert_eq!(
         storage
             .list_articles(ListArticles {
                 tag: Some("nope".to_owned()),
                 ..ListArticles::default()
             })
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [] as [curio_core::model::Article; 0]
     );
 }
 
@@ -837,7 +843,7 @@ fn feed_tag_filter_scopes_articles_to_the_folder_subtree() {
     assert_eq!(titles("Tech/Databases"), vec!["db".to_owned()]);
     assert_eq!(titles("Cooking"), vec!["cook".to_owned()]);
     // `Tec` must NOT match `Tech` (prefix guarded by the `/` boundary).
-    assert!(titles("Tec").is_empty());
+    assert_eq!(titles("Tec"), [] as [std::string::String; 0]);
 }
 
 // ------------------------------------------------------- state and events
@@ -908,7 +914,10 @@ fn state_flips_are_idempotent_and_stage_intents_in_order() {
     storage
         .mark_intents_emitted(pending.iter().map(|p| p.intent_id).collect())
         .unwrap();
-    assert!(storage.pending_intents().unwrap().is_empty());
+    assert_eq!(
+        storage.pending_intents().unwrap(),
+        [] as [curio_core::storage::PendingIntent; 0]
+    );
 }
 
 #[test]
@@ -1129,7 +1138,10 @@ fn search_hits_content_text_not_just_titles() {
     let hits = storage.search_articles("quick fox", 10).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].title, "Bland title");
-    assert!(storage.search_articles("absent", 10).unwrap().is_empty());
+    assert_eq!(
+        storage.search_articles("absent", 10).unwrap(),
+        [] as [curio_core::model::Article; 0]
+    );
 }
 
 #[test]
@@ -1167,20 +1179,29 @@ fn fts_mapping_survives_vacuum_deletes_and_updates() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].id, a3);
     assert_eq!(hits[0].title, "Third");
-    assert!(storage.search_articles("beta", 10).unwrap().is_empty());
+    assert_eq!(
+        storage.search_articles("beta", 10).unwrap(),
+        [] as [curio_core::model::Article; 0]
+    );
 
     // Updates through the sync trigger keep the index fresh.
     storage
         .upsert_articles(vec![new_article("k3", "Third", "delta words now")])
         .unwrap();
-    assert!(storage.search_articles("gamma", 10).unwrap().is_empty());
+    assert_eq!(
+        storage.search_articles("gamma", 10).unwrap(),
+        [] as [curio_core::model::Article; 0]
+    );
     let hits = storage.search_articles("delta", 10).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].id, a3);
 
     // Deletes clean the index via the delete trigger.
     storage.delete_article(a1).unwrap();
-    assert!(storage.search_articles("alpha", 10).unwrap().is_empty());
+    assert_eq!(
+        storage.search_articles("alpha", 10).unwrap(),
+        [] as [curio_core::model::Article; 0]
+    );
 
     storage.vacuum().unwrap();
     storage.fts_integrity_check().unwrap();

@@ -536,7 +536,7 @@ mod tests {
         assert_eq!(page.len(), 50);
         assert!(page[0].id.0 > page[1].id.0, "id DESC keyset order");
         // curio_id round-tripped through the storage layer (valid v7).
-        assert!(!page[0].content.text.is_empty());
+        assert_ne!(page[0].content.text, "");
         // FTS index was built by the insert triggers.
         let hits = handle.storage().search_articles("signal", 10).unwrap();
         assert!(!hits.is_empty(), "FTS should find a corpus token");

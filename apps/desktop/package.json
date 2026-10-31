@@ -24,7 +24,7 @@
         "@sveltejs/adapter-static": "^3.0.1",
         "@sveltejs/kit": "^2.0.0",
         "@sveltejs/vite-plugin-svelte": "^4.0.4",
-        "@tauri-apps/cli": "^2.0.0",
+        "@tauri-apps/cli": "^2.12.4",
         "@testing-library/svelte": "^5.0.0",
         "@types/node": "^20.10.0",
         "@typescript-eslint/parser": "^8.62.1",
@@ -40,7 +40,7 @@
         "vitest": "^2.0.0"
     },
     "dependencies": {
-        "@tauri-apps/api": "^2.0.0",
+        "@tauri-apps/api": "^2.12.4",
         "@tauri-apps/plugin-opener": "^2.5.4",
         "@tauri-apps/plugin-process": "^2",
         "@tauri-apps/plugin-updater": "^2",

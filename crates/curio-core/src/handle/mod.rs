@@ -14,12 +14,20 @@
 //! before the operation returns — heads never think about emission.
 //!
 //! The operation surface is one `impl CoreHandle` block per concern:
-//! `feeds`, `refresh`, `articles`, `state`, `destinations`, `imports`
-//! and `maintenance`. This file holds the shared types, `open` /
-//! `open_with`, the accessors (`version`, `profile_dir`, and the raw
-//! `storage()` escape hatch that #178 is closing), the `enrich-reddit`
-//! API-credential setters (`set_reddit_api`, `reddit_api_client_id`),
-//! and the emission helpers every mutation ends with.
+//! `feeds`, `refresh`, `articles`, `state`, `destinations`, `imports`,
+//! `settings` and `maintenance`. This file holds the shared types, `open` /
+//! `open_with`, the accessors (`version`, `profile_dir`), the
+//! `enrich-reddit` API-credential setters (`set_reddit_api`,
+//! `reddit_api_client_id`), and the emission helpers every mutation ends
+//! with.
+//!
+//! Heads reach storage only through these methods. The raw `storage()`
+//! accessor exists only under the `test-support` feature, which test code
+//! enables through `[dev-dependencies]`, so a production head that
+//! bypasses the facade does not compile. (Builds that include test
+//! targets unify that feature into every head; `just check-prod` — a CI
+//! step — type-checks libs + bins alone so the bypass is caught per
+//! commit.)
 
 mod articles;
 mod destinations;
@@ -27,6 +35,7 @@ mod feeds;
 mod imports;
 mod maintenance;
 mod refresh;
+mod settings;
 mod state;
 
 use std::collections::{BTreeMap, HashMap};
@@ -89,6 +98,13 @@ pub enum CoreError {
     UnknownDestination {
         /// The name that was looked up.
         name: String,
+    },
+    /// The settings key is owned by the facade (the `"destinations"`
+    /// registry) and cannot be read or written as a raw value.
+    #[error("the {key:?} settings key is facade-owned — use the destination operations")]
+    ReservedSettingKey {
+        /// The refused key.
+        key: String,
     },
     /// A row referenced by the caller does not exist.
     #[error("{entity} not found")]
@@ -304,7 +320,11 @@ impl CoreHandle {
         &self.profile_dir
     }
 
-    /// The storage facade, for read paths the facade does not wrap.
+    /// The raw storage layer, for tests that seed or inspect rows the
+    /// facade deliberately does not expose (e.g. inserting an article
+    /// without a fetch). Test-only: compiled in by the `test-support`
+    /// feature, which no production build enables.
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn storage(&self) -> &Storage {
         &self.storage

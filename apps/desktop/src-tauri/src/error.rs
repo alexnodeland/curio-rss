@@ -122,7 +122,7 @@ impl From<CoreError> for CommandError {
                 Self::user(ErrorCode::UnknownDestination, error.to_string(), true)
             }
             CoreError::Fetch(_) => Self::user(ErrorCode::Network, error.to_string(), true),
-            CoreError::InvalidUrl { .. } => {
+            CoreError::InvalidUrl { .. } | CoreError::ReservedSettingKey { .. } => {
                 Self::user(ErrorCode::InvalidInput, error.to_string(), true)
             }
             CoreError::RateLimited { .. } | CoreError::RedditAuth { .. } => {

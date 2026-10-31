@@ -65,7 +65,7 @@ fn untag_article_impl(core: &CoreHandle, article_id: i64, tag: &str) -> Result<b
 }
 
 fn list_tags_impl(core: &CoreHandle) -> Result<Vec<String>, CommandError> {
-    Ok(core.storage().list_tags()?)
+    Ok(core.list_tags()?)
 }
 
 #[cfg(test)]

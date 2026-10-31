@@ -112,7 +112,7 @@ pub fn generate(dir: impl AsRef<Path>, spec: &FixtureSpec) -> Result<FixtureRepo
     // drop) before we take the file over ourselves.
     let db_path = {
         let handle = CoreHandle::open(dir)?;
-        handle.storage().path().to_path_buf()
+        handle.db_path().to_path_buf()
     };
     // Remove the events scaffolding the open created — the fixture is one file.
     remove_path(&dir.join(".curio"))?;
@@ -522,7 +522,7 @@ mod tests {
         let report = generate(dir.path(), &small()).unwrap();
         let handle = CoreHandle::open(dir.path()).unwrap();
         assert_eq!(
-            handle.storage().count_articles().unwrap(),
+            handle.count_articles().unwrap(),
             u64::try_from(report.articles).unwrap()
         );
         assert_eq!(handle.list_feeds().unwrap().len(), report.feeds);
@@ -538,7 +538,7 @@ mod tests {
         // curio_id round-tripped through the storage layer (valid v7).
         assert_ne!(page[0].content.text, "");
         // FTS index was built by the insert triggers.
-        let hits = handle.storage().search_articles("signal", 10).unwrap();
+        let hits = handle.search_articles("signal", 10).unwrap();
         assert!(!hits.is_empty(), "FTS should find a corpus token");
         // Backend-owned unread counts have real signal (not all-unread).
         let unread = handle.unread_counts().unwrap();

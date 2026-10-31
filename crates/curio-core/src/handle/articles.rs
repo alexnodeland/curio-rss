@@ -1,4 +1,5 @@
-//! Articles: listing, lookup, hydration, single-URL save, search.
+//! Articles: listing, lookup, hydration, single-URL save, search,
+//! counting, deletion, and the tag vocabulary.
 
 use std::collections::BTreeMap;
 
@@ -359,6 +360,36 @@ impl CoreHandle {
     /// Storage errors.
     pub fn search_articles(&self, query: &str, limit: u32) -> Result<Vec<Article>, CoreError> {
         Ok(self.storage.search_articles(query, limit)?)
+    }
+
+    /// How many articles are stored in total.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn count_articles(&self) -> Result<u64, CoreError> {
+        Ok(self.storage.count_articles()?)
+    }
+
+    /// Deletes an article (state, tags, and the FTS index entry go with
+    /// it via cascade + trigger). DB-local, no contract event.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::Storage`] wrapping `NotFound` if the article does not
+    /// exist; storage errors.
+    pub fn delete_article(&self, id: ArticleId) -> Result<(), CoreError> {
+        Ok(self.storage.delete_article(id)?)
+    }
+
+    /// Every known tag name, sorted — the tag vocabulary for pickers and
+    /// autocomplete.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn list_tags(&self) -> Result<Vec<String>, CoreError> {
+        Ok(self.storage.list_tags()?)
     }
 
     /// The article's current flag projection.

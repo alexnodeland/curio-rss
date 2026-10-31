@@ -51,7 +51,7 @@ struct NotifyPrefs {
 
 impl NotifyPrefs {
     fn read(core: &CoreHandle) -> Self {
-        let get = |key: &str| core.storage().get_setting(key).ok().flatten();
+        let get = |key: &str| core.get_setting(key).ok().flatten();
         // Per-event flags default ON (once master is enabled); master defaults OFF.
         let flag = |key: &str| get(key).is_none_or(|value| value != "false");
         Self {

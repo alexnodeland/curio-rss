@@ -3,12 +3,12 @@
  * App-updates controls for Settings → General: the running version, a manual
  * "Check for updates" with inline status, an "Install and restart" flow with
  * download progress, and the auto-check / auto-install toggles (persisted on
- * the uiStore). The updater runs only in the packaged app — in the dev browser
+ * the prefsStore). The updater runs only in the packaged app — in the dev browser
  * the plugin calls throw and the flow lands on the error state, which is fine.
  */
 import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
-import { uiStore } from '$lib/state/ui.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
 import { type Update, checkForUpdate, installAndRelaunch } from '$lib/utils/updates';
 
 type Status =
@@ -86,8 +86,8 @@ async function install(update: Update): Promise<void> {
     <label class="toggle">
         <input
             type="checkbox"
-            checked={uiStore.updatesAutoCheck}
-            onchange={(event) => void uiStore.setUpdatesAutoCheck(event.currentTarget.checked)}
+            checked={prefsStore.updatesAutoCheck}
+            onchange={(event) => void prefsStore.setUpdatesAutoCheck(event.currentTarget.checked)}
         />
         <span class="toggle-text">
             <span class="toggle-label">{t('settings.updates.autoCheck')}</span>
@@ -96,9 +96,9 @@ async function install(update: Update): Promise<void> {
     <label class="toggle">
         <input
             type="checkbox"
-            checked={uiStore.updatesAutoInstall}
-            disabled={!uiStore.updatesAutoCheck}
-            onchange={(event) => void uiStore.setUpdatesAutoInstall(event.currentTarget.checked)}
+            checked={prefsStore.updatesAutoInstall}
+            disabled={!prefsStore.updatesAutoCheck}
+            onchange={(event) => void prefsStore.setUpdatesAutoInstall(event.currentTarget.checked)}
         />
         <span class="toggle-text">
             <span class="toggle-label">{t('settings.updates.autoInstall')}</span>

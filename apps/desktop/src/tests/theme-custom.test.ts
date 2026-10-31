@@ -7,7 +7,7 @@ import { settingsStore } from '$lib/state/settings.svelte';
  * add/remove/init lifecycle injects the rule, persists the JSON array,
  * re-validates on load, and falls back when the active theme is deleted.
  */
-import { UiStore } from '$lib/state/ui.svelte';
+import { ThemeStore } from '$lib/state/theme.svelte';
 import { readComputedTokens } from '$lib/utils/theme-dom';
 import {
     CURIO_BASE_TOKENS,
@@ -74,7 +74,7 @@ describe('theme round-trip', () => {
     });
 });
 
-describe('UiStore — custom themes', () => {
+describe('ThemeStore — custom themes', () => {
     let harness: IpcHarness | null = null;
 
     afterEach(() => {
@@ -91,7 +91,7 @@ describe('UiStore — custom themes', () => {
 
     it('addCustomTheme injects the rule and persists the JSON array', async () => {
         harness = installIpcHarness({ set_setting: null });
-        const ui = new UiStore();
+        const ui = new ThemeStore();
 
         await ui.addCustomTheme(themeFixture());
 
@@ -106,7 +106,7 @@ describe('UiStore — custom themes', () => {
 
     it('removeCustomTheme falls back to system when it was active', async () => {
         harness = installIpcHarness({ set_setting: null });
-        const ui = new UiStore();
+        const ui = new ThemeStore();
         await ui.addCustomTheme(themeFixture());
         await ui.setThemePreference('custom-ocean');
         expect(ui.resolvedTheme).toBe('custom-ocean');
@@ -127,7 +127,7 @@ describe('UiStore — custom themes', () => {
         });
         await settingsStore.load();
 
-        const ui = new UiStore();
+        const ui = new ThemeStore();
         ui.initCustomThemes();
 
         expect(ui.customThemes.map((theme) => theme.id)).toEqual(['ocean']);
@@ -139,7 +139,7 @@ describe('UiStore — custom themes', () => {
         });
         await settingsStore.load();
 
-        const ui = new UiStore();
+        const ui = new ThemeStore();
         ui.initCustomThemes();
 
         expect(ui.customThemes).toHaveLength(0);

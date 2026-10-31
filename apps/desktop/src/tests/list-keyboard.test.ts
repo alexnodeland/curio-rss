@@ -9,7 +9,6 @@ import { articlesStore } from '$lib/state/articles.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -20,6 +19,7 @@ import {
     flushIpc,
     installIpcHarness,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 const ARTICLES = Array.from({ length: 6 }, (_, index) =>
     articleSummaryFixture({ id: 2000 + index, title: `Article ${index}` }),
@@ -48,7 +48,7 @@ describe('list keyboard navigation', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         menuStore.reset();
         installed?.teardown();
         installed = null;

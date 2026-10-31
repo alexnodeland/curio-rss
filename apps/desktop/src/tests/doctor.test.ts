@@ -4,7 +4,7 @@
  * Each button is a thin command call whose outcome becomes a toast.
  */
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -16,6 +16,7 @@ import {
     installIpcHarness,
     pathTokenFixture,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function harnessResponders(overrides: Record<string, Responder> = {}): Record<string, Responder> {
     return {
@@ -35,7 +36,7 @@ describe('DoctorPanel', () => {
 
     afterEach(() => {
         cleanup();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -57,7 +58,7 @@ describe('DoctorPanel', () => {
         await flushIpc();
 
         expect(harness.callsFor('integrity_check')).toHaveLength(1);
-        expect(uiStore.toasts.at(-1)?.message).toBe('Integrity check passed');
+        expect(toastStore.toasts.at(-1)?.message).toBe('Integrity check passed');
     });
 
     it('sweeps event retention and reports the removed count', async () => {
@@ -68,7 +69,7 @@ describe('DoctorPanel', () => {
         await fireEvent.click(getByText('Sweep old event logs'));
         await flushIpc();
 
-        expect(uiStore.toasts.at(-1)?.message).toBe('Removed 2 old log files');
+        expect(toastStore.toasts.at(-1)?.message).toBe('Removed 2 old log files');
     });
 
     it('copies a diagnostics bundle and names the path', async () => {
@@ -80,6 +81,6 @@ describe('DoctorPanel', () => {
         await flushIpc();
 
         expect(harness.callsFor('copy_diagnostics_bundle')).toHaveLength(1);
-        expect(uiStore.toasts.at(-1)?.message).toContain('/cache/curio/diagnostics/bundle');
+        expect(toastStore.toasts.at(-1)?.message).toContain('/cache/curio/diagnostics/bundle');
     });
 });

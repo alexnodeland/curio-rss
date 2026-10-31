@@ -6,9 +6,9 @@
  */
 import ArticleList, { ROW_HEIGHT } from '$components/articles/ArticleList.svelte';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import {
     flushIpc,
     installIpcHarness,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 const ARTICLES = Array.from({ length: 12 }, (_, index) =>
     articleSummaryFixture({ id: 1000 + index, title: `Article ${index}` }),
@@ -57,14 +58,14 @@ describe('mark-on-scroll', () => {
         resetQueryCache();
         articlesStore.reset();
         selectionStore.reset();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
 
     it('marks rows read as they scroll past the top when enabled', async () => {
         harness = harnessWithArticles();
-        uiStore.markOnScroll = true;
+        prefsStore.markOnScroll = true;
         const { container } = render(ArticleList);
         await flushIpc();
         await tick();
@@ -84,7 +85,7 @@ describe('mark-on-scroll', () => {
 
     it('touches nothing while the setting is off', async () => {
         harness = harnessWithArticles();
-        uiStore.markOnScroll = false;
+        prefsStore.markOnScroll = false;
         const { container } = render(ArticleList);
         await flushIpc();
         await tick();

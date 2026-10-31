@@ -8,10 +8,10 @@ import { articlesStore } from '$lib/state/articles.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, flushIpc, installIpcHarness, unreadCountsFixture } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function emptyHarness(): IpcHarness {
     return installIpcHarness({
@@ -31,7 +31,7 @@ describe('ListPane — unread-only toggle', () => {
         articlesStore.reset();
         selectionStore.reset();
         searchStore.reset();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });

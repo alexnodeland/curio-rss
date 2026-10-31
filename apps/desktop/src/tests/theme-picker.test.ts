@@ -1,5 +1,5 @@
 /**
- * The theme picker wires the built-in themes into `uiStore.setThemePreference`
+ * The theme picker wires the built-in themes into `themeStore.setThemePreference`
  * (persist + apply the DOM attribute), and drives the WP6 custom-theme flows:
  * importing a validated `.yaml` theme applies + persists it, exporting serializes
  * the active theme — both through the PathToken commands, so no raw path ever
@@ -7,11 +7,13 @@
  */
 import ThemePicker from '$components/common/ThemePicker.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { themeStore } from '$lib/state/theme.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { CURIO_BASE_TOKENS, type CustomTheme, serializeTheme } from '$lib/utils/theme-format';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, flushIpc, installIpcHarness, pathTokenFixture } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function validThemeYaml(id = 'ocean', name = 'Ocean'): string {
     const tokens: Record<string, string> = {};
@@ -30,7 +32,7 @@ describe('ThemePicker', () => {
 
     afterEach(() => {
         cleanup();
-        uiStore.reset();
+        resetUiStores();
         settingsStore.reset();
         harness?.teardown();
         harness = null;
@@ -51,7 +53,7 @@ describe('ThemePicker', () => {
         await fireEvent.click(getByLabelText('Use the Nord theme'));
         await flushIpc();
 
-        expect(uiStore.themePreference).toBe('nord');
+        expect(themeStore.themePreference).toBe('nord');
         expect(document.documentElement.getAttribute('data-theme')).toBe('nord');
         expect(harness.callsFor('set_setting')).toEqual([{ key: 'ui.theme', value: 'nord' }]);
     });
@@ -79,8 +81,8 @@ describe('ThemePicker', () => {
         await fireEvent.click(getByText('Import theme…'));
         await settle();
 
-        expect(uiStore.customThemes.map((theme) => theme.id)).toEqual(['ocean']);
-        expect(uiStore.themePreference).toBe('custom-ocean');
+        expect(themeStore.customThemes.map((theme) => theme.id)).toEqual(['ocean']);
+        expect(themeStore.themePreference).toBe('custom-ocean');
         expect(document.documentElement.getAttribute('data-theme')).toBe('custom-ocean');
 
         const writes = harness.callsFor('set_setting');
@@ -103,8 +105,8 @@ describe('ThemePicker', () => {
         await fireEvent.click(getByText('Import theme…'));
         await settle();
 
-        expect(uiStore.customThemes).toHaveLength(0);
-        expect(uiStore.toasts.some((toast) => toast.tone === 'error')).toBe(true);
+        expect(themeStore.customThemes).toHaveLength(0);
+        expect(toastStore.toasts.some((toast) => toast.tone === 'error')).toBe(true);
     });
 
     it('exports the active theme through the PathToken flow', async () => {

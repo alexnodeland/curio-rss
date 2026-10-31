@@ -17,7 +17,7 @@ import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 
 // The home layout only applies when a single YouTube/Reddit-typed feed is
 // selected (not "All articles" — a mixed corpus has no one home page).
@@ -30,7 +30,7 @@ const homeType = $derived.by(() => {
     return feed === undefined ? null : feedHomeType(feed.url);
 });
 
-const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
+const homeOn = $derived(homeType !== null && layoutStore.isHomeLayout(homeType));
 </script>
 
 <div class="list-pane">
@@ -61,7 +61,7 @@ const homeOn = $derived(homeType !== null && uiStore.isHomeLayout(homeType));
                 aria-pressed={homeOn}
                 use:tooltip={{ text: homeOn ? t('list.view.rows') : t('list.view.home') }}
                 aria-label={homeOn ? t('list.view.rows') : t('list.view.home')}
-                onclick={() => void uiStore.setHomeLayout(homeType, !homeOn)}
+                onclick={() => void layoutStore.setHomeLayout(homeType, !homeOn)}
             >
                 <Icon name={homeOn ? 'rows' : 'grid'} />
             </button>

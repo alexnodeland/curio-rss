@@ -9,7 +9,7 @@
 import { type RedditApiStatusDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { openExternal } from '$lib/utils/external';
 
 let status = $state<RedditApiStatusDto | null>(null);
@@ -41,9 +41,9 @@ async function save(): Promise<void> {
         status = result.data;
         clientId = '';
         clientSecret = '';
-        uiStore.showToast(t('settings.redditApi.saved'), 'success');
+        toastStore.showToast(t('settings.redditApi.saved'), 'success');
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         busy = false;
     }
@@ -61,9 +61,9 @@ async function remove(): Promise<void> {
             return;
         }
         status = result.data;
-        uiStore.showToast(t('settings.redditApi.removed'), 'success');
+        toastStore.showToast(t('settings.redditApi.removed'), 'success');
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         busy = false;
     }

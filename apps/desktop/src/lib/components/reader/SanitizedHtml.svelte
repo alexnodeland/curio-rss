@@ -52,7 +52,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
 import { openExternal } from '$lib/utils/external';
-import { uiStore } from '$lib/state/ui.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
 import { loadCachedImage } from '$lib/utils/images';
 
 let { html }: { html: string } = $props();
@@ -66,7 +66,7 @@ let offImageCount = $state(0);
 
 /** Show the "images are off" nudge only when this article actually hides some. */
 const showMediaHint = $derived(
-    !uiStore.mediaPrefetch && offImageCount > 0 && !uiStore.mediaHintDismissed,
+    !prefsStore.mediaPrefetch && offImageCount > 0 && !prefsStore.mediaHintDismissed,
 );
 
 /**
@@ -78,7 +78,7 @@ const showMediaHint = $derived(
  */
 $effect(() => {
     void clean; // re-run when the sanitized body changes
-    const on = uiStore.mediaPrefetch;
+    const on = prefsStore.mediaPrefetch;
     const root = contentEl;
     if (root === undefined) {
         return;
@@ -159,7 +159,7 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
         <button
             class="media-hint-enable"
             type="button"
-            onclick={() => void uiStore.setMediaPrefetch(true)}
+            onclick={() => void prefsStore.setMediaPrefetch(true)}
         >
             {t('reader.imagesOff.enable')}
         </button>
@@ -167,7 +167,7 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
             class="media-hint-dismiss"
             type="button"
             aria-label={t('toast.dismiss')}
-            onclick={() => uiStore.dismissMediaHint()}
+            onclick={() => prefsStore.dismissMediaHint()}
         >
             <Icon name="close" size={14} />
         </button>

@@ -98,29 +98,34 @@ describe('query cache', () => {
         expect(query.loaded).toBe(true);
     });
 
-    it('whenLoaded on a brand-new entry resolves with its data', async () => {
-        const query = ensureQuery('destinations', () =>
-            Promise.resolve({ status: 'ok' as const, data: ['vault'] }),
-        );
+    it('whenLoaded on a brand-new entry resolves with its data in one fetch', async () => {
+        const fetcher = countingFetcher(() => ['vault']);
+        const query = ensureQuery('destinations', fetcher.fetch);
         // No flush: the creation refetch is still only a queued microtask.
         await query.whenLoaded();
         expect(query.loaded).toBe(true);
         expect(query.data).toEqual(['vault']);
+        // The queued creation load reuses the fetch whenLoaded started.
+        await flushIpc();
+        expect(fetcher.calls()).toBe(1);
     });
 
-    it('whenLoaded waits past a superseded refetch for the one that lands', async () => {
+    it('whenLoaded keeps waiting when a newer refetch supersedes the one it awaits', async () => {
         const pending: ((value: CommandResult<string>) => void)[] = [];
         const query = ensureQuery(
             'feeds',
             () => new Promise<CommandResult<string>>((resolve) => pending.push(resolve)),
         );
         await flushIpc(); // the creation refetch is now in flight (pending[0])
-        void query.refetch(); // supersedes it (pending[1])
 
         let settled = false;
+        // whenLoaded starts awaiting pending[0] before anything supersedes it.
         const waiting = query.whenLoaded().then(() => {
             settled = true;
         });
+        void query.refetch(); // supersedes it (pending[1])
+        expect(pending).toHaveLength(2);
+
         pending[0]({ status: 'ok', data: 'stale' });
         await flushIpc();
         expect(settled).toBe(false); // the superseded result landed nothing
@@ -128,6 +133,7 @@ describe('query cache', () => {
 
         pending[1]({ status: 'ok', data: 'fresh' });
         await waiting;
+        expect(settled).toBe(true);
         expect(query.data).toBe('fresh');
     });
 

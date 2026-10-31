@@ -53,13 +53,22 @@ export class Query<T> {
     }
 
     /**
+     * Starts the first fetch unless one has already begun, and returns the
+     * newest fetch's promise — so the creation load and an early `whenLoaded`
+     * share one fetch instead of racing two.
+     */
+    start(): Promise<void> {
+        return this.#latest ?? this.refetch();
+    }
+
+    /**
      * Resolves once a fetch has settled (`loaded`), starting one if none is in
      * flight. A superseded refetch resolves without landing anything, so this
      * keeps awaiting the newest one rather than trusting the first to finish.
      */
     async whenLoaded(): Promise<void> {
         while (!this.loaded) {
-            await (this.#latest ?? this.refetch());
+            await this.start();
         }
     }
 
@@ -119,8 +128,10 @@ export function ensureQuery<T>(
         const created = new Query(key, fetcher, scope);
         registry.set(key, created as Query<unknown>);
         // Deferred a microtask so a fetcher may close over state its owner
-        // finishes constructing after `ensureQuery` returns.
-        queueMicrotask(() => void created.refetch());
+        // finishes constructing after `ensureQuery` returns. `start`, not
+        // `refetch`: a `whenLoaded` that already kicked the first fetch off is
+        // reused rather than superseded by a second IPC round-trip.
+        queueMicrotask(() => void created.start());
         return created;
     });
 }

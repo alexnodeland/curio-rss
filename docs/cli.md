@@ -13,7 +13,20 @@ future head.
   write commands return the changed/unchanged result). Parse, don't scrape.
 - Diagnostics go to stderr, driven by `RUST_LOG` (e.g.
   `RUST_LOG=curio_core=debug curio fetch`).
-- Errors exit non-zero with a one-line `error: …` on stderr.
+- Errors exit non-zero with a one-line `error: …` on stderr: status **75**
+  (`EX_TEMPFAIL`) when another Curio process — the desktop app, another cron
+  job — kept the profile busy past the wait (nothing is wrong; retry later),
+  **1** for every other failure.
+- The CLI and the desktop app can run on one profile at the same time: state
+  changes and the event log are serialized between them (an event is never
+  lost, and lines never interleave; a rare duplicate line can appear, which
+  consumers drop by `event_id`). Two things are **not process-safe yet**
+  ([#234](https://github.com/alexnodeland/curio-rss/issues/234)): a
+  destination removed in the desktop app comes back on the next CLI command
+  if `curio.toml` still lists it, and adding or removing a destination in one
+  head while the other is open can undo the other's change (restart the app
+  after `curio dest add`). Refreshing the same feed from both heads at
+  once is harmless but can cost one extra full download.
 
 ## Commands at a glance
 
@@ -30,6 +43,7 @@ future head.
 | `curio dest add <name> <path>` | Register a save destination |
 | `curio save <id> --dest <name>` | Export a note per `curio.frontmatter.v1` |
 | `curio import <file> --from <service>` | Import subscriptions + saved articles from a third-party export (idempotent) |
+| `curio reddit login\|status\|logout` | Manage the optional BYO Reddit API credentials (OS keychain, per profile) |
 | `curio events tail [-n N]` | Watch the behavioral event stream |
 | `curio doctor` | DB integrity, FTS sync, events-log health |
 
@@ -51,9 +65,11 @@ All state lives in one profile directory:
 |------|----------|
 | `curio.toml` | human-editable configuration (below) |
 | `curio.db` | WAL SQLite: feeds, articles, state, FTS index |
-| `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (two newest kept; see [Upgrades and backups](#upgrades-and-backups)) |
+| `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (the latest one plus the highest-numbered other kept; see [Upgrades and backups](#upgrades-and-backups)) |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
-| `.curio/.gitignore` | scaffolded so the events log is never committed |
+| `.curio/events.lock` | the lock that lets several Curio processes share the events log (holds no data; safe to ignore, never commit) |
+| `.curio/.gitignore` | scaffolded so the events log and its lock file are never committed |
+| `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
 | `set-aside/<timestamp>/` | databases the desktop recovery screen moved out of the way (never deleted; see [Upgrades and backups](#upgrades-and-backups)) |
 
 The default location is the platform data directory —
@@ -115,11 +131,16 @@ curio fetch                 # refresh every active feed
 curio fetch example.com     # or just one
 ```
 
-`fetch` reports per-feed status and new/updated article counts. The
+`fetch` reports per-feed status and new/updated article counts —
+"updated" counts only entries that actually changed; a feed re-listing
+identical items reports `0 updated` and rewrites no articles. The
 engine does conditional GET (ETag/Last-Modified preserved on every error
 path), honors permanent redirects, auto-pauses a feed forever on HTTP 410,
 and stores only sanitized content — raw feed HTML never reaches the
-database.
+database. An article whose full text was loaded (load-full, a feed's
+full-text mode, or Reddit enrichment) keeps that body: later refreshes of
+a feed still listing the item update its title and metadata, never revert
+it to the feed's excerpt.
 
 ```sh
 curio opml import subscriptions.opml   # folders become tags; known URLs skipped
@@ -143,6 +164,26 @@ politeness delay — so `curio fetch` of a subreddit `.rss` works out of the box
 This override is hard-coded in the engine (not a `curio.toml` knob) and is
 disclosed in [PRIVACY.md](../PRIVACY.md); every other host keeps rustls + the
 honest `curio/<version>` UA and the default 500 ms delay.
+
+**Reddit API credentials (optional).** Reddit enrichment works
+unauthenticated, slowly. Bring your own free app from reddit.com/prefs/apps
+(type "script") and Curio uses the authenticated API at the faster tier:
+
+```sh
+curio reddit login --client-id <id>   # reads the secret from stdin (keeps it out of shell history)
+curio reddit status                   # configured? and the client id — never the secret
+curio reddit logout                   # remove them; back to unauthenticated
+```
+
+The credentials live in the OS keychain, **one item per profile**: `--profile`
+(or `CURIO_PROFILE`) selects whose app a command — including a cron
+`curio fetch` — uses, and two profiles can hold different apps. Note that the
+CLI's default profile is not the desktop app's, so credentials saved in the
+app are not seen by a bare `curio fetch` unless you point `--profile` at the
+app's profile directory. The keychain item is keyed by the id in
+`.curio/profile-id`, so moving a profile directory keeps its credentials.
+Upgrading from 0.4.x, the old shared item is copied into each profile the
+first time it opens; `reddit logout` removes it.
 
 ## Reading
 
@@ -198,7 +239,64 @@ rename. Export is idempotent on `(curio_id, checksum)`:
 - content changed since → `updated`, emits `article.updated`, replaces
   only the frontmatter machine keys and the managed region — everything
   you wrote outside the markers survives byte-for-byte
-- unchanged → `unchanged`, writes nothing, emits nothing
+- unchanged → `unchanged`, writes nothing, emits nothing; if the note on
+  disk is blank (emptied by a crash or a sync tool) it is quietly
+  rewritten, and if it no longer parses as a Curio note (frontmatter or
+  markers edited away, or bytes that are not even UTF-8) the save fails
+  with a parse error instead of claiming it is intact
+
+Bulk saves (`curio save --all --dest vault`, or a filter such as
+`--read-later`) run every article through the same steps and stop at the
+first one that fails — including a note that no longer parses, even if
+its content has not changed. Notes saved before it stay saved; repair or
+delete the offending note and re-run (already-exported notes come back
+`unchanged`).
+
+Notes land at `curio/<slug>.md`, where the slug is the title lowercased,
+NFC-normalized and dash-separated, capped at 100 bytes so the name fits
+every filesystem's 255-byte limit even with a dedup suffix
+(`<slug>-<id prefix>.md` when another article already owns the name — in
+the manifest, or because the note already on disk there belongs to a
+different `curio_id`). Titles that would be a Windows device name (`con`,
+`nul`, `com1`, …) get a `-note` suffix. Every write is flushed to disk
+(`fsync` on the file and its directory) before the manifest records it,
+and a failed write leaves no temp file behind. On filesystems that cannot
+flush at all (some network shares, exFAT, FUSE mounts) the flush is
+skipped rather than failing the save.
+
+The manifest is a file in your folder, so Curio never trusts it alone:
+
+- **A note is only rewritten for the article it belongs to** — the
+  note's own frontmatter `curio_id` decides. If the manifest was lost,
+  reset or restored from an old commit, a second "Weekly links" article
+  gets `curio/weekly-links-<id-prefix>.md` instead of taking over the first
+  one's note, and a file of your own at a slug path is never touched
+  (a blank one — empty or whitespace only — holds nothing to keep, so it
+  counts as free).
+  An article whose own note is already there is reconciled onto it and
+  reported as `updated` (never a second `created`).
+- **One export per destination at a time**, across threads and processes
+  (the CLI next to the desktop app): exports queue on an advisory lock,
+  `.curio/manifest.lock` (gitignored, never deleted — it holds no data).
+  An `unchanged` export writes nothing and takes no lock, so it works on
+  a read-only folder too; on a network or FUSE mount without advisory
+  locks Curio warns and serializes within its own process only.
+- **A vanished vault is refused, not recreated.** If the destination
+  folder is gone — or, once it has been exported to, its `.curio/` folder
+  is — `save` fails with "destination folder … is missing" instead of
+  re-exporting everything into an empty folder at the old path. Every
+  command re-applies `curio.toml`'s destinations, but that never
+  recreates such a folder. Reconnect the drive, or run `curio dest add
+  <name> <path>` again (new or same path) to start the destination
+  afresh; changing a destination's path in `curio.toml` does the same.
+- **Sync-tool conflict copies** of the manifest (`manifest (conflicted
+  copy).json`, iCloud's `manifest 2.json`, Syncthing's
+  `manifest.sync-conflict-….json`, OneDrive's `manifest-HOSTNAME.json`)
+  are merged back on the next export — union of the entries, the newest
+  `exported_at` wins — and then removed. If the union gives one note path
+  to two articles, the note's own `curio_id` keeps its entry; the other
+  article gets a path of its own on its next export. Other files in
+  `.curio/` (a `manifest.backup.json` of your own) are never touched.
 
 ## Events
 
@@ -223,20 +321,27 @@ curio doctor [--json]
 Health probes over the durable surfaces, exit code 1 if any fail:
 schema version, `PRAGMA integrity_check`, FTS5-index/content sync,
 events-log parseability, the events `.gitignore` scaffold, staged
-event intents (a non-empty set means a crash interrupted emission; the
-next open replays them), and quarantined intents (`dead-intents`: staged
-rows whose envelope no longer decoded — they are moved to `curio.db`'s
-`event_intents_dead` table so they stop blocking every open and emit,
-and their events never reached the log).
+event intents (a non-empty set means emission was interrupted — a crash,
+or a flush that failed on a full disk or an unwritable events directory;
+the change itself is already stored, and the next command, or the next
+open, replays the staged events into the log), and quarantined intents
+(`dead-intents`: staged rows whose envelope no longer decoded — they are
+moved to `curio.db`'s `event_intents_dead` table so they stop blocking
+every open and emit, and their events never reached the log).
 
 ## Upgrades and backups
 
 Opening a profile whose database was written by an older Curio upgrades
 it in place, after first writing a consistent snapshot next to it:
 `curio.db.pre-vN.bak`, where `N` is the schema version being upgraded
-to (the two newest are kept). The upgrade runs as one transaction: if
-any step fails, the database stays exactly at its old version and the
-open fails with a message naming the backup. A database written by a
+to (the one just written and the highest-numbered other are kept — a
+rollback to an older build never prunes its own fresh backup). The
+upgrade runs as one transaction: if any step fails, the database stays
+exactly at its old version and the open fails with a message naming the
+backup. Two Curio processes upgrading the same profile at once (the
+desktop app and a scheduled `curio`) are safe: each writes its snapshot
+under its own temporary name, and the upgrade itself runs once, under
+the database's write lock. A database written by a
 *newer* Curio is refused untouched (update Curio instead), as is a file
 that is not a Curio database at all.
 

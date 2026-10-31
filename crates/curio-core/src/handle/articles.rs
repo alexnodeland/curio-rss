@@ -7,7 +7,9 @@ use curio_types::Timestamp;
 
 use crate::content;
 use crate::fetch::FetchRequest;
-use crate::model::{Article, ArticleContent, ArticleId, ArticleState, FeedId, NewArticle};
+use crate::model::{
+    Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, NewArticle,
+};
 use crate::storage::ListArticles;
 
 use super::{CoreError, CoreHandle, SavedUrl};
@@ -92,6 +94,7 @@ impl CoreHandle {
                 text: processed.text,
             },
             Some(processed.word_count),
+            ContentOrigin::FullText,
         )?;
         self.storage
             .get_article(id)?
@@ -200,7 +203,7 @@ impl CoreHandle {
         for tag in tags {
             self.storage.tag_article(id, tag)?;
         }
-        self.emit()?;
+        self.emit();
         self.storage
             .get_article(id)?
             .ok_or(CoreError::NotFound { entity: "article" })
@@ -346,6 +349,7 @@ impl CoreHandle {
             id,
             &ArticleContent { html, text },
             Some(word_count),
+            ContentOrigin::Enriched,
         )?;
         self.storage
             .get_article(id)?

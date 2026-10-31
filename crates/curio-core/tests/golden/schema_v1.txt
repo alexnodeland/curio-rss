@@ -56,7 +56,8 @@ CREATE TABLE articles (
     saved_at          TEXT    NOT NULL,
     source_updated_at TEXT,
     modified_at       TEXT    NOT NULL
-, lead_image TEXT)
+, lead_image TEXT, content_origin TEXT NOT NULL DEFAULT 'feed'
+    CHECK (content_origin IN ('feed', 'manual', 'full_text', 'enriched')))
 
 -- table articles_fts
 CREATE VIRTUAL TABLE articles_fts USING fts5(
@@ -88,7 +89,8 @@ CREATE TABLE event_intents (
 
 -- table event_intents_dead
 CREATE TABLE event_intents_dead (
-    id             INTEGER PRIMARY KEY,
+    dead_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    intent_id      INTEGER NOT NULL,
     event_id       TEXT NOT NULL,
     ts             TEXT NOT NULL,
     envelope_json  TEXT NOT NULL,
@@ -132,6 +134,9 @@ CREATE TABLE settings (
     value TEXT NOT NULL
 ) WITHOUT ROWID
 
+-- table sqlite_sequence
+CREATE TABLE sqlite_sequence(name,seq)
+
 -- table tags
 CREATE TABLE tags (
     id   INTEGER PRIMARY KEY,
@@ -151,7 +156,9 @@ CREATE TRIGGER articles_fts_ai AFTER INSERT ON articles BEGIN
 END
 
 -- trigger articles_fts_au
-CREATE TRIGGER articles_fts_au AFTER UPDATE OF title, content_text ON articles BEGIN
+CREATE TRIGGER articles_fts_au AFTER UPDATE OF title, content_text ON articles
+WHEN old.title IS NOT new.title OR old.content_text IS NOT new.content_text
+BEGIN
     INSERT INTO articles_fts(articles_fts, rowid, title, content_text)
     VALUES ('delete', old.id, old.title, old.content_text);
     INSERT INTO articles_fts(rowid, title, content_text)

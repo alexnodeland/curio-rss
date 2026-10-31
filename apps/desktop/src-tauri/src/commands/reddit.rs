@@ -50,11 +50,11 @@ pub async fn get_reddit_api_status(
     run_blocking(move || Ok(status_of(&core))).await
 }
 
-/// Startup: pull the keychain item (if any) into the running core.
-/// Best-effort — a locked/absent keychain backend degrades to the
+/// Startup: pull the profile's keychain item (if any) into the running
+/// core. Best-effort — a locked/absent keychain backend degrades to the
 /// unauthenticated tier with a log line, never a failed launch.
 pub fn load_credentials_at_startup(core: &CoreHandle) {
-    match secrets::load_reddit_api() {
+    match secrets::load_reddit_api(core.profile_dir()) {
         Ok(Some(secret)) => core.set_reddit_api(Some(RedditApiConfig::new(
             secret.client_id,
             secret.client_secret,
@@ -80,17 +80,20 @@ fn set_reddit_api_impl(
             "both the client id and the client secret are required",
         ));
     }
-    secrets::store_reddit_api(&RedditAppSecret {
-        client_id: client_id.clone(),
-        client_secret: client_secret.clone(),
-    })
+    secrets::store_reddit_api(
+        core.profile_dir(),
+        &RedditAppSecret {
+            client_id: client_id.clone(),
+            client_secret: client_secret.clone(),
+        },
+    )
     .map_err(|err| map_secrets(&err))?;
     core.set_reddit_api(Some(RedditApiConfig::new(client_id, client_secret)));
     Ok(status_of(core))
 }
 
 fn clear_reddit_api_impl(core: &CoreHandle) -> Result<RedditApiStatusDto, CommandError> {
-    secrets::clear_reddit_api().map_err(|err| map_secrets(&err))?;
+    secrets::clear_reddit_api(core.profile_dir()).map_err(|err| map_secrets(&err))?;
     core.set_reddit_api(None);
     Ok(status_of(core))
 }
@@ -117,6 +120,17 @@ mod tests {
     use crate::commands::testutil::temp_core;
     use crate::error::ErrorKind;
 
+    /// Drops `core` and reopens its profile the way the app launches:
+    /// open, then pull the keychain item.
+    fn restart(core: Arc<CoreHandle>) -> Arc<CoreHandle> {
+        let profile = core.profile_dir().to_path_buf();
+        // The test holds the only reference, so this closes the handle.
+        drop(core);
+        let fresh = CoreHandle::open(profile).unwrap();
+        load_credentials_at_startup(&fresh);
+        Arc::new(fresh)
+    }
+
     #[test]
     fn the_credential_round_trip_stays_secret_free_on_the_way_out() {
         curio_core::secrets::use_mock_store_for_tests();
@@ -128,10 +142,20 @@ mod tests {
         assert!(status.configured);
         assert_eq!(status.client_id.as_deref(), Some("cid123"));
 
-        // A restart-equivalent: the keychain item hydrates a fresh core.
-        let (_dir2, fresh) = temp_core();
-        load_credentials_at_startup(&fresh);
-        assert_eq!(fresh.reddit_api_client_id().as_deref(), Some("cid123"));
+        // A restart: the keychain item hydrates a fresh core on the same
+        // profile (the old handle is gone first — one handle per profile)…
+        let core = restart(core);
+        assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid123"));
+
+        // …but never a core on another profile, which can hold its own.
+        let (_dir2, other) = temp_core();
+        load_credentials_at_startup(&other);
+        assert!(other.reddit_api_client_id().is_none());
+        set_reddit_api_impl(&other, "cid456", "hush").unwrap();
+        let (core, other) = (restart(core), restart(other));
+        assert_eq!(core.reddit_api_client_id().as_deref(), Some("cid123"));
+        assert_eq!(other.reddit_api_client_id().as_deref(), Some("cid456"));
+        clear_reddit_api_impl(&other).unwrap();
 
         let cleared = clear_reddit_api_impl(&core).unwrap();
         assert!(!cleared.configured);

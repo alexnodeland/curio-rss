@@ -102,7 +102,7 @@ defense-in-depth, not the primary defense.
 - Numbered embedded migrations: forward-only, and the whole pending set runs in **one**
   `IMMEDIATE` transaction (a failing step leaves the file at its old version, never
   half-way). An existing database is first snapshotted with `VACUUM INTO` to
-  `curio.db.pre-vN.bak` (two newest kept) — no backup, no migration. Upgrade-tested
+  `curio.db.pre-vN.bak` (that one plus the highest-numbered other kept) — no backup, no migration. Upgrade-tested
   against fixture DBs written by every released version (`fixtures/db/`).
 - Opening is typed: `OpenError` separates corrupt / too-new / locked / IO / failed-backup /
   failed-migration so heads act on the class instead of parsing `SQLite` messages (the
@@ -112,8 +112,20 @@ defense-in-depth, not the primary defense.
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
+- Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
+  (`feed | manual | full_text | enriched`) records where the stored body came from; a
+  refresh upsert replaces only `feed`/`manual` bodies (hydrated or enriched text is never
+  reverted to the excerpt), skips rows already holding the incoming values (no
+  `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
+  `content_text` actually differ.
 - Network-filesystem guard (planned, #112): refuses to open the DB on
   Syncthing/iCloud/NFS-class mounts without an explicit override flag.
+- Fault containment: a panicking write job replies `JobPanicked`, its open transaction
+  is rolled back and the writer keeps serving; a panicking read still returns its pooled
+  connection, and a read that waits too long for one fails with `PoolTimeout` rather
+  than hanging. Lock contention with another process on the profile surfaces as the
+  typed, retryable `StorageError::Busy` (CLI exit status 75), never a bare
+  `sqlite error`.
 
 ### `events/` — event-sourced article state
 
@@ -127,10 +139,54 @@ same transaction. One mechanism serves three masters:
 3. The substrate for any future sync — server head, client mode, or file-based journal
    merge — as a deterministic merge problem instead of a retrofit.
 
+**Several heads on one profile** (the desktop app plus a CLI cron job) share the JSONL
+log safely: every drain — claim the staged intents, append, fsync, delete the intents —
+runs under an exclusive advisory lock on `.curio/events.lock` (beside the contract
+directory, never inside it), and starts by catching up with the other writers (heal a
+torn tail, adopt a file they rotated to, re-read the size counter). A staged intent is
+therefore drained by one process at a time, lines never interleave, and a heal never
+truncates another process's append in flight. A lock file deleted while in use is
+noticed (file identity is re-checked on every acquire) and re-created. A holder that
+keeps the lock past 15 s yields the typed, retryable `EventLogError::ProfileLocked`
+(at open; a mutation's drain treats it like any emission failure and leaves the
+events staged for the next drain).
+Delivery is **at-least-once**, as the contract already assumes: if deleting the drained
+intents fails after the fsync (a crash, or the database staying busy past its 5 s
+timeout because another process holds a long write), the next drain appends them again
+and consumers drop the duplicate by `event_id`.
+
+Not yet process-safe ([#234](https://github.com/alexnodeland/curio-rss/issues/234)):
+the destination registry is cached per process and written back whole, so one head's
+add/remove can undo another's (and the CLI's `curio.toml` reconcile re-adds a destination
+the desktop removed); and the per-feed refresh lock is in-process only.
+
 Cursor semantics are designed now (`events since <cursor>`) so the JSONL export, `curio
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.
 Envelope, event types, negation rule (ULID `event_id`, tags-in-payload, non-monotone
 histories) are fixed by [contracts-draft.md](contracts-draft.md).
+
+**Emission durability (as built).** Each state change commits together with a
+write-ahead *intent* row; the emitter then appends the envelope to the JSONL log,
+fsyncs, and only then deletes the intent — a crash can duplicate a line (consumers
+dedupe by `event_id`), never lose one. Three failure modes are closed explicitly:
+
+- *Power loss:* the writer connection runs `PRAGMA synchronous = FULL`, so a commit
+  that returned is on disk before its event is fsynced. Under WAL + `NORMAL` the
+  commit could roll back on power loss and leave an `article.starred` line whose
+  state change the database forgot, with no negation ever following. The cost is
+  one WAL fsync per mutation.
+- *Disk full / I/O error mid-append:* the log truncates back to its last whole
+  line and reopens through the torn-tail heal, so a retry never extends a partial
+  line; lines already appended in that batch are fsynced and retired, the rest
+  stay staged.
+- *Unwritable events directory:* a failed flush is not a failed mutation — the
+  change is stored, so the operation reports success, the handle raises its
+  pending-events flag (`CoreHandle::has_pending_events`), and the next mutation,
+  the desktop head's once-a-minute retry (`flush_pending_events`), or the next open
+  drains the backlog. `curio doctor` reports staged intents.
+
+Readers that must keep going past damage use `events::read_all_lenient`, which
+skips and reports invalid lines; `read_all` stays strict.
 
 ### `export/` — the strategic seam
 

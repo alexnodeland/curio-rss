@@ -68,8 +68,12 @@ url = { workspace = true }
 # Test seeding (`commands::testutil::seed_article`) needs the raw
 # storage accessor; production builds never see it.
 curio-core = { workspace = true, features = ["test-support"] }
-# Startup-recovery tests forge too-new and backed-up databases; already in
-# the graph via curio-core, so no new licenses to triage.
+# "Never panics" properties over discovery's pure extraction (arbitrary
+# bytes / multi-byte text); already a workspace dev-dependency.
+proptest = { workspace = true }
+# Builds the `SQLITE_BUSY` source of a `StorageError::Busy` for the
+# error-mapping tests, and forges too-new and backed-up databases for the
+# startup-recovery tests (already in the graph via curio-core).
 rusqlite = { workspace = true }
 specta-typescript = "=0.0.12"
 tempfile = { workspace = true }

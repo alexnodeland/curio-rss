@@ -11,7 +11,7 @@ import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,6 +24,7 @@ import {
     rejectWith,
     unreadCountsFixture,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 function twoFeedHarness(): IpcHarness {
     return installIpcHarness({
@@ -51,7 +52,7 @@ describe('Sidebar', () => {
         articlesStore.reset();
         selectionStore.reset();
         sidebarTreeStore.reset(); // the cursor now persists across blur (UX), so isolate it here
-        uiStore.reset();
+        resetUiStores();
         feedsStore.reset();
         harness?.teardown();
         harness = null;
@@ -163,7 +164,7 @@ describe('Sidebar — folder tree', () => {
         articlesStore.reset();
         selectionStore.reset();
         sidebarTreeStore.reset(); // the cursor now persists across blur (UX), so isolate it here
-        uiStore.reset();
+        resetUiStores();
         feedsStore.reset();
         menuStore.reset();
         feedDnd.clear();
@@ -383,7 +384,7 @@ describe('Sidebar — folder tree', () => {
 
         // The rename is refused (no tag rewrite) and a collision toast is shown.
         expect(harness.callsFor('set_feed_tags')).toHaveLength(0);
-        expect(uiStore.toasts.at(-1)?.tone).toBe('error');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('error');
     });
 
     it('Alt+↓ reorders the feed under the cursor within its group', async () => {

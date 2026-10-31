@@ -2,14 +2,15 @@
 //! workspace suite goes red the moment an edit un-pins an action, ungates the
 //! release, or widens the updater signing key's reach (issue #174) — or puts
 //! the nightly back on a retired runner, softens its gate, or stops it from
-//! running on the PRs that edit it (issue #175).
+//! running on the PRs that edit it (issue #175), or lets criterion keep the
+//! state that made the bench log unparseable (issue #185).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn workflows_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows")
+    xtask::paths::repo_root().unwrap().join(".github/workflows")
 }
 
 #[test]
@@ -45,7 +46,9 @@ fn no_workflow_uses_a_mutable_version_tag() {
 /// repo ships (actions, cargo, npm).
 #[test]
 fn dependabot_covers_actions_cargo_and_npm() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/dependabot.yml");
+    let path = xtask::paths::repo_root()
+        .unwrap()
+        .join(".github/dependabot.yml");
     let text = std::fs::read_to_string(&path).expect("read dependabot.yml");
     for ecosystem in ["github-actions", "cargo", "npm"] {
         assert!(
@@ -118,6 +121,59 @@ fn code_ahead_of_the_key_in_the_real_sign_job_is_flagged() {
             "`{step}`: {violations:#?}"
         );
     }
+}
+
+/// Dropping the real sign job's `environment:` (so the key would be read
+/// outside the tag-restricted, reviewer-gated `updater-signing` environment)
+/// fails the lint (issue #187).
+#[test]
+fn the_real_sign_job_must_keep_its_environment() {
+    let line = "    environment: ${{ github.event_name == 'push' && 'updater-signing' || '' }}\n";
+    assert_flagged(
+        &lint_release_edit(line, ""),
+        "job `sign` holds the signing key but declares no `environment:`",
+    );
+    // Selecting it unconditionally would hold the dispatch dry run at the
+    // tag-only deployment rule.
+    assert_flagged(
+        &lint_release_edit(line, "    environment: updater-signing\n"),
+        "always deploys to `updater-signing`",
+    );
+}
+
+/// Pins the committed sign job's text: its environment expression names
+/// `updater-signing` only on a tag push (empty, i.e. no environment,
+/// otherwise), and the key step and the throwaway-key step split on that same
+/// condition. A pin, not a proof — the lint rule itself is exercised in
+/// `xtask/src/workflows.rs`, and that GitHub really runs the dispatch dry run
+/// with no environment is checked by the post-merge dry run (runbook §2).
+#[test]
+fn the_real_dry_run_runs_outside_the_signing_environment() {
+    let dir = workflows_dir();
+    let release = std::fs::read_to_string(dir.join("release.yml")).expect("read release.yml");
+    let doc: serde_yaml::Value = serde_yaml::from_str(&release).expect("parse release.yml");
+    let sign = &doc["jobs"]["sign"];
+    assert_eq!(
+        sign["environment"].as_str(),
+        Some("${{ github.event_name == 'push' && 'updater-signing' || '' }}")
+    );
+    let conditions: Vec<(&str, &str)> = sign["steps"]
+        .as_sequence()
+        .expect("sign steps")
+        .iter()
+        .filter_map(|step| Some((step["name"].as_str()?, step["if"].as_str()?)))
+        .collect();
+    assert!(
+        conditions.contains(&("Sign the updater archive", "github.event_name == 'push'")),
+        "{conditions:#?}"
+    );
+    assert!(
+        conditions.contains(&(
+            "Sign with a throwaway key (dry run)",
+            "github.event_name != 'push'"
+        )),
+        "{conditions:#?}"
+    );
 }
 
 /// Lint the committed `ci.yml` + `release.yml` beside an edited copy of the
@@ -210,5 +266,55 @@ fn softening_the_real_nightly_is_flagged() {
             "          if-no-files-found: warn\n",
         ),
         "uploads without `if-no-files-found: error`",
+    );
+}
+
+/// The real bench runs criterion without state of its own (issue #185): put
+/// it back on its default, cached home or let it keep a baseline, and the
+/// lint fails — that is the shape that split the tracked line in two.
+#[test]
+fn a_stateful_criterion_in_the_real_bench_is_flagged() {
+    assert_flagged(
+        &lint_nightly_edit(
+            "        env:\n          CRITERION_HOME: ${{ runner.temp }}/criterion\n",
+            "",
+        ),
+        "job `bench` step 5 runs `cargo bench` without `CRITERION_HOME` on a `runner.temp` dir",
+    );
+    assert_flagged(
+        &lint_nightly_edit(" --noplot --discard-baseline", " --noplot"),
+        "runs `cargo bench` without `--discard-baseline`",
+    );
+    assert_flagged(
+        &lint_nightly_edit("          set -o pipefail\n", ""),
+        "pipes `cargo bench` without `set -o pipefail`",
+    );
+}
+
+/// The real bench log is checked before tracking, and the 130% alert stays a
+/// hard failure — the fix makes the result parseable, it never softens the
+/// gate.
+#[test]
+fn an_unchecked_or_soft_real_bench_is_flagged() {
+    assert_flagged(
+        &lint_nightly_edit(
+            "          cargo run -p xtask -- bench-output bench-output.txt\n",
+            "          echo skipped\n",
+        ),
+        "has no `xtask -- bench-output` step between the bench and the tracker",
+    );
+    assert_flagged(
+        &lint_nightly_edit(
+            "          --expect cold_start/open_and_first_page_50k\n",
+            "",
+        ),
+        "checks the bench log without `--expect <bench-id>`",
+    );
+    assert_flagged(
+        &lint_nightly_edit(
+            "          fail-on-alert: true\n",
+            "          fail-on-alert: false\n",
+        ),
+        "tracks the bench without `fail-on-alert: true`",
     );
 }

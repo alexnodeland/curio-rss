@@ -10,7 +10,7 @@ import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 
 let { articleId }: { articleId: number } = $props();
 
@@ -41,7 +41,7 @@ async function addTag(): Promise<void> {
         }
         draft = ''; // committed — clear for the next tag
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         adding = false;
     }
@@ -54,7 +54,7 @@ async function removeTag(tag: string): Promise<void> {
             toastCommandError(result.error);
         }
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 

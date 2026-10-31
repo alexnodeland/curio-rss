@@ -479,6 +479,73 @@ async fn bulk_save_exports_the_library_idempotently() {
         .failure();
 }
 
+/// Every CLI invocation re-applies curio.toml's destinations. That must
+/// never undo the missing-destination check: a vault that vanished (or an
+/// unmounted mount point that now looks empty) is refused, not recreated
+/// and fully re-exported — until `curio dest add` registers it afresh.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_vanished_vault_is_refused_not_recreated() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let vault = parent.path().join("vault");
+    seed(profile.path(), &server);
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let first = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(first["created"], 3);
+    let saved = |profile: &std::path::Path| {
+        events_lines(profile)
+            .iter()
+            .filter(|event| event["type"] == "article.saved")
+            .count()
+    };
+    assert_eq!(saved(profile.path()), 3);
+
+    // The folder is gone: refused, and nothing is recreated.
+    std::fs::remove_dir_all(&vault).unwrap();
+    curio(profile.path())
+        .args(["save", "--all", "--dest", "vault"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is missing"));
+    assert!(!vault.exists(), "the vault root must not be recreated");
+
+    // An empty folder at the old path (an unmounted mount point): refused
+    // too, and left empty.
+    std::fs::create_dir(&vault).unwrap();
+    curio(profile.path())
+        .args(["save", "--all", "--dest", "vault"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is missing"));
+    assert_eq!(std::fs::read_dir(&vault).unwrap().count(), 0);
+    assert_eq!(saved(profile.path()), 3, "no duplicate article.saved");
+
+    // Registering it again starts the destination afresh.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let afresh = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(afresh["created"], 3);
+    assert!(vault.join(".curio/manifest.json").is_file());
+}
+
 #[test]
 fn reddit_credentials_have_a_full_cli_surface_and_never_echo_the_secret() {
     let profile = tempfile::tempdir().unwrap();
@@ -599,12 +666,17 @@ async fn open_emits_article_opened_and_launches_the_browser() {
     let curio_id = article_id_by_title(profile.path(), "With a guid");
     let short = &curio_id[curio_id.len() - 8..];
 
-    // A fake $BROWSER that records the URL it was handed.
+    // A fake $BROWSER that records the URL it was handed. It writes a
+    // sibling temp file and renames it into place, so the capture file
+    // only ever appears complete: a plain `> file` redirection creates the
+    // (empty) file before `printf` runs, and the wait loop below could read
+    // that empty file under a slow (instrumented) build (#230).
     let captured = profile.path().join("browser-arg.txt");
     let script = profile.path().join("fake-browser.sh");
     std::fs::write(
         &script,
-        "#!/bin/sh\nprintf '%s' \"$1\" > \"$CURIO_TEST_BROWSER_OUT\"\n",
+        "#!/bin/sh\nprintf '%s' \"$1\" > \"$CURIO_TEST_BROWSER_OUT.tmp\" && \
+         mv \"$CURIO_TEST_BROWSER_OUT.tmp\" \"$CURIO_TEST_BROWSER_OUT\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -662,4 +734,32 @@ fn failures_are_helpful_and_nonzero() {
             .success(),
     );
     assert_eq!(tail.as_array().unwrap().len(), 0);
+}
+
+/// Another process holding the profile database (the desktop app
+/// mid-write) is reported as what it is — busy, retry — with its own exit
+/// status (75, `EX_TEMPFAIL`), not a generic `sqlite error` exit 1.
+#[test]
+fn a_busy_profile_says_so_and_exits_75() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    let other = rusqlite::Connection::open(profile.path().join("curio.db")).unwrap();
+    other.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let vault = profile.path().join("vault");
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .code(75)
+        .stderr(predicate::str::contains("busy"))
+        .stderr(predicate::str::contains("another Curio process"));
+    other.execute_batch("ROLLBACK").unwrap();
+
+    // Once the other writer is done, the same command just works.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
 }

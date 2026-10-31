@@ -7,8 +7,12 @@ import { wireMenuActions } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { wireInvalidation } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
 import { startupStore } from '$lib/state/startup.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { themeStore } from '$lib/state/theme.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
+import { typographyStore } from '$lib/state/typography.svelte';
 import { runStartupUpdateCheck } from '$lib/utils/updates';
 import type { Snippet } from 'svelte';
 
@@ -39,14 +43,14 @@ onMount(() => {
         localeStore.init();
         // Custom themes before initTheme: a custom preference must resolve
         // against a populated list and have its rule injected pre-paint.
-        uiStore.initCustomThemes();
-        uiStore.initTheme();
-        uiStore.initLayout();
-        uiStore.initTypography();
-        uiStore.initReading();
-        uiStore.initRefresh();
-        uiStore.initNotifications();
-        uiStore.initUpdates();
+        themeStore.initCustomThemes();
+        themeStore.initTheme();
+        layoutStore.initLayout();
+        typographyStore.initTypography();
+        prefsStore.initReading();
+        prefsStore.initRefresh();
+        prefsStore.initNotifications();
+        prefsStore.initUpdates();
         feedsStore.initSidebarState();
 
         // Event-driven invalidation: the query cache and the refresh
@@ -67,10 +71,10 @@ onMount(() => {
         // Auto-update: check the release feed once (best-effort, off in the dev
         // browser). Auto-install relaunches; otherwise a toast points at Settings.
         void runStartupUpdateCheck({
-            autoCheck: uiStore.updatesAutoCheck,
-            autoInstall: uiStore.updatesAutoInstall,
+            autoCheck: prefsStore.updatesAutoCheck,
+            autoInstall: prefsStore.updatesAutoInstall,
             onAvailable: (version) =>
-                uiStore.showToast(t('updates.available', { version }), 'info'),
+                toastStore.showToast(t('updates.available', { version }), 'info'),
         });
     })();
 

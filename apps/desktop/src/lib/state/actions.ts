@@ -20,14 +20,15 @@ import {
 } from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
 import { feedsStore } from './feeds.svelte';
+import { layoutStore } from './layout.svelte';
 import type { CommandResult } from './query-cache.svelte';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
-import { uiStore } from './ui.svelte';
+import { toastStore } from './toasts.svelte';
 
 /** Surfaces a command failure as an error toast. */
 export function toastCommandError(error: CommandError): void {
-    uiStore.showToast(commandErrorMessage(error), 'error');
+    toastStore.showToast(commandErrorMessage(error), 'error');
 }
 
 /** Unwraps a command result; failures (including thrown) become toasts. */
@@ -36,7 +37,7 @@ async function run<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | unde
     try {
         result = await invoke();
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
         return undefined;
     }
     if (result.status === 'error') {
@@ -168,7 +169,7 @@ export async function markAllRead(feedId: number | null): Promise<void> {
     if (changed === undefined) {
         return;
     }
-    uiStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+    toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
 }
 
 /**
@@ -182,7 +183,7 @@ export async function openInBrowser(articleId: number, url: string): Promise<voi
     try {
         await openExternal(url);
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
         return;
     }
     await run(() => commands.recordOpened(articleId, null));
@@ -203,7 +204,7 @@ export async function importFromFile(source: ImportSourceDto = 'opml'): Promise<
             return;
         }
         if (picked.data === null) {
-            uiStore.showToast(t('opml.cancelled'), 'info');
+            toastStore.showToast(t('opml.cancelled'), 'info');
             return;
         }
         const result = await commands.importFile(picked.data.token, source);
@@ -212,7 +213,7 @@ export async function importFromFile(source: ImportSourceDto = 'opml'): Promise<
             return;
         }
         const { feeds_added, articles_added, feeds_skipped, articles_skipped } = result.data;
-        uiStore.showToast(
+        toastStore.showToast(
             t('import.done', {
                 feeds: feeds_added,
                 articles: articles_added,
@@ -221,7 +222,7 @@ export async function importFromFile(source: ImportSourceDto = 'opml'): Promise<
             'success',
         );
     } catch {
-        uiStore.showToast(t('app.error.internal'), 'error');
+        toastStore.showToast(t('app.error.internal'), 'error');
     }
 }
 
@@ -275,7 +276,7 @@ export async function goToNextUnread(): Promise<void> {
     }
     const feed = feedsStore.nextFeedWithUnread(selectionStore.selectedFeedId);
     if (feed === null) {
-        uiStore.showToast(t('nav.noMoreUnread'), 'info');
+        toastStore.showToast(t('nav.noMoreUnread'), 'info');
         return;
     }
     searchStore.clear();
@@ -322,7 +323,7 @@ export async function promoteSelected(): Promise<void> {
     await destinationsStore.ensureLoaded();
     const target = destinationsStore.promoteTarget;
     if (target === null) {
-        uiStore.openModal('destinations');
+        layoutStore.openModal('destinations');
         return;
     }
     const outcome = await run(() => destinationsStore.promote(articleId, target));
@@ -331,7 +332,7 @@ export async function promoteSelected(): Promise<void> {
     }
     const key =
         outcome.disposition === 'unchanged' ? 'toast.promote.unchanged' : 'toast.promote.saved';
-    uiStore.showToast(t(key, { name: target }), 'success');
+    toastStore.showToast(t(key, { name: target }), 'success');
 }
 
 /** Focuses the search input (the `/` shortcut). */
@@ -368,10 +369,10 @@ function withSelected(action: (articleId: number) => Promise<void>): void {
 }
 
 function toggleHelp(): void {
-    if (uiStore.activeModal === 'help') {
-        uiStore.closeModal();
+    if (layoutStore.activeModal === 'help') {
+        layoutStore.closeModal();
     } else {
-        uiStore.openModal('help');
+        layoutStore.openModal('help');
     }
 }
 
@@ -413,10 +414,10 @@ export function handleShortcut(id: ShortcutId): void {
             refreshAll();
             break;
         case 'app.addFeed':
-            uiStore.openModal('add-feed');
+            layoutStore.openModal('add-feed');
             break;
         case 'app.settings':
-            uiStore.openModal('settings');
+            layoutStore.openModal('settings');
             break;
         case 'search.focus':
             focusSearch();

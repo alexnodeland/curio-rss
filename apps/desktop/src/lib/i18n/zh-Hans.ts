@@ -12,6 +12,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'app.tagline': '你的阅读，尽在你的笔记',
     'app.loading': '加载中…',
     'app.error.internal': '出了点问题。重试可能会有帮助。',
+    'app.error.profileBusy': '另一个 Curio 进程（例如命令行运行）正在使用此配置文件。请稍后重试。',
     'a11y.skipToContent': '跳到主要内容',
     'shell.feeds.loading': '正在加载订阅…',
     'shell.feeds.empty': '还没有订阅',

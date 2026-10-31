@@ -10,11 +10,12 @@
  */
 import Toasts from '$components/common/Toasts.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { render } from '@testing-library/svelte';
 import axe from 'axe-core';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resetUiStores } from './ui-stores';
 
 const AXE_OPTIONS: axe.RunOptions = {
     rules: {
@@ -36,7 +37,7 @@ async function auditViolations(node: Element): Promise<string[]> {
 
 describe('accessibility smoke', () => {
     afterEach(() => {
-        uiStore.reset();
+        resetUiStores();
     });
 
     it('the help dialog has no axe violations', async () => {
@@ -47,8 +48,8 @@ describe('accessibility smoke', () => {
 
     it('the toast outlet has no axe violations', async () => {
         const { container } = render(Toasts);
-        uiStore.showToast('note saved', 'success', 0);
-        uiStore.showToast('fetch failed', 'error', 0);
+        toastStore.showToast('note saved', 'success', 0);
+        toastStore.showToast('fetch failed', 'error', 0);
         await tick();
         const violations = await auditViolations(container);
         expect(violations, violations.join('\n')).toEqual([]);

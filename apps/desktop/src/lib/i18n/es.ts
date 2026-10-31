@@ -11,6 +11,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'app.tagline': 'Tu lectura, en tus notas',
     'app.loading': 'Cargando…',
     'app.error.internal': 'Algo salió mal. Reintentar puede ayudar.',
+    'app.error.profileBusy':
+        'Otro proceso de Curio (por ejemplo, una orden desde la línea de comandos) está usando este perfil ahora mismo. Vuelve a intentarlo en un momento.',
     'a11y.skipToContent': 'Saltar al contenido',
     'shell.feeds.loading': 'Cargando suscripciones…',
     'shell.feeds.empty': 'Aún no hay suscripciones',

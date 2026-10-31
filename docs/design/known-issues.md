@@ -73,6 +73,54 @@ consumer implementation.
   parallel. Regression test:
   `concurrent_refreshes_of_one_feed_cannot_clobber_validators`
   (tests/handle.rs — deterministically fails when the lock is removed).
+  **Caveat:** the lock is per process. The desktop app and a CLI
+  `curio fetch` refreshing the same feed at the same moment can still
+  race this way (same bounded consequence). Tracked in #234.
+- **Destinations are not process-safe yet (#234).** Each `CoreHandle`
+  loads the destination registry once at open and writes the whole
+  cached map back on `add_destination`/`remove_destination`, so a head
+  can undo a destination change another process made while it was open,
+  and the CLI's `curio.toml` reconcile (run by every command) re-adds a
+  destination the desktop app removed. #114's acceptance criterion
+  "a destination removed in the desktop stays removed after a CLI run"
+  is therefore still open. Workaround until #234: change destinations
+  from one head at a time, keep `curio.toml` in sync with what the app
+  shows, and restart the app after `curio dest add`.
+- **Event emission is at-least-once under heavy cross-process
+  contention.** A drain appends and fsyncs under the events lock, then
+  deletes the drained intents through this process's writer. If another
+  process holds a database write past the 5 s busy timeout, that delete
+  fails with `Busy` after the lines are durable; the intents stay
+  staged and the next drain (in either process) appends them again. The
+  contract requires consumers to dedupe by `event_id`, so nothing is
+  lost or corrupted, but the log can carry a duplicate line. Related:
+  the events lock is held while the delete waits behind this process's
+  queued write jobs, so a long in-process job (a vacuum, a big import)
+  stalls other processes' emits. Past 15 s their drain gives up with
+  `ProfileLocked` and, emission being non-fatal (#118), the events stay
+  staged behind the pending-events flag until the next mutation, the
+  desktop's periodic retry, or the next open drains them; only opening
+  a profile reports it (CLI exit 75). Trigger to act: a consumer that
+  cannot dedupe, or `ProfileLocked` reports from real use. The fix would be a
+  durable "appended, not yet retired" record kept under the lock.
+- **FIXED (#111): every refresh reverted hydrated/enriched full text to
+  the feed excerpt and rewrote unchanged rows.** `upsert_articles`
+  (`storage/repo/articles.rs`) now consults `articles.content_origin`
+  (migration 0007): hydrated (`full_text`) and `enriched` bodies take
+  title/metadata updates only, and every update is change-aware — an
+  identical entry writes nothing, so `updated` counts real changes, the
+  next export stays `unchanged`, and the FTS row is untouched (the
+  `articles_fts_au` trigger also gained a `WHEN` value-change guard).
+  The upgrade infers provenance: rows of a feed in full-text mode are
+  backfilled `full_text` (so their newest, still-hydrated batch survives),
+  everything else `feed`/`manual`. A body loaded in full (load-full) on a
+  feed *not* in full-text mode carries no recoverable provenance — if it
+  has not been reverted yet, the first post-upgrade refresh that still
+  lists the item reverts it to the excerpt one last time; load it in full
+  again and it is kept from then on. Regression tests:
+  `hydrated_full_text_survives_refresh_and_re_export_is_unchanged`,
+  `enriched_reddit_body_survives_a_refresh_of_its_feed` (tests/handle.rs),
+  `re_upserting_identical_entries_writes_nothing` (tests/storage.rs).
 - **CRLF-rewritten notes still refuse re-export** (diagnostic fixed —
   the error now names line endings and the remedy; see
   `split_names_crlf_line_endings_in_its_refusal`). Accepting CRLF

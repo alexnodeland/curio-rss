@@ -1044,6 +1044,7 @@ dependencies = [
  "directories",
  "jsonschema",
  "predicates",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1066,14 +1067,18 @@ dependencies = [
  "dom_smoothie",
  "ego-tree",
  "feed-rs",
+ "fs4",
  "htmd",
+ "icu_normalizer",
  "insta",
  "keyring",
+ "libc",
  "proptest",
  "quick-xml",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
+ "same-file",
  "scraper",
  "serde_json",
  "serde_yaml",
@@ -1094,6 +1099,7 @@ dependencies = [
  "curio-core",
  "curio-types",
  "directories",
+ "proptest",
  "rusqlite",
  "scraper",
  "serde",
@@ -1742,6 +1748,16 @@ checksum = "e076045bb43dac435333ed5f04caf35c7463631d0dae2deb2638d94dd0a5b872"
 dependencies = [
  "lazy_static",
  "num",
+]
+
+[[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

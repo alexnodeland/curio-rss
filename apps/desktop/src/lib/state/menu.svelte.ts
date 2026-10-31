@@ -1,6 +1,6 @@
 /**
  * The menu/context-menu singleton. One menu is open at a time — mirroring the
- * `ModalKind` discipline in ui.svelte.ts — so a module-level store owns the
+ * `ModalKind` discipline in layout.svelte.ts — so a module-level store owns the
  * open menu's descriptors, its anchor position, and the element that invoked
  * it (focus returns there on dismissal). Menu content is DATA (`MenuItem[]`),
  * not markup, so the same descriptors drive context menus (WP7), the native

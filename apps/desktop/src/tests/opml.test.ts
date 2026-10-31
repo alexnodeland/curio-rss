@@ -5,7 +5,7 @@
  * payload. Cancellation is a no-op with a toast.
  */
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -15,6 +15,7 @@ import {
     installIpcHarness,
     pathTokenFixture,
 } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 const PICKED_PATH = '/home/user/Downloads/subs.opml';
 
@@ -23,7 +24,7 @@ describe('OpmlPanel', () => {
 
     afterEach(() => {
         cleanup();
-        uiStore.reset();
+        resetUiStores();
         harness?.teardown();
         harness = null;
     });
@@ -48,7 +49,9 @@ describe('OpmlPanel', () => {
         expect(harness.callsFor('import_file')).toEqual([
             { pathToken: 'TOKEN-IN', source: 'opml' },
         ]);
-        expect(uiStore.toasts.at(-1)?.message).toBe('Imported 2 feeds and 0 articles, skipped 1');
+        expect(toastStore.toasts.at(-1)?.message).toBe(
+            'Imported 2 feeds and 0 articles, skipped 1',
+        );
         for (const call of harness.calls) {
             expect(JSON.stringify(call.args)).not.toContain(PICKED_PATH);
         }
@@ -73,7 +76,9 @@ describe('OpmlPanel', () => {
         expect(harness.callsFor('import_file')).toEqual([
             { pathToken: 'TOKEN-CSV', source: 'pocket_csv' },
         ]);
-        expect(uiStore.toasts.at(-1)?.message).toBe('Imported 0 feeds and 7 articles, skipped 0');
+        expect(toastStore.toasts.at(-1)?.message).toBe(
+            'Imported 0 feeds and 7 articles, skipped 0',
+        );
     });
 
     it('exports through the token', async () => {
@@ -87,7 +92,7 @@ describe('OpmlPanel', () => {
         await flushIpc();
 
         expect(harness.callsFor('export_opml')).toEqual([{ pathToken: 'TOKEN-OUT' }]);
-        expect(uiStore.toasts.at(-1)?.message).toBe('Exported your subscriptions');
+        expect(toastStore.toasts.at(-1)?.message).toBe('Exported your subscriptions');
     });
 
     it('treats a cancelled pick as a no-op', async () => {
@@ -98,6 +103,6 @@ describe('OpmlPanel', () => {
         await flushIpc();
 
         expect(harness.callsFor('import_file')).toHaveLength(0);
-        expect(uiStore.toasts.at(-1)?.message).toBe('Cancelled');
+        expect(toastStore.toasts.at(-1)?.message).toBe('Cancelled');
     });
 });

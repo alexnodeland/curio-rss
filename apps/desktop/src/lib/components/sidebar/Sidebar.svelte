@@ -24,7 +24,7 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { folderPathsForTags } from '$lib/state/folder-ops';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
-import { uiStore } from '$lib/state/ui.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { untrack } from 'svelte';
 import FeedItem from './FeedItem.svelte';
@@ -253,7 +253,7 @@ function newFolder(): void {
                 type="button"
                 aria-label={t('toolbar.addFeed')}
                 use:tooltip={{ text: t('toolbar.addFeed'), kbd: 'A' }}
-                onclick={() => uiStore.openModal('add-feed')}><Icon name="plus" /></button
+                onclick={() => layoutStore.openModal('add-feed')}><Icon name="plus" /></button
             >
             <button
                 class="chrome-button"
@@ -269,7 +269,7 @@ function newFolder(): void {
                 type="button"
                 aria-label={t('toolbar.settings')}
                 use:tooltip={{ text: t('toolbar.settings'), kbd: ',' }}
-                onclick={() => uiStore.openModal('settings')}><Icon name="settings" /></button
+                onclick={() => layoutStore.openModal('settings')}><Icon name="settings" /></button
             >
         </div>
     </div>
@@ -335,7 +335,7 @@ function newFolder(): void {
                         <button
                             class="empty-action empty-action-primary"
                             type="button"
-                            onclick={() => uiStore.openModal('add-feed')}
+                            onclick={() => layoutStore.openModal('add-feed')}
                         >
                             {t('emptyState.addFeed')}
                         </button>
@@ -386,7 +386,7 @@ function newFolder(): void {
                                 selected={selectionStore.selectedFeedId === feed.id}
                                 siblings={feedTree.ungrouped.map((candidate) => candidate.id)}
                                 onselect={(feedId) => selectionStore.selectFeed(feedId)}
-                                onedit={(feedId, section) => uiStore.openEditFeed(feedId, section)}
+                                onedit={(feedId, section) => layoutStore.openEditFeed(feedId, section)}
                             />
                         </li>
                     {/each}

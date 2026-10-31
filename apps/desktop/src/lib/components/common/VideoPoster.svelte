@@ -10,7 +10,7 @@
  * request — the cache is the only path.
  */
 import { posterHue, youTubeThumbnailUrl } from '$lib/reader/view-mode';
-import { uiStore } from '$lib/state/ui.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
 import { loadCachedImage } from '$lib/utils/images';
 
 let {
@@ -26,7 +26,7 @@ let thumb: string | null = $state(null);
 
 $effect(() => {
     const url = stillUrl;
-    const on = uiStore.mediaPrefetch;
+    const on = prefsStore.mediaPrefetch;
     thumb = null;
     if (!on || url === null) {
         return;

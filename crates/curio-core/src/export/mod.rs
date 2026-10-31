@@ -18,18 +18,42 @@
 //!   never a dangling manifest entry.
 //! - **Idempotency** on `(curio_id, checksum)`: unchanged → no write.
 //!
+//! Safety beyond the contract text, because the manifest is a file in
+//! the user's folder and can be lost, reset, stale, or forked by a sync
+//! tool:
+//!
+//! - **Ownership**: an existing file is only rewritten when its own
+//!   frontmatter `curio_id` is the article being exported. A path held by
+//!   another article (or by a file that is not a Curio note) is skipped
+//!   for the next deterministic candidate — never overwritten.
+//! - **Serialization**: one export per destination at a time, across
+//!   threads and processes (an in-process queue plus an advisory lock on
+//!   `.curio/manifest.lock`); temp files are unique per write.
+//! - **No resurrection**: a missing destination root is
+//!   [`ExportError::DestinationMissing`], never recreated.
+//! - **Conflict copies** of the manifest are merged back in (see
+//!   [`manifest_conflict_copies`]).
+//!
 //! Event emission (`article.saved` / `article.updated`) is wired by the
 //! [`crate::CoreHandle`] facade, which owns the storage + events pair;
 //! this module reports the [`ExportDisposition`] the facade maps onto
 //! the contract events.
 
+mod lock;
 mod manifest;
 mod note;
+mod slug;
+mod target;
+mod write;
 
-pub use manifest::{load_manifest, write_manifest};
+pub use manifest::{load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+
+use lock::DestinationLock;
+use target::{NoteWrite, recorded_target, unlocked_idempotency_hit, unrecorded_target};
+use write::{contained_path, write_atomic};
 
 use curio_types::{ArticleFrontmatter, Checksum, CurioId, Destination, ManifestEntry, Timestamp};
 use sha2::{Digest as _, Sha256};
@@ -124,6 +148,29 @@ pub enum ExportError {
         /// The offending relative path.
         path: String,
     },
+    /// The destination's root directory (or, for a destination that has
+    /// exported before, its `.curio/` marker) is gone — moved, renamed or
+    /// unmounted. Curio refuses to recreate it empty at the old path and
+    /// re-export everything into it.
+    #[error(
+        "destination folder {root} is missing, or no longer holds Curio's .curio/ folder \
+         (moved, renamed or unmounted?) — reconnect it, or register the destination again \
+         to start it afresh"
+    )]
+    DestinationMissing {
+        /// The registered destination root.
+        root: PathBuf,
+    },
+    /// Every candidate path for the note is held by another article's
+    /// note or by a file that is not a Curio note — refusing to
+    /// overwrite either.
+    #[error(
+        "every candidate note path up to {path:?} is taken by another file — refusing to overwrite it"
+    )]
+    PathsTaken {
+        /// The last candidate tried (relative to the destination root).
+        path: String,
+    },
 }
 
 /// A note whose bytes are already durably on disk but whose manifest
@@ -133,23 +180,34 @@ pub enum ExportError {
 /// Ordering: note → event intent → manifest. Staging the intent before
 /// the manifest write means no crash window can lose the contract
 /// event: with no intent and no manifest entry, the next export re-runs
-/// as Created/Updated and stages then; with an intent but no manifest
+/// (as `Updated` once the article's own note is on disk) and stages then; with an intent but no manifest
 /// entry, startup replay emits it (at worst a consumer later sees a
 /// duplicate snapshot for the same `curio_id`, which folds
 /// idempotently). Were the manifest written first, its
 /// `(curio_id, checksum)` idempotency hit would suppress the event on
 /// every retry — losing it forever.
+///
+/// A staged export that writes holds the destination's export lock until
+/// it is committed or dropped, so keep the window short: another export to
+/// the same destination (any thread, any process) waits for it. The pure
+/// idempotency hit writes nothing and takes no lock — an unchanged export
+/// still works on a read-only destination.
 #[derive(Debug)]
 #[must_use = "call commit() — the manifest write is still pending"]
 pub struct StagedExport {
     outcome: ExportOutcome,
     pending: Option<PendingManifest>,
+    /// Held from the manifest load through the manifest commit; `None`
+    /// for the lock-free idempotency hit.
+    _lock: Option<DestinationLock>,
 }
 
 #[derive(Debug)]
 struct PendingManifest {
     root: PathBuf,
     manifest: curio_types::ManifestV1,
+    /// Conflict copies folded into `manifest`; removed once it is durable.
+    merged_copies: Vec<PathBuf>,
 }
 
 impl StagedExport {
@@ -168,6 +226,16 @@ impl StagedExport {
     pub fn commit(self) -> Result<ExportOutcome, ExportError> {
         if let Some(pending) = self.pending {
             write_manifest(&pending.root, &pending.manifest)?;
+            for copy in pending.merged_copies {
+                // Its entries are in the durable manifest now; a copy
+                // that refuses to go is merged again (idempotently) next
+                // time, so this is worth a log line, not a failed export.
+                if let Err(err) = std::fs::remove_file(&copy)
+                    && err.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(path = %copy.display(), %err, "could not remove a merged manifest conflict copy");
+                }
+            }
         }
         Ok(self.outcome)
     }
@@ -207,73 +275,100 @@ pub fn stage_export_note(
     let body = note::neutralize_markers(input.markdown.trim_end());
     let body = body.as_ref();
     let checksum = region_checksum(body);
-    let mut manifest = load_manifest(&destination.root)?;
-
-    let existing = manifest.notes.get(&input.curio_id).cloned();
-    let (rel_path, disposition) = match &existing {
-        Some(entry) => {
-            let unchanged = entry.checksum == checksum;
-            (
-                entry.path.clone(),
-                if unchanged {
-                    ExportDisposition::Unchanged
-                } else {
-                    ExportDisposition::Updated
-                },
-            )
-        }
-        None => (
-            unique_note_path(&manifest, input),
-            ExportDisposition::Created,
-        ),
-    };
-
-    let abs_path = contained_path(&destination.root, &rel_path)?;
-    let note_exists = abs_path.is_file();
-
-    if disposition == ExportDisposition::Unchanged && note_exists {
+    let root = &destination.root;
+    if let Some(outcome) = unlocked_idempotency_hit(root, input, checksum)? {
         return Ok(StagedExport {
-            outcome: ExportOutcome {
-                path: rel_path,
-                checksum,
-                disposition,
-            },
+            outcome,
             pending: None,
+            _lock: None,
         });
     }
+    // One export per destination at a time, from the manifest load
+    // through the manifest commit — across threads and processes.
+    let lock = DestinationLock::acquire(root)?;
+    let mut manifest = load_manifest(root)?;
+    let merged_copies = manifest::merge_conflict_copies(root, &mut manifest)?;
 
-    // Build the note: fresh, or a managed-region/machine-key replacement
-    // that preserves user content byte-for-byte.
-    let content = if note_exists {
-        let old = read_file(&abs_path)?;
-        note::replace_managed(&old, &frontmatter(input, checksum), body, &abs_path)?
-    } else {
-        render_note(&frontmatter(input, checksum), body)?
+    let target = match manifest.notes.get(&input.curio_id) {
+        Some(entry) => recorded_target(root, &manifest, input, entry, checksum)?,
+        None => unrecorded_target(root, &manifest, input, ExportDisposition::Created)?,
+    };
+    // Every target but the idempotency hit (whose manifest entry already
+    // says exactly this) is (re-)recorded — also when the note on disk
+    // turns out to be current already and its write is skipped.
+    let record = target.write.is_some();
+    let outcome = ExportOutcome {
+        path: target.rel_path,
+        checksum,
+        disposition: target.disposition,
     };
 
-    // Contract write ordering: note first…
-    write_atomic(&destination.root, &abs_path, content.as_bytes())?;
-    // …manifest second — held back so the caller can stage its event
-    // intent between the two writes (see [`StagedExport`]).
-    manifest.notes.insert(
-        input.curio_id,
-        ManifestEntry {
-            path: rel_path.clone(),
-            checksum,
-            exported_at: Timestamp::now(),
-        },
-    );
+    if let Some(write) = target.write {
+        // Build the note: fresh, or a managed-region/machine-key
+        // replacement that preserves user content byte-for-byte.
+        let abs_path = contained_path(root, &outcome.path)?;
+        let fm = frontmatter(input, checksum);
+        let (content, current) = match write {
+            NoteWrite::Replace(old) => {
+                let content = note::replace_managed(&old, &fm, body, &abs_path)?;
+                let current = content == old;
+                (content, current)
+            }
+            NoteWrite::Fresh => (render_note(&fm, body)?, false),
+        };
+        // Contract write ordering: note first (skipped when the note on
+        // disk already has exactly these bytes)…
+        if !current {
+            write_atomic(root, &abs_path, content.as_bytes())?;
+        }
+    }
+    if record {
+        // …manifest second — held back so the caller can stage its event
+        // intent between the two writes (see [`StagedExport`]).
+        manifest.notes.insert(
+            input.curio_id,
+            ManifestEntry {
+                path: outcome.path.clone(),
+                checksum,
+                exported_at: Timestamp::now(),
+            },
+        );
+    } else if merged_copies.is_empty() {
+        // The pure idempotency hit: nothing to write at all.
+        return Ok(StagedExport {
+            outcome,
+            pending: None,
+            _lock: Some(lock),
+        });
+    }
     Ok(StagedExport {
-        outcome: ExportOutcome {
-            path: rel_path,
-            checksum,
-            disposition,
-        },
+        outcome,
         pending: Some(PendingManifest {
-            root: destination.root.clone(),
+            root: root.clone(),
             manifest,
+            merged_copies,
         }),
+        _lock: Some(lock),
     })
+}
+
+/// Checks that a destination which has exported before is still there:
+/// its root and the `.curio/` marker the first export created. Callers
+/// that know the destination has exported (the facade records it) run
+/// this before [`stage_export_note`]; a fresh destination has no marker
+/// yet, and the export creates it.
+///
+/// # Errors
+///
+/// [`ExportError::DestinationMissing`] when either is gone.
+pub fn require_marker(root: &Path) -> Result<(), ExportError> {
+    if root.join(".curio").is_dir() {
+        Ok(())
+    } else {
+        Err(ExportError::DestinationMissing {
+            root: root.to_path_buf(),
+        })
+    }
 }
 
 /// sha256 over exactly the managed-region bytes (the trimmed markdown
@@ -303,116 +398,6 @@ fn frontmatter(input: &ExportInput, checksum: Checksum) -> ArticleFrontmatter {
     }
 }
 
-/// `curio/<slug>.md`, deduplicated against paths owned by *other*
-/// articles by suffixing a `curio_id` prefix (deterministic, no counters).
-fn unique_note_path(manifest: &curio_types::ManifestV1, input: &ExportInput) -> String {
-    let slug = slugify(&input.title, &input.curio_id);
-    let candidate = format!("curio/{slug}.md");
-    let taken = |path: &str| {
-        manifest
-            .notes
-            .iter()
-            .any(|(id, entry)| *id != input.curio_id && entry.path == path)
-    };
-    if !taken(&candidate) {
-        return candidate;
-    }
-    let id = input.curio_id.to_string();
-    let short = id.get(..8).unwrap_or(&id);
-    let suffixed = format!("curio/{slug}-{short}.md");
-    if taken(&suffixed) {
-        format!("curio/{slug}-{id}.md")
-    } else {
-        suffixed
-    }
-}
-
-fn slugify(title: &str, curio_id: &CurioId) -> String {
-    let mut slug = String::new();
-    let mut pending_dash = false;
-    for c in title.chars().flat_map(char::to_lowercase) {
-        if c.is_alphanumeric() {
-            if pending_dash && !slug.is_empty() {
-                slug.push('-');
-            }
-            pending_dash = false;
-            slug.push(c);
-            if slug.chars().count() >= 80 {
-                break;
-            }
-        } else {
-            pending_dash = true;
-        }
-    }
-    if slug.is_empty() {
-        curio_id.to_string()
-    } else {
-        slug
-    }
-}
-
-/// Joins a relative note path under the root, refusing traversal. This
-/// is the lexical half of containment; [`write_atomic`] adds the
-/// realpath half (symlinked intermediate directories cannot redirect a
-/// write outside the root).
-fn contained_path(root: &Path, rel: &str) -> Result<PathBuf, ExportError> {
-    let rel_path = Path::new(rel);
-    let safe = rel_path
-        .components()
-        .all(|c| matches!(c, Component::Normal(_)));
-    if !safe || rel_path.is_absolute() {
-        return Err(ExportError::Containment {
-            path: rel.to_owned(),
-        });
-    }
-    Ok(root.join(rel_path))
-}
-
-fn read_file(path: &Path) -> Result<String, ExportError> {
-    std::fs::read_to_string(path).map_err(|source| ExportError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-/// Temp-file + atomic-rename write in the target's own directory,
-/// with realpath containment under `root`: after the parent directories
-/// exist, both they and the root are canonicalized and the write is
-/// refused unless the parent still resolves under the root — a symlinked
-/// intermediate directory planted inside the destination cannot redirect
-/// the write elsewhere. (The final component is not followed either:
-/// `rename` replaces a symlink itself rather than writing through it.)
-pub(crate) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
-    let io_err = |source| ExportError::Io {
-        path: path.to_path_buf(),
-        source,
-    };
-    let dir = path.parent().ok_or_else(|| ExportError::Containment {
-        path: path.display().to_string(),
-    })?;
-    std::fs::create_dir_all(dir).map_err(io_err)?;
-    let canonical_root = root.canonicalize().map_err(|source| ExportError::Io {
-        path: root.to_path_buf(),
-        source,
-    })?;
-    let canonical_dir = dir.canonicalize().map_err(io_err)?;
-    if !canonical_dir.starts_with(&canonical_root) {
-        return Err(ExportError::Containment {
-            path: path.display().to_string(),
-        });
-    }
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_default();
-    let tmp = dir.join(format!(".{file_name}.curio-tmp-{}", std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(|source| ExportError::Io {
-        path: tmp.clone(),
-        source,
-    })?;
-    std::fs::rename(&tmp, path).map_err(io_err)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -428,31 +413,31 @@ mod tests {
         );
     }
 
-    #[test]
-    fn slugify_is_boring_and_safe() {
-        let id = CurioId::new();
-        assert_eq!(slugify("Hello, World!", &id), "hello-world");
-        assert_eq!(slugify("../../etc/passwd", &id), "etc-passwd");
-        assert_eq!(slugify("Ünïcode Tîtle", &id), "ünïcode-tîtle");
-        assert_eq!(slugify("", &id), id.to_string());
-        assert_eq!(slugify("!!!", &id), id.to_string());
+    pub(super) fn sample_input(curio_id: CurioId, title: &str) -> ExportInput {
+        ExportInput {
+            curio_id,
+            title: title.to_owned(),
+            source: "https://example.com/a".to_owned(),
+            feed: None,
+            feed_title: None,
+            author: None,
+            published: None,
+            saved: Timestamp::now(),
+            tags: vec![],
+            lang: None,
+            word_count: None,
+            markdown: "body".to_owned(),
+        }
     }
 
     #[test]
-    fn contained_path_refuses_traversal() {
-        let root = Path::new("/tmp/dest");
-        assert!(contained_path(root, "curio/note.md").is_ok());
+    fn require_marker_wants_the_curio_dir() {
+        let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            contained_path(root, "../escape.md"),
-            Err(ExportError::Containment { .. })
+            require_marker(dir.path()),
+            Err(ExportError::DestinationMissing { .. })
         ));
-        assert!(matches!(
-            contained_path(root, "/abs/path.md"),
-            Err(ExportError::Containment { .. })
-        ));
-        assert!(matches!(
-            contained_path(root, "a/../../b.md"),
-            Err(ExportError::Containment { .. })
-        ));
+        std::fs::create_dir(dir.path().join(".curio")).unwrap();
+        assert!(require_marker(dir.path()).is_ok());
     }
 }

@@ -8,13 +8,17 @@
 //! cannot fix — show a generic failure and point at diagnostics.
 //!
 //! Mapping policy (from the build spec): `NotFound` / `UnknownDestination`
-//! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) / a database
-//! locked by another process are user-tier, and so is `Busy` (another
-//! Curio process holds the profile — recoverable by retrying), as is a
-//! missing destination folder (`ExportError::DestinationMissing`, code
+//! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) are user-tier, as
+//! is a missing destination folder (`ExportError::DestinationMissing`, code
 //! `IO`); `Sqlite` / `WriterGone` / `JobPanicked` / `PoolTimeout` /
 //! `IntegrityFailed` / other IO / a corrupt or failed-upgrade database
 //! are internal-tier.
+//!
+//! Contention with another Curio process on the profile — a busy database
+//! (`StorageError::Busy`, `OpenError::Locked`) or a held events lock
+//! (`EventLogError::ProfileLocked`) — is user-tier, recoverable, code
+//! `PROFILE_BUSY`. The frontend shows its own localized copy for that
+//! code rather than `message`, which is English and names the lock file.
 
 use curio_core::CoreError;
 use curio_core::export::ExportError;
@@ -50,6 +54,11 @@ pub enum ErrorCode {
     Parse,
     /// The storage layer failed.
     Storage,
+    /// Another Curio process (a CLI run, a cron job) holds the profile —
+    /// its database stayed busy or its events lock stayed held. Retrying
+    /// once it finishes succeeds. The UI shows its own localized message
+    /// for this code; `message` is the English diagnostic.
+    ProfileBusy,
     /// Filesystem IO failed.
     Io,
     /// Anything else — a bug, not a state.
@@ -91,6 +100,12 @@ impl CommandError {
         }
     }
 
+    /// Contention with another Curio process on the profile: user-tier,
+    /// recoverable, [`ErrorCode::ProfileBusy`].
+    fn profile_busy(error: &dyn std::fmt::Display) -> Self {
+        Self::user(ErrorCode::ProfileBusy, error.to_string(), true)
+    }
+
     /// Shorthand for invalid user input.
     pub fn invalid_input(message: impl Into<String>) -> Self {
         Self::user(ErrorCode::InvalidInput, message, true)
@@ -108,7 +123,7 @@ impl From<StorageError> for CommandError {
             }
             // Another Curio process (a CLI run) is writing to the
             // profile: tell the user why, and that a retry will work.
-            StorageError::Busy(_) => Self::user(ErrorCode::Storage, error.to_string(), true),
+            StorageError::Busy(_) => Self::profile_busy(&error),
             StorageError::Sqlite(_)
             | StorageError::WriterGone
             | StorageError::JobPanicked { .. }
@@ -128,7 +143,7 @@ impl From<OpenError> for CommandError {
             OpenError::TooNew { .. } => {
                 Self::user(ErrorCode::SchemaTooNew, error.to_string(), false)
             }
-            OpenError::Locked { .. } => Self::user(ErrorCode::Storage, error.to_string(), true),
+            OpenError::Locked { .. } => Self::profile_busy(&error),
             OpenError::Io { .. } => Self::internal(ErrorCode::Io, error.to_string()),
             // Corrupt, Backup, MigrationFailed, and any class added later.
             _ => Self::internal(ErrorCode::Storage, error.to_string()),
@@ -142,7 +157,7 @@ impl From<CoreError> for CommandError {
         // database, or the events lock held by a CLI run) is the same
         // story whichever layer hit it: retry once the other run ends.
         if error.is_profile_busy() {
-            return Self::user(ErrorCode::Storage, error.to_string(), true);
+            return Self::profile_busy(&error);
         }
         match error {
             CoreError::Storage(storage) => storage.into(),
@@ -247,9 +262,42 @@ mod tests {
             None,
         )));
         assert_eq!(error.kind, ErrorKind::User);
-        assert_eq!(error.code, ErrorCode::Storage);
+        assert_eq!(error.code, ErrorCode::ProfileBusy);
         assert!(error.recoverable);
         assert!(error.message.contains("another Curio process"), "{error}");
+    }
+
+    #[test]
+    fn a_database_locked_at_open_is_profile_busy_too() {
+        let locked = OpenError::Locked {
+            path: "/profile/curio.db".into(),
+            source: rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                None,
+            ),
+        };
+        for error in [
+            CommandError::from(CoreError::Open(locked)),
+            CommandError::from(OpenError::Locked {
+                path: "/profile/curio.db".into(),
+                source: rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_LOCKED),
+                    None,
+                ),
+            }),
+        ] {
+            assert_eq!(error.kind, ErrorKind::User);
+            assert_eq!(error.code, ErrorCode::ProfileBusy);
+            assert!(error.recoverable);
+        }
+    }
+
+    #[test]
+    fn the_profile_busy_code_is_screaming_snake_on_the_wire() {
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::ProfileBusy).unwrap_or_default(),
+            "\"PROFILE_BUSY\""
+        );
     }
 
     #[test]
@@ -262,7 +310,7 @@ mod tests {
             },
         )));
         assert_eq!(error.kind, ErrorKind::User);
-        assert_eq!(error.code, ErrorCode::Storage);
+        assert_eq!(error.code, ErrorCode::ProfileBusy);
         assert!(error.recoverable);
         // Any other emission failure stays internal.
         let error = CommandError::from(CoreError::Events(EventsError::Log(EventLogError::Io(

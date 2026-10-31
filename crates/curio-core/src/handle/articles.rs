@@ -62,6 +62,12 @@ impl CoreHandle {
             Some(feed_id) => self.storage.get_feed(feed_id)?,
             None => None,
         };
+        // Matched against the feed's *current* URL only: the store keeps no
+        // URL history, so a link-less row saved under a URL the feed no
+        // longer has — and that no longer redirects to it (the user edited
+        // the feed URL, say) — is not recognized and is fetched like a page.
+        // The redirect case is covered by also checking where the fetch
+        // lands, below.
         let lands_on_feed =
             |url: &str| feed.as_ref().is_some_and(|feed| is_feed_own_url(url, feed));
         if lands_on_feed(&article.source_url) {

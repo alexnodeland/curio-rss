@@ -1,16 +1,23 @@
 //! The feed's own declared lead image for an entry: `media:thumbnail` →
-//! image `media:content` → image `enclosure`, resolved to an absolute
-//! `http(s)` URL the policed image cache can load.
+//! image `media:content` → image `enclosure`, as an absolute `http(s)` URL
+//! the policed image cache can load (see `feed_image` for which base a
+//! relative reference resolves against).
 
 use feed_rs::model::{Link, MediaObject};
 use url::Url;
 
 /// The feed's own declared lead image for an entry, if any, preferring the
 /// most explicit signal: a `media:thumbnail`, then an image `media:content`,
-/// then an image `enclosure`. A relative reference is resolved against
-/// `base` (the entry link, else the feed URL); feed-rs has already applied
-/// any `xml:base` to `media:content` URLs and links, but hands
-/// `media:thumbnail` over raw. Only an absolute `http(s)` result qualifies:
+/// then an image `enclosure`.
+///
+/// The signals reach here resolved differently. feed-rs resolves
+/// `media:content` URLs (an RSS `<enclosure>` among them) and Atom link
+/// hrefs while parsing, against the element's `xml:base`, whose stack
+/// starts from the feed URL we hand it — so a relative one arrives already
+/// absolute against `xml:base`, else the feed URL, never the entry link.
+/// It hands `media:thumbnail` over raw; a relative one is resolved here
+/// against `base` (the entry link, else the feed URL), matching how the
+/// entry's inline images resolve. Only an absolute `http(s)` result qualifies:
 /// anything else can't be fetched by the image cache, so it's dropped here
 /// rather than stored as an un-loadable value. The inline-`<img>` fallback
 /// lives in ingest, over the base-resolved, sanitized body.
@@ -217,6 +224,37 @@ mod tests {
         assert_eq!(
             feed.entries[0].lead_image.as_deref(),
             Some("https://example.com/pics/p.jpg")
+        );
+    }
+
+    #[test]
+    fn relative_enclosures_and_media_content_resolve_against_the_feed_url_not_the_entry_link() {
+        // feed-rs resolves these while parsing, from the feed URL: the entry
+        // link never applies to them (only to `media:thumbnail`).
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+<channel><title>t</title>
+<item><title>a</title><guid>g1</guid><link>https://blog.example.com/p/1/</link>
+<enclosure url="img.jpg" type="image/jpeg" length="1"/></item>
+<item><title>b</title><guid>g2</guid><link>https://blog.example.com/p/2/</link>
+<media:content url="pic.png" type="image/png"/></item>
+<item><title>c</title><guid>g3</guid><link>https://blog.example.com/p/3/</link>
+<media:thumbnail url="thumb.jpg"/>
+<enclosure url="img.jpg" type="image/jpeg" length="1"/></item>
+</channel></rss>"#;
+        let feed = parse_feed(xml, Some("https://feeds.example.net/rss.xml")).unwrap();
+        let images: Vec<Option<&str>> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.lead_image.as_deref())
+            .collect();
+        assert_eq!(
+            images,
+            [
+                Some("https://feeds.example.net/img.jpg"),
+                Some("https://feeds.example.net/pic.png"),
+                Some("https://blog.example.com/p/3/thumb.jpg"),
+            ]
         );
     }
 

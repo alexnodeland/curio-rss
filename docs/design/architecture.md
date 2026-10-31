@@ -116,8 +116,17 @@ defense-in-depth, not the primary defense.
   reverted to the excerpt), skips rows already holding the incoming values (no
   `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
   `content_text` actually differ.
-- Network-filesystem guard (planned, #112): refuses to open the DB on
-  Syncthing/iCloud/NFS-class mounts without an explicit override flag.
+- Network-filesystem guard: before anything is created, the profile open probes the
+  filesystem type (`statfs` `f_type` on Linux, `f_fstypename` on macOS; UNC paths on
+  Windows), the sync-client root markers (`.stfolder`, a `.dropbox` file) and the
+  well-known sync locations (`~/Library/Mobile Documents`, `~/Library/CloudStorage`),
+  and refuses NFS/SMB/AFP/WebDAV mounts and iCloud/Dropbox/Syncthing folders with
+  `OpenError::NetworkFs` unless `CoreOptions::allow_network_fs` is set (the CLI's
+  `--allow-network-fs`, or `CURIO_ALLOW_NETWORK_FS=1` for either head).
+- An events directory that cannot be opened (full or read-only disk, a file in its
+  place) is an emission failure, not an open failure: the handle attaches the log
+  lazily, opens with the backlog flag raised and intents staged, and the next drain
+  retries the attach. Only events-lock contention still fails the open (as "busy").
 - Fault containment: a panicking write job replies `JobPanicked`, its open transaction
   is rolled back and the writer keeps serving; a panicking read still returns its pooled
   connection, and a read that waits too long for one fails with `PoolTimeout` rather

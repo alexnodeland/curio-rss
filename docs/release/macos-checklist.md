@@ -34,6 +34,12 @@ production feed).
 
 - [ ] **Per-profile Reddit credentials (real Keychain)** — `curio --profile /tmp/a reddit login --client-id a` and `curio --profile /tmp/b reddit login --client-id b` (any secrets); Keychain Access shows two `Curio` items with accounts `reddit-api/<key>`, `reddit status` reports `a` / `b` per profile, and `reddit logout` on one leaves the other configured. Moving a profile (`mv /tmp/a /tmp/a2`) keeps its credentials. Upgrading from 0.4.x: the old single `reddit-api` item is copied into each profile that opens (both the CLI and the desktop app come up authenticated) and stays in Keychain Access until a `reddit logout`.
 
+## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
+
+- [ ] **iCloud Drive refused** — `curio --profile ~/Library/Mobile\ Documents/com~apple~CloudDocs/curio-test init` fails with "is on iCloud Drive" and creates nothing; `CURIO_PROFILE=<that dir> open -a Curio` shows the same refusal instead of a window. With `--allow-network-fs` (or `CURIO_ALLOW_NETWORK_FS=1`) it opens. Delete the folder afterwards.
+- [ ] **SMB share refused** — mount any SMB share in Finder (`⌘K`, `smb://…`), then `curio --profile /Volumes/<share>/curio-test init` fails with "is on an SMB/CIFS network share"; the override opens it.
+- [ ] **Local disk unaffected** — the default profile and `CURIO_PROFILE=$(mktemp -d)` open with no warning.
+
 ## Shared default profile (real macOS only — CI can't point the app at a temp `~/Library`)
 
 Use a throwaway macOS user account, or move your real

@@ -56,3 +56,64 @@ fn dependabot_covers_actions_cargo_and_npm() {
         "dependabot updates must be grouped"
     );
 }
+
+/// Lint the committed `ci.yml` beside an edited copy of the committed
+/// `release.yml`.
+fn lint_release_edit(from: &str, to: &str) -> Vec<String> {
+    let dir = workflows_dir();
+    let ci = std::fs::read_to_string(dir.join("ci.yml")).expect("read ci.yml");
+    let release = std::fs::read_to_string(dir.join("release.yml")).expect("read release.yml");
+    assert_eq!(
+        release.matches(from).count(),
+        1,
+        "`{from}` must occur exactly once in release.yml"
+    );
+    let edited = release.replace(from, to);
+    xtask::workflows::lint(&[
+        xtask::workflows::WorkflowFile {
+            name: "ci.yml",
+            source: &ci,
+        },
+        xtask::workflows::WorkflowFile {
+            name: "release.yml",
+            source: &edited,
+        },
+    ])
+}
+
+/// A job that `needs` the gate but runs on `always()` would build off a red
+/// tag — the regression the gate rule exists to block.
+#[test]
+fn an_always_build_job_in_the_real_release_is_flagged() {
+    let violations = lint_release_edit(
+        "    needs: gate\n    runs-on: macos",
+        "    needs: gate\n    if: ${{ always() }}\n    runs-on: macos",
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("job `build` has `if: … always()")),
+        "{violations:#?}"
+    );
+}
+
+/// A step ahead of the key in the real sign job that runs project code or
+/// injects env must fail the lint.
+#[test]
+fn code_ahead_of_the_key_in_the_real_sign_job_is_flagged() {
+    let anchor = "      - name: Collect the unsigned bundle\n";
+    for (step, needle) in [
+        ("npm run build", "runs `npm` before the signing step"),
+        ("node ./dist/x.js", "runs `node` before the signing step"),
+        (
+            "echo NODE_OPTIONS=--require ./evil.js >> \"$GITHUB_ENV\"",
+            "writes `GITHUB_ENV` at or before the signing step",
+        ),
+    ] {
+        let violations = lint_release_edit(anchor, &format!("      - run: {step}\n{anchor}"));
+        assert!(
+            violations.iter().any(|v| v.contains(needle)),
+            "`{step}`: {violations:#?}"
+        );
+    }
+}

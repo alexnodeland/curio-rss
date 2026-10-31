@@ -7,13 +7,18 @@
 //!    `docker://…@sha256:` digest, or `owner/repo@<40-hex commit SHA>` with a
 //!    trailing `# vX.Y.Z` comment (what dependabot bumps).
 //! 2. **Release gate.** `ci.yml` is callable (`workflow_call`), `release.yml`
-//!    calls it, and every other release job transitively `needs` that call —
-//!    so a tag on a commit with red CI never reaches a draft release.
+//!    calls it, and every other release job transitively `needs` that call
+//!    with no `always()` / `failure()` / `cancelled()` in its `if:` — so a
+//!    tag on a commit with red CI never reaches a draft release.
 //! 3. **Signing-key isolation.** The updater signing secrets are referenced
 //!    from exactly one step's `env`, across all workflows. That step runs a
 //!    `signer sign` command and no build tool; its job installs npm packages
 //!    only with `--ignore-scripts`, compiles nothing, and uses only the
-//!    first-party artifact plumbing actions. No `secrets: inherit` or
+//!    first-party artifact plumbing actions. Ahead of the key step the job
+//!    runs nothing but that install (no build tool, node or npx, no
+//!    background process), and up to and including it nothing writes the
+//!    runner's env/path/output files or sets a code-injecting env var
+//!    (`BASH_ENV`, `NODE_OPTIONS`, …). No `secrets: inherit` or
 //!    `toJSON(secrets)` anywhere (both hand every secret onward).
 //! 4. **Release assets.** The draft release step ships `SHA256SUMS`, a
 //!    `CycloneDX` SBOM and the provenance attestation bundle, and its job mints
@@ -34,6 +39,21 @@ pub const SIGNING_SECRETS: &[&str] = &["TAURI_SIGNING_PRIVATE_KEY"];
 const BUILD_WORDS: &[&str] = &[
     "build", "bundle", "cargo", "rustc", "npm", "npx", "pnpm", "yarn", "bun", "just", "make",
     "vite", "node",
+];
+
+/// Env vars that make a shell or node load extra code. None may be set in
+/// the signing job's `env`, at job level or at/before the key step.
+const INJECTING_ENV: &[&str] = &["BASH_ENV", "ENV", "NODE_OPTIONS", "LD_PRELOAD"];
+
+/// Runner command files a step writes to change later steps' env / PATH, or
+/// to export values out of the step. None may be written at or before the
+/// key step.
+const RUNNER_FILES: &[&str] = &[
+    "GITHUB_ENV",
+    "GITHUB_PATH",
+    "GITHUB_OUTPUT",
+    "GITHUB_STATE",
+    "BASH_ENV",
 ];
 
 /// The only actions a signing job may run besides its own `run:` steps.
@@ -217,7 +237,7 @@ fn release_gate(release: &Parsed<'_>, ci: Option<&Parsed<'_>>) -> Vec<String> {
         return out;
     }
 
-    for (job_id, _) in &all_jobs {
+    for (job_id, job) in &all_jobs {
         if gates.contains(job_id) {
             continue;
         }
@@ -229,8 +249,38 @@ fn release_gate(release: &Parsed<'_>, ci: Option<&Parsed<'_>>) -> Vec<String> {
                 gates.iter().copied().collect::<Vec<_>>().join(", ")
             ));
         }
+        if let Some(function) = job_if(job).as_deref().and_then(status_override) {
+            out.push(format!(
+                "{}: job `{job_id}` has `if: … {function} …`, which runs it even when the CI gate (or a job it needs) failed — drop the status function",
+                release.name
+            ));
+        }
     }
     out
+}
+
+/// A job's `if:` condition as text (a bare `true`/`false` stays as written).
+fn job_if(job: &Value) -> Option<String> {
+    match job.get("if")? {
+        Value::String(text) => Some(text.clone()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
+/// The status-check function in `condition` that lets a job run although a
+/// job it `needs` failed or was cancelled: `always()`, `failure()` or
+/// `cancelled()` (including `!cancelled()`). Without one, GitHub implies
+/// `success()` — every needed job, the gate included, must have passed.
+fn status_override(condition: &str) -> Option<&'static str> {
+    let compact: String = condition
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    ["always()", "failure()", "cancelled()"]
+        .into_iter()
+        .find(|function| compact.contains(function))
 }
 
 fn reaches_gate<'a>(
@@ -407,19 +457,113 @@ fn signing_step_is_minimal(wf: &Parsed<'_>, at: &StepRef<'_>) -> Vec<String> {
                 "{other_label} runs cargo in the signing job — build in another job"
             ));
         }
-        for command in script.lines() {
-            let command_words = shell_words(command);
-            let installs = command_words
-                .windows(2)
-                .any(|pair| pair[0] == "npm" && matches!(pair[1], "ci" | "install" | "i"));
-            if installs && !command_words.contains(&"--ignore-scripts") {
+        let commands = shell_commands(script);
+        for command in &commands {
+            if is_npm_install(command) && !command.iter().any(|w| w == "--ignore-scripts") {
                 out.push(format!(
                     "{other_label} installs npm packages without `--ignore-scripts` in the signing job"
                 ));
             }
         }
+        if index > at.step {
+            // Runs after the key step: the key lived only in that step's
+            // process env, so nothing here can reach it.
+            continue;
+        }
+        for (key, _) in env_entries(other) {
+            if INJECTING_ENV.contains(&key) {
+                out.push(format!(
+                    "{other_label} sets `{key}` in the signing job, which injects code into the key step's shell or node"
+                ));
+            }
+        }
+        for file in RUNNER_FILES {
+            if script.contains(file) {
+                out.push(format!(
+                    "{other_label} writes `{file}` at or before the signing step — it could inject env into (or export from) the key step"
+                ));
+            }
+        }
+        if index == at.step {
+            continue;
+        }
+        if backgrounds(script) {
+            out.push(format!(
+                "{other_label} leaves a background process running beside the signing step"
+            ));
+        }
+        for command in commands.iter().filter(|c| !is_npm_install(c)) {
+            for word in BUILD_WORDS {
+                if *word != "cargo" && command.iter().any(|w| w == word) {
+                    out.push(format!(
+                        "{other_label} runs `{word}` before the signing step — only `npm ci --ignore-scripts` may run ahead of the key"
+                    ));
+                }
+            }
+        }
+    }
+    for (key, _) in env_entries(job) {
+        if INJECTING_ENV.contains(&key) {
+            out.push(format!(
+                "{}: job `{}` sets `{key}` for every step of the signing job, the key step included",
+                wf.name, at.job
+            ));
+        }
     }
     out
+}
+
+/// The entries of a job's or step's `env:` mapping.
+fn env_entries(node: &Value) -> Vec<(&str, &Value)> {
+    node.get("env")
+        .and_then(Value::as_mapping)
+        .map(|env| {
+            env.iter()
+                .filter_map(|(key, value)| Some((key.as_str()?, value)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Is this simple command an `npm ci` / `npm install` / `npm i`?
+fn is_npm_install(command: &[String]) -> bool {
+    command
+        .windows(2)
+        .any(|pair| pair[0] == "npm" && matches!(pair[1].as_str(), "ci" | "install" | "i"))
+}
+
+/// Does `script` start a process that outlives its step (`cmd &`, `nohup`,
+/// `setsid`, `disown`)? `&&`, `2>&1` and `&>` are not backgrounding.
+fn backgrounds(script: &str) -> bool {
+    if shell_words(script)
+        .iter()
+        .any(|w| matches!(*w, "nohup" | "setsid" | "disown"))
+    {
+        return true;
+    }
+    let chars: Vec<char> = script.chars().collect();
+    chars.iter().enumerate().any(|(i, c)| {
+        let before = i.checked_sub(1).and_then(|j| chars.get(j)).copied();
+        let after = chars.get(i + 1).copied();
+        *c == '&' && !matches!(before, Some('&' | '>' | '<')) && !matches!(after, Some('&' | '>'))
+    })
+}
+
+/// Split shell text into simple commands (on newlines, `;`, `&`, `|`,
+/// parentheses and backticks; `\`-continued lines are joined first), each as
+/// its words.
+fn shell_commands(script: &str) -> Vec<Vec<String>> {
+    script
+        .replace("\\\n", " ")
+        .split(['\n', ';', '&', '|', '(', ')', '`'])
+        .map(|command| {
+            command
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|words| !words.is_empty())
+        .collect()
 }
 
 /// Split shell text into words on whitespace and shell punctuation.
@@ -704,6 +848,113 @@ jobs:
 
         let dangling = RELEASE.replace("    needs: gate\n", "    needs: nowhere\n");
         assert_flags(&run(CI, &dangling), "job `build` does not");
+    }
+
+    #[test]
+    fn a_status_function_that_outlives_a_red_gate_is_flagged() {
+        // `needs` alone is not enough: `always()` & co. run the job anyway.
+        for condition in [
+            "${{ always() }}",
+            "always()",
+            "${{ !cancelled() }}",
+            "${{ success() || failure() }}",
+            "${{ ALWAYS ( ) && github.event_name == 'push' }}",
+        ] {
+            let bypass = RELEASE.replace(
+                "    needs: gate\n",
+                &format!("    needs: gate\n    if: {condition}\n"),
+            );
+            assert_flags(&run(CI, &bypass), "job `build` has `if: …");
+        }
+
+        // A downstream job, two hops from the gate, is held to it too.
+        let downstream = RELEASE.replace(
+            "    needs: [sign]\n",
+            "    needs: [sign]\n    if: ${{ always() }}\n",
+        );
+        assert_flags(&run(CI, &downstream), "job `release` has `if: … always()");
+
+        // Ordinary conditions keep the implied `success()`.
+        for condition in ["${{ github.event_name == 'push' }}", "success()", "true"] {
+            let plain = RELEASE.replace(
+                "    needs: gate\n",
+                &format!("    needs: gate\n    if: {condition}\n"),
+            );
+            assert_eq!(run(CI, &plain), Vec::<String>::new(), "{condition}");
+        }
+    }
+
+    #[test]
+    fn the_signing_job_runs_nothing_but_the_install_before_the_key() {
+        let before_key = |step: &str| {
+            RELEASE.replace(
+                "      - name: Sign\n",
+                &format!("      - run: {step}\n      - name: Sign\n"),
+            )
+        };
+        for (step, word) in [
+            ("npm run build", "npm"),
+            ("npx vite build", "npx"),
+            ("node ./dist/x.js", "node"),
+            ("npm ci --ignore-scripts && npm run build", "npm"),
+            ("make sign", "make"),
+        ] {
+            assert_flags(
+                &run(CI, &before_key(step)),
+                &format!("runs `{word}` before the signing step"),
+            );
+        }
+
+        let env_write = before_key("echo NODE_OPTIONS=--require ./evil.js >> \"$GITHUB_ENV\"");
+        assert_flags(&run(CI, &env_write), "writes `GITHUB_ENV` at or before");
+        let path_write = before_key("echo ./evil >> $GITHUB_PATH");
+        assert_flags(&run(CI, &path_write), "writes `GITHUB_PATH` at or before");
+
+        for step in [
+            "python3 -m http.server &",
+            "nohup ./watch.sh",
+            "(sleep 600; cat /proc/*/environ) & disown",
+        ] {
+            assert_flags(&run(CI, &before_key(step)), "leaves a background process");
+        }
+
+        // The key step itself must not export the key to later steps.
+        let exported = RELEASE.replace(
+            "        run: ./node_modules/.bin/tauri signer sign Curio.app.tar.gz\n",
+            "        run: |\n          ./node_modules/.bin/tauri signer sign Curio.app.tar.gz\n          echo \"k=$TAURI_SIGNING_PRIVATE_KEY\" >> \"$GITHUB_OUTPUT\"\n",
+        );
+        assert_flags(&run(CI, &exported), "writes `GITHUB_OUTPUT` at or before");
+
+        // Code-injecting env vars, on a step or the whole job.
+        let step_env = RELEASE.replace(
+            "          TAURI_SIGNING_PRIVATE_KEY_PASSWORD:",
+            "          NODE_OPTIONS: --require ./evil.js\n          TAURI_SIGNING_PRIVATE_KEY_PASSWORD:",
+        );
+        assert_flags(
+            &run(CI, &step_env),
+            "sets `NODE_OPTIONS` in the signing job",
+        );
+        let job_env = RELEASE.replace(
+            "  sign:\n    needs: build\n",
+            "  sign:\n    needs: build\n    env:\n      BASH_ENV: ./evil.sh\n",
+        );
+        assert_flags(&run(CI, &job_env), "sets `BASH_ENV` for every step");
+    }
+
+    #[test]
+    fn the_signing_job_may_do_plain_work_around_the_key() {
+        // Harmless shell ahead of the key, a line-continued install, and
+        // node / output files AFTER the key step (the manifest writer) pass.
+        let fine = RELEASE
+            .replace(
+                "      - run: npm ci --ignore-scripts\n",
+                "      - run: |\n          set -euo pipefail\n          npm ci \\\n            --ignore-scripts 2>&1 | tee install.log\n          ls -l dist && echo ok\n",
+            )
+            .replace(
+                "  release:\n",
+                "      - run: node -e 'require(\"fs\")' && echo \"v=1\" >> \"$GITHUB_OUTPUT\"\n  release:\n",
+            );
+        assert_eq!(run(CI, &fine), Vec::<String>::new());
     }
 
     #[test]

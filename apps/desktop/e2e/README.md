@@ -19,6 +19,15 @@ for WKWebView**, so macOS correctness rides the versioned manual checklist in
 instead — this is a deliberate gap (docs/design/roadmap.md §5, decision D11:
 "Playwright-drives-Tauri is unimplementable; no test backdoors").
 
+On Windows, `msedgedriver` hands WebView2 its `--remote-debugging-port` /
+`--user-data-dir` flags through the `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+env var, which the runtime ignores once an app sets browser arguments of its
+own — and wry always does. Debug builds of the app (the smoke builds with
+`--debug`) therefore forward that env var's flags after wry's defaults when
+they create the main window (`src-tauri/src/browser_args.rs`); release builds
+never take injected flags. Without it every Windows session fails with
+"DevToolsActivePort file doesn't exist".
+
 ## What the harness sets up (`wdio.conf.ts`)
 
 No test hooks live in the app. Before the app boots, the launcher:

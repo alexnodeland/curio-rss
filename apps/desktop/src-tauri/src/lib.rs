@@ -12,6 +12,7 @@
 //! tauri. `curio-core` stays webview-free — `deny.toml` wrappers +
 //! `cargo run -p xtask -- boundary` enforce it mechanically.
 
+pub mod browser_args;
 pub mod commands;
 pub mod discovery;
 pub mod dto;
@@ -138,7 +139,7 @@ pub fn run() {
     let tauri_builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // A second launch focuses the existing window instead.
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 let _ = window.set_focus();
             }
         }))
@@ -152,6 +153,9 @@ pub fn run() {
         .on_menu_event(menu::on_event)
         .setup(move |app| {
             builder.mount_events(app);
+            // First, as tauri would for a `create: true` window, so startup
+            // ordering is unchanged.
+            create_main_window(app)?;
 
             let profile = paths::profile_dir()?;
             // Rotating logs + panic hook first, so anything below is captured.
@@ -184,5 +188,59 @@ pub fn run() {
         // Startup failed before a window existed; stderr is all we have.
         eprintln!("curio-desktop failed to start: {error}");
         std::process::exit(1);
+    }
+}
+
+/// The label of the one window, configured in `tauri.conf.json`.
+const MAIN_WINDOW: &str = "main";
+
+/// Builds the main window from its `tauri.conf.json` entry. That entry is
+/// `create: false` so the window is made here, where a debug build on
+/// Windows can hand `WebView2` the automation flags wry would otherwise
+/// shadow (see [`browser_args`]).
+fn create_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW)
+        .ok_or("tauri.conf.json has no `main` window")?;
+    let window = tauri::WebviewWindowBuilder::from_config(app.handle(), config)?;
+    #[cfg(all(windows, debug_assertions))]
+    let window = match browser_args::with_injected(
+        std::env::var(browser_args::AUTOMATION_ENV).ok().as_deref(),
+    ) {
+        Some(args) => window.additional_browser_args(&args),
+        None => window,
+    };
+    window.build()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MAIN_WINDOW;
+
+    /// `create_main_window` is the only place the main window is made: tauri
+    /// must not also create it from the config (a second window with the
+    /// same label fails startup), and the entry it builds from must exist.
+    #[test]
+    fn the_config_leaves_main_window_creation_to_setup() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap_or_default();
+        let windows = config["app"]["windows"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let main: Vec<_> = windows
+            .iter()
+            .filter(|window| window["label"] == MAIN_WINDOW)
+            .collect();
+        assert_eq!(main.len(), 1, "exactly one `{MAIN_WINDOW}` window");
+        assert!(
+            windows.iter().all(|window| window["create"] == false),
+            "every configured window is `create: false`, made in setup"
+        );
     }
 }

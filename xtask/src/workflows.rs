@@ -20,12 +20,12 @@
 //!    runner's env/path/output files or sets a code-injecting env var
 //!    (`BASH_ENV`, `NODE_OPTIONS`, …). No `secrets: inherit` or
 //!    `toJSON(secrets)` anywhere (both hand every secret onward). The
-//!    signing job deploys to the `updater-signing` environment (issue #187)
-//!    — the only place the key is to be stored, tag-restricted and
-//!    reviewer-gated —
-//!    whenever the key step runs: unconditionally, or (in a workflow that a
-//!    `workflow_dispatch` dry run also triggers) under exactly the key step's
-//!    own `if:`, so the dry run is never held at the tag-only rule.
+//!    signing job deploys to the `updater-signing` environment (issue #187),
+//!    the only place the key is to be stored, tag-restricted and
+//!    reviewer-gated, whenever the key step runs: unconditionally, or (in a
+//!    workflow that a `workflow_dispatch` dry run also triggers) under
+//!    exactly the key step's own `if:`, so the dry run is never held at the
+//!    tag-only rule.
 //! 4. **Release assets.** The draft release step ships `SHA256SUMS`, a
 //!    `CycloneDX` SBOM and the provenance attestation bundle, and its job mints
 //!    that attestation first.

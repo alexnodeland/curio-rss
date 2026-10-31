@@ -43,7 +43,9 @@ Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
    `latest.json`. On a tag push the job deploys to the **`updater-signing`
    environment** (below), so it **waits for your approval**: open the run →
    **Review deployments** → tick `updater-signing` → **Approve and deploy**.
-   The key step fails fast with a pointer here if the key comes through empty.
+   The key step fails fast with a pointer here if the environment is not
+   configured (its `UPDATER_SIGNING_READY` variable is missing) or the key
+   comes through empty.
 4. **`sbom`** writes CycloneDX SBOMs: the Rust graph per darwin arch and the
    whole npm lockfile (dev dependencies included — the build toolchain that
    compiled the frontend bundle).
@@ -76,15 +78,19 @@ then reads it as empty, and a sign job nobody approved never starts.
 `workflow_dispatch` dry run the name is empty, i.e. no environment, so the dry
 run is not held at the tag-only rule).
 
-**Order matters.** Do steps 1–4 **before the next `v*` tag is pushed** —
-ideally before the `release.yml` that references the environment merges.
+**Order matters.** Do steps 1–4 **before the next `v*` tag is pushed**.
 GitHub silently auto-creates an environment that a job references but that
-does not exist yet, and creates it with **no** protection rules: a tag cut in
-that window would deploy to an unprotected `updater-signing` and sign with the
-still-present repository secret, unapproved. If `updater-signing` already
-exists when you start (auto-created, or from an earlier attempt), open it and
-check its protection rules and deployment tag rule against steps 2–3 before
-you tag. Step 5 comes last, after the environment holds the secrets.
+does not exist yet, and creates it with **no** protection rules. So the key
+step first checks the `UPDATER_SIGNING_READY` variable, which exists only on
+the environment you configure (step 4): a tag cut before the setup fails
+there with `::error::the updater-signing environment is not configured`
+instead of signing unapproved with the still-present repository secret.
+Never define `UPDATER_SIGNING_READY` as a repository or organization
+variable — those reach every job and would defeat the check. If
+`updater-signing` already exists when you start (auto-created by such a
+failed run, or from an earlier attempt), open it and check its protection
+rules and deployment tag rule against steps 2–3 before you tag. Step 5 comes
+last, after the environment holds the secrets.
 
 Setup (repository admin, in the GitHub web UI):
 
@@ -101,7 +107,10 @@ Setup (repository admin, in the GitHub web UI):
 4. **Environment secrets → Add environment secret**: `TAURI_SIGNING_PRIVATE_KEY`
    (the minisign private key, the full contents of the `.key` file — GitHub
    never shows an existing secret's value, so paste it from your offline
-   copy), then `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (its password).
+   copy), then `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (its password). Then
+   **Environment variables → Add environment variable**:
+   `UPDATER_SIGNING_READY` = `true` — add it last, once steps 2–3 are saved;
+   it is what tells the release run the environment is ready.
 5. Once a `release.yml` that selects the environment is on `main`:
    **Settings → Secrets and variables → Actions → Repository secrets** →
    delete `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
@@ -121,7 +130,8 @@ Verify (after any change to the environment, and once after the setup):
       `environment: updater-signing` is refused ("not allowed to deploy …
       due to environment protection rules"). Delete the branch afterwards.
 - [ ] **Settings → Secrets and variables → Actions** lists no repository-level
-      `TAURI_SIGNING_*` secret.
+      `TAURI_SIGNING_*` secret and no repository-level `UPDATER_SIGNING_READY`
+      variable.
 
 **Dry run first (recommended).** Actions → `release` → **Run workflow** on
 `main` runs all of the above except the publish steps: it signs with a

@@ -102,7 +102,7 @@ defense-in-depth, not the primary defense.
 - Numbered embedded migrations: forward-only, and the whole pending set runs in **one**
   `IMMEDIATE` transaction (a failing step leaves the file at its old version, never
   half-way). An existing database is first snapshotted with `VACUUM INTO` to
-  `curio.db.pre-vN.bak` (two newest kept) — no backup, no migration. Upgrade-tested
+  `curio.db.pre-vN.bak` (that one plus the highest-numbered other kept) — no backup, no migration. Upgrade-tested
   against fixture DBs written by every released version (`fixtures/db/`).
 - Opening is typed: `OpenError` separates corrupt / too-new / locked / IO / failed-backup /
   failed-migration so heads act on the class instead of parsing `SQLite` messages. A

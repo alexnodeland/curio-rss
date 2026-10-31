@@ -52,7 +52,7 @@ All state lives in one profile directory:
 |------|----------|
 | `curio.toml` | human-editable configuration (below) |
 | `curio.db` | WAL SQLite: feeds, articles, state, FTS index |
-| `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (two newest kept; see [Upgrades and backups](#upgrades-and-backups)) |
+| `curio.db.pre-vN.bak` | automatic snapshot taken before upgrading the database to schema `N` (the latest one plus the highest-numbered other kept; see [Upgrades and backups](#upgrades-and-backups)) |
 | `.curio/events/events-YYYYMMDD.jsonl` | the `curio.events.v1` behavioral log |
 | `.curio/.gitignore` | scaffolded so the events log is never committed |
 | `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
@@ -317,9 +317,14 @@ and their events never reached the log).
 Opening a profile whose database was written by an older Curio upgrades
 it in place, after first writing a consistent snapshot next to it:
 `curio.db.pre-vN.bak`, where `N` is the schema version being upgraded
-to (the two newest are kept). The upgrade runs as one transaction: if
-any step fails, the database stays exactly at its old version and the
-open fails with a message naming the backup. A database written by a
+to (the one just written and the highest-numbered other are kept — a
+rollback to an older build never prunes its own fresh backup). The
+upgrade runs as one transaction: if any step fails, the database stays
+exactly at its old version and the open fails with a message naming the
+backup. Two Curio processes upgrading the same profile at once (the
+desktop app and a scheduled `curio`) are safe: each writes its snapshot
+under its own temporary name, and the upgrade itself runs once, under
+the database's write lock. A database written by a
 *newer* Curio is refused untouched (update Curio instead), as is a file
 that is not a Curio database at all.
 

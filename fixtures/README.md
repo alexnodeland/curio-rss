@@ -37,12 +37,32 @@ Current layout:
   every one and asserts the pre-migration backup, row counts, FTS integrity
   and intent replay. Cutting a release adds its fixture here.
 
-Planned layout (populated from later phases, per `docs/design/roadmap.md`):
+- `feeds/` — well-formed RSS/Atom/JSON Feed (and Reddit JSON) samples for
+  the ingest pipeline's unit and integration tests
 
-- `feeds/` — real-world RSS/Atom/JSON Feed samples for the ingest pipeline
-- `nasty/` — the hostile corpus: malformed XML, encoding bombs, stored-XSS
-  attempts (`<script>`, `onerror=`), oversized entries
-- `html/` — article HTML → readability → CommonMark conversion cases
+- `nasty/` — the **seeds** of the hostile corpus: RSS 1.0/RDF, JSON Feed
+  1.0/1.1 oddities, `xml:base`, duplicate guids, every kind of bad date,
+  media/iTunes namespaces, HTML served as a feed, malformed and truncated
+  XML, an entity bomb, stored-XSS payloads (`<script>`, `onerror=`,
+  `javascript:`), and a hostile Reddit listing.
+  `crates/curio-core/tests/nasty_corpus.rs` pins each file (with
+  `feeds/`) to its expected outcome — parses with N entries, or rejected —
+  and **a new file here must be added to its `SEEDS` table**
+  (`committed_seeds_are_all_pinned` fails otherwise). The corpus itself,
+  over 1000 inputs, is generated from these seeds at test time,
+  deterministically: byte-level encoding variants (BOMs, UTF-16, Latin-1,
+  lying declarations, control characters), size/shape extremes (deep
+  nesting, a ~700 KB entry, thousands of items, attribute floods) and
+  seeded mutants. That is why nothing large is committed. Every input must
+  end in a classified outcome with no panic, and everything it stores must
+  pass the inertness audit (`tests/common/inert.rs`). The same files seed
+  the `fuzz/` targets (`just fuzz`, nightly).
+
+- `html/` — article HTML → sanitize → extract → CommonMark cases, pinned to
+  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate
+
+- `import/`, `opml/` — refugee-importer exports and OPML subscription lists
+  (`opml/` also seeds the `opml` fuzz target)
 
 Rule: no fixture file may exceed 1 MB — CI's blob-size guard fails the push
 (the 50k `generated/` database is ~100 MB, which is exactly why it is

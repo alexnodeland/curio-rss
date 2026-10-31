@@ -75,6 +75,14 @@ and as lefthook hooks scoped to `apps/desktop/` changes.
 - **Lints are the floor.** `cargo fmt` clean, `cargo clippy --workspace
   --all-targets -- -D warnings` clean, `cargo test --workspace` green.
   `unwrap`/`expect` are denied outside tests.
+- **Untrusted input has three walls.** Everything a feed, page or export
+  file can reach goes through the nasty corpus
+  (`crates/curio-core/tests/nasty_corpus.rs`, over 1000 generated inputs,
+  in `just ci`), a proptest suite per pure entry point
+  (`crates/curio-core/tests/props/`), and the cargo-fuzz targets in
+  `fuzz/` (nightly toolchain, run for 10 minutes each by the nightly
+  workflow; locally `just fuzz <target> [seconds]`). A crash any of them
+  finds becomes a pinned regression input or seed.
 - **Engine files stay small.** No `.rs` file under `crates/curio-core/src`
   may exceed 700 lines (tests included) — the xtask `core_file_size` test
   fails the suite on one that does. Grow a module by splitting it along its

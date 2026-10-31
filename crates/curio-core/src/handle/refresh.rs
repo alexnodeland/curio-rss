@@ -294,7 +294,8 @@ impl CoreHandle {
 }
 
 /// Turns a parsed entry into a storage row via the content pipeline
-/// (sanitize → extract → text — the D6 invariant lives here).
+/// (sanitize → extract whole pages only → text — the D6 invariant lives
+/// here).
 fn ingest_entry(feed_id: FeedId, feed_url: &str, entry: ParsedEntry) -> NewArticle {
     let base = entry.link.as_deref().unwrap_or(feed_url).to_owned();
     let processed = content::process(&entry.content_html, Some(&base));

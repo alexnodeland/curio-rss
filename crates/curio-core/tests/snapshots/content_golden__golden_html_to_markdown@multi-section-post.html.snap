@@ -1,0 +1,16 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/multi-section-post.html
+---
+## Why we moved the queue
+
+The first block group opens the post. It is deliberately the shorter of the two, so a scorer that keeps only its top candidate drops it.
+
+## What changed after the move
+
+The second block group carries the bulk of the argument: latency fell, retries stopped piling up, and the on-call rotation got its weekends back.
+
+It also has a second paragraph, which is exactly what used to make it the only block that survived extraction.
+
+Ghost-style callout card: the last word on the migration.

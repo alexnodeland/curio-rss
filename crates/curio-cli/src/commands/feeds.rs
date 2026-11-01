@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use anyhow::Context as _;
 use curio_core::RefreshOutcome;
 use curio_core::feeds::{DiscoverOptions, normalize_input};
-use curio_core::model::NewFeed;
+use curio_core::model::{FetchErrorKind, NewFeed};
 use serde::Serialize;
 
 use crate::app::App;
@@ -173,6 +173,9 @@ struct FetchView {
     new_articles: u64,
     updated_articles: u64,
     error: Option<String>,
+    /// The machine-readable failure class (`refused`, `tls_certificate`,
+    /// `not_a_feed`, …) for scripts to branch on.
+    error_kind: Option<&'static str>,
 }
 
 impl FetchView {
@@ -185,6 +188,7 @@ impl FetchView {
             new_articles: outcome.new_articles,
             updated_articles: outcome.updated_articles,
             error: outcome.error.clone(),
+            error_kind: outcome.error_kind.map(FetchErrorKind::as_str),
         }
     }
 }

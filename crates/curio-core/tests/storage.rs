@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use curio_core::model::{
-    ArticleContent, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchRecord, FetchStatus,
-    NewArticle, NewFeed,
+    ArticleContent, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchErrorKind, FetchRecord,
+    FetchStatus, NewArticle, NewFeed,
 };
 use curio_core::storage::{ListArticles, OpenError, Storage, StorageError};
 use curio_types::{EventPayload, Timestamp};
@@ -252,16 +252,21 @@ fn feed_lifecycle_round_trips_and_stages_events() {
                 && tags == &["rust".to_owned()]
     ));
 
-    // Duplicate URL is a constraint violation.
+    // Subscribing to the same URL again is the typed duplicate, not a
+    // generic SQLite failure — and stages no second feed.added.
+    let err = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap_err();
     assert!(
-        storage
-            .add_feed(NewFeed {
-                url: "https://example.com/feed.xml".to_owned(),
-                title: None,
-                tags: vec![],
-            })
-            .is_err()
+        matches!(err, StorageError::Duplicate { entity: "feed", .. }),
+        "{err:?}"
     );
+    assert_eq!(err.to_string(), "feed already exists");
+    assert_eq!(storage.pending_intents().unwrap().len(), 1);
 
     storage
         .set_feed_status(feed.id, FeedStatus::Paused)
@@ -1140,6 +1145,7 @@ fn fetch_log_round_trips_newest_first() {
                 status,
                 http_status: http,
                 error: (status == FetchStatus::Error).then(|| "timeout".to_owned()),
+                error_kind: (status == FetchStatus::Error).then_some(FetchErrorKind::ReadTimeout),
                 articles_new: 0,
                 duration_ms: Some(42),
             })
@@ -1149,6 +1155,8 @@ fn fetch_log_round_trips_newest_first() {
     assert_eq!(recent.len(), 2);
     assert_eq!(recent[0].status, FetchStatus::Error);
     assert_eq!(recent[0].error.as_deref(), Some("timeout"));
+    assert_eq!(recent[0].error_kind, Some(FetchErrorKind::ReadTimeout));
+    assert_eq!(recent[1].error_kind, None);
     assert_eq!(recent[1].status, FetchStatus::NotModified);
     // Unknown feed violates the foreign key.
     assert!(
@@ -1159,6 +1167,7 @@ fn fetch_log_round_trips_newest_first() {
                 status: FetchStatus::Ok,
                 http_status: Some(200),
                 error: None,
+                error_kind: None,
                 articles_new: 0,
                 duration_ms: None,
             })
@@ -1191,6 +1200,7 @@ fn feed_health_derives_from_the_latest_fetch_outcome() {
                 status,
                 http_status: None,
                 error: error.map(str::to_owned),
+                error_kind: error.map(|_| FetchErrorKind::Refused),
                 articles_new: 0,
                 duration_ms: None,
             })
@@ -1208,12 +1218,14 @@ fn feed_health_derives_from_the_latest_fetch_outcome() {
     record(FetchStatus::Error, Some("connection refused"));
     let errored = only(&storage);
     assert_eq!(errored.last_error.as_deref(), Some("connection refused"));
+    assert_eq!(errored.last_error_kind, Some(FetchErrorKind::Refused));
     assert_eq!(errored.last_ok_at, ok_at);
 
     // Recovery clears last_error again — the dot follows the newest attempt.
     record(FetchStatus::Ok, None);
     let recovered = only(&storage);
     assert_eq!(recovered.last_error, None);
+    assert_eq!(recovered.last_error_kind, None);
 }
 
 #[test]
@@ -1868,8 +1880,66 @@ fn migration_0008_adds_the_dead_letter_table_to_a_v7_database() {
     }
 
     let storage = Storage::open(&path).unwrap();
-    assert_eq!(Storage::schema_version(), 8);
-    assert_eq!(storage.db_schema_version().unwrap(), 8);
+    assert_eq!(Storage::schema_version(), 9);
+    assert_eq!(storage.db_schema_version().unwrap(), 9);
     assert_eq!(storage.quarantined_intent_count().unwrap(), 0);
-    assert!(dir.path().join("curio.db.pre-v8.bak").is_file());
+    assert!(dir.path().join("curio.db.pre-v9.bak").is_file());
+}
+
+/// A v8 profile gains `fetch_log.error_kind`: the fetch history it already
+/// holds survives with no kind (it was never tracked), and new errored
+/// attempts carry theirs — through to the feed's derived health.
+#[test]
+fn migration_0009_adds_the_fetch_error_kind_to_a_v8_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../src/storage/migrations/0001_init.sql"),
+            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+            include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+            include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 8).unwrap();
+        conn.execute_batch(
+            "INSERT INTO feeds (id, url, added_at, modified_at) \
+               VALUES (1, 'https://example.com/feed.xml', '2026-01-01T00:00:00Z', \
+                       '2026-01-01T00:00:00Z'); \
+             INSERT INTO fetch_log (feed_id, fetched_at, status, error) \
+               VALUES (1, '2026-01-01T00:00:00Z', 'error', 'old failure');",
+        )
+        .unwrap();
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(storage.db_schema_version().unwrap(), 9);
+    let feed = storage.list_feeds().unwrap().remove(0);
+    assert_eq!(feed.last_error.as_deref(), Some("old failure"));
+    assert_eq!(feed.last_error_kind, None);
+    let old = storage.recent_fetches(feed.id, 5).unwrap();
+    assert_eq!((old.len(), old[0].error_kind), (1, None));
+
+    storage
+        .record_fetch(FetchRecord {
+            feed_id: feed.id,
+            fetched_at: Timestamp::now(),
+            status: FetchStatus::Error,
+            http_status: None,
+            error: Some("connection refused".to_owned()),
+            error_kind: Some(FetchErrorKind::Refused),
+            articles_new: 0,
+            duration_ms: None,
+        })
+        .unwrap();
+    let feed = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(feed.last_error_kind, Some(FetchErrorKind::Refused));
+    let newest = storage.recent_fetches(feed.id, 1).unwrap();
+    assert_eq!(newest[0].error_kind, Some(FetchErrorKind::Refused));
 }

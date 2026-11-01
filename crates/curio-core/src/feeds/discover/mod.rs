@@ -313,6 +313,20 @@ pub async fn discover(
     })
 }
 
+/// The fetch-free half of discovery, for a body that failed to parse as a
+/// feed: when it sniffs as an HTML page, the feeds that page declares
+/// (its `<link rel="alternate">` feeds, or a synthesized `YouTube` channel
+/// feed — unvalidated, and with no extra request); `None` when it is not
+/// a web page at all. A refresh uses it to say "this is a web page, not a
+/// feed" instead of reporting an XML parse error.
+pub(crate) fn web_page_feeds(body: &[u8], final_url: &str) -> Option<Vec<DiscoveredFeed>> {
+    if !sniff::looks_like_html(&String::from_utf8_lossy(body)) {
+        return None;
+    }
+    let extracted = html::extract(body, final_url);
+    Some(extracted.feeds)
+}
+
 /// The URL to subscribe for a fetch of `requested`: the redirect target
 /// only when every hop was permanent (as refresh adopts it) — a temporary
 /// redirect (tracking link, signed CDN URL) is never stored.

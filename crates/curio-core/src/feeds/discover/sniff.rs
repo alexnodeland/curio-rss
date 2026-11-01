@@ -16,15 +16,7 @@ pub(super) const SNIFF_WINDOW: usize = 2048;
 /// substring elsewhere in an HTML page does not count. JSON: the body is an
 /// object declaring a `jsonfeed.org` `version`.
 pub(super) fn looks_like_feed(text: &str) -> bool {
-    // Cut on a char boundary: `text` is lossily decoded, so byte
-    // `SNIFF_WINDOW` can fall inside a multi-byte char (CJK, emoji, U+FFFD).
-    // (A hand-rolled `floor_char_boundary`: that is newer than the MSRV.)
-    let mut cut = SNIFF_WINDOW.min(text.len());
-    while !text.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    let head = &text[..cut];
-    let head = head.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let head = sniff_head(text);
     if head.starts_with('{') {
         return declares_json_feed_version(head);
     }
@@ -35,6 +27,30 @@ pub(super) fn looks_like_feed(text: &str) -> bool {
             .iter()
             .any(|root| local.eq_ignore_ascii_case(root))
     })
+}
+
+/// A quick structural sniff: is the body an HTML page? Past any BOM,
+/// whitespace, prolog, comments and `<!DOCTYPE html>`, the root element is
+/// `html` (or, for markup that omits it, `head`/`body`), ASCII
+/// case-insensitive.
+pub(super) fn looks_like_html(text: &str) -> bool {
+    root_element_name(sniff_head(text)).is_some_and(|name| {
+        ["html", "head", "body"]
+            .iter()
+            .any(|root| name.eq_ignore_ascii_case(root))
+    })
+}
+
+/// The first [`SNIFF_WINDOW`] bytes of `text`, past a BOM and whitespace.
+fn sniff_head(text: &str) -> &str {
+    // Cut on a char boundary: `text` is lossily decoded, so byte
+    // `SNIFF_WINDOW` can fall inside a multi-byte char (CJK, emoji, U+FFFD).
+    // (A hand-rolled `floor_char_boundary`: that is newer than the MSRV.)
+    let mut cut = SNIFF_WINDOW.min(text.len());
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    text[..cut].trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
 }
 
 /// The name of the first element in `xml`, skipping whitespace, processing
@@ -136,12 +152,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn html_pages_are_recognised_and_feeds_are_not() {
+        let pages = [
+            "<!DOCTYPE html>\n<html lang=\"en\"><head></head></html>",
+            "\u{feff}\n  <!-- built by hand --><HTML><body>hi</body></HTML>",
+            r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"/>"#,
+            "<head><title>no html tag</title></head>",
+            "<body>just a body</body>",
+        ];
+        for page in pages {
+            assert!(looks_like_html(page), "expected a web page: {page:?}");
+        }
+        let not_pages = [
+            r#"<rss version="2.0"><channel/></rss>"#,
+            "<feed>",
+            "<htmlish/>",
+            r#"{"version":"https://jsonfeed.org/version/1.1"}"#,
+            "plain text <html>",
+            "",
+        ];
+        for body in not_pages {
+            assert!(!looks_like_html(body), "expected not a web page: {body:?}");
+        }
+    }
+
     proptest::proptest! {
         #[test]
         fn the_sniff_never_panics_on_markup_shaped_text(
             body in "[ \u{feff}]{0,3}(<\\?[^>]{0,40}\\??>?|<!--.{0,40}(-->)?|<!DOCTYPE[^>]{0,30}(\\[.{0,30}\\]?)?>?|<[a-zA-Z:日本🎌]{0,10}|\\{.{0,40}|[日本語🎌👍🏽a]{0,700}){0,6}",
         ) {
             let _ = looks_like_feed(&body);
+            let _ = looks_like_html(&body);
         }
     }
 }

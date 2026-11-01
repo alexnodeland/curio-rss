@@ -70,8 +70,10 @@ rustix = { workspace = true }
 curio-core = { path = ".", features = ["test-support"] }
 insta = { workspace = true }
 proptest = { workspace = true }
+rcgen = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-rustls = { workspace = true }
 wiremock = { workspace = true }
 
 [lints]

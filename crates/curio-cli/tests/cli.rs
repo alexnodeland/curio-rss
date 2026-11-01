@@ -135,6 +135,7 @@ async fn the_full_happy_path_produces_contract_valid_artifacts() {
     );
     assert_eq!(fetch[0]["status"], "ok");
     assert_eq!(fetch[0]["new_articles"], 3);
+    assert!(fetch[0]["error_kind"].is_null(), "{}", fetch[0]);
 
     let list = stdout_json(
         &curio(profile.path())
@@ -948,6 +949,39 @@ async fn feed_add_refuses_a_page_with_no_feed_unless_told_not_to_validate() {
             .success(),
     );
     assert_eq!(added["url"], format!("{server}/"));
+}
+
+#[test]
+fn a_failed_fetch_reports_its_typed_error_kind() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let url = format!("http://127.0.0.1:{port}/feed.xml");
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    curio(profile.path())
+        .args([
+            "feed",
+            "add",
+            &url,
+            "--allow-private-network",
+            "--no-validate",
+        ])
+        .assert()
+        .success();
+
+    let fetch = stdout_json(
+        &curio(profile.path())
+            .args(["fetch", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(fetch[0]["status"], "error");
+    assert_eq!(fetch[0]["error_kind"], "refused");
+    let error = fetch[0]["error"].as_str().unwrap();
+    assert_eq!(error.matches(&url).count(), 1, "{error}");
 }
 
 #[test]

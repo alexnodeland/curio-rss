@@ -136,6 +136,7 @@ export function feedFixture(overrides: Partial<FeedDto> = {}): FeedDto {
         added_at: '2026-07-01T10:00:00.000Z',
         last_fetched_at: null,
         last_error: null,
+        last_error_kind: null,
         last_ok_at: null,
         tags: [],
         fetch_full_text: false,
@@ -212,6 +213,7 @@ export function refreshOutcomeFixture(
         new_articles: 1,
         updated_articles: 0,
         error: null,
+        error_kind: null,
         ...overrides,
     };
 }
@@ -223,6 +225,7 @@ export function fetchRecordFixture(overrides: Partial<FetchRecordDto> = {}): Fet
         status: 'ok',
         http_status: 200,
         error: null,
+        error_kind: null,
         articles_new: 1,
         duration_ms: 120,
         ...overrides,

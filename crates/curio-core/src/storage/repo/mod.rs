@@ -117,17 +117,20 @@ pub struct PendingIntent {
     pub envelope: EventEnvelope,
 }
 
-// The trailing two columns derive current health from `fetch_log`: the error
-// text iff the *newest* attempt errored, and the timestamp of the newest
-// successful attempt. Correlated on `feeds.id` — every FEED_COLS query is a
-// bare `FROM feeds` (no aliases/joins), so the reference is unambiguous.
+// The trailing three columns derive current health from `fetch_log`: the
+// error text iff the *newest* attempt errored, the timestamp of the newest
+// successful attempt, and the newest attempt's error kind iff it errored.
+// Correlated on `feeds.id` — every FEED_COLS query is a bare `FROM feeds`
+// (no aliases/joins), so the reference is unambiguous.
 const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modified, status, \
                          allow_private_network, added_at, last_fetched_at, tags, fetch_full_text, \
                          (SELECT CASE WHEN status = 'error' THEN error END FROM fetch_log \
                           WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error, \
                          (SELECT fetched_at FROM fetch_log WHERE feed_id = feeds.id \
                           AND status IN ('ok', 'not_modified') ORDER BY id DESC LIMIT 1) \
-                          AS last_ok_at";
+                          AS last_ok_at, \
+                         (SELECT CASE WHEN status = 'error' THEN error_kind END FROM fetch_log \
+                          WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error_kind";
 
 const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url, author, \
                             published_at, content_html, content_text, lang, word_count, \

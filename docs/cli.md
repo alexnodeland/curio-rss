@@ -246,6 +246,16 @@ full-text mode, or Reddit enrichment) keeps that body: later refreshes of
 a feed still listing the item update its title and metadata, never revert
 it to the feed's excerpt.
 
+A failed refresh says why in one short line — the cause the OS or TLS stack
+reported ("connection refused", "invalid peer certificate: UnknownIssuer",
+"connect timeout"), or "this is a web page, not a feed — found 2 feeds on it
+(first: …)" when the subscribed URL serves an HTML page. `--json` adds a
+stable `error_kind` next to `error` for scripts to branch on: `invalid_url`,
+`dns`, `blocked` (the SSRF guard), `refused`, `reset`, `tls_certificate`,
+`tls_handshake`, `connect_timeout`, `read_timeout`, `redirect`, `too_large`,
+`transport`, `http` (see `http_status`), `gone` (HTTP 410), `not_a_feed`,
+`parse`, or `busy` (another Curio process was refreshing the feed).
+
 Sloppy feeds are normalized on the way in. An entry with no publication
 date takes its last-updated date, and a date in the future is clamped to
 when Curio first saw the article (the future value itself is not kept; if

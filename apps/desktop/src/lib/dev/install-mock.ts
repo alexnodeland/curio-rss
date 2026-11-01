@@ -263,6 +263,7 @@ tokens:
                             status: 'ok',
                             http_status: 200,
                             error: null,
+                            error_kind: null,
                             articles_new: 2,
                             duration_ms: 143,
                         },
@@ -272,6 +273,7 @@ tokens:
                             status: 'ok',
                             http_status: 200,
                             error: null,
+                            error_kind: null,
                             articles_new: 0,
                             duration_ms: 98,
                         },
@@ -281,6 +283,7 @@ tokens:
                             status: 'not_modified',
                             http_status: 304,
                             error: null,
+                            error_kind: null,
                             articles_new: 0,
                             duration_ms: 61,
                         },
@@ -293,6 +296,7 @@ tokens:
                         new_articles: 0,
                         updated_articles: 0,
                         error: null,
+                        error_kind: null,
                     };
                 case 'refresh_all':
                     return feeds.map((f) => ({
@@ -302,6 +306,7 @@ tokens:
                         new_articles: 0,
                         updated_articles: 0,
                         error: null,
+                        error_kind: null,
                     }));
                 case 'get_app_info':
                     return {

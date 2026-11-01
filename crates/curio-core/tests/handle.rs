@@ -12,8 +12,10 @@ use std::time::Duration;
 use curio_core::events::{FoldedState, read_all};
 use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
-use curio_core::model::{ArticleContent, FeedStatus, FetchStatus, NewArticle, NewFeed};
-use curio_core::storage::ListArticles;
+use curio_core::model::{
+    ArticleContent, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
+};
+use curio_core::storage::{ListArticles, StorageError};
 use curio_core::{CoreHandle, CoreOptions, ImportSource};
 use curio_types::{Destination, DestinationName, EventPayload};
 use wiremock::matchers::{method, path};
@@ -383,6 +385,7 @@ async fn http_410_auto_pauses_the_feed_for_good() {
     let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.status, FetchStatus::Error);
     assert_eq!(outcome.http_status, Some(410));
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::Gone));
     assert_eq!(
         core.get_feed(feed.id).unwrap().unwrap().status,
         FeedStatus::Dead
@@ -390,6 +393,7 @@ async fn http_410_auto_pauses_the_feed_for_good() {
 
     // A dead feed is never fetched again — even explicitly.
     let again = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(again.error_kind, Some(FetchErrorKind::Gone));
     assert!(again.error.unwrap().contains("dead"));
     // And refresh_all skips it entirely.
     assert_eq!(
@@ -419,11 +423,135 @@ async fn ssrf_guard_holds_inside_the_facade_without_the_w1_flag() {
 
     let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.status, FetchStatus::Error);
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::Blocked));
     assert!(outcome.error.unwrap().contains("not public"));
     assert_eq!(
         core.list_articles(ListArticles::default()).unwrap(),
         [] as [curio_core::model::Article; 0]
     );
+}
+
+/// A subscription that points at a web page is reported as one — with the
+/// feeds the page links to counted — not as an XML parse error.
+#[tokio::test]
+async fn a_web_page_at_a_feed_url_is_not_a_feed_and_counts_its_feeds() {
+    let server = MockServer::start().await;
+    let page = |links: &str| {
+        format!(
+            "<!DOCTYPE html><html><head><title>Blog</title>{links}</head>\
+             <body><p>Hello</p></body></html>"
+        )
+    };
+    let two = page(
+        r#"<link rel="alternate" type="application/rss+xml" href="/feed.xml">
+           <link rel="alternate" type="application/atom+xml" href="/atom.xml">"#,
+    );
+    let one = page(r#"<link rel="alternate" type="application/rss+xml" href="/feed.xml">"#);
+    for (route, body) in [("/two", two), ("/one", one), ("/none", page(""))] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/html"))
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/broken.xml"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw("<rss><channel>", "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let refresh = async |route: &str| {
+        let feed = subscribe(&core, &format!("{}{route}", server.uri()));
+        let outcome = core.refresh_feed(feed.id).await.unwrap();
+        (feed, outcome)
+    };
+
+    let (feed, outcome) = refresh("/two").await;
+    assert_eq!(outcome.status, FetchStatus::Error);
+    assert_eq!(outcome.http_status, Some(200));
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::NotAFeed));
+    let message = outcome.error.unwrap();
+    assert!(
+        message.starts_with("this is a web page, not a feed — found 2 feeds"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("{}/feed.xml", server.uri())),
+        "{message}"
+    );
+    // Persisted: the feed's health carries the kind across a cold start.
+    let stored = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.last_error_kind, Some(FetchErrorKind::NotAFeed));
+    assert_eq!(
+        core.recent_fetches(feed.id, 1).unwrap()[0].error_kind,
+        Some(FetchErrorKind::NotAFeed)
+    );
+
+    let (_, outcome) = refresh("/one").await;
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::NotAFeed));
+    assert!(
+        outcome.error.unwrap().contains("found 1 feed on it: "),
+        "singular"
+    );
+
+    let (_, outcome) = refresh("/none").await;
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::NotAFeed));
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some("this is a web page, not a feed — found no feeds on it")
+    );
+
+    // A body that is feed-shaped but broken stays a parse error.
+    let (_, outcome) = refresh("/broken.xml").await;
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::Parse));
+}
+
+#[tokio::test]
+async fn a_refused_refresh_is_typed_and_persisted() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let url = format!("http://127.0.0.1:{port}/feed.xml");
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &url);
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(outcome.status, FetchStatus::Error);
+    assert_eq!(outcome.http_status, None);
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::Refused));
+    let message = outcome.error.unwrap();
+    assert_eq!(message.matches(&url).count(), 1, "{message}");
+    let stored = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.last_error.as_deref(), Some(message.as_str()));
+    assert_eq!(stored.last_error_kind, Some(FetchErrorKind::Refused));
+}
+
+#[test]
+fn subscribing_to_a_feed_twice_is_a_typed_duplicate() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let new = || NewFeed {
+        url: "https://example.com/feed.xml".to_owned(),
+        title: None,
+        tags: Vec::new(),
+    };
+    core.add_feed(new()).unwrap();
+    let err = core.add_feed(new()).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::CoreError::Storage(StorageError::Duplicate { entity: "feed", .. })
+        ),
+        "{err:?}"
+    );
+    assert_eq!(core.list_feeds().unwrap().len(), 1);
 }
 
 /// A 301-adopted URL rewrite is a subscription identity change: the fold

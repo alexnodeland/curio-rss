@@ -409,6 +409,42 @@ describe('AddFeedModal', () => {
         expect(getByTestId('add-feed-unvalidated')).toBeTruthy();
     });
 
+    it.each([
+        ['add_feed', 'Subscribe', 'HTTP_STATUS', { host: 'lan.example', status: '503' }],
+        ['discover_feeds', 'Find feeds', 'NETWORK_TIMEOUT', { host: 'lan.example' }],
+    ] as const)(
+        'treats a finer fetch code from %s as unreachable too (%s)',
+        async (command, button, code, params) => {
+            harness = installIpcHarness(
+                base({
+                    [command]: rejectWith(
+                        commandErrorFixture({
+                            kind: 'user',
+                            code,
+                            params,
+                            message: 'could not reach https://lan.example/',
+                            recoverable: true,
+                        }),
+                    ),
+                }),
+            );
+            const { getByText, getByTestId, getByPlaceholderText } = render(AddFeedModal, {
+                onclose: vi.fn(),
+            });
+
+            await fireEvent.input(getByPlaceholderText('https://example.com'), {
+                target: { value: 'https://lan.example/' },
+            });
+            await fireEvent.click(getByText(button));
+            await flushIpc();
+
+            expect(toastStore.toasts.at(-1)?.tone).toBe('error');
+            expect(toastStore.toasts.at(-1)?.message).toContain('lan.example');
+            expect(getByText('Couldn’t reach that address to check it for a feed.')).toBeTruthy();
+            expect(getByTestId('add-feed-unvalidated')).toBeTruthy();
+        },
+    );
+
     it('offers the escape hatch when Find comes back empty, and clears it on edit', async () => {
         harness = installIpcHarness(base({ discover_feeds: discoveryFixture({ feeds: [] }) }));
         const { getByText, queryByTestId, getByPlaceholderText } = render(AddFeedModal, {

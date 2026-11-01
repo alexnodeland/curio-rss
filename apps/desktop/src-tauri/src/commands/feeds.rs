@@ -885,7 +885,7 @@ mod tests {
         let (_dir, core) = temp_core_trusting_localhost();
         add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: format!("{}/a.xml", server.uri()),
                 title: None,
                 tags: vec![],

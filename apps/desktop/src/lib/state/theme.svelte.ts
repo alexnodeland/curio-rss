@@ -88,6 +88,44 @@ function systemTheme(): ThemeId {
     return systemMediaQuery()?.matches === true ? 'light' : 'dark';
 }
 
+/**
+ * The pre-`EventTarget` listener API. Older system WebKit (Safari < 14, i.e.
+ * macOS 10.14/10.15 webviews — where Dark and Auto appearance first shipped)
+ * implements only `addListener`/`removeListener` on `MediaQueryList`.
+ */
+interface LegacyMediaQueryList {
+    addListener?: (listener: () => void) => void;
+    removeListener?: (listener: () => void) => void;
+}
+
+/**
+ * Subscribes `listener` to the query's changes — `addEventListener` where the
+ * webview has it, the legacy `addListener` otherwise. False when neither
+ * exists (nothing was attached).
+ */
+function watchQuery(query: MediaQueryList, listener: () => void): boolean {
+    if (typeof query.addEventListener === 'function') {
+        query.addEventListener('change', listener);
+        return true;
+    }
+    const legacy: LegacyMediaQueryList = query;
+    if (typeof legacy.addListener === 'function') {
+        legacy.addListener(listener);
+        return true;
+    }
+    return false;
+}
+
+/** Undoes {@link watchQuery} through whichever API attached the listener. */
+function unwatchQuery(query: MediaQueryList, listener: () => void): void {
+    if (typeof query.removeEventListener === 'function') {
+        query.removeEventListener('change', listener);
+        return;
+    }
+    const legacy: LegacyMediaQueryList = query;
+    if (typeof legacy.removeListener === 'function') legacy.removeListener(listener);
+}
+
 export class ThemeStore {
     themePreference: ThemePreference = $state('system');
 
@@ -198,13 +236,12 @@ export class ThemeStore {
         }
         if (this.#systemQuery !== null) return;
         const query = systemMediaQuery();
-        if (query === null || typeof query.addEventListener !== 'function') return;
-        query.addEventListener('change', this.#onSystemChange);
+        if (query === null || !watchQuery(query, this.#onSystemChange)) return;
         this.#systemQuery = query;
     }
 
     #stopFollowingSystem(): void {
-        this.#systemQuery?.removeEventListener('change', this.#onSystemChange);
+        if (this.#systemQuery !== null) unwatchQuery(this.#systemQuery, this.#onSystemChange);
         this.#systemQuery = null;
     }
 

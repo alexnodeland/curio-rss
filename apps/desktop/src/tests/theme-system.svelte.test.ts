@@ -19,21 +19,46 @@ interface FakeAppearance {
     readonly listeners: Set<EventListenerOrEventListenerObject>;
 }
 
-function stubAppearance(initiallyLight: boolean): FakeAppearance {
+/**
+ * Which listener API the fake query exposes: the modern `EventTarget` one,
+ * only the legacy `addListener`/`removeListener` (Safari < 14 WebKit), or
+ * neither.
+ */
+type ListenerApi = 'event-target' | 'legacy' | 'none';
+
+function stubAppearance(
+    initiallyLight: boolean,
+    api: ListenerApi = 'event-target',
+): FakeAppearance {
     let light = initiallyLight;
     const listeners = new Set<EventListenerOrEventListenerObject>();
-    const query = {
+    const query: Record<string, unknown> = {
         get matches(): boolean {
             return light;
         },
         media: '(prefers-color-scheme: light)',
-        addEventListener: (type: string, listener: EventListenerOrEventListenerObject): void => {
-            if (type === 'change') listeners.add(listener);
-        },
-        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject): void => {
-            if (type === 'change') listeners.delete(listener);
-        },
     };
+    if (api === 'event-target') {
+        query.addEventListener = (
+            type: string,
+            listener: EventListenerOrEventListenerObject,
+        ): void => {
+            if (type === 'change') listeners.add(listener);
+        };
+        query.removeEventListener = (
+            type: string,
+            listener: EventListenerOrEventListenerObject,
+        ): void => {
+            if (type === 'change') listeners.delete(listener);
+        };
+    } else if (api === 'legacy') {
+        query.addListener = (listener: EventListener): void => {
+            listeners.add(listener);
+        };
+        query.removeListener = (listener: EventListener): void => {
+            listeners.delete(listener);
+        };
+    }
     vi.stubGlobal('matchMedia', (media: string) => {
         expect(media).toBe('(prefers-color-scheme: light)');
         return query;
@@ -57,6 +82,7 @@ function dataTheme(): string | null {
 
 describe('theme store — following the OS appearance', () => {
     let harness: IpcHarness | null = null;
+    let store = new ThemeStore();
 
     beforeEach(() => {
         window.localStorage.clear();
@@ -64,6 +90,9 @@ describe('theme store — following the OS appearance', () => {
     });
 
     afterEach(() => {
+        // Detach here, not at the end of each test, so a failed assertion
+        // can't leave a listener on the stubbed query.
+        store.reset();
         settingsStore.reset();
         vi.unstubAllGlobals();
         harness?.teardown();
@@ -74,7 +103,7 @@ describe('theme store — following the OS appearance', () => {
         const os = stubAppearance(true);
         harness = installIpcHarness({ get_setting: null });
         await settingsStore.load();
-        const store = new ThemeStore();
+        store = new ThemeStore();
 
         store.initTheme();
         expect(dataTheme()).toBe('light');
@@ -85,14 +114,13 @@ describe('theme store — following the OS appearance', () => {
 
         os.set(true);
         expect(dataTheme()).toBe('light');
-        store.reset();
     });
 
     it('an OS appearance change re-syncs the localStorage mirrors', async () => {
         const os = stubAppearance(false);
         harness = installIpcHarness({ get_setting: null });
         await settingsStore.load();
-        const store = new ThemeStore();
+        store = new ThemeStore();
         store.initTheme();
 
         window.localStorage.removeItem(THEME_STORAGE_KEY);
@@ -103,14 +131,13 @@ describe('theme store — following the OS appearance', () => {
         // itself), rewritten on the change; no custom rule is active.
         expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('system');
         expect(window.localStorage.getItem(THEME_CUSTOM_CSS_KEY)).toBeNull();
-        store.reset();
     });
 
     it('picking an explicit theme leaves no listener, and the OS no longer repaints', async () => {
         const os = stubAppearance(true);
         harness = installIpcHarness({ get_setting: null, set_setting: null });
         await settingsStore.load();
-        const store = new ThemeStore();
+        store = new ThemeStore();
         store.initTheme();
         expect(store.followsSystem).toBe(true);
 
@@ -126,7 +153,7 @@ describe('theme store — following the OS appearance', () => {
     it('returning to system re-attaches exactly one listener', async () => {
         const os = stubAppearance(true);
         harness = installIpcHarness({ set_setting: null });
-        const store = new ThemeStore();
+        store = new ThemeStore();
 
         await store.setThemePreference('system');
         await store.setThemePreference('system');
@@ -146,7 +173,7 @@ describe('theme store — following the OS appearance', () => {
         const os = stubAppearance(true);
         harness = installIpcHarness({ get_setting: null });
         await settingsStore.load();
-        const store = new ThemeStore();
+        store = new ThemeStore();
         store.initTheme();
 
         const seen: string[] = [];
@@ -161,13 +188,47 @@ describe('theme store — following the OS appearance', () => {
 
         expect(seen).toEqual(['light', 'dark']);
         dispose();
-        store.reset();
+    });
+
+    it('follows the OS through the legacy addListener API (Safari < 14 WebKit)', async () => {
+        const os = stubAppearance(true, 'legacy');
+        harness = installIpcHarness({ get_setting: null, set_setting: null });
+        await settingsStore.load();
+        store = new ThemeStore();
+
+        store.initTheme();
+        expect(store.followsSystem).toBe(true);
+        expect(os.listeners.size).toBe(1);
+        os.set(false);
+        expect(dataTheme()).toBe('dark');
+
+        // An explicit theme detaches through removeListener.
+        await store.setThemePreference('nord');
+        expect(os.listeners.size).toBe(0);
+        expect(store.followsSystem).toBe(false);
+        os.set(true);
+        expect(dataTheme()).toBe('nord');
+    });
+
+    it('resolves the OS appearance but attaches nothing when the query has no listener API', async () => {
+        const os = stubAppearance(true, 'none');
+        harness = installIpcHarness({ get_setting: null });
+        await settingsStore.load();
+        store = new ThemeStore();
+
+        store.initTheme();
+
+        expect(dataTheme()).toBe('light');
+        expect(os.listeners.size).toBe(0);
+        expect(store.followsSystem).toBe(false);
     });
 
     it('stays inert without matchMedia (falls back dark, attaches nothing)', async () => {
+        // Seed a non-dark value so the dark fallback is actually written.
+        document.documentElement.setAttribute('data-theme', 'nord');
         harness = installIpcHarness({ get_setting: null });
         await settingsStore.load();
-        const store = new ThemeStore();
+        store = new ThemeStore();
 
         store.initTheme();
 

@@ -67,8 +67,12 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   resolution; redirects re-checked per hop (cap 5). Per-feed
   `allow_private_network = true` (explicit config edit only, never settable from feed
   content) exempts a feed — the W1 allowlist in the contract, kept so localhost digest
-  feeds stay subscribable.
-- Streaming-enforced size caps, connect/total timeouts, shared pooled client, and an
+  feeds stay subscribable. Each hop's one DNS lookup (bounded by the connect timeout)
+  is screened in full and *pinned*: the connection dials only those addresses — all of
+  them, in resolver order, so a dead first record (a broken IPv6 route) falls back to the
+  next — with no second lookup for a rebinding answer to slip into.
+- Streaming-enforced size caps, connect/total timeouts, shared pooled client (one per TLS
+  backend and SSRF policy — keep-alive and TLS sessions reused across requests to a host), and an
   honest default User-Agent — overridden by a **per-host fetch policy** (a browser UA +
   a longer politeness delay, on the platform-native TLS stack) for hosts that reject the
   default, so sources like Reddit's `.rss` fetch. Still RSS-native, not enrichment; every

@@ -77,12 +77,17 @@ function toDto(filters: ArticleFilters, before: number | null, limit: number): L
 }
 
 /**
- * A limit-1 `list_articles` request for the next unread article in a scope
- * strictly below `before` — the backend-owned query behind next-unread
- * navigation. Forces `read: false` over whatever the scope's read filter was.
+ * A `list_articles` request for the unread articles in a scope strictly below
+ * `before` — limit 1 is the backend-owned query behind next-unread
+ * navigation; a larger `limit` pages a whole view's unread (mark-view-read).
+ * Forces `read: false` over whatever the scope's read filter was.
  */
-export function unreadScopeDto(filters: ArticleFilters, before: number | null): ListArticlesDto {
-    return toDto({ ...filters, read: false }, before, 1);
+export function unreadScopeDto(
+    filters: ArticleFilters,
+    before: number | null,
+    limit = 1,
+): ListArticlesDto {
+    return toDto({ ...filters, read: false }, before, limit);
 }
 
 /**

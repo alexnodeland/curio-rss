@@ -235,7 +235,12 @@ curio fetch                 # refresh every active feed
 curio fetch example.com     # or just one
 ```
 
-`fetch` reports per-feed status and new/updated article counts —
+`fetch` refreshes up to 8 feeds at once (requests to one host still
+take turns, politeness-delayed), so a few unreachable hosts cost about
+one request timeout between them, and a feed that fails — or is
+unsubscribed by the desktop app mid-run — gets an error line while every
+other feed still refreshes. It reports per-feed status, in subscription
+order, and new/updated article counts —
 "updated" counts only entries that actually changed; a feed re-listing
 identical items reports `0 updated` and rewrites no articles. The
 engine does conditional GET (ETag/Last-Modified preserved on every error

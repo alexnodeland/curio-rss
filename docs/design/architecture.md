@@ -76,6 +76,17 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
 - Conditional GET with `etag`/`last_modified` **preserved on error paths** (the sketch
   clobbered them on any failure).
 - Permanent-redirect stored-URL updates; 410 dead-feed auto-pause; feed-health tracking.
+- **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
+  both heads: `buffer_unordered` over the feed list, 8 feeds in flight by default (the
+  per-host politeness reservations still queue same-host requests), so a few hung hosts
+  cost about one request timeout between them. A per-feed `Err` — the feed removed
+  mid-sweep, a storage error, a panicking parse — becomes that feed's outcome; the sweep
+  always runs to the end. One sweep runs per handle: a second request (refresh pressed
+  twice, the scheduler firing mid-sweep) joins it and gets its report, so no feed is
+  fetched twice. Progress carries `sweep_id`/`done`/`total`; `cancel_refresh` stops new
+  fetches and drops the ones in flight (nothing is recorded for them). Each feed's
+  storage reads/writes and its parse → sanitize → ingest run via `spawn_blocking`, so a
+  large feed never stalls the async runtime (the CLI's is current-thread).
 
 ### `ingest/` — sanitize-at-ingest
 

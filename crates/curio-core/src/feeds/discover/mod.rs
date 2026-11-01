@@ -139,6 +139,14 @@ pub enum DiscoverError {
         /// The HTTP status.
         status: u16,
     },
+    /// The page answered, but neither it nor anything it declares or the
+    /// probes found is a feed — only [`resolve`] reports this ([`discover`]
+    /// answers an empty [`Discovery::feeds`] instead).
+    #[error("no feed found at {input}")]
+    NoFeed {
+        /// The input, trimmed.
+        input: String,
+    },
 }
 
 impl DiscoverError {
@@ -148,6 +156,45 @@ impl DiscoverError {
     pub fn is_input_error(&self) -> bool {
         matches!(self, Self::Empty | Self::InvalidUrl { .. })
     }
+}
+
+/// What a subscribe resolves typed input to: the feed URL to subscribe
+/// plus the other validated candidates discovery offered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolution {
+    /// The best validated feed URL — the one to subscribe to.
+    pub url: String,
+    /// The other validated candidates, best first.
+    pub alternates: Vec<String>,
+}
+
+/// Resolves what a user typed to the one feed URL a subscribe should store:
+/// [`discover`], then its best validated candidate. This is the validating
+/// subscribe path every head shares — a URL that resolves here is a feed a
+/// refresh can parse. A head's "subscribe anyway" escape hatch uses
+/// [`normalize_input`] instead.
+///
+/// # Errors
+///
+/// Every [`discover`] error, plus [`DiscoverError::NoFeed`] when the page
+/// answered but no feed validated.
+pub async fn resolve(
+    client: &PolicedClient,
+    input: &str,
+    options: DiscoverOptions,
+) -> Result<Resolution, DiscoverError> {
+    let mut urls = discover(client, input, options)
+        .await?
+        .feeds
+        .into_iter()
+        .map(|feed| feed.url);
+    let url = urls.next().ok_or_else(|| DiscoverError::NoFeed {
+        input: input.trim().to_owned(),
+    })?;
+    Ok(Resolution {
+        url,
+        alternates: urls.collect(),
+    })
 }
 
 /// Normalizes what a user typed into an absolute http(s) URL: trims it,

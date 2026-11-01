@@ -28,7 +28,8 @@ mod opml;
 mod parse;
 
 pub use discover::{
-    DiscoverError, DiscoverOptions, DiscoveredFeed, Discovery, discover, normalize_input,
+    DiscoverError, DiscoverOptions, DiscoveredFeed, Discovery, Resolution, discover,
+    normalize_input, resolve,
 };
 pub use opml::{OpmlError, OpmlFeed, OpmlImport, export_opml, import_opml, parse_opml};
 pub use parse::{FeedParseError, ParsedEntry, ParsedFeed, ParsedFeedMeta, parse_feed};

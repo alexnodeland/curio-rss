@@ -10,6 +10,13 @@
  * unbounded trail of prefetched bodies would make every mark-read fan out
  * across the whole scan history. Queries created by anyone else (the reader
  * for a directly selected article, list rows for flags) are never dropped.
+ *
+ * Flag (`articleState`) queries are ensured but never owned or dropped: the
+ * list rows already create them for every rendered row (ArticleRow,
+ * ArticleList, SearchResults), so the prefetch adds at most the few rows just
+ * outside the rendered slice. Each is one tiny state row, and the trail is
+ * bounded by the rows the session has scrolled past — not worth an ownership
+ * protocol shared with the list.
  */
 import { commands } from '$lib/bindings';
 import { untrack } from 'svelte';
@@ -19,10 +26,20 @@ import { type Query, dropQuery, ensureQuery, hasQuery, queryKeys } from './query
 export const PREFETCH_RADIUS = 2;
 
 /**
+ * How long the selection must sit still before its neighbours are fetched, in
+ * ms. Longer than a held key's auto-repeat interval (≈30–90 ms across
+ * platforms), so a j-burst creates no neighbour fetches for the rows it only
+ * passes through — even once it reaches already-prefetched rows, whose bodies
+ * are loaded the moment the selection lands — yet short enough to finish well
+ * before a reader who stopped on an article reaches its end.
+ */
+export const PREFETCH_SETTLE_MS = 120;
+
+/**
  * The ids to prefetch around `center` in `items`, nearest first and forward
  * before backward at each distance (j is the common direction). The selected
- * id itself is excluded; when the selected row has left the window (an
- * auto-mark-read dropped it from an unread view), `center` is its last
+ * id itself is excluded; when the selected row has left the window (it was
+ * archived out of the view), `center` is its last
  * position, so the row that shifted into that slot is included as the very
  * next one j will land on.
  */
@@ -65,6 +82,18 @@ export class ArticlePrefetcher {
             for (const id of ids) {
                 this.#ensure(id);
             }
+            this.#evict(ids, selectedId);
+        });
+    }
+
+    /**
+     * Drops only: the owned bodies that are neither in `ids` nor selected,
+     * without fetching anything. The reader calls this on every step of a
+     * burst, before the settle delay, so out-of-range bodies stop riding each
+     * `ArticlesChanged` refetch as soon as the selection leaves them.
+     */
+    retain(ids: readonly number[], selectedId: number | null): void {
+        untrack(() => {
             this.#evict(ids, selectedId);
         });
     }

@@ -11,7 +11,7 @@ import { localeStore } from '$lib/i18n';
 import { keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS } from '$lib/keyboard/registry';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
-import { articlePrefetcher } from '$lib/state/prefetch';
+import { PREFETCH_SETTLE_MS, articlePrefetcher } from '$lib/state/prefetch';
 import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
@@ -317,6 +317,14 @@ describe('ReaderPane', () => {
             await flushIpc();
         }
 
+        /** Waits out the prefetch settle delay, then lets the fetches land. */
+        async function settle(): Promise<void> {
+            await new Promise((resolve) => {
+                setTimeout(resolve, PREFETCH_SETTLE_MS * 2);
+            });
+            await flushIpc();
+        }
+
         function fetchedIds(): number[] {
             return (harness?.callsFor('get_article') ?? []).map((args) => args.articleId as number);
         }
@@ -355,6 +363,10 @@ describe('ReaderPane', () => {
 
             expect(getByText('Landed')).toBeTruthy();
             expect(container.querySelector('.body-skeleton')).toBeNull();
+            // Landing over its skeleton, the body fades in on its own.
+            expect(container.querySelector('.reader-body')?.classList.contains('landing')).toBe(
+                true,
+            );
             expect(queryByText('Loading…')).toBeNull();
             // Same toolbar node: the body landing did not remount the chrome.
             expect(getByRole('toolbar')).toBe(toolbar);
@@ -366,6 +378,9 @@ describe('ReaderPane', () => {
             selectionStore.selectedArticleId = ROWS[4].id; // 106
             render(ReaderPane);
             await flushIpc();
+            // Only the selection until it has sat still for the settle delay.
+            expect(fetchedIds()).toEqual([106]);
+            await settle();
 
             // The selected body first, then the neighbours: +1, -1, +2, -2.
             expect(fetchedIds()).toEqual([106, 105, 107, 104, 108]);
@@ -379,7 +394,7 @@ describe('ReaderPane', () => {
             await loadWindow();
             selectionStore.selectedArticleId = 106;
             const { container, getByRole, getByText, queryByText } = render(ReaderPane);
-            await flushIpc();
+            await settle();
             const toolbar = getByRole('toolbar');
             const callsBefore = fetchedIds().length;
 
@@ -393,9 +408,13 @@ describe('ReaderPane', () => {
             expect(queryByText('Loading…')).toBeNull();
             expect(fetchedIds().slice(callsBefore)).not.toContain(105);
             expect(getByRole('toolbar')).toBe(toolbar);
+            // A cached body rides the switch fade alone — no second fade on it.
+            expect(container.querySelector('.reader-body')?.classList.contains('landing')).toBe(
+                false,
+            );
 
             // …and the window slides: the new outer neighbour is fetched.
-            await flushIpc();
+            await settle();
             expect(fetchedIds()).toContain(103);
         });
 
@@ -404,11 +423,11 @@ describe('ReaderPane', () => {
             await loadWindow();
             selectionStore.selectedArticleId = 109;
             render(ReaderPane);
-            await flushIpc();
+            await settle();
             expect(articlePrefetcher.owned).toEqual(expect.arrayContaining([108, 110, 107]));
 
             selectionStore.selectedArticleId = 103;
-            await flushIpc();
+            await settle();
             // 110/108/107 are now more than two rows away and were dropped.
             expect([...articlePrefetcher.owned].sort((a, b) => a - b)).toEqual([
                 101, 102, 104, 105,
@@ -417,6 +436,72 @@ describe('ReaderPane', () => {
             selectionStore.selectedArticleId = null;
             await flushIpc();
             expect(articlePrefetcher.owned).toEqual([]);
+        });
+
+        it('a held j fetches no neighbours until the selection settles', async () => {
+            harness = installIpcHarness(windowResponders());
+            await loadWindow();
+            selectionStore.selectedArticleId = 109;
+            selectionStore.rememberIndex(1);
+            const { getByText } = render(ReaderPane);
+            await settle();
+            expect([...articlePrefetcher.owned].sort((a, b) => a - b)).toEqual([107, 108, 110]);
+            const callsBefore = fetchedIds().length;
+
+            // Key repeat: two steps onto cached rows, each well inside the
+            // settle delay of the one before.
+            selectionStore.selectNextArticle(); // → 108, cached
+            await flushIpc();
+            selectionStore.selectNextArticle(); // → 107, cached
+            await flushIpc();
+
+            expect(getByText('Body of 107')).toBeTruthy();
+            // No fetch for the outer rows the burst only passed by…
+            expect(fetchedIds().slice(callsBefore)).toEqual([]);
+            // …while what fell out of range (110) was dropped at once.
+            expect([...articlePrefetcher.owned].sort((a, b) => a - b)).toEqual([107, 108]);
+
+            // Holding still on 107 fetches its window.
+            await settle();
+            expect(fetchedIds().slice(callsBefore)).toEqual([106, 105]);
+        });
+
+        it('centres on the vacated slot when the selection leaves the window', async () => {
+            let rows = ROWS;
+            harness = installIpcHarness({
+                ...windowResponders(),
+                list_articles: () => rows,
+                set_archived: true,
+            });
+            const unwire = await wireInvalidation();
+            await loadWindow();
+            selectionStore.selectedArticleId = 107;
+            selectionStore.rememberIndex(3);
+            const { getByRole } = render(ReaderPane);
+            await settle();
+            expect([...articlePrefetcher.owned].sort((a, b) => a - b)).toEqual([
+                105, 106, 108, 109,
+            ]);
+
+            // Archived out of the view: the read-hold lets go of it, the backend
+            // stops returning it, so 106 shifts into slot 3 and the selection is
+            // no longer in the window.
+            await fireEvent.click(getByRole('button', { name: 'Archive' }));
+            await flushIpc();
+            rows = ROWS.filter((row) => row.id !== 107);
+            await events.articlesChanged.emit({ feed_id: null });
+            await flushIpc();
+            expect(selectionStore.selectedIndex).toBe(-1);
+            await settle();
+
+            // Centred on slot 3 (106, j's next landing), not on the -1 index
+            // (which would prefetch nothing and evict every owned body): 104 at
+            // +2 is new, and the rest of the window is kept.
+            expect(fetchedIds()).toContain(104);
+            expect([...articlePrefetcher.owned].sort((a, b) => a - b)).toEqual([
+                104, 105, 106, 108, 109,
+            ]);
+            unwire();
         });
     });
 });

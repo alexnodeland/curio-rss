@@ -41,7 +41,7 @@ import {
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
-import { articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
+import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
@@ -254,23 +254,41 @@ $effect(() => {
     }
 });
 
-// Prefetch the neighbours' bodies once the selected one has settled (so a
-// fast j-burst doesn't queue fetches for rows it is only passing through).
-// Centred on the selection, or on its last position when an auto-mark-read
-// dropped it from the window. No selection evicts every prefetched body.
+// Prefetch the neighbours' bodies once the selected one has loaded and the
+// selection has sat still for `PREFETCH_SETTLE_MS` — every step restarts the
+// wait (the effect's cleanup cancels it), so a held j creates no neighbour
+// fetches for rows it only passes through, cached or not. What leaves the range
+// is dropped at once, without waiting. Centred on the selection, or on its last
+// position when it left the window (archived out of the view). No selection
+// evicts every prefetched body.
 $effect(() => {
     const articleId = selectedId;
     if (articleId === null) {
         articlePrefetcher.prefetch([], null);
         return;
     }
-    if (articleQuery?.loaded !== true) {
-        return;
-    }
     const items = articlesStore.activeItems;
     const index = selectionStore.selectedIndex;
     const center = index >= 0 ? index : Math.min(selectionStore.lastPresentIndex, items.length - 1);
-    articlePrefetcher.prefetch(neighbourIds(items, center, articleId), articleId);
+    const ids = neighbourIds(items, center, articleId);
+    articlePrefetcher.retain(ids, articleId);
+    if (articleQuery?.loaded !== true) {
+        return;
+    }
+    const timer = setTimeout(() => articlePrefetcher.prefetch(ids, articleId), PREFETCH_SETTLE_MS);
+    return () => clearTimeout(timer);
+});
+
+/**
+ * The selection whose body skeleton was shown — set as it renders, so the body
+ * that later lands over it gets its own fade (`.landing`), while a body
+ * straight from cache rides the scroll body's switch fade only.
+ */
+let skeletonSelection = $state<number | null>(null);
+$effect(() => {
+    if (selectedId !== null && articleQuery !== null && articleQuery.data == null) {
+        skeletonSelection = selectedId;
+    }
 });
 
 function openSource(event: MouseEvent, current: ReaderHead): void {
@@ -527,7 +545,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                         </div>
                     {/if}
                     {#if current !== null}
-                        <div class="reader-body">
+                        <div class="reader-body" class:landing={skeletonSelection === selectedId}>
                             <ViewModeDispatch article={current} feed={currentFeed(current)} />
                         </div>
                     {:else}
@@ -661,12 +679,15 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         min-height: 0;
         overflow-y: auto;
         /* A short fade on every article switch (the scroll body is keyed on
-           the selection) and again as a body lands over its skeleton, so j/k
-           reads as a cross-fade rather than a hard cut. */
+           the selection), so j/k reads as a cross-fade rather than a hard
+           cut. A body already in cache mounts with it and rides this fade
+           alone — stacking a second one would multiply the opacities. */
         animation: reader-fade-in var(--dur-fast) var(--ease);
     }
 
-    .reader-body {
+    /* A body that lands over its skeleton, later in the same selection,
+       fades in on its own. */
+    .reader-body.landing {
         animation: reader-fade-in var(--dur-base) var(--ease);
     }
 
@@ -683,7 +704,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
        fades outright too so nothing even flickers. */
     @media (prefers-reduced-motion: reduce) {
         .reader-scroll,
-        .reader-body {
+        .reader-body.landing {
             animation: none;
         }
     }

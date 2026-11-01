@@ -83,6 +83,22 @@ describe('ArticlePrefetcher', () => {
         expect(hasQuery(queryKeys.article(4))).toBe(false);
     });
 
+    it('retain drops out-of-range bodies without fetching anything', async () => {
+        const ipc = install();
+        const prefetcher = new ArticlePrefetcher();
+        prefetcher.prefetch([1, 2, 3], null);
+        await flushIpc();
+        const fetched = ipc.callsFor('get_article').length;
+
+        prefetcher.retain([2, 9], 3); // 1 left the range, 3 is selected, 9 is new
+        await flushIpc();
+
+        expect(ipc.callsFor('get_article')).toHaveLength(fetched);
+        expect(hasQuery(queryKeys.article(1))).toBe(false);
+        expect(hasQuery(queryKeys.article(9))).toBe(false);
+        expect([...prefetcher.owned].sort((a, b) => a - b)).toEqual([2, 3]);
+    });
+
     it('never adopts or drops a body query someone else created', () => {
         install();
         ensureQuery(queryKeys.article(7), () => Promise.resolve({ status: 'ok', data: null }));

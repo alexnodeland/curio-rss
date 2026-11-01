@@ -10,6 +10,7 @@
 import type { ArticleSummaryDto, ListArticlesDto } from '$lib/bindings';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { PREFETCH_SETTLE_MS } from '$lib/state/prefetch';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
@@ -156,8 +157,13 @@ describe('shell keyboard wiring', () => {
 
         await fireEvent.keyDown(window, { key: 'j' });
         await flushIpc();
-        // The selected body first, then the reader's neighbour prefetch (the
+        expect(harness.callsFor('get_article')).toEqual([{ articleId: 500 }]);
+        // Once the selection has settled: the reader's neighbour prefetch (the
         // top row has no previous neighbour) — and only the selection is marked.
+        await new Promise((resolve) => {
+            setTimeout(resolve, PREFETCH_SETTLE_MS * 2);
+        });
+        await flushIpc();
         expect(harness.callsFor('get_article')).toEqual([
             { articleId: 500 },
             { articleId: 499 },

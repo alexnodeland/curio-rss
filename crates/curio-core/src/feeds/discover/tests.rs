@@ -13,6 +13,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::*;
 use crate::fetch::FetchConfig;
 
+mod resolve;
+
 /// A client that trusts the loopback fixture servers, with no politeness
 /// delay.
 fn client() -> PolicedClient {

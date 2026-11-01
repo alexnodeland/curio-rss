@@ -148,8 +148,7 @@ pub fn events_lines(profile: &Path) -> Vec<Value> {
 pub fn note_frontmatter(note: &str) -> Value {
     let rest = note.strip_prefix("---\n").expect("opening fence");
     let end = rest.find("\n---\n").expect("closing fence");
-    let yaml: serde_yaml::Value = serde_yaml::from_str(&rest[..end]).unwrap();
-    serde_json::to_value(yaml).unwrap()
+    curio_core::export::yaml::from_str(&rest[..end]).unwrap()
 }
 
 fn load_schema(name: &str) -> Value {

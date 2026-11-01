@@ -67,8 +67,12 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   resolution; redirects re-checked per hop (cap 5). Per-feed
   `allow_private_network = true` (explicit config edit only, never settable from feed
   content) exempts a feed — the W1 allowlist in the contract, kept so localhost digest
-  feeds stay subscribable.
-- Streaming-enforced size caps, connect/total timeouts, shared pooled client, and an
+  feeds stay subscribable. Each hop's one DNS lookup (bounded by the connect timeout)
+  is screened in full and *pinned*: the connection dials only those addresses — all of
+  them, in resolver order, so a dead first record (a broken IPv6 route) falls back to the
+  next — with no second lookup for a rebinding answer to slip into.
+- Streaming-enforced size caps, connect/total timeouts, shared pooled client (one per TLS
+  backend and SSRF policy — keep-alive and TLS sessions reused across requests to a host), and an
   honest default User-Agent — overridden by a **per-host fetch policy** (a browser UA +
   a longer politeness delay, on the platform-native TLS stack) for hosts that reject the
   default, so sources like Reddit's `.rss` fetch. Still RSS-native, not enrichment; every
@@ -76,6 +80,18 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
 - Conditional GET with `etag`/`last_modified` **preserved on error paths** (the sketch
   clobbered them on any failure).
 - Permanent-redirect stored-URL updates; 410 dead-feed auto-pause; feed-health tracking.
+- Transparent gzip/brotli/deflate decompression, with the size cap counted on the
+  **decoded** body so a compression bomb fails as `BodyTooLarge`. An `Accept` header per
+  request kind (feed / page / image), and the response `Content-Type` carried on
+  `FetchResponse`.
+- `fetch::decode` turns bodies into text: BOM → HTTP `charset` → `<meta charset>` (HTML)
+  or the XML declaration (feeds, XHTML) → UTF-8, so windows-1251 or Shift_JIS sources
+  never come out as mojibake (a feed is transcoded to UTF-8 before feed-rs sees it). A
+  server-default header that contradicts the document yields to it in both directions: a
+  UTF-8 header over non-UTF-8 bytes, and a single-byte legacy header (`iso-8859-1`) over
+  valid non-ASCII UTF-8 that declares UTF-8. Full-page
+  extraction ("load full article", URL clips) runs only on HTML: a PDF or image URL is
+  clipped link-only.
 
 ### `ingest/` — sanitize-at-ingest
 

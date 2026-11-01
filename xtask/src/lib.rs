@@ -8,8 +8,10 @@
 //! (`paths`, issue #183) has one scanner.
 
 pub mod bench;
+pub mod fuzz;
 pub mod paths;
 pub mod workflows;
+pub mod yaml;
 
 /// Crate names that must never appear in curio-core's dependency tree.
 /// Phase 4 moved the webview boundary: the desktop head

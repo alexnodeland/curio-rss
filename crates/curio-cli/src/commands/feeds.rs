@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use anyhow::Context as _;
 use curio_core::RefreshOutcome;
-use curio_core::feeds::{DiscoverOptions, normalize_input};
+use curio_core::feeds::{DiscoverError, DiscoverOptions, Resolution, normalize_input};
 use curio_core::model::{FetchErrorKind, NewFeed};
 use serde::Serialize;
 
@@ -46,23 +46,17 @@ fn full_text(app: &App, reference: &str, enabled: bool) -> anyhow::Result<ExitCo
     Ok(ExitCode::SUCCESS)
 }
 
-/// What `feed add` resolved the input to: the URL to subscribe plus any
-/// other validated candidates the page offered.
-struct Resolved {
-    url: String,
-    alternates: Vec<String>,
-}
-
-/// Turns the typed input into the URL to subscribe: discovered and
-/// validated by default, or merely normalized under `--no-validate`.
+/// Turns the typed input into the URL to subscribe (plus any other
+/// validated candidates): the core's shared validating subscribe path by
+/// default, or merely normalized under `--no-validate`.
 fn resolve_feed_url(
     app: &App,
     input: &str,
     allow_private_network: bool,
     no_validate: bool,
-) -> anyhow::Result<Resolved> {
+) -> anyhow::Result<Resolution> {
     if no_validate {
-        return Ok(Resolved {
+        return Ok(Resolution {
             url: normalize_input(input)?.into(),
             alternates: Vec::new(),
         });
@@ -71,24 +65,20 @@ fn resolve_feed_url(
         .enable_all()
         .build()
         .context("building the discovery runtime")?;
-    let discovery = runtime.block_on(app.core.discover_feeds(
-        input,
-        DiscoverOptions {
-            allow_private_network,
-            ..DiscoverOptions::default()
-        },
-    ))?;
-    let mut urls = discovery.feeds.into_iter().map(|feed| feed.url);
-    let url = urls.next().with_context(|| {
-        format!(
-            "no feed found at {} — check the address, or pass --no-validate to subscribe anyway",
-            input.trim()
-        )
-    })?;
-    Ok(Resolved {
-        url,
-        alternates: urls.collect(),
-    })
+    runtime
+        .block_on(app.core.resolve_feed_url(
+            input,
+            DiscoverOptions {
+                allow_private_network,
+                ..DiscoverOptions::default()
+            },
+        ))
+        .map_err(|error| match error {
+            DiscoverError::NoFeed { .. } => anyhow::anyhow!(
+                "{error} — check the address, or pass --no-validate to subscribe anyway"
+            ),
+            other => other.into(),
+        })
 }
 
 fn add(
@@ -98,7 +88,7 @@ fn add(
     allow_private_network: bool,
     no_validate: bool,
 ) -> anyhow::Result<ExitCode> {
-    let Resolved { url, alternates } =
+    let Resolution { url, alternates } =
         resolve_feed_url(app, input, allow_private_network, no_validate)?;
     let feed = app.core.add_feed(NewFeed {
         url: url.clone(),

@@ -56,6 +56,13 @@ pub enum ErrorCode {
     Network,
     /// Feed/OPML bytes did not parse.
     Parse,
+    /// Subscribe-time validation: the page answered but neither it nor
+    /// anything it declares (or the probes found) is a feed. The UI offers
+    /// an explicit "subscribe anyway".
+    NoFeed,
+    /// The feed URL (as typed, or as a homepage resolved to) is already a
+    /// subscription.
+    AlreadySubscribed,
     /// The storage layer failed.
     Storage,
     /// Another Curio process (a CLI run, a cron job) holds the profile —

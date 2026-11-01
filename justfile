@@ -166,6 +166,24 @@ bench-cold-start-ci:
     cargo run -q -p xtask -- bench-output bench-output.txt \
       --expect cold_start/open_and_first_page_50k
 
+# Opt-in, NOT part of `just ci` (needs `rustup toolchain install nightly` and
+# `cargo install cargo-fuzz --locked`; the nightly workflow's fuzz job runs it):
+# Fuzz one cargo-fuzz target (feed_parse|opml|content_pipeline|url_screen)
+fuzz target="feed_parse" seconds="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+      feed_parse) seeds="fixtures/feeds fixtures/nasty" ;;
+      opml) seeds="fixtures/opml" ;;
+      content_pipeline) seeds="fixtures/html" ;;
+      *) seeds="" ;;
+    esac
+    cp Cargo.lock fuzz/Cargo.lock
+    mkdir -p "fuzz/corpus/{{target}}"
+    # shellcheck disable=SC2086 # seeds is a list of directories
+    cargo +nightly fuzz run "{{target}}" "fuzz/corpus/{{target}}" $seeds -- \
+      -max_total_time="{{seconds}}" -timeout=30 -rss_limit_mb=2048
+
 # Blob-size guard: fail if any git object in history exceeds 1MB
 # (mirrors CI's blob-guard job — catches the blob BEFORE it is pushed
 # and immortalized in history)

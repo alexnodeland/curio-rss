@@ -7,14 +7,17 @@
 //! harness `trusted_addrs` escape hatch, so redirects *out* of it hit the
 //! live deny-private policy.
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::net::IpAddr;
+use std::io::{Read, Write};
+use std::net::{IpAddr, TcpListener};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use curio_core::fetch::{
-    DEFAULT_ACCEPT, FetchConfig, FetchError, FetchRequest, HostOverride, PolicedClient,
-    TimeoutPhase, TransportKind,
+    DEFAULT_ACCEPT, DnsLookup, FetchConfig, FetchError, FetchKind, FetchRequest, HostOverride,
+    IMAGE_ACCEPT, LookupFuture, PAGE_ACCEPT, PolicedClient, TimeoutPhase, TransportKind,
 };
 use curio_core::model::FetchErrorKind;
 use wiremock::matchers::{header, method, path};
@@ -445,7 +448,7 @@ async fn honest_user_agent_rides_every_request() {
 }
 
 #[tokio::test]
-async fn default_accept_header_rides_every_request() {
+async fn default_accept_header_rides_every_feed_request() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
@@ -466,7 +469,7 @@ async fn default_accept_header_rides_every_request() {
     assert_eq!(
         accept,
         Some(DEFAULT_ACCEPT),
-        "the spec-correct Accept header must ride every request"
+        "the spec-correct Accept header must ride every feed request"
     );
 }
 
@@ -697,5 +700,444 @@ async fn politeness_delay_spaces_same_host_requests() {
     assert!(
         started.elapsed() >= Duration::from_millis(120),
         "second same-host fetch must wait out the politeness delay"
+    );
+}
+
+// --- Pooling, multi-address fallback and bounded DNS (#124) -------------
+
+/// A DNS seam answering every name with a fixed address list.
+#[derive(Debug)]
+struct FixedLookup(Vec<IpAddr>);
+
+impl DnsLookup for FixedLookup {
+    fn lookup(&self, _host: &str) -> LookupFuture {
+        let addrs = self.0.clone();
+        Box::pin(async move { Ok(addrs) })
+    }
+}
+
+/// A DNS seam that never answers — a hung resolver.
+#[derive(Debug)]
+struct HungLookup;
+
+impl DnsLookup for HungLookup {
+    fn lookup(&self, _host: &str) -> LookupFuture {
+        Box::pin(std::future::pending())
+    }
+}
+
+fn ip(raw: &str) -> IpAddr {
+    raw.parse().unwrap()
+}
+
+/// A minimal keep-alive HTTP/1.1 server on `127.0.0.1` that counts the TCP
+/// connections it accepts (wiremock does not expose that). Every request
+/// gets a 200 `ok`; a connection serves requests until the client closes it.
+fn counting_server() -> (u16, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&accepted);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            counter.fetch_add(1, Ordering::SeqCst);
+            std::thread::spawn(move || {
+                let mut pending: Vec<u8> = Vec::new();
+                let mut buf = [0_u8; 4096];
+                loop {
+                    let Ok(read) = stream.read(&mut buf) else {
+                        return;
+                    };
+                    if read == 0 {
+                        return;
+                    }
+                    pending.extend_from_slice(&buf[..read]);
+                    // GET requests carry no body: each blank line ends one.
+                    while let Some(end) = pending.windows(4).position(|w| w == b"\r\n\r\n") {
+                        pending.drain(..end + 4);
+                        let reply = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok";
+                        if stream.write_all(reply).is_err() {
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    (port, accepted)
+}
+
+#[tokio::test]
+async fn sequential_fetches_to_one_host_reuse_a_pooled_connection() {
+    let (port, accepted) = counting_server();
+    let client = PolicedClient::new(fast_config());
+    for feed in ["a.xml", "b.xml", "c.xml"] {
+        let response = client
+            .fetch(&allowed(format!("http://127.0.0.1:{port}/{feed}")))
+            .await
+            .unwrap();
+        assert_eq!(response.body, b"ok");
+    }
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        1,
+        "three sequential same-host fetches must share one keep-alive connection"
+    );
+}
+
+#[tokio::test]
+async fn pooled_connections_never_cross_ssrf_policies() {
+    // A deny-private request must never borrow a connection an
+    // allow_private_network request opened (it may point at an address the
+    // deny-private screen refuses): the policy is part of the pool key.
+    let (port, accepted) = counting_server();
+    let mut config = fast_config();
+    config.trusted_addrs.insert(ip("127.0.0.1"));
+    let client = PolicedClient::with_lookup(config, Arc::new(FixedLookup(vec![ip("127.0.0.1")])));
+    let url = format!("http://fixture.test:{port}/feed.xml");
+
+    client.fetch(&FetchRequest::new(&url)).await.unwrap();
+    client.fetch(&allowed(&url)).await.unwrap();
+    assert_eq!(accepted.load(Ordering::SeqCst), 2, "one pool per policy");
+    client.fetch(&FetchRequest::new(&url)).await.unwrap();
+    client.fetch(&allowed(&url)).await.unwrap();
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        2,
+        "each policy reuses its own pooled connection"
+    );
+}
+
+#[tokio::test]
+async fn dead_first_address_falls_back_to_the_next() {
+    // The broken-IPv6-route shape: the resolver ranks an address first that
+    // refuses (nothing listens on [::1] at the fixture's port — or the host
+    // has no IPv6 at all), then the IPv4 address that serves.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<rss/>"))
+        .mount(&server)
+        .await;
+    let port = server.address().port();
+
+    let client = PolicedClient::with_lookup(
+        fast_config(),
+        Arc::new(FixedLookup(vec![ip("::1"), ip("127.0.0.1")])),
+    );
+    let response = client
+        .fetch(&allowed(format!("http://fixture.test:{port}/feed.xml")))
+        .await
+        .unwrap();
+    assert!(response.is_success());
+    assert_eq!(response.body, b"<rss/>");
+}
+
+/// The same-family path (no Happy Eyeballs): two IPv4 records, the first
+/// refusing. Linux routes all of 127/8 to loopback; macOS does not, so this
+/// variant is Linux-only — the cross-family test above runs everywhere.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn refused_first_ipv4_address_falls_back_to_the_second() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+    let port = server.address().port();
+
+    let client = PolicedClient::with_lookup(
+        fast_config(),
+        Arc::new(FixedLookup(vec![ip("127.0.0.2"), ip("127.0.0.1")])),
+    );
+    let response = client
+        .fetch(&allowed(format!("http://fixture.test:{port}/feed.xml")))
+        .await
+        .unwrap();
+    assert_eq!(response.body, b"ok");
+}
+
+#[tokio::test]
+async fn every_resolved_address_is_screened_through_the_seam() {
+    // One private record poisons a mixed answer — before any connection.
+    let client = PolicedClient::with_lookup(
+        fast_config(),
+        Arc::new(FixedLookup(vec![ip("93.184.215.14"), ip("10.0.0.7")])),
+    );
+    let err = client
+        .fetch(&FetchRequest::new("http://mixed.test/feed.xml"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            FetchError::PrivateAddress { addr, ref host } if addr == ip("10.0.0.7") && host == "mixed.test"
+        ),
+        "expected PrivateAddress for the private record, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_hung_dns_lookup_is_bounded_by_the_connect_timeout() {
+    let mut config = fast_config();
+    config.connect_timeout = Duration::from_millis(150);
+    let client = PolicedClient::with_lookup(config, Arc::new(HungLookup));
+    let started = Instant::now();
+    // The outer bound turns a regression (an unbounded lookup) into a fast,
+    // named failure instead of a hang until the CI job times out.
+    let err = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.fetch(&FetchRequest::new("http://hang.test/feed.xml")),
+    )
+    .await
+    .expect("the fetch must not outlive its DNS timeout")
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            FetchError::Dns { ref host, ref message } if host == "hang.test" && message.contains("timed out")
+        ),
+        "expected a DNS timeout, got {err:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the lookup must give up at the configured timeout, took {:?}",
+        started.elapsed()
+    );
+}
+
+/// A DNS seam that answers each name's first lookup with loopback and every
+/// later lookup of that name with an address the screen never saw — the
+/// rebinding shape — recording every name it is asked for.
+#[derive(Debug, Default)]
+struct RebindingLookup(Mutex<Vec<String>>);
+
+impl DnsLookup for RebindingLookup {
+    fn lookup(&self, host: &str) -> LookupFuture {
+        let mut asked = self.0.lock().unwrap();
+        let seen = asked.iter().any(|name| name == host);
+        asked.push(host.to_owned());
+        let addr = if seen {
+            ip("192.0.2.1")
+        } else {
+            ip("127.0.0.1")
+        };
+        Box::pin(async move { Ok(vec![addr]) })
+    }
+}
+
+#[tokio::test]
+async fn every_connection_dials_the_pin_its_own_screen_set() {
+    // The pinning resolver falls back to an unscreened lookup for a name it
+    // holds no pin for (only ever the user's own proxy host). That is safe
+    // only while hyper asks it for exactly the name the screen pinned, for
+    // every spelling a URL can carry: mixed case, a trailing dot, an IDN.
+    // Each spelling is its own hyper pool key, so each fetch opens a
+    // connection and consults the resolver; a missed pin would show up as
+    // a second lookup of that name (and a dial to the rebound address).
+    let (port, accepted) = counting_server();
+    let mut config = fast_config();
+    config.trusted_addrs.insert(ip("127.0.0.1"));
+    config.connect_timeout = Duration::from_secs(2);
+    let lookup = Arc::new(RebindingLookup::default());
+    let client = PolicedClient::with_lookup(config, Arc::clone(&lookup) as Arc<dyn DnsLookup>);
+
+    for host in ["Fixture.Test", "fixture.test.", "b\u{fc}cher.test"] {
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.fetch(&FetchRequest::new(format!("http://{host}:{port}/feed.xml"))),
+        )
+        .await
+        .expect("a pinned fetch must not stall")
+        .unwrap();
+        assert_eq!(response.body, b"ok", "{host}");
+    }
+    assert_eq!(
+        *lookup.0.lock().unwrap(),
+        ["fixture.test", "fixture.test.", "xn--bcher-kva.test"],
+        "exactly one (pre-flight) lookup per name, none from the connector"
+    );
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        3,
+        "one connection per spelling"
+    );
+}
+
+#[tokio::test]
+async fn page_and_image_fetches_send_their_own_accept_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    let client = PolicedClient::new(fast_config());
+    for kind in [FetchKind::Page, FetchKind::Image] {
+        let request = FetchRequest {
+            kind,
+            ..allowed(format!("{}/thing", server.uri()))
+        };
+        client.fetch(&request).await.unwrap();
+    }
+
+    let requests = server.received_requests().await.unwrap();
+    let accepts: Vec<_> = requests
+        .iter()
+        .map(|sent| sent.headers.get("accept").and_then(|v| v.to_str().ok()))
+        .collect();
+    assert_eq!(accepts, [Some(PAGE_ACCEPT), Some(IMAGE_ACCEPT)]);
+}
+
+#[tokio::test]
+async fn the_response_content_type_is_surfaced_verbatim() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw("<p>hi</p>", "text/html; charset=windows-1251"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = PolicedClient::new(fast_config());
+    let response = client
+        .fetch(&allowed(format!("{}/page", server.uri())))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.content_type.as_deref(),
+        Some("text/html; charset=windows-1251")
+    );
+    assert!(response.is_html_page());
+}
+
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn deflate(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn brotli(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    brotli::BrotliCompress(
+        &mut std::io::Cursor::new(bytes),
+        &mut out,
+        &brotli::enc::BrotliEncoderParams::default(),
+    )
+    .unwrap();
+    out
+}
+
+const FEED: &str = include_str!("../../../fixtures/feeds/rss2.xml");
+
+#[tokio::test]
+async fn compressed_responses_are_decoded_transparently() {
+    for (coding, body) in [
+        ("gzip", gzip(FEED.as_bytes())),
+        ("br", brotli(FEED.as_bytes())),
+        ("deflate", deflate(FEED.as_bytes())),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-encoding", coding)
+                    .set_body_raw(body, "application/rss+xml"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = PolicedClient::new(fast_config());
+        let response = client
+            .fetch(&allowed(format!("{}/feed.xml", server.uri())))
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(response.body).unwrap(),
+            FEED,
+            "{coding} body decoded"
+        );
+
+        // The client advertised what it can decode.
+        let requests = server.received_requests().await.unwrap();
+        let accept_encoding = requests[0]
+            .headers
+            .get("accept-encoding")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        for advertised in ["gzip", "br", "deflate"] {
+            assert!(
+                accept_encoding.contains(advertised),
+                "{advertised} missing from {accept_encoding:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_gzip_bomb_trips_the_cap_on_its_decoded_size() {
+    // 8 MiB of zeros compresses to a few KiB: far under the cap on the
+    // wire, far over it once decoded.
+    let bomb = gzip(&vec![0u8; 8 * 1024 * 1024]);
+    assert!(
+        bomb.len() < 64 * 1024,
+        "fixture precondition: a tiny wire size"
+    );
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "gzip")
+                .set_body_raw(bomb, "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = fast_config();
+    config.max_body_bytes = 1024 * 1024;
+    let client = PolicedClient::new(config);
+    let err = client
+        .fetch(&allowed(format!("{}/bomb.xml", server.uri())))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, FetchError::BodyTooLarge { limit, .. } if limit == 1024 * 1024),
+        "expected BodyTooLarge, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_brotli_bomb_trips_the_cap_too() {
+    let bomb = brotli(&vec![b'a'; 8 * 1024 * 1024]);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "br")
+                .set_body_raw(bomb, "text/html"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = fast_config();
+    config.max_body_bytes = 1024 * 1024;
+    let client = PolicedClient::new(config);
+    let err = client
+        .fetch(&allowed(format!("{}/bomb.html", server.uri())))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, FetchError::BodyTooLarge { .. }),
+        "expected BodyTooLarge, got {err:?}"
     );
 }

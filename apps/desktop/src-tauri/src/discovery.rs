@@ -57,6 +57,8 @@ impl From<DiscoverError> for CommandError {
     fn from(error: DiscoverError) -> Self {
         if error.is_input_error() {
             Self::invalid_input(error.to_string())
+        } else if matches!(error, DiscoverError::NoFeed { .. }) {
+            Self::user(ErrorCode::NoFeed, error.to_string(), false)
         } else {
             Self::user(ErrorCode::Network, error.to_string(), true)
         }

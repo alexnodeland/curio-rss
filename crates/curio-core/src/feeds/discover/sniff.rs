@@ -1,7 +1,8 @@
 //! The structural feed sniff: do these bytes look like a feed rather than
-//! an HTML page? Content-Type is not exposed by the policed response, so
-//! discovery inspects the bytes — the cheap gate in front of
-//! [`crate::feeds::parse_feed`].
+//! an HTML page? Feeds are too often served under the wrong Content-Type
+//! (`text/html`, `text/plain`, `application/octet-stream`) for the header
+//! to decide, so discovery inspects the decoded bytes — the cheap gate in
+//! front of [`crate::feeds::parse_fetched_feed`].
 
 /// How much of the body the feed sniff looks at. Feeds declare their root
 /// element (or JSON Feed `version`) early; scanning the whole body would

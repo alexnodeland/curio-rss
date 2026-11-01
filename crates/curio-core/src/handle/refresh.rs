@@ -173,7 +173,7 @@ impl CoreHandle {
                 format!("HTTP {}", response.status),
             ));
         }
-        match crate::feeds::parse_feed(&response.body, Some(&response.final_url)) {
+        match crate::feeds::parse_fetched_feed(&response) {
             Ok(parsed) => self.ingest_parsed(id, feed, &response, parsed, now),
             Err(err) => {
                 // A body we could not parse must not update the
@@ -398,8 +398,7 @@ fn unparseable(
     response: &crate::fetch::FetchResponse,
     err: &crate::feeds::FeedParseError,
 ) -> (FetchErrorKind, String) {
-    let Some(feeds) = crate::feeds::discover::web_page_feeds(&response.body, &response.final_url)
-    else {
+    let Some(feeds) = crate::feeds::discover::web_page_feeds(response) else {
         return (FetchErrorKind::Parse, err.to_string());
     };
     let message = match feeds.as_slice() {

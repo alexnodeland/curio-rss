@@ -547,8 +547,20 @@ tokens:
                         favicon: null,
                     };
                 }
-                case 'get_cached_image':
-                    return String(args.url ?? '');
+                case 'get_cached_image': {
+                    // `.invalid` hosts (RFC 2606) stand in for an unreachable
+                    // image, so the reader's failed-image path is previewable.
+                    const url = String(args.url ?? '');
+                    if (/^https?:\/\/[^/]*\.invalid\//i.test(url)) {
+                        throw {
+                            kind: 'user',
+                            code: 'NETWORK',
+                            message: `could not fetch ${url}`,
+                            recoverable: true,
+                        };
+                    }
+                    return url;
+                }
                 case 'copy_diagnostics_bundle':
                     return { token: 'dev-token', path: '/Users/alex/curio-diagnostics.zip' };
                 case 'add_feed': {

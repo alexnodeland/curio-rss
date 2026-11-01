@@ -102,7 +102,7 @@ fn browser_scheme(value: &str) -> Option<String> {
 /// Every attribute the sanitize gate may leave on stored HTML.
 const ALLOWED_ATTRIBUTES: &[&str] = &[
     "href", "rel", "title", "src", "alt", "datetime", "colspan", "rowspan", "id", "dir", "lang",
-    "start", "class",
+    "start", "class", "width", "height",
 ];
 
 /// The id/fragment token shape: ASCII alphanumerics and `-_.:`.
@@ -128,6 +128,13 @@ fn value_is_filtered(element: &str, attr: &str, value: &str) -> bool {
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         }
         "start" => element == "ol" && value.parse::<i32>().is_ok(),
+        // Plain, canonical pixel integers on images only (`1..=20000`).
+        "width" | "height" => {
+            element == "img"
+                && value.parse::<u32>().is_ok_and(|pixels| {
+                    (1..=20_000).contains(&pixels) && pixels.to_string() == value
+                })
+        }
         "class" => {
             matches!(element, "pre" | "code")
                 && value.strip_prefix("language-").is_some_and(|lang| {

@@ -2,6 +2,8 @@
 //! counting, deletion, and the tag vocabulary.
 
 use std::collections::BTreeMap;
+#[cfg(feature = "enrich-reddit")]
+use std::ops::ControlFlow;
 
 use curio_types::Timestamp;
 
@@ -13,6 +15,7 @@ use crate::model::{
 use crate::storage::ListArticles;
 
 use super::refresh::is_feed_own_url;
+use super::sweep::{RefreshCancel, until_cancelled};
 use super::{CoreError, CoreHandle, SavedUrl};
 
 impl CoreHandle {
@@ -49,19 +52,53 @@ impl CoreHandle {
     /// stored before the feed's URL was redirect-adopted). Extracting the
     /// feed XML as if it were the article would replace the real body.
     ///
+    /// Only the page fetch runs on the async runtime the call is awaited
+    /// on: the storage reads and writes, the page decode and the
+    /// readability extraction run on the blocking pool, so a large page
+    /// never stalls that runtime.
+    ///
     /// # Errors
     ///
     /// [`CoreError::NotFound`] for an unknown article; fetch, content or
-    /// storage errors.
+    /// storage errors; [`CoreError::Panicked`] when the extraction panics.
     pub async fn hydrate_article(&self, id: ArticleId) -> Result<Article, CoreError> {
-        let article = self
-            .storage
-            .get_article(id)?
-            .ok_or(CoreError::NotFound { entity: "article" })?;
-        let feed = match article.feed_id {
-            Some(feed_id) => self.storage.get_feed(feed_id)?,
-            None => None,
-        };
+        match self.hydrate_article_until(id, None).await? {
+            Some(article) => Ok(article),
+            // Only a cancel signal stops a hydrate short, and none was
+            // given: the stored article is unchanged.
+            None => {
+                self.on_blocking_pool(move |storage| {
+                    storage
+                        .get_article(id)?
+                        .ok_or(CoreError::NotFound { entity: "article" })
+                })
+                .await
+            }
+        }
+    }
+
+    /// [`Self::hydrate_article`], stopped short once `cancel` fires: a
+    /// fetch still in flight is dropped and the result is `None` — the
+    /// article is left as it was. Only the fetches race the cancel; once
+    /// a page is in, its extraction and storage write run to the end, so
+    /// a cancelled sweep never returns ahead of a write it started.
+    pub(super) async fn hydrate_article_until(
+        &self,
+        id: ArticleId,
+        cancel: Option<&RefreshCancel>,
+    ) -> Result<Option<Article>, CoreError> {
+        let (article, feed) = self
+            .on_blocking_pool(move |storage| {
+                let article = storage
+                    .get_article(id)?
+                    .ok_or(CoreError::NotFound { entity: "article" })?;
+                let feed = match article.feed_id {
+                    Some(feed_id) => storage.get_feed(feed_id)?,
+                    None => None,
+                };
+                Ok((article, feed))
+            })
+            .await?;
         // Matched against the feed's *current* URL only: the store keeps no
         // URL history, so a link-less row saved under a URL the feed no
         // longer has — and that no longer redirects to it (the user edited
@@ -72,7 +109,7 @@ impl CoreHandle {
             |url: &str| feed.as_ref().is_some_and(|feed| is_feed_own_url(url, feed));
         if lands_on_feed(&article.source_url) {
             tracing::debug!(article = %id, "link-less feed entry: nothing to hydrate");
-            return Ok(article);
+            return Ok(Some(article));
         }
         let allow_private_network = feed.as_ref().is_some_and(|feed| feed.allow_private_network);
         // Enrichment first (feature-gated): a source-specific provider
@@ -81,44 +118,50 @@ impl CoreHandle {
         // host); any other enrichment failure falls through to the
         // generic page fetch below.
         #[cfg(feature = "enrich-reddit")]
-        if let Some(enriched) = self
-            .try_reddit_enrichment(id, &article, allow_private_network)
+        if let ControlFlow::Break(enriched) = self
+            .try_reddit_enrichment(id, &article, allow_private_network, cancel)
             .await?
         {
             return Ok(enriched);
         }
-        let response = self
-            .client
-            .fetch(&FetchRequest {
-                url: article.source_url.clone(),
-                allow_private_network,
-                kind: FetchKind::Page,
-                ..FetchRequest::default()
-            })
-            .await?;
+        let request = FetchRequest {
+            url: article.source_url.clone(),
+            allow_private_network,
+            kind: FetchKind::Page,
+            ..FetchRequest::default()
+        };
+        let Some(response) = until_cancelled(cancel, self.client.fetch(&request)).await else {
+            return Ok(None);
+        };
+        let response = response?;
         // A PDF, image or other non-HTML body has no main content to
         // extract — readability over binary data would only make noise.
         if !response.is_success() || lands_on_feed(&response.final_url) || !response.is_html_page()
         {
-            return Ok(article);
+            return Ok(Some(article));
         }
-        let processed = content::process_full_page(&response.html_text(), &response.final_url)?;
-        // A mis-scored thin page must not clobber real feed content.
-        if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len() {
-            return Ok(article);
-        }
-        self.storage.update_article_content(
-            id,
-            &ArticleContent {
-                html: processed.html,
-                text: processed.text,
-            },
-            Some(processed.word_count),
-            ContentOrigin::FullText,
-        )?;
-        self.storage
-            .get_article(id)?
-            .ok_or(CoreError::NotFound { entity: "article" })
+        self.on_blocking_pool(move |storage| {
+            let processed = content::process_full_page(&response.html_text(), &response.final_url)?;
+            // A mis-scored thin page must not clobber real feed content.
+            if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len()
+            {
+                return Ok(article);
+            }
+            storage.update_article_content(
+                id,
+                &ArticleContent {
+                    html: processed.html,
+                    text: processed.text,
+                },
+                Some(processed.word_count),
+                ContentOrigin::FullText,
+            )?;
+            storage
+                .get_article(id)?
+                .ok_or(CoreError::NotFound { entity: "article" })
+        })
+        .await
+        .map(Some)
     }
 
     /// Saves a single URL as a feedless read-later article — the
@@ -271,52 +314,86 @@ impl CoreHandle {
     }
 
     /// The reddit enrichment attempt (D14/D15), split out of
-    /// [`Self::hydrate_article`]: `Ok(Some(_))` = enriched and stored;
-    /// `Ok(None)` = not a reddit post / soft failure, use the generic
-    /// path; `Err(RateLimited)` = hard stop, make no further request to
-    /// the throttled host. Provider output passes the SAME sanitize gate
-    /// as everything else. A 429 — from the token grant or the API call
-    /// — trips the breaker immediately, honoring `Retry-After`.
+    /// [`Self::hydrate_article_until`]: `Break(Some(_))` = enriched and
+    /// stored; `Break(None)` = `cancel` fired during a fetch, nothing
+    /// stored; `Continue` = not a reddit post / soft failure, use the
+    /// generic path; `Err(RateLimited)` = hard stop, make no further
+    /// request to the throttled host. Provider output passes the SAME
+    /// sanitize gate as everything else. A 429 — from the token grant or
+    /// the API call — trips the breaker immediately, honoring
+    /// `Retry-After`.
     #[cfg(feature = "enrich-reddit")]
     async fn try_reddit_enrichment(
         &self,
         id: ArticleId,
         article: &Article,
         allow_private_network: bool,
-    ) -> Result<Option<Article>, CoreError> {
-        use crate::RedditAuthReason;
-        use crate::enrich::{EnrichError, reddit};
+        cancel: Option<&RefreshCancel>,
+    ) -> Result<ControlFlow<Option<Article>>, CoreError> {
+        use crate::enrich::reddit;
 
         if !reddit::is_reddit_post(&article.source_url) {
-            return Ok(None);
+            return Ok(ControlFlow::Continue(()));
         }
 
         if !self.enrich_breaker.closed() {
             return Err(reddit_rate_limited(self.enrich_breaker.open_remaining()));
         }
-        let (bearer, grant_failure) = self.reddit_bearer().await?;
+        let Some(grant) = until_cancelled(cancel, self.reddit_bearer()).await else {
+            return Ok(ControlFlow::Break(None));
+        };
+        let (bearer, grant_failure) = grant?;
         let api_origin = self.reddit_auth.api_origin();
         let auth = match (bearer.as_deref(), api_origin.as_deref()) {
             (Some(bearer), Some(api_origin)) => Some(reddit::PostAuth { bearer, api_origin }),
             _ => None,
         };
         let authenticated = auth.is_some();
-        match reddit::fetch_post(
+        let post = reddit::fetch_post(
             &self.client,
             &article.source_url,
             allow_private_network,
             auth,
-        )
-        .await
-        {
-            Ok(enriched) => {
-                self.enrich_breaker.record_success();
-                self.store_enriched(id, &article.source_url, &enriched.html)
-            }
-            Err(EnrichError::Http {
+        );
+        let Some(post) = until_cancelled(cancel, post).await else {
+            return Ok(ControlFlow::Break(None));
+        };
+        let enriched = match post {
+            Ok(enriched) => enriched,
+            Err(err) => return self.reddit_post_failed(id, err, authenticated, grant_failure),
+        };
+        self.enrich_breaker.record_success();
+        let source_url = article.source_url.clone();
+        let stored = self
+            .on_blocking_pool(move |storage| {
+                store_enriched(storage, id, &source_url, &enriched.html)
+            })
+            .await?;
+        Ok(stored.map_or(ControlFlow::Continue(()), |stored| {
+            ControlFlow::Break(Some(stored))
+        }))
+    }
+
+    /// A failed reddit post fetch, split out of
+    /// [`Self::try_reddit_enrichment`]: a 429 trips the breaker, a 401/403
+    /// asks for (working) credentials, anything else falls back to the
+    /// generic page fetch.
+    #[cfg(feature = "enrich-reddit")]
+    fn reddit_post_failed(
+        &self,
+        id: ArticleId,
+        err: crate::enrich::EnrichError,
+        authenticated: bool,
+        grant_failure: Option<GrantFailure>,
+    ) -> Result<ControlFlow<Option<Article>>, CoreError> {
+        use crate::RedditAuthReason;
+        use crate::enrich::EnrichError;
+
+        match err {
+            EnrichError::Http {
                 status: 429,
                 retry_after,
-            }) => {
+            } => {
                 self.enrich_breaker.trip(retry_after);
                 tracing::warn!(
                     article = %id,
@@ -325,10 +402,10 @@ impl CoreHandle {
                 );
                 Err(reddit_rate_limited(self.enrich_breaker.open_remaining()))
             }
-            Err(EnrichError::Http {
+            EnrichError::Http {
                 status: status @ (401 | 403),
                 ..
-            }) if authenticated => {
+            } if authenticated => {
                 // A stale or revoked token: drop it so the next call
                 // re-grants, and tell the user — falling back to an HTML
                 // fetch of the same host would only produce junk.
@@ -339,10 +416,10 @@ impl CoreHandle {
                     status,
                 })
             }
-            Err(EnrichError::Http {
+            EnrichError::Http {
                 status: status @ (401 | 403),
                 ..
-            }) => {
+            } => {
                 // Reddit's 2026 lockdown: anonymous .json requests are
                 // 403-blocked outright. Deterministic — no breaker, no
                 // fallback fetch; the guidance IS the answer. Installed
@@ -370,47 +447,16 @@ impl CoreHandle {
                     },
                 })
             }
-            Err(err) => {
+            err => {
                 self.enrich_breaker.record_failure();
                 tracing::warn!(
                     article = %id,
                     %err,
                     "reddit enrichment failed; falling back to the page fetch"
                 );
-                Ok(None)
+                Ok(ControlFlow::Continue(()))
             }
         }
-    }
-
-    /// Stores a provider's enriched body. Provider output IS the main
-    /// content already — it only passes the sanitize gate (readability's
-    /// boilerplate extraction would drop the appended media figures).
-    /// The API is authoritative for its own posts, so it may replace
-    /// longer feed content — but never with nothing (`Ok(None)` sends
-    /// the caller down the generic path instead).
-    #[cfg(feature = "enrich-reddit")]
-    fn store_enriched(
-        &self,
-        id: ArticleId,
-        source_url: &str,
-        raw_html: &str,
-    ) -> Result<Option<Article>, CoreError> {
-        let html = content::sanitize(raw_html, Some(source_url));
-        let text = content::plain_text(&html);
-        let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
-        if text.trim().is_empty() && content::first_image(&html).is_none() {
-            return Ok(None);
-        }
-        self.storage.update_article_content(
-            id,
-            &ArticleContent { html, text },
-            Some(word_count),
-            ContentOrigin::Enriched,
-        )?;
-        self.storage
-            .get_article(id)?
-            .ok_or(CoreError::NotFound { entity: "article" })
-            .map(Some)
     }
 
     /// Full-text search (escaped FTS5 — user input is never raw MATCH).
@@ -502,4 +548,35 @@ fn reddit_rate_limited(remaining: Option<std::time::Duration>) -> CoreError {
         host: "reddit.com".to_owned(),
         retry_after_secs: remaining.map_or(60, |d| d.as_secs().max(1)),
     }
+}
+
+/// Stores a provider's enriched body. Provider output IS the main
+/// content already — it only passes the sanitize gate (readability's
+/// boilerplate extraction would drop the appended media figures).
+/// The API is authoritative for its own posts, so it may replace
+/// longer feed content — but never with nothing (`Ok(None)` sends
+/// the caller down the generic path instead).
+#[cfg(feature = "enrich-reddit")]
+fn store_enriched(
+    storage: &crate::storage::Storage,
+    id: ArticleId,
+    source_url: &str,
+    raw_html: &str,
+) -> Result<Option<Article>, CoreError> {
+    let html = content::sanitize(raw_html, Some(source_url));
+    let text = content::plain_text(&html);
+    let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
+    if text.trim().is_empty() && content::first_image(&html).is_none() {
+        return Ok(None);
+    }
+    storage.update_article_content(
+        id,
+        &ArticleContent { html, text },
+        Some(word_count),
+        ContentOrigin::Enriched,
+    )?;
+    storage
+        .get_article(id)?
+        .ok_or(CoreError::NotFound { entity: "article" })
+        .map(Some)
 }

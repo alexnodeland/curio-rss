@@ -437,6 +437,11 @@ export const it: Partial<Record<MessageKey, string>> = {
         'Il sito ha rifiutato la richiesta (403). Alcuni siti bloccano i lettori di feed: riprova più tardi o controlla l’URL del feed.',
     'feedHealth.hint.rateLimited':
         'Il sito sta limitando le richieste (429). Curio distanzia i tentativi: riprova tra poco.',
+    'feedHealth.schedule.backoff':
+        '{count, plural, one {# recupero non riuscito} other {# recuperi non riusciti di fila}}: prossimo tentativo {when}',
+    'feedHealth.schedule.next': 'Prossimo aggiornamento {when}',
+    'feedHealth.schedule.autoPaused':
+        '{count, plural, one {Curio ha sospeso questo feed dopo # recupero non riuscito.} other {Curio ha sospeso questo feed dopo # recuperi non riusciti di fila.}} Riprendilo per riprovare.',
     'feedHealth.unsubscribe': 'Annulla iscrizione',
     'feedHealth.unsubscribe.confirm':
         'Rimuovere questa iscrizione? Gli articoli salvati vengono mantenuti.',

@@ -4,7 +4,8 @@
  * subscription. Details — the (read-only, copyable) feed URL, display name
  * (`set_feed_title`), site URL + description (`set_feed_metadata`), and
  * folders & tags (`set_feed_tags`, chip editor). Health — lifecycle status
- * with pause / resume / reactivate (`set_feed_status`), the recent fetch log
+ * with pause / resume / reactivate (`set_feed_status`), the refresh schedule
+ * (a failure backoff's next attempt, an automatic pause's reason), the recent fetch log
  * (`recent_fetches`) with a plain-language hint for a refused/rate-limited
  * feed, and mark-all-read. Danger — the two-step unsubscribe. Replaces the
  * old standalone feed-health panel (its health surface is now a section
@@ -27,6 +28,7 @@ import type { EditFeedSection } from '$lib/state/layout.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { copyText } from '$lib/utils/clipboard';
 import { openExternal } from '$lib/utils/external';
+import { feedScheduleNote } from '$lib/utils/feed-schedule';
 
 let {
     feedId,
@@ -60,6 +62,28 @@ const feed = $derived(feedsStore.feeds.find((candidate) => candidate.id === feed
 $effect(() => {
     if (section === 'health' && healthEl !== undefined) {
         healthEl.scrollIntoView({ block: 'start' });
+    }
+});
+
+// The engine-owned schedule, in words: when a failing (or self-throttled)
+// feed is next fetched, or why Curio paused it by itself.
+const scheduleNote = $derived(feed === null ? null : feedScheduleNote(feed));
+const scheduleText = $derived.by((): string | null => {
+    if (scheduleNote === null) {
+        return null;
+    }
+    switch (scheduleNote.kind) {
+        case 'autoPaused':
+            return t('feedHealth.schedule.autoPaused', { count: scheduleNote.failures });
+        case 'backoff':
+            return t('feedHealth.schedule.backoff', {
+                count: scheduleNote.failures,
+                when: formatIntlDateTime(scheduleNote.nextAttempt),
+            });
+        case 'scheduled':
+            return t('feedHealth.schedule.next', {
+                when: formatIntlDateTime(scheduleNote.nextAttempt),
+            });
     }
 });
 
@@ -325,6 +349,9 @@ function closeWithFlush(): void {
 
         <section class="health" aria-label={t('editFeed.section.health')} bind:this={healthEl}>
             <h3>{t('editFeed.section.health')}</h3>
+            {#if scheduleNote !== null && scheduleText !== null}
+                <p class="schedule schedule-{scheduleNote.kind}" role="status">{scheduleText}</p>
+            {/if}
             <div class="controls" role="group" aria-label={t('feedHealth.status')}>
                 {#if feed.status === 'active'}
                     <button type="button" onclick={() => void setStatus('paused')}
@@ -667,6 +694,35 @@ function closeWithFlush(): void {
     .fetch-new {
         color: var(--accent);
         font-weight: 500;
+    }
+
+    .schedule {
+        font-size: var(--text-sm);
+        line-height: 1.4;
+        color: var(--fg-muted);
+    }
+
+    .schedule-backoff {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .schedule-backoff::before {
+        content: '';
+        flex: none;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--error);
+    }
+
+    .schedule-autoPaused {
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        border-left: 3px solid var(--warning);
     }
 
     .fetch-hint {

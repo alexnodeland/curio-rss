@@ -441,6 +441,11 @@ export const pl: Partial<Record<MessageKey, string>> = {
         'Witryna odrzuciła żądanie (403). Niektóre witryny blokują czytniki kanałów — spróbuj ponownie później lub sprawdź adres URL kanału.',
     'feedHealth.hint.rateLimited':
         'Witryna ogranicza liczbę żądań (429). Curio rozkłada ponowne próby w czasie — spróbuj ponownie za chwilę.',
+    'feedHealth.schedule.backoff':
+        '{count, plural, one {# nieudane pobranie} few {# nieudane pobrania z rzędu} many {# nieudanych pobrań z rzędu} other {# nieudanego pobrania z rzędu}} — następna próba {when}',
+    'feedHealth.schedule.next': 'Następne odświeżenie {when}',
+    'feedHealth.schedule.autoPaused':
+        '{count, plural, one {Curio wstrzymało ten kanał po # nieudanym pobraniu.} other {Curio wstrzymało ten kanał po # nieudanych pobraniach z rzędu.}} Wznów go, aby spróbować ponownie.',
     'feedHealth.unsubscribe': 'Anuluj subskrypcję',
     'feedHealth.unsubscribe.confirm': 'Usunąć tę subskrypcję? Zapisane artykuły zostaną zachowane.',
     'feedHealth.unsubscribe.remove': 'Usuń',

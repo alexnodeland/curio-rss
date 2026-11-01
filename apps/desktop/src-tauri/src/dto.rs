@@ -208,6 +208,16 @@ pub struct FeedDto {
     /// Full-text mode: new articles are hydrated from their source pages
     /// at refresh time.
     pub fetch_full_text: bool,
+    /// Failed fetches in a row (0 ⇒ healthy).
+    pub consecutive_failures: u32,
+    /// The earliest time a background or refresh-all sweep fetches the
+    /// feed again (RFC 3339 UTC) — a failure backoff, the host's
+    /// `Retry-After` or the feed's own refresh hint. `null` ⇒ due on the
+    /// next sweep.
+    pub next_attempt_at: Option<String>,
+    /// When the engine paused the feed by itself after a long run of
+    /// failures (RFC 3339 UTC); `null` for a feed the user paused.
+    pub auto_paused_at: Option<String>,
 }
 
 impl From<Feed> for FeedDto {
@@ -226,6 +236,9 @@ impl From<Feed> for FeedDto {
             last_ok_at: feed.last_ok_at.map(|t| t.to_string()),
             tags: feed.tags,
             fetch_full_text: feed.fetch_full_text,
+            consecutive_failures: feed.consecutive_failures,
+            next_attempt_at: feed.next_attempt_at.map(|t| t.to_string()),
+            auto_paused_at: feed.auto_paused_at.map(|t| t.to_string()),
         }
     }
 }

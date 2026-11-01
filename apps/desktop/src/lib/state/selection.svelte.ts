@@ -45,8 +45,9 @@ export class SelectionStore {
 
     /**
      * The last window index the selection sat at while present. When the
-     * selected row leaves the window (auto-mark-read drops it from an unread
-     * view), `selectedIndex` goes to -1; j/k resume relative to this captured
+     * selected row leaves the window (archived out of the view — a row read
+     * in an unread-only view is held in place for the session, see
+     * `read-hold.ts`), `selectedIndex` goes to -1; j/k resume relative to this captured
      * position instead of teleporting to the top. ArticleList keeps it current
      * via `rememberIndex` whenever a real row is selected.
      */

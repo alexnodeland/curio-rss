@@ -116,13 +116,22 @@ export async function toggleReadLater(articleId: number): Promise<void> {
     await toggleFlag(articleId, 'read_later', (id, value) => commands.setReadLater(id, value));
 }
 
-/** Marks read / unread against the current backend flag. */
+/**
+ * Marks read / unread against the current backend flag. The row is held for
+ * the view session first, so marking it read in an unread-only view keeps it
+ * in place (dimmed) instead of yanking it out from under the cursor.
+ */
 export async function toggleRead(articleId: number): Promise<void> {
+    articlesStore.holdRead(articleId);
     await toggleFlag(articleId, 'read', (id, value) => commands.markRead(id, value));
 }
 
-/** Archives / unarchives against the current backend flag. */
+/**
+ * Archives / unarchives against the current backend flag. Archiving takes the
+ * row out of the reading flow, so any session read-hold on it is let go.
+ */
 export async function toggleArchived(articleId: number): Promise<void> {
+    articlesStore.releaseHeld(articleId);
     await toggleFlag(articleId, 'archived', (id, value) => commands.setArchived(id, value));
 }
 
@@ -133,6 +142,9 @@ export async function toggleArchived(articleId: number): Promise<void> {
  * j/k scanning.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
+    // Held first: in an unread-only view the open must not drop the row (and
+    // the selection with it) — it stays until the view changes.
+    articlesStore.holdRead(articleId);
     await run(() => commands.markRead(articleId, true));
 }
 
@@ -143,6 +155,8 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
  * was already read, so re-scrolling the same rows costs nothing.
  */
 export async function markReadOnScroll(articleId: number): Promise<void> {
+    // Held so the scrolled-past rows don't vanish and shift the list up.
+    articlesStore.holdRead(articleId);
     try {
         await commands.markRead(articleId, true);
     } catch {
@@ -165,6 +179,8 @@ export async function loadFullArticle(articleId: number): Promise<boolean> {
  * list refresh off the Rust-emitted `ArticlesChanged`.
  */
 export async function markAllRead(feedId: number | null): Promise<void> {
+    // An explicit sweep: the held stragglers go with the rest.
+    articlesStore.releaseHolds();
     const changed = await run(() => commands.markAllRead(feedId));
     if (changed === undefined) {
         return;
@@ -353,17 +369,31 @@ function focusSearch(): void {
     searchStore.requestFocus();
 }
 
+/**
+ * Refreshes one feed (the `r` shortcut, the feed's context menu). An explicit
+ * refresh ends the current view's read-hold: the list shows the backend
+ * window again once it reloads.
+ */
+export function refreshFeed(feedId: number): void {
+    articlesStore.releaseHolds();
+    void run(() => feedsStore.refreshFeed(feedId));
+}
+
 /** Refreshes the selected feed, if any (the `r` shortcut). */
 function refreshSelectedFeed(): void {
     const feedId = selectionStore.selectedFeedId;
     if (feedId === null) {
         return;
     }
-    void run(() => feedsStore.refreshFeed(feedId));
+    refreshFeed(feedId);
 }
 
-/** Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar). */
+/**
+ * Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar); like a
+ * feed refresh, it ends the current view's read-hold.
+ */
 export function refreshAll(): void {
+    articlesStore.releaseHolds();
     void run(() => feedsStore.refreshAll());
 }
 

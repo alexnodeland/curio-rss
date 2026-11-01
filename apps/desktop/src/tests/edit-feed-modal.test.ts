@@ -291,24 +291,32 @@ describe('EditFeedModal', () => {
     });
 
     it('drops the next-attempt note once that time has passed', async () => {
-        harness = harnessFor('active', {
-            list_feeds: [
-                feedFixture({
-                    id: 1,
-                    title: 'Alpha',
-                    consecutive_failures: 1,
-                    next_attempt_at: new Date(Date.now() + 100).toISOString(),
-                }),
-            ],
-        });
-        const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
-        await flushIpc();
-        expect(container.querySelector('.schedule')).not.toBeNull();
-        await new Promise((resolve) => {
-            setTimeout(resolve, 400);
-        });
-        await flushIpc();
-        expect(container.querySelector('.schedule')).toBeNull();
+        // Fake clock (still ticking, so the IPC flush resolves): the modal
+        // stays open past the deadline without the test waiting it out.
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            harness = harnessFor('active', {
+                list_feeds: [
+                    feedFixture({
+                        id: 1,
+                        title: 'Alpha',
+                        consecutive_failures: 1,
+                        next_attempt_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+                    }),
+                ],
+            });
+            const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+            await flushIpc();
+            expect(container.querySelector('.schedule')).not.toBeNull();
+            vi.advanceTimersByTime(9 * 60_000);
+            await flushIpc();
+            expect(container.querySelector('.schedule')).not.toBeNull();
+            vi.advanceTimersByTime(2 * 60_000);
+            await flushIpc();
+            expect(container.querySelector('.schedule')).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('shows when a failing feed is next attempted', async () => {

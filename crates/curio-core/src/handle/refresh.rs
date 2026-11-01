@@ -2,11 +2,9 @@
 //! and the per-feed refresh serialization.
 
 use std::path::{Path, PathBuf};
-use std::pin::pin;
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
-use futures_util::future::{Either, select};
 use tokio::sync::Mutex as AsyncMutex;
 
 use curio_types::Timestamp;
@@ -20,7 +18,7 @@ use crate::model::{
 };
 use crate::storage::Storage;
 
-use super::sweep::RefreshCancel;
+use super::sweep::{RefreshCancel, until_cancelled};
 use super::{CoreError, CoreHandle, LOCKS_DIR, RefreshOutcome};
 
 impl CoreHandle {
@@ -29,11 +27,15 @@ impl CoreHandle {
     /// (recorded, validators preserved), not errors; only storage-level
     /// failures surface as `Err`.
     ///
-    /// Everything but the network I/O — the storage reads and writes, the
-    /// feed parse and the CPU-heavy sanitize/extract pipeline — runs on
-    /// the blocking pool, so a large feed never stalls the async runtime
-    /// it is awaited on (a current-thread runtime keeps its timers
-    /// ticking).
+    /// The refresh itself keeps off the async runtime it is awaited on:
+    /// its storage reads and writes, the feed parse and the CPU-heavy
+    /// sanitize pipeline run on the blocking pool, so a large feed never
+    /// stalls that runtime (a current-thread runtime keeps its timers
+    /// ticking). One part still runs on the runtime: with full-text mode
+    /// on, the articles the refresh inserted are then hydrated one by one
+    /// through [`Self::hydrate_article`], whose storage calls and
+    /// readability extraction are synchronous — a full-text feed with
+    /// many new items still holds the runtime for each page it extracts.
     ///
     /// Refreshes of the **same feed are serialized**, across processes
     /// too: concurrent callers in this process queue on a per-feed mutex,
@@ -57,19 +59,22 @@ impl CoreHandle {
     /// [`CoreError::Io`] when the lock file cannot be created;
     /// [`CoreError::Panicked`] when the ingest pipeline panics.
     pub async fn refresh_feed(&self, id: FeedId) -> Result<RefreshOutcome, CoreError> {
-        self.refresh_feed_until(id, None).await
+        let outcome = self.refresh_feed_until(id, None).await?;
+        // Only a cancel signal abandons a refresh, and none was given.
+        Ok(outcome.unwrap_or_else(|| not_fetched(id, "refresh cancelled")))
     }
 
     /// [`Self::refresh_feed`], abandoned early once `cancel` fires: a
-    /// fetch still in flight is dropped (nothing is recorded, the stored
-    /// validators stay as they were) and the outcome says the refresh was
-    /// cancelled; the full-text hydration of a finished refresh stops at
-    /// the next article.
+    /// fetch still in flight is dropped — nothing is recorded, the stored
+    /// validators stay as they were, and the result is `None` (an
+    /// abandoned refresh has no outcome). Once the fetch is in, the
+    /// refresh settles as usual; its full-text hydration stops at once,
+    /// an in-flight page fetch included.
     pub(super) async fn refresh_feed_until(
         &self,
         id: FeedId,
         cancel: Option<&RefreshCancel>,
-    ) -> Result<RefreshOutcome, CoreError> {
+    ) -> Result<Option<RefreshOutcome>, CoreError> {
         // Unknown feeds fail before a lock file is minted for them.
         if self
             .on_blocking_pool(move |storage| Ok(storage.get_feed(id)?))
@@ -78,23 +83,25 @@ impl CoreHandle {
         {
             return Err(CoreError::NotFound { entity: "feed" });
         }
-        let lock = self.refresh_lock(id);
-        let serialized = lock.lock().await;
+        // Owned guards: they move into the blocking job below, so the
+        // feed stays locked until its storage writes are done even when
+        // this future is dropped (a sweep given up on) while they run.
+        let serialized = self.refresh_lock(id).lock_owned().await;
         let Some(across_processes) = self.refresh_file_lock(id).await? else {
-            return Ok(not_fetched(
+            return Ok(Some(not_fetched(
                 id,
                 "another Curio process is still refreshing this feed — skipped",
-            ));
+            )));
         };
         let feed = self
             .on_blocking_pool(move |storage| Ok(storage.get_feed(id)?))
             .await?
             .ok_or(CoreError::NotFound { entity: "feed" })?;
         if feed.status == FeedStatus::Dead {
-            return Ok(not_fetched(
+            return Ok(Some(not_fetched(
                 id,
                 "feed is dead (HTTP 410) — refusing to fetch",
-            ));
+            )));
         }
 
         let started = Instant::now();
@@ -106,20 +113,20 @@ impl CoreHandle {
             bearer: None,
             ..FetchRequest::default()
         };
-        let fetched = match cancel {
-            None => self.client.fetch(&request).await,
-            Some(cancel) => {
-                match select(pin!(self.client.fetch(&request)), pin!(cancel.cancelled())).await {
-                    Either::Left((fetched, _)) => fetched,
-                    Either::Right(((), _)) => return Ok(not_fetched(id, CANCELLED)),
-                }
-            }
+        let Some(fetched) = until_cancelled(cancel, self.client.fetch(&request)).await else {
+            return Ok(None);
         };
         let now = Timestamp::now();
         let duration_ms = u32::try_from(started.elapsed().as_millis()).ok();
 
         let settled = self
-            .on_blocking_pool(move |storage| settle(storage, id, &feed, fetched, now, duration_ms))
+            .on_blocking_pool(move |storage| {
+                // Held for the whole job, released when it ends: a dropped
+                // caller cannot let the next refresh of this feed in while
+                // these writes still run (the validator race above).
+                let _locked = (serialized, across_processes);
+                settle(storage, id, &feed, fetched, now, duration_ms)
+            })
             .await?;
         if settled.url_adopted {
             // The URL is the identity key of feed.added/feed.removed;
@@ -128,13 +135,12 @@ impl CoreHandle {
         }
         // Full-text mode's refresh hook: hydrate the articles this refresh
         // *inserted* (never the whole backlog) from their source pages,
-        // outside the per-feed locks. Best-effort per article — a dead page
-        // keeps its feed excerpt, and hydrate_article's never-clobber
-        // guard already protects feeds that ship full content.
-        drop(across_processes);
-        drop(serialized);
+        // outside the per-feed locks (the blocking job released them).
+        // Best-effort per article — a dead page keeps its feed excerpt, and
+        // hydrate_article's never-clobber guard already protects feeds that
+        // ship full content.
         self.hydrate_batch(settled.hydrate_pending, cancel).await;
-        Ok(settled.outcome)
+        Ok(Some(settled.outcome))
     }
 
     /// Runs a storage job on the blocking pool, off the async runtime.
@@ -163,13 +169,15 @@ impl CoreHandle {
     /// best-effort per article. A rate-limit error stops the whole batch
     /// — every remaining hydrate would fail the same way; the articles
     /// keep their feed excerpts and a later manual load-full picks them
-    /// up. So does a cancelled sweep, at the next article.
+    /// up. So does a cancelled sweep, at once: the page fetch in flight is
+    /// dropped (a hydrate writes nothing before its fetch is in).
     async fn hydrate_batch(&self, pending: Vec<ArticleId>, cancel: Option<&RefreshCancel>) {
         for article_id in pending {
-            if cancel.is_some_and(RefreshCancel::is_cancelled) {
+            let Some(hydrated) = until_cancelled(cancel, self.hydrate_article(article_id)).await
+            else {
                 break;
-            }
-            match self.hydrate_article(article_id).await {
+            };
+            match hydrated {
                 Ok(_) => {}
                 Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. }) => {
                     // Deterministic for every remaining article in the
@@ -240,9 +248,6 @@ fn not_fetched(feed_id: FeedId, why: &str) -> RefreshOutcome {
         error: Some(why.to_owned()),
     }
 }
-
-/// The error of a refresh whose fetch a cancelled sweep abandoned.
-pub(super) const CANCELLED: &str = "refresh cancelled";
 
 /// What the blocking half of a refresh settled.
 struct Settled {

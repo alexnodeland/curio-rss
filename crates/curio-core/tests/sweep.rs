@@ -230,7 +230,9 @@ async fn concurrent_sweep_requests_fetch_each_feed_once() {
 }
 
 /// Cancelling stops new fetches and drops the ones in flight at once —
-/// nothing recorded for them — instead of waiting out a slow host.
+/// nothing recorded for them, and no outcome either: an abandoned feed
+/// was not refreshed, it did not fail — instead of waiting out a slow
+/// host.
 #[tokio::test]
 async fn cancel_stops_new_fetches_and_drops_the_ones_in_flight() {
     let server = MockServer::start().await;
@@ -261,7 +263,7 @@ async fn cancel_stops_new_fetches_and_drops_the_ones_in_flight() {
             }
         })
         .await;
-    assert_eq!(progressed, 2, "the abandoned feed is reported too");
+    assert_eq!(progressed, 1, "the abandoned feed never finished");
 
     assert!(
         started.elapsed() < Duration::from_secs(10),
@@ -270,13 +272,9 @@ async fn cancel_stops_new_fetches_and_drops_the_ones_in_flight() {
     );
     assert!(report.cancelled);
     assert_eq!(report.total, 30);
-    assert_eq!(report.outcomes.len(), 2, "{report:#?}");
+    assert_eq!(report.outcomes.len(), 1, "{report:#?}");
+    assert_eq!(report.outcomes[0].feed_id, ids[0]);
     assert_eq!(report.outcomes[0].status, FetchStatus::Ok);
-    assert_eq!(report.outcomes[1].feed_id, ids[1]);
-    assert_eq!(
-        report.outcomes[1].error.as_deref(),
-        Some("refresh cancelled")
-    );
     assert!(
         core.recent_fetches(ids[1], 10).unwrap().is_empty(),
         "an abandoned fetch records nothing"
@@ -403,4 +401,107 @@ async fn a_joined_request_takes_over_when_the_running_sweep_is_dropped() {
     assert!(!takeover.joined, "the joiner ran its own sweep");
     assert_eq!(takeover.sweep_id, 2);
     assert_eq!(count(&takeover, FetchStatus::Ok), 3);
+}
+
+/// A cancel that lands while a refreshed feed's full-text pages are being
+/// fetched drops the page fetch in flight too — the sweep does not wait
+/// out a slow article host. The feed itself was refreshed, so it keeps
+/// its outcome; the feed after it never starts.
+#[tokio::test]
+async fn cancel_drops_a_full_text_page_fetch_in_flight() {
+    let server = MockServer::start().await;
+    let mut items = String::new();
+    for i in 0..3 {
+        write!(
+            items,
+            "<item><title>Post {i}</title><link>{}/page/{i}</link>\
+             <guid>urn:p:{i}</guid><description>excerpt {i}</description></item>",
+            server.uri()
+        )
+        .unwrap();
+    }
+    let feed = format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Full</title>{items}</channel></rss>"#
+    );
+    Mock::given(method("GET"))
+        .and(path_regex("^/f/"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed, "application/rss+xml"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/page/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw("<html><body><p>full</p></body></html>", "text/html")
+                .set_delay(Duration::from_secs(20)),
+        )
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path(), Duration::from_secs(30));
+    let paths: Vec<String> = (0..2).map(|i| format!("/f/{i}.xml")).collect();
+    let ids = subscribe_all(&core, &server, &paths);
+    core.set_feed_full_text(ids[0], true).unwrap();
+
+    let started = Instant::now();
+    let (report, ()) = tokio::join!(
+        core.refresh_many(ids.clone(), RefreshOptions { concurrency: 1 }, |_| {}),
+        async {
+            // Cancel once the first article page is being fetched.
+            loop {
+                let requests = server.received_requests().await.unwrap();
+                if requests.iter().any(|r| r.url.path().starts_with("/page/")) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(core.cancel_refresh());
+        }
+    );
+
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(report.cancelled);
+    assert_eq!(report.outcomes.len(), 1, "{report:#?}");
+    assert_eq!(report.outcomes[0].feed_id, ids[0]);
+    assert_eq!(report.outcomes[0].status, FetchStatus::Ok);
+    assert_eq!(report.outcomes[0].new_articles, 3);
+    let requests = server.received_requests().await.unwrap();
+    let pages = requests
+        .iter()
+        .filter(|r| r.url.path().starts_with("/page/"))
+        .count();
+    assert_eq!(pages, 1, "hydration stopped at the cancel");
+    assert!(
+        requests.iter().all(|r| r.url.path() != "/f/1.xml"),
+        "the second feed never started"
+    );
+}
+
+/// A cancel that lands after every feed finished stopped nothing: the
+/// report is complete and not marked cancelled.
+#[tokio::test]
+async fn a_cancel_after_the_last_feed_stops_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(rss())
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path(), Duration::from_secs(5));
+    let paths: Vec<String> = (0..3).map(|i| format!("/f/{i}.xml")).collect();
+    let ids = subscribe_all(&core, &server, &paths);
+
+    let report = core
+        .refresh_many(ids, RefreshOptions::default(), |step| {
+            if step.done == step.total {
+                assert!(core.cancel_refresh());
+            }
+        })
+        .await;
+    assert_eq!(count(&report, FetchStatus::Ok), 3);
+    assert!(!report.cancelled, "{report:#?}");
 }

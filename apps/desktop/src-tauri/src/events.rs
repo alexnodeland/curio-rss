@@ -51,8 +51,9 @@ pub struct RefreshFinished {
     pub sweep_id: u64,
     /// Whether `cancel_refresh` stopped it early.
     pub cancelled: bool,
-    /// One outcome per feed the sweep got to, in feed-list order (a
-    /// cancelled sweep has none for the feeds it never started).
+    /// One outcome per feed the sweep refreshed, in feed-list order (a
+    /// cancelled sweep has none for the feeds it never started or whose
+    /// fetch it abandoned — those were not refreshed, they did not fail).
     pub outcomes: Vec<RefreshOutcomeDto>,
 }
 

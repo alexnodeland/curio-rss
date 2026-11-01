@@ -117,7 +117,12 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   feed's remaining queued pages. `hydrate_article` fetches on the runtime but runs its
   storage calls, page decode and readability extraction on the blocking pool. The sweep
   — and `RefreshFinished` — ends once its queued pages are stored; a single-feed
-  `refresh_feed` hydrates through the same queue before it returns.
+  `refresh_feed` hydrates through the same queue before it returns. Each finished page
+  reports progress too (`RefreshProgress` with no feed, and a running page count), so a
+  sweep that runs on past its last feed keeps the progress pill ("Loading full text…
+  3 of 12") and its watchdog alive. A cancel races only the page fetches: a page whose
+  fetch is in is extracted and stored before the sweep returns, and a cancel that stops
+  pages after the last feed still marks the sweep cancelled.
 
 ### `ingest/` — sanitize-at-ingest
 

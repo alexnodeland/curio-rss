@@ -5,12 +5,15 @@
  * (new articles across N feeds, or how far a stopped sweep got). A small
  * visible pill mirrors it for sighted users with the sweep's running count
  * ("Refreshing… 12 of 300"), a thin progress bar, and a Stop button that
- * cancels the sweep. Reads the feeds store's event-driven refresh fields —
- * no polling.
+ * cancels the sweep. Full-text pages load after their feeds, so once every
+ * feed is in and pages are still loading the pill counts those instead
+ * ("Loading full text… 3 of 12"). Reads the feeds store's event-driven
+ * refresh fields — no polling.
  */
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { feedsStore } from '$lib/state/feeds.svelte';
+import { REFRESH_CONTROL_ID, feedsStore } from '$lib/state/feeds.svelte';
+import { tick } from 'svelte';
 
 /** How long the completion summary lingers before the pill self-dismisses. */
 const REFRESH_DISMISS_MS = 5000;
@@ -57,22 +60,58 @@ const announcement = $derived(
         : summary,
 );
 
+/** Every feed is in and full-text pages are still loading. */
+const loadingPages = $derived(
+    progress !== null &&
+        progress.done >= progress.total &&
+        progress.pagesDone < progress.pagesTotal,
+);
+
 /** The pill's text: the running count once the first feed is in. */
 const label = $derived(
     !feedsStore.refreshing
         ? summary
         : feedsStore.cancellingRefresh
           ? t('refresh.cancelling')
-          : progress !== null
-            ? t('refresh.inProgress', { done: progress.done, total: progress.total })
-            : t('refresh.announce.start'),
+          : progress === null
+            ? t('refresh.announce.start')
+            : loadingPages
+              ? t('refresh.loadingFullText', {
+                    done: progress.pagesDone,
+                    total: progress.pagesTotal,
+                })
+              : t('refresh.inProgress', { done: progress.done, total: progress.total }),
 );
 
 const fraction = $derived(
-    progress !== null && progress.total > 0 ? Math.min(progress.done / progress.total, 1) : 0,
+    progress === null
+        ? 0
+        : loadingPages
+          ? progress.pagesDone / progress.pagesTotal
+          : progress.total > 0
+            ? Math.min(progress.done / progress.total, 1)
+            : 0,
 );
 
+let stopButton: HTMLButtonElement | undefined = $state();
+
+// The Stop button goes once the sweep settles; if it held focus, hand focus
+// to the refresh control rather than dropping it on the page body. Runs
+// before the DOM update, while the button is still there to ask.
+$effect.pre(() => {
+    if (feedsStore.refreshing || stopButton === undefined) {
+        return;
+    }
+    if (document.activeElement === stopButton) {
+        void tick().then(() => document.getElementById(REFRESH_CONTROL_ID)?.focus());
+    }
+});
+
 function stop(): void {
+    // `aria-disabled` keeps the button focusable while the stop lands.
+    if (feedsStore.cancellingRefresh) {
+        return;
+    }
     void feedsStore.cancelRefresh();
 }
 </script>
@@ -91,7 +130,8 @@ function stop(): void {
                     type="button"
                     aria-label={t('refresh.cancel.label')}
                     use:tooltip={t('refresh.cancel.label')}
-                    disabled={feedsStore.cancellingRefresh}
+                    aria-disabled={feedsStore.cancellingRefresh}
+                    bind:this={stopButton}
                     onclick={stop}>{t('refresh.cancel')}</button
                 >
                 <span
@@ -154,16 +194,18 @@ function stop(): void {
         cursor: pointer;
     }
 
-    .stop:hover:not(:disabled) {
+    .stop:hover:not([aria-disabled='true']) {
         color: var(--fg);
     }
 
     .stop:focus-visible {
         outline: 2px solid var(--accent);
-        outline-offset: 1px;
+        /* Inside the button: the pill clips anything past its edge, and the
+           ring stays on through "Stopping…". */
+        outline-offset: -2px;
     }
 
-    .stop:disabled {
+    .stop[aria-disabled='true'] {
         cursor: default;
         opacity: 0.5;
     }

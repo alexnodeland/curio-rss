@@ -99,6 +99,23 @@ impl<T> WorkQueue<T> {
             lane.busy = false;
         }
     }
+
+    /// Drops every waiting job `keep` turns down; returns how many it
+    /// dropped. Jobs in flight are not the queue's to drop.
+    pub(super) fn retain(&mut self, mut keep: impl FnMut(&T) -> bool) -> usize {
+        let mut dropped = 0;
+        for lane in &mut self.lanes {
+            let before = lane.pending.len();
+            lane.pending.retain(|work| keep(&work.job));
+            dropped += before - lane.pending.len();
+        }
+        dropped
+    }
+
+    /// How many jobs are waiting to start.
+    pub(super) fn waiting(&self) -> usize {
+        self.lanes.iter().map(|lane| lane.pending.len()).sum()
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +166,32 @@ mod tests {
         // Releasing a lane that does not exist is harmless.
         queue.release(99);
         assert!(WorkQueue::<u32>::new([]).take().is_none());
+    }
+
+    /// `retain` drops waiting jobs across every lane (never one in
+    /// flight), and `waiting` counts what is left to start.
+    #[test]
+    fn the_work_queue_drops_waiting_jobs_on_request() {
+        let host = |name: &str| Some(name.to_owned());
+        let mut queue = WorkQueue::new([
+            (1, host("a.example")),
+            (2, host("a.example")),
+            (3, None),
+            (4, host("b.example")),
+        ]);
+        assert_eq!(queue.waiting(), 4);
+        let first = queue.take().unwrap();
+        assert_eq!(first.job, 1);
+        assert_eq!(queue.waiting(), 3);
+        // Odd jobs go; 1 is in flight, so only 3 is dropped.
+        assert_eq!(queue.retain(|job| job % 2 == 0), 1);
+        assert_eq!(queue.waiting(), 2);
+        let mut started = Vec::new();
+        queue.release(first.lane);
+        while let Some(work) = queue.take() {
+            started.push(work);
+        }
+        assert_eq!(jobs(&started), [4, 2]);
+        assert_eq!(queue.waiting(), 0);
     }
 }

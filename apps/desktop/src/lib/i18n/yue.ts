@@ -404,6 +404,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         '更新完成：{feeds, plural, other {# 個訂閱源}}共 {count, plural, other {# 篇新文章}}',
     'refresh.inProgress': '更新緊… {total} 個之中嘅 {done} 個',
+    'refresh.loadingFullText': '載入緊全文… {total} 篇之中嘅 {done} 篇',
     'refresh.announce.cancelled':
         '更新已停止：{feeds, plural, other {# 個訂閱源}}共 {count, plural, other {# 篇新文章}}',
     'refresh.cancel': '停止',

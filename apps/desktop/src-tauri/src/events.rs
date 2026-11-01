@@ -27,21 +27,28 @@ pub struct ArticlesChanged {
     pub feed_id: Option<i64>,
 }
 
-/// One feed finished during a `refresh_all` sweep — drive the progress UI
-/// ("12/300"). Feeds refresh concurrently, so progress arrives in
-/// completion order.
+/// A feed or a full-text page finished during a `refresh_all` sweep —
+/// drive the progress UI ("12/300", then "Loading full text… 3/12").
+/// Feeds refresh concurrently, so progress arrives in completion order. A
+/// full-text feed's pages load after the feed, so a sweep can run on past
+/// its last feed: each page that finishes reports too, keeping the sweep
+/// visibly alive.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct RefreshProgress {
     /// The sweep this progress belongs to (counts up per app run).
     pub sweep_id: u64,
-    /// Feeds finished so far, this one included.
+    /// Feeds finished so far.
     pub done: u32,
     /// Feeds the sweep set out to refresh.
     pub total: u32,
-    /// The feed that finished.
-    pub feed_id: i64,
-    /// Its outcome.
-    pub outcome: RefreshOutcomeDto,
+    /// Full-text pages finished so far (loaded, failed or dropped).
+    pub pages_done: u32,
+    /// Full-text pages queued so far — final once `done` reaches `total`.
+    pub pages_total: u32,
+    /// The feed that finished; none when a page did.
+    pub feed_id: Option<i64>,
+    /// Its outcome; none when a page did.
+    pub outcome: Option<RefreshOutcomeDto>,
 }
 
 /// The whole `refresh_all` sweep finished (or was cancelled).

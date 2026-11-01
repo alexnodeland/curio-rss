@@ -440,6 +440,7 @@ export const en = {
     'refresh.announce.done':
         'Refresh complete: {count, plural, one {# new article} other {# new articles}} across {feeds, plural, one {# feed} other {# feeds}}',
     'refresh.inProgress': 'Refreshing… {done} of {total}',
+    'refresh.loadingFullText': 'Loading full text… {done} of {total}',
     'refresh.announce.cancelled':
         'Refresh stopped: {count, plural, one {# new article} other {# new articles}} from {feeds, plural, one {# feed} other {# feeds}}',
     'refresh.cancel': 'Stop',

@@ -5,7 +5,7 @@
 import { events } from '$lib/bindings';
 import { FeedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
     feedFixture,
@@ -64,6 +64,8 @@ describe('feeds store', () => {
             sweep_id: 1,
             done: 1,
             total: 2,
+            pages_done: 0,
+            pages_total: 0,
             feed_id: 1,
             outcome: first,
         });
@@ -74,6 +76,8 @@ describe('feeds store', () => {
             sweep_id: 1,
             done: 2,
             total: 2,
+            pages_done: 0,
+            pages_total: 0,
             feed_id: 2,
             outcome: second,
         });
@@ -101,10 +105,18 @@ describe('feeds store', () => {
             sweep_id: 4,
             done: 12,
             total: 300,
+            pages_done: 0,
+            pages_total: 0,
             feed_id: 1,
             outcome: first,
         });
-        expect(store.refreshProgress).toEqual({ sweepId: 4, done: 12, total: 300 });
+        expect(store.refreshProgress).toEqual({
+            sweepId: 4,
+            done: 12,
+            total: 300,
+            pagesDone: 0,
+            pagesTotal: 0,
+        });
         // A sweep the scheduler started never adds to the last one's.
         expect(store.refreshOutcomes).toEqual([first]);
 
@@ -123,6 +135,8 @@ describe('feeds store', () => {
             sweep_id: 1,
             done: 1,
             total: 3,
+            pages_done: 0,
+            pages_total: 0,
             feed_id: 1,
             outcome,
         });
@@ -141,6 +155,91 @@ describe('feeds store', () => {
         unwire();
     });
 
+    it('counts full-text pages past the last feed and stays alive while they load', async () => {
+        vi.useFakeTimers();
+        try {
+            harness = installIpcHarness({});
+            const store = new FeedsStore();
+            const unwire = await store.wireRefreshEvents();
+            const outcome = refreshOutcomeFixture({ feed_id: 1, new_articles: 3 });
+            await events.refreshProgress.emit({
+                sweep_id: 3,
+                done: 1,
+                total: 1,
+                pages_done: 0,
+                pages_total: 3,
+                feed_id: 1,
+                outcome,
+            });
+            // Each page re-arms the watchdog: a long run of pages, one
+            // every 100 s, never trips its 120 s deadline.
+            for (const pagesDone of [1, 2]) {
+                await vi.advanceTimersByTimeAsync(100_000);
+                await events.refreshProgress.emit({
+                    sweep_id: 3,
+                    done: 1,
+                    total: 1,
+                    pages_done: pagesDone,
+                    pages_total: 3,
+                    feed_id: null,
+                    outcome: null,
+                });
+            }
+            await vi.advanceTimersByTimeAsync(100_000);
+            expect(store.refreshing).toBe(true);
+            expect(store.refreshProgress).toEqual({
+                sweepId: 3,
+                done: 1,
+                total: 1,
+                pagesDone: 2,
+                pagesTotal: 3,
+            });
+            // A page carries no outcome of its own.
+            expect(store.refreshOutcomes).toEqual([outcome]);
+            unwire();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('a late event of a sweep the watchdog gave up on keeps its outcomes', async () => {
+        vi.useFakeTimers();
+        try {
+            harness = installIpcHarness({});
+            const store = new FeedsStore();
+            const unwire = await store.wireRefreshEvents();
+            const first = refreshOutcomeFixture({ feed_id: 1 });
+            const second = refreshOutcomeFixture({ feed_id: 2 });
+            await events.refreshProgress.emit({
+                sweep_id: 5,
+                done: 1,
+                total: 2,
+                pages_done: 0,
+                pages_total: 0,
+                feed_id: 1,
+                outcome: first,
+            });
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(store.refreshing).toBe(false);
+            expect(store.refreshProgress).toBeNull();
+
+            await events.refreshProgress.emit({
+                sweep_id: 5,
+                done: 2,
+                total: 2,
+                pages_done: 0,
+                pages_total: 0,
+                feed_id: 2,
+                outcome: second,
+            });
+            expect(store.refreshing).toBe(true);
+            expect(store.refreshOutcomes).toEqual([first, second]);
+            unwire();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('drops the stopping state when no sweep was running to cancel', async () => {
         harness = installIpcHarness({ cancel_refresh: false });
         const store = new FeedsStore();
@@ -157,13 +256,21 @@ describe('feeds store', () => {
             sweep_id: 2,
             done: 1,
             total: 5,
+            pages_done: 0,
+            pages_total: 0,
             feed_id: 1,
             outcome,
         });
 
         await store.refreshAll();
         expect(store.refreshOutcomes).toEqual([outcome]);
-        expect(store.refreshProgress).toEqual({ sweepId: 2, done: 1, total: 5 });
+        expect(store.refreshProgress).toEqual({
+            sweepId: 2,
+            done: 1,
+            total: 5,
+            pagesDone: 0,
+            pagesTotal: 0,
+        });
         unwire();
     });
 

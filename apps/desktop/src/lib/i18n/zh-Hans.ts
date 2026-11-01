@@ -404,6 +404,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         '刷新完成：{feeds, plural, other {# 个订阅源}}共有 {count, plural, other {# 篇新文章}}',
     'refresh.inProgress': '正在刷新… {done}/{total}',
+    'refresh.loadingFullText': '正在加载全文… {done}/{total}',
     'refresh.announce.cancelled':
         '刷新已停止：{feeds, plural, other {# 个订阅源}}共有 {count, plural, other {# 篇新文章}}',
     'refresh.cancel': '停止',

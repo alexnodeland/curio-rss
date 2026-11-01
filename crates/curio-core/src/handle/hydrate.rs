@@ -12,15 +12,13 @@
 //! that ship full content — and its extraction and storage writes run on
 //! the blocking pool, off the async runtime.
 
-use std::collections::HashSet;
-
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 
 use crate::fetch::PolicedClient;
 use crate::model::{ArticleId, FeedId};
 
-use super::sweep::{RefreshCancel, until_cancelled};
+use super::sweep::RefreshCancel;
 use super::work_queue::{Work, WorkQueue};
 use super::{CoreError, CoreHandle};
 
@@ -50,44 +48,68 @@ pub(super) enum Hydrated {
     Cancelled,
 }
 
-/// Pending hydrations, handed out fairly across page hosts.
+/// Pending hydrations, handed out fairly across page hosts, and a count
+/// of how far they have come.
 #[derive(Debug, Default)]
 pub(super) struct HydrationQueue {
     queue: WorkQueue<Hydration>,
-    /// Feeds whose hydrations are blocked upstream — their queued
-    /// articles are dropped (they keep their feed excerpts, and a later
-    /// manual load-full picks them up).
-    blocked: HashSet<FeedId>,
+    /// Pages queued so far.
+    queued: usize,
+    /// Pages finished so far: loaded, failed, cancelled, or dropped
+    /// with a feed blocked upstream.
+    finished: usize,
+    /// Pages a cancel stopped while they were fetched.
+    cancelled: usize,
 }
 
 impl HydrationQueue {
     /// Queues `pending`, each in its page host's lane.
     pub(super) fn extend(&mut self, client: &PolicedClient, pending: Vec<Hydration>) {
+        self.queued += pending.len();
         for hydration in pending {
             let host = client.paced_host(&hydration.url);
             self.queue.push(hydration, host);
         }
     }
 
-    /// The next hydration to start, skipping blocked feeds' articles.
-    /// `None` when every waiting page's host is busy, or none is left.
+    /// The next hydration to start. `None` when every waiting page's
+    /// host is busy, or none is left.
     pub(super) fn take(&mut self) -> Option<Work<Hydration>> {
-        loop {
-            let work = self.queue.take()?;
-            if !self.blocked.contains(&work.job.feed_id) {
-                return Some(work);
+        self.queue.take()
+    }
+
+    /// A hydration finished: its host may take the next page, and one
+    /// blocked upstream drops its feed's queued pages (they keep their
+    /// feed excerpts, and a later manual load-full picks them up). A
+    /// feed's pages are all queued at once, as its refresh settles, so
+    /// none of them can arrive after the drop.
+    pub(super) fn settle(&mut self, work: &Work<Hydration>, hydrated: Hydrated) {
+        self.queue.release(work.lane);
+        self.finished += 1;
+        match hydrated {
+            Hydrated::Done => {}
+            Hydrated::Blocked => {
+                let feed = work.job.feed_id;
+                self.finished += self.queue.retain(|queued| queued.feed_id != feed);
             }
-            self.queue.release(work.lane);
+            Hydrated::Cancelled => self.cancelled += 1,
         }
     }
 
-    /// A hydration finished: its host may take the next page, and a
-    /// blocked one drops its feed's queued articles.
-    pub(super) fn settle(&mut self, work: &Work<Hydration>, hydrated: Hydrated) {
-        self.queue.release(work.lane);
-        if hydrated == Hydrated::Blocked {
-            self.blocked.insert(work.job.feed_id);
-        }
+    /// Pages finished so far (see [`Self::settle`]).
+    pub(super) fn finished(&self) -> usize {
+        self.finished
+    }
+
+    /// Pages queued so far.
+    pub(super) fn queued(&self) -> usize {
+        self.queued
+    }
+
+    /// Whether a cancel left pages unloaded: one dropped while it was
+    /// fetched, or one that never started.
+    pub(super) fn cut_short(&self) -> bool {
+        self.cancelled > 0 || self.queue.waiting() > 0
     }
 }
 
@@ -110,25 +132,27 @@ impl CoreHandle {
         }
     }
 
-    /// Runs one queued hydration — dropped at its page fetch once
-    /// `cancel` fires (a hydrate writes nothing before its fetch is in).
+    /// Runs one queued hydration — stopped at its page fetch once
+    /// `cancel` fires. Only the fetches race the cancel: a page whose
+    /// fetch is in is extracted and stored before the hydration ends, so
+    /// no write lands after the sweep has returned.
     pub(super) async fn hydrate_queued(
         &self,
         work: Work<Hydration>,
         cancel: Option<&RefreshCancel>,
     ) -> (Work<Hydration>, Hydrated) {
         let article = work.job.article_id;
-        let hydrated = match until_cancelled(cancel, self.hydrate_article(article)).await {
-            None => Hydrated::Cancelled,
-            Some(Ok(_)) => Hydrated::Done,
-            Some(Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. })) => {
+        let hydrated = match self.hydrate_article_until(article, cancel).await {
+            Ok(None) => Hydrated::Cancelled,
+            Ok(Some(_)) => Hydrated::Done,
+            Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. }) => {
                 tracing::warn!(
                     feed = %work.job.feed_id,
                     "full-text hydrate blocked upstream; dropping the feed's queued pages"
                 );
                 Hydrated::Blocked
             }
-            Some(Err(err)) => {
+            Err(err) => {
                 tracing::warn!(
                     %article,
                     %err,
@@ -185,11 +209,29 @@ mod tests {
 
         // Feed 1 is blocked upstream: its other page is dropped, feed 2's
         // page on the same host goes next.
+        assert_eq!((queue.finished(), queue.queued()), (0, 4));
         queue.settle(&first, Hydrated::Blocked);
+        assert_eq!(queue.finished(), 2, "the dropped page counts as finished");
         let third = queue.take().unwrap();
         assert_eq!(third.job.article_id, ArticleId(21));
         queue.settle(&third, Hydrated::Done);
+        assert!(!queue.cut_short(), "nothing was cancelled");
         queue.settle(&second, Hydrated::Cancelled);
         assert!(queue.take().is_none(), "nothing is left");
+        assert_eq!((queue.finished(), queue.queued()), (4, 4));
+        assert!(queue.cut_short(), "a page was cancelled mid-fetch");
+    }
+
+    /// A page a cancel never let start leaves the queue cut short too.
+    #[test]
+    fn pages_left_waiting_cut_the_queue_short() {
+        let client = PolicedClient::new(FetchConfig::default());
+        let mut queue = HydrationQueue::default();
+        queue.extend(&client, vec![hydration(1, 10, "https://a.example/1")]);
+        assert!(queue.cut_short());
+        let work = queue.take().unwrap();
+        assert!(!queue.cut_short(), "the page is in flight, not waiting");
+        queue.settle(&work, Hydrated::Done);
+        assert!(!queue.cut_short());
     }
 }

@@ -138,7 +138,9 @@ tokens:
     // A simulated refresh sweep: one feed every `SWEEP_STEP_MS`, emitting
     // `RefreshProgress` per feed and `RefreshFinished` at the end, so the
     // progress pill and its Stop button can be reviewed. `?sweep=<n>` pads
-    // the sweep to n feeds (e.g. 300) to preview a large library's count.
+    // the sweep to n feeds (e.g. 300) to preview a large library's count;
+    // `?fulltext=<n>` has n full-text pages load after the last feed, one
+    // per step, to preview the "Loading full text" count.
     const { events } = await import('$lib/bindings');
     const SWEEP_STEP_MS = 350;
     let sweep: { cancelled: boolean } | null = null;
@@ -151,8 +153,31 @@ tokens:
         }
         return ids;
     }
+    /** `?fulltext=<n>`: how many full-text pages a sweep loads. */
+    function sweepPages(): number {
+        return Number(new URLSearchParams(window.location.search).get('fulltext') ?? 0);
+    }
+    /** The sweep's full-text pages, one per step after the last of its `feeds`. */
+    async function loadPages(current: { cancelled: boolean }, feeds: number): Promise<void> {
+        const pagesTotal = sweepPages();
+        for (let page = 1; page <= pagesTotal; page++) {
+            if (current.cancelled) return;
+            await new Promise((resolve) => setTimeout(resolve, SWEEP_STEP_MS));
+            if (current.cancelled) return;
+            await events.refreshProgress.emit({
+                sweep_id: sweepId,
+                done: feeds,
+                total: feeds,
+                pages_done: page,
+                pages_total: pagesTotal,
+                feed_id: null,
+                outcome: null,
+            });
+        }
+    }
     async function runSweep(): Promise<unknown[]> {
         const ids = sweepFeedIds();
+        const pagesTotal = sweepPages();
         const current = { cancelled: false };
         sweep = current;
         sweepId += 1;
@@ -174,10 +199,13 @@ tokens:
                 sweep_id: sweepId,
                 done: index + 1,
                 total: ids.length,
+                pages_done: 0,
+                pages_total: pagesTotal,
                 feed_id: feedId,
                 outcome,
             });
         }
+        await loadPages(current, ids.length);
         sweep = null;
         await events.refreshFinished.emit({
             sweep_id: sweepId,

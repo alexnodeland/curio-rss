@@ -48,13 +48,17 @@ function readStringArray(raw: string | undefined): string[] {
 
 /**
  * How long the refresh flag may stay set with no progress before the watchdog
- * force-clears it. Re-armed on every progress event, so it only trips after a
- * genuine stall — the `RefreshFinished` event failing to arrive must never
- * wedge the refresh button disabled forever.
+ * force-clears it. Re-armed on every progress event — a full-text page that
+ * finishes reports one too, so a sweep loading pages past its last feed stays
+ * alive — so it only trips after a genuine stall: the `RefreshFinished` event
+ * failing to arrive must never wedge the refresh button disabled forever.
  */
 const REFRESH_WATCHDOG_MS = 120_000;
 
-/** A refresh sweep's running count — "12 of 300". */
+/** The DOM id of the sidebar's refresh control — where focus goes back to. */
+export const REFRESH_CONTROL_ID = 'refresh-all';
+
+/** A refresh sweep's running count — "12 of 300", then its full-text pages. */
 export interface RefreshSweepProgress {
     /** The sweep the count belongs to (counts up per app run). */
     sweepId: number;
@@ -62,6 +66,10 @@ export interface RefreshSweepProgress {
     done: number;
     /** Feeds the sweep set out to refresh. */
     total: number;
+    /** Full-text pages finished so far. */
+    pagesDone: number;
+    /** Full-text pages queued so far — final once `done` reaches `total`. */
+    pagesTotal: number;
 }
 
 export class FeedsStore {
@@ -85,6 +93,13 @@ export class FeedsStore {
 
     /** Backstop timer that clears `refreshing` if no finish/progress arrives. */
     #refreshWatchdog: ReturnType<typeof setTimeout> | undefined;
+
+    /**
+     * The sweep the outcomes belong to. Kept past a settle, so a late event
+     * of the same sweep (after the watchdog gave up on it) adds to its
+     * outcomes rather than wiping them as a new sweep would.
+     */
+    #outcomesSweepId: number | null = null;
 
     /**
      * Folder paths the user has collapsed in the sidebar tree. In-memory and
@@ -395,6 +410,7 @@ export class FeedsStore {
         this.#pendingFolders.clear();
         this.#mutedNotifyFeeds.clear();
         this.#clearRefreshWatchdog();
+        this.#outcomesSweepId = null;
         this.refreshing = false;
         this.refreshOutcomes = [];
         this.refreshProgress = null;
@@ -538,19 +554,30 @@ export class FeedsStore {
     async wireRefreshEvents(): Promise<() => void> {
         const unlisteners = await Promise.all([
             events.refreshProgress.listen((event) => {
-                const { sweep_id, done, total, outcome } = event.payload;
+                const { sweep_id, done, total, pages_done, pages_total, outcome } = event.payload;
                 // A new sweep's progress (the background scheduler starts
                 // sweeps too) never adds to the last sweep's outcomes.
-                if (this.refreshProgress?.sweepId !== sweep_id) {
+                if (this.#outcomesSweepId !== sweep_id) {
+                    this.#outcomesSweepId = sweep_id;
                     this.refreshOutcomes = [];
                     this.refreshCancelled = false;
                 }
                 this.refreshing = true;
-                this.refreshProgress = { sweepId: sweep_id, done, total };
-                this.refreshOutcomes = [...this.refreshOutcomes, outcome];
+                this.refreshProgress = {
+                    sweepId: sweep_id,
+                    done,
+                    total,
+                    pagesDone: pages_done,
+                    pagesTotal: pages_total,
+                };
+                // A full-text page's progress carries no feed outcome.
+                if (outcome !== null) {
+                    this.refreshOutcomes = [...this.refreshOutcomes, outcome];
+                }
                 this.#armRefreshWatchdog(); // still alive — push the deadline out
             }),
             events.refreshFinished.listen((event) => {
+                this.#outcomesSweepId = event.payload.sweep_id;
                 this.refreshOutcomes = event.payload.outcomes;
                 this.refreshCancelled = event.payload.cancelled;
                 this.#settleRefresh();

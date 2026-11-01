@@ -429,6 +429,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         'Actualisation terminée : {count, plural, one {# nouvel article} other {# nouveaux articles}} dans {feeds, plural, one {# flux} other {# flux}}',
     'refresh.inProgress': 'Actualisation… {done} sur {total}',
+    'refresh.loadingFullText': 'Chargement du texte intégral… {done} sur {total}',
     'refresh.announce.cancelled':
         'Actualisation arrêtée : {count, plural, one {# nouvel article} other {# nouveaux articles}} dans {feeds, plural, one {# flux} other {# flux}}',
     'refresh.cancel': 'Arrêter',

@@ -60,19 +60,27 @@ impl Default for RefreshOptions {
     }
 }
 
-/// One feed of a sweep finished — handed to the sweep's progress callback.
+/// One feed or full-text page of a sweep finished — handed to the sweep's
+/// progress callback. The pages of a full-text feed load after the feed
+/// itself, so a sweep can run on after its last feed: the page steps keep
+/// reporting until it ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SweepProgress<'a> {
     /// The sweep this progress belongs to.
     pub sweep_id: u64,
-    /// Feeds finished so far, this one included. A feed whose fetch a
-    /// cancel abandoned never finishes, so a cancelled sweep stops short
-    /// of `total`.
+    /// Feeds finished so far. A feed whose fetch a cancel abandoned never
+    /// finishes, so a cancelled sweep stops short of `total`.
     pub done: usize,
     /// Feeds the sweep set out to refresh.
     pub total: usize,
-    /// The finished feed's outcome.
-    pub outcome: &'a RefreshOutcome,
+    /// Full-text pages finished so far: loaded, failed, or dropped (with
+    /// a feed blocked upstream, or by a cancel).
+    pub pages_done: usize,
+    /// Full-text pages queued so far — it grows as full-text feeds
+    /// finish, so it is final only once `done` reaches `total`.
+    pub pages_total: usize,
+    /// The finished feed's outcome; `None` when this step was a page.
+    pub outcome: Option<&'a RefreshOutcome>,
 }
 
 /// What a whole sweep did.
@@ -88,8 +96,8 @@ pub struct SweepReport {
     /// fetch it abandoned — those were not refreshed, they did not fail.
     pub outcomes: Vec<RefreshOutcome>,
     /// Whether [`CoreHandle::cancel_refresh`] stopped the sweep short of
-    /// some feed (a cancel landing after the last feed finished stops
-    /// nothing, and leaves this `false`).
+    /// some feed or full-text page (a cancel landing after the last feed
+    /// and page finished stops nothing, and leaves this `false`).
     pub cancelled: bool,
     /// Whether this request found a sweep already running and waited for
     /// it instead of starting another. The report is that sweep's: its
@@ -145,7 +153,8 @@ impl CoreHandle {
     /// are hydrated in the sweep's own queue, up to
     /// `options.hydrate_concurrency` pages at once, while the remaining
     /// feeds refresh; a feed's progress fires once the feed is settled,
-    /// its hydrations after it, and the sweep returns once they are done.
+    /// then one per page as its pages finish, and the sweep returns once
+    /// they are done.
     ///
     /// **One sweep at a time.** A request made while another sweep is in
     /// flight joins it: it waits for that sweep and returns its report
@@ -158,7 +167,11 @@ impl CoreHandle {
     /// [`Self::cancel_refresh`] stops the sweep: no further feed or page
     /// starts, fetches in flight (feed and full-text page fetches alike) are
     /// dropped, and the report comes back with [`SweepReport::cancelled`]
-    /// set and no outcomes for the feeds that were not refreshed.
+    /// set and no outcomes for the feeds that were not refreshed. A cancel
+    /// that lands after the last feed, while pages still load, stops those
+    /// pages and sets [`SweepReport::cancelled`] too, though every feed
+    /// has its outcome. A page whose fetch is in when the cancel lands is
+    /// still stored before the sweep returns.
     pub async fn refresh_many(
         &self,
         ids: Vec<FeedId>,
@@ -301,6 +314,14 @@ impl CoreHandle {
                 Finished::Page(work, hydrated) => {
                     pages_out -= 1;
                     pages.settle(&work, hydrated);
+                    on_progress(SweepProgress {
+                        sweep_id,
+                        done,
+                        total,
+                        pages_done: pages.finished(),
+                        pages_total: pages.queued(),
+                        outcome: None,
+                    });
                     continue;
                 }
                 Finished::Feed(work, refreshed) => (work, refreshed),
@@ -318,7 +339,9 @@ impl CoreHandle {
                 sweep_id,
                 done,
                 total,
-                outcome: &outcome,
+                pages_done: pages.finished(),
+                pages_total: pages.queued(),
+                outcome: Some(&outcome),
             });
             if let Some(slot) = slots.get_mut(work.job.index) {
                 *slot = Some(outcome);
@@ -328,8 +351,9 @@ impl CoreHandle {
         SweepReport {
             sweep_id,
             total,
-            // Only a cancel leaves a feed without an outcome.
-            cancelled: outcomes.len() < total,
+            // Only a cancel leaves a feed without an outcome, or a page
+            // unloaded.
+            cancelled: outcomes.len() < total || pages.cut_short(),
             outcomes,
             joined: false,
         }

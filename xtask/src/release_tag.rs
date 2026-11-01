@@ -194,13 +194,43 @@ impl Git {
     }
 
     fn run(&self, args: &[&str]) -> Result<std::process::Output, String> {
-        Command::new("git")
-            .arg("-C")
-            .arg(&self.root)
+        git_at(&self.root)
             .args(args)
             .output()
             .map_err(|err| format!("cannot run git {}: {err}", args.join(" ")))
     }
+}
+
+/// Git's repository-locating environment (`git rev-parse --local-env-vars`).
+/// Git exports `GIT_DIR` & co. to the hooks it runs, so a `git -C <root>`
+/// started from inside a hook (a pre-push test run) would otherwise read —
+/// and write — the hook's repository instead of `root`.
+const GIT_LOCAL_ENV: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+/// `git -C <root>`, with the repository found from `root` alone.
+fn git_at(root: &Path) -> Command {
+    let mut command = Command::new("git");
+    for key in GIT_LOCAL_ENV {
+        command.env_remove(key);
+    }
+    command.arg("-C").arg(root);
+    command
 }
 
 impl Repo for Git {
@@ -448,13 +478,20 @@ mod tests {
             std::fs::create_dir_all(dir.join(".github/workflows")).unwrap();
             let scratch = Self(dir);
             scratch.git(&["init", "-q", "-b", "main"]);
+            // Every later call writes: make sure it is this repository.
+            let top = scratch.git(&["rev-parse", "--absolute-git-dir"]);
+            assert_eq!(
+                std::fs::canonicalize(&top).unwrap(),
+                std::fs::canonicalize(scratch.0.join(".git")).unwrap(),
+                "the scratch git commands resolve to another repository"
+            );
             scratch
         }
 
         fn git(&self, args: &[&str]) -> String {
-            let output = Command::new("git")
-                .arg("-C")
-                .arg(&self.0)
+            let output = git_at(&self.0)
+                // Never fall through to a repository above the temp dir.
+                .env("GIT_CEILING_DIRECTORIES", std::env::temp_dir())
                 .args([
                     "-c",
                     "user.name=t",
@@ -550,6 +587,28 @@ mod tests {
                 tag: "v0.5.0".to_owned()
             })
         );
+    }
+
+    /// Inside a git hook (the pre-push test run) `GIT_DIR` & co. point at
+    /// the hook's repository; `git_at` must drop them so `-C` decides.
+    #[test]
+    fn git_ignores_the_repository_a_hook_exports() {
+        let command = git_at(Path::new("/nowhere"));
+        let removed: Vec<_> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .filter_map(|(key, _)| key.to_str())
+            .collect();
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+        ] {
+            assert!(removed.contains(&key), "{key} kept: {removed:?}");
+        }
+        let args: Vec<_> = command.get_args().filter_map(|a| a.to_str()).collect();
+        assert_eq!(args, ["-C", "/nowhere"]);
     }
 
     /// A repository with no commit yet: every read fails rather than

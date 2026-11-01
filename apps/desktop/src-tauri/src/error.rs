@@ -336,6 +336,12 @@ mod tests {
             assert_eq!(error.kind, ErrorKind::Internal);
             assert_eq!(error.code, ErrorCode::Storage);
         }
+        // A panic in a refresh's blocking half is a bug, not user input.
+        let error = CommandError::from(CoreError::Panicked {
+            message: "parser bug".into(),
+        });
+        assert_eq!(error.kind, ErrorKind::Internal);
+        assert_eq!(error.code, ErrorCode::Internal);
     }
 
     #[test]

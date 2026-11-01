@@ -12,8 +12,9 @@
 //! Coordination with a manual refresh is the [`RefreshScheduler`]: a manual
 //! refresh calls [`RefreshScheduler::mark_refreshed`], resetting the interval
 //! clock so a scheduled sweep never piles on right after one; an in-flight flag
-//! keeps two scheduled ticks from overlapping (per-feed locks make overlap
-//! safe but pointless).
+//! keeps two scheduled ticks from overlapping. Core runs one sweep at a time
+//! anyway: a tick that lands during a manual sweep joins it (no feed is fetched
+//! twice) and leaves the events and notification to that sweep.
 //!
 //! The same tick is also the event-emission retry timer (#118): a failed
 //! JSONL flush (full disk, unwritable events dir) never fails the mutation
@@ -170,10 +171,13 @@ async fn run_once(handle: &AppHandle, core: &SharedCore, scheduler: &RefreshSche
         return;
     }
     match refresh_all_and_emit(handle, core).await {
+        // A tick that found a manual sweep running joined it: that sweep is
+        // the user's, reported in-app — nothing to notify.
+        Ok(sweep) if sweep.joined => {}
         // A background sweep is the moment to notify (foreground refreshes are
         // reported in-app by the refresh status line); the notify layer decides
         // whether the user's prefs + OS permission actually surface anything.
-        Ok(outcomes) => crate::notify::notify_refresh(handle, core, &outcomes),
+        Ok(sweep) => crate::notify::notify_refresh(handle, core, &sweep.finished.outcomes),
         Err(error) => tracing::warn!(%error, "scheduled refresh failed"),
     }
     scheduler.mark_refreshed();

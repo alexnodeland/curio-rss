@@ -135,12 +135,19 @@ export const commands = {
 	 */
 	refreshFeed: (feedId: number) => typedError<RefreshOutcomeDto, CommandError>(__TAURI_INVOKE("refresh_feed", { feedId })),
 	/**
-	 *  Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
-	 *  (core's own `refresh_all` is sequential and silent — the head loops
-	 *  `refresh_feed` so the UI can watch; orchestration, not business logic).
-	 *  A manual refresh resets the background scheduler's interval clock.
+	 *  Refreshes every `active` feed as one core sweep (bounded concurrency),
+	 *  emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
+	 *  end. Pressing refresh while a sweep runs joins it — no feed is fetched
+	 *  twice. A manual refresh resets the background scheduler's interval
+	 *  clock.
 	 */
 	refreshAll: () => typedError<RefreshOutcomeDto[], CommandError>(__TAURI_INVOKE("refresh_all")),
+	/**
+	 *  Cancels the refresh sweep in flight: no further feed starts and the
+	 *  fetches in flight are dropped, so the sweep finishes early
+	 *  ([`RefreshFinished::cancelled`]). `false` when no sweep is running.
+	 */
+	cancelRefresh: () => typedError<boolean, CommandError>(__TAURI_INVOKE("cancel_refresh")),
 	/**
 	 *  The recent fetch log for one feed, newest first — the feed-health
 	 *  surface.
@@ -894,9 +901,16 @@ export type RedditApiStatusDto = {
 	client_id: string | null,
 };
 
-/**  The whole `refresh_all` sweep finished. */
+/**  The whole `refresh_all` sweep finished (or was cancelled). */
 export type RefreshFinished = {
-	/**  Every feed's outcome, in refresh order. */
+	/**  The sweep that finished. */
+	sweep_id: number,
+	/**  Whether `cancel_refresh` stopped it early. */
+	cancelled: boolean,
+	/**
+	 *  One outcome per feed the sweep got to, in feed-list order (a
+	 *  cancelled sweep has none for the feeds it never started).
+	 */
 	outcomes: RefreshOutcomeDto[],
 };
 
@@ -919,8 +933,18 @@ export type RefreshOutcomeDto = {
 	error: string | null,
 };
 
-/**  One feed finished during `refresh_all` — drive the progress UI. */
+/**
+ *  One feed finished during a `refresh_all` sweep — drive the progress UI
+ *  ("12/300"). Feeds refresh concurrently, so progress arrives in
+ *  completion order.
+ */
 export type RefreshProgress = {
+	/**  The sweep this progress belongs to (counts up per app run). */
+	sweep_id: number,
+	/**  Feeds finished so far, this one included. */
+	done: number,
+	/**  Feeds the sweep set out to refresh. */
+	total: number,
 	/**  The feed that finished. */
 	feed_id: number,
 	/**  Its outcome. */

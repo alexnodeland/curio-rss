@@ -294,6 +294,8 @@ tokens:
                         updated_articles: 0,
                         error: null,
                     };
+                case 'cancel_refresh':
+                    return false;
                 case 'refresh_all':
                     return feeds.map((f) => ({
                         feed_id: f.id,

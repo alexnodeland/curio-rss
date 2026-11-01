@@ -84,6 +84,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'reader.action.promote': 'In Notizen speichern',
     'reader.action.typography': 'Typografie',
     'reader.meta.words': '{count, plural, one {# Wort} other {# Wörter}}',
+    'article.date.firstSeen': 'Erstmals gesehen: {date}',
+    'article.date.firstSeenHint': 'Der Feed nennt kein Veröffentlichungsdatum',
     'reddit.postedBy': 'Gepostet von u/{author}',
     'reader.youtube.play': '{title} abspielen',
     'reader.youtube.hint': 'Zum Laden klicken — bis dahin wird nichts geladen',

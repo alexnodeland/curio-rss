@@ -277,6 +277,34 @@ describe('actions — views and shortcut routing', () => {
         expect(harness.calls).toHaveLength(0);
     });
 
+    it('article.open skips a link-less entry rather than opening the feed XML', async () => {
+        const feedUrl = 'https://example.org/feed.xml';
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, url: feedUrl })],
+            list_articles: [
+                articleSummaryFixture({ id: 1, feed_id: 1, source_url: feedUrl }),
+                articleSummaryFixture({ id: 2, feed_id: 1 }),
+            ],
+            record_opened: null,
+            'plugin:opener|open_url': null,
+        });
+        feedsStore.prime();
+        await articlesStore.current.loadMore();
+        await flushIpc();
+
+        selectionStore.selectedArticleId = 1;
+        handleShortcut('article.open');
+        await flushIpc();
+        expect(harness.callsFor('plugin:opener|open_url')).toHaveLength(0);
+        expect(harness.callsFor('record_opened')).toHaveLength(0);
+
+        // A linked entry in the same feed still opens.
+        selectionStore.selectedArticleId = 2;
+        handleShortcut('article.open');
+        await flushIpc();
+        expect(harness.callsFor('plugin:opener|open_url')).toHaveLength(1);
+    });
+
     it('routeMenuAction runs a shortcut id through the action layer', () => {
         harness = installIpcHarness({});
         routeMenuAction('app.settings');

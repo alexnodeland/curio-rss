@@ -89,6 +89,8 @@ export const en = {
     'reader.action.promote': 'Save to notes',
     'reader.action.typography': 'Typography',
     'reader.meta.words': '{count, plural, one {# word} other {# words}}',
+    'article.date.firstSeen': 'First seen {date}',
+    'article.date.firstSeenHint': 'The feed gave no publication date',
     'reddit.postedBy': 'Posted by u/{author}',
 
     'reader.youtube.play': 'Play {title}',

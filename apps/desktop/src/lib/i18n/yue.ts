@@ -85,6 +85,8 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'reader.action.promote': '儲存到筆記',
     'reader.action.typography': '排版',
     'reader.meta.words': '{count, plural, other {# 個字}}',
+    'article.date.firstSeen': '首次見到：{date}',
+    'article.date.firstSeenHint': '呢個訂閱源冇提供發佈日期',
     'reddit.postedBy': '由 u/{author} 發佈',
     'reader.youtube.play': '播放 {title}',
     'reader.youtube.hint': '撳一下先載入 — 你唔撳就唔會載入',

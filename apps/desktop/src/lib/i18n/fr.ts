@@ -84,6 +84,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'reader.action.promote': 'Enregistrer dans les notes',
     'reader.action.typography': 'Typographie',
     'reader.meta.words': '{count, plural, one {# mot} other {# mots}}',
+    'article.date.firstSeen': 'Vu pour la première fois : {date}',
+    'article.date.firstSeenHint': 'Le flux n’indique aucune date de publication',
     'reddit.postedBy': 'Publié par u/{author}',
     'reader.youtube.play': 'Lire {title}',
     'reader.youtube.hint':

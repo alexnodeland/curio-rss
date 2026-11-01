@@ -286,7 +286,9 @@ impl CoreHandle {
     }
 }
 
-/// A per-feed `Err` as that feed's outcome.
+/// A per-feed `Err` as that feed's outcome. It carries no
+/// [`RefreshOutcome::error_kind`]: the refresh failed in the engine (the
+/// feed went away, storage, a panic), not in the fetch the kinds classify.
 fn errored(feed_id: FeedId, err: &CoreError) -> RefreshOutcome {
     let error = match err {
         CoreError::NotFound { .. } => "the feed was removed during the refresh".to_owned(),
@@ -299,6 +301,7 @@ fn errored(feed_id: FeedId, err: &CoreError) -> RefreshOutcome {
         new_articles: 0,
         updated_articles: 0,
         error: Some(error),
+        error_kind: None,
     }
 }
 

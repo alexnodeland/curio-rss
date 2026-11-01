@@ -2,7 +2,7 @@
 //! list/search query compilers, and the raw-row -> domain-type parsers.
 
 use super::{ARTICLE_COLS, FEED_COLS, ListArticles};
-use crate::model::{Article, ArticleContent, ArticleId, Feed, FeedId, FeedStatus};
+use crate::model::{Article, ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchErrorKind};
 use crate::storage::StorageError;
 use curio_types::{CurioId, EventEnvelope, Timestamp};
 use rusqlite::types::ToSql;
@@ -226,6 +226,15 @@ pub(super) fn parse_opt_ts(
     s.map(|s| parse_ts(column, &s)).transpose()
 }
 
+/// Reads a stored `fetch_log.error_kind`. Deliberately lenient: an unknown
+/// value reads as `None` rather than [`StorageError::Corrupt`] — kinds are
+/// added without a schema migration, so a profile a newer build touched
+/// can carry one this build does not know, and that must never break
+/// listing feeds. The human `error` text still says what happened.
+pub(super) fn parse_fetch_error_kind(s: Option<&str>) -> Option<FetchErrorKind> {
+    s.and_then(FetchErrorKind::parse)
+}
+
 pub(super) fn parse_curio_id(s: &str) -> Result<CurioId, StorageError> {
     s.parse().map_err(|err| StorageError::Corrupt {
         column: "articles.curio_id",
@@ -252,6 +261,7 @@ pub(super) struct RawFeed {
     fetch_full_text: bool,
     last_error: Option<String>,
     last_ok_at: Option<String>,
+    last_error_kind: Option<String>,
 }
 
 pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
@@ -271,6 +281,7 @@ pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         fetch_full_text: row.get(12)?,
         last_error: row.get(13)?,
         last_ok_at: row.get(14)?,
+        last_error_kind: row.get(15)?,
     })
 }
 
@@ -292,6 +303,7 @@ impl RawFeed {
             added_at: parse_ts("feeds.added_at", &self.added_at)?,
             last_fetched_at: parse_opt_ts("feeds.last_fetched_at", self.last_fetched_at)?,
             last_error: self.last_error,
+            last_error_kind: parse_fetch_error_kind(self.last_error_kind.as_deref()),
             last_ok_at: parse_opt_ts("fetch_log.fetched_at", self.last_ok_at)?,
             tags: serde_json::from_str(&self.tags).map_err(|err| StorageError::Corrupt {
                 column: "feeds.tags",

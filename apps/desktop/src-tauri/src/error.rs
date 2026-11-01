@@ -11,9 +11,14 @@
 //! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) are user-tier, as
 //! is a missing destination folder (`ExportError::DestinationMissing`, code
 //! `IO`) and a profile on network or sync-managed storage
-//! (`OpenError::NetworkFs`, code `IO`); `Sqlite` / `WriterGone` / `JobPanicked` / `PoolTimeout` /
-//! `IntegrityFailed` / other IO / a corrupt or failed-upgrade database
-//! are internal-tier.
+//! (`OpenError::NetworkFs`, code `IO`). `Sqlite` / `Duplicate` /
+//! `DiskFull` / `ReadOnly` / `DatabaseCorrupt` / `WriterGone` /
+//! `JobPanicked` / `PoolTimeout` / `IntegrityFailed` / other IO / a failed
+//! upgrade are internal-tier: a user-tier message is shown verbatim, and the
+//! core's typed storage messages are English — they reach the user only
+//! once each class has its own code and localized copy (as `PROFILE_BUSY`
+//! has). A subscribe that collides with an existing feed is already
+//! user-tier through `ALREADY_SUBSCRIBED`, checked before any insert.
 //!
 //! Contention with another Curio process on the profile — a busy database
 //! (`StorageError::Busy`, `OpenError::Locked`) or a held events lock
@@ -132,7 +137,14 @@ impl From<StorageError> for CommandError {
             // Another Curio process (a CLI run) is writing to the
             // profile: tell the user why, and that a retry will work.
             StorageError::Busy(_) => Self::profile_busy(&error),
+            // The typed storage classes stay internal-tier: their messages
+            // are the core's English text, and a user-tier message is
+            // shown verbatim — they need their own localized codes first.
             StorageError::Sqlite(_)
+            | StorageError::Duplicate { .. }
+            | StorageError::DiskFull(_)
+            | StorageError::ReadOnly(_)
+            | StorageError::DatabaseCorrupt(_)
             | StorageError::WriterGone
             | StorageError::JobPanicked { .. }
             | StorageError::PoolTimeout { .. }
@@ -277,6 +289,43 @@ mod tests {
         assert_eq!(error.code, ErrorCode::ProfileBusy);
         assert!(error.recoverable);
         assert!(error.message.contains("another Curio process"), "{error}");
+    }
+
+    #[test]
+    fn typed_storage_classes_stay_internal_until_they_are_localized() {
+        // Their messages are the core's English text and a user-tier
+        // message is shown verbatim, so none may reach the user tier
+        // without its own code and localized copy.
+        let sqlite = |code| {
+            StorageError::from(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("UNIQUE constraint failed: feeds.url".to_owned()),
+            ))
+        };
+        for code in [
+            rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE,
+            rusqlite::ffi::SQLITE_FULL,
+            rusqlite::ffi::SQLITE_READONLY,
+            rusqlite::ffi::SQLITE_CORRUPT,
+        ] {
+            let storage = sqlite(code);
+            assert!(
+                matches!(
+                    storage,
+                    StorageError::Duplicate { .. }
+                        | StorageError::DiskFull(_)
+                        | StorageError::ReadOnly(_)
+                        | StorageError::DatabaseCorrupt(_)
+                ),
+                "{code}: {storage:?}"
+            );
+            let error = CommandError::from(storage);
+            assert_eq!(
+                (error.kind, error.code),
+                (ErrorKind::Internal, ErrorCode::Storage),
+                "{code}: {error}"
+            );
+        }
     }
 
     #[test]

@@ -19,6 +19,7 @@ use reqwest::header::{
 };
 use url::Url;
 
+use super::errors::map_reqwest;
 use super::pool::Pools;
 use super::resolve::{DnsLookup, SystemLookup};
 use super::{FetchError, FetchKind, FetchRequest, FetchResponse};
@@ -535,19 +536,6 @@ fn header_string(response: &reqwest::Response, name: &str) -> Option<String> {
         .get(name)
         .and_then(|v| v.to_str().ok())
         .map(ToOwned::to_owned)
-}
-
-pub(super) fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
-    if err.is_timeout() {
-        FetchError::Timeout {
-            url: url.to_string(),
-        }
-    } else {
-        FetchError::Transport {
-            url: url.to_string(),
-            message: err.to_string(),
-        }
-    }
 }
 
 #[cfg(test)]

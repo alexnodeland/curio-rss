@@ -50,22 +50,40 @@ pub(super) fn extract(body: &[u8], content_type: Option<&str>, final_url: &str) 
     }
 
     let document = Html::parse_document(&text);
-    let mut feeds = drop_comment_feeds(feed_links(&document, base.as_ref()));
+    Extracted {
+        is_feed: false,
+        feeds: page_feeds(&document, base.as_ref()),
+        anchors: feed_anchors(&document, base.as_ref()),
+        favicon: favicon(&document, base.as_ref()),
+    }
+}
+
+/// Only the feeds an HTML page declares — [`Extracted::feeds`] without the
+/// feed sniff, the probe anchors or the favicon. For a body already known
+/// to be a web page (a refresh that got one instead of its feed).
+pub(super) fn declared_feeds(
+    body: &[u8],
+    content_type: Option<&str>,
+    final_url: &str,
+) -> Vec<DiscoveredFeed> {
+    let document = Html::parse_document(&decode_html(body, content_type));
+    page_feeds(&document, Url::parse(final_url).ok().as_ref())
+}
+
+/// The page's `<link rel="alternate">` feeds (comment feeds dropped when a
+/// primary feed exists), else a synthesized `YouTube` channel feed.
+fn page_feeds(document: &Html, base: Option<&Url>) -> Vec<DiscoveredFeed> {
+    let mut feeds = drop_comment_feeds(feed_links(document, base));
     // A YouTube channel/handle page usually carries no `<link rel="alternate">`
     // feed — synthesize the videos feed from its canonical channel id so a
     // pasted `youtube.com/@handle` still subscribes. Only when nothing else
     // matched, to avoid a duplicate when the alternate link *is* present.
     if feeds.is_empty()
-        && let Some(candidate) = youtube_channel_feed(&document, base.as_ref())
+        && let Some(candidate) = youtube_channel_feed(document, base)
     {
         feeds.push(candidate);
     }
-    Extracted {
-        is_feed: false,
-        feeds,
-        anchors: feed_anchors(&document, base.as_ref()),
-        favicon: favicon(&document, base.as_ref()),
-    }
+    feeds
 }
 
 /// If the page is a `YouTube` channel/handle page, builds its

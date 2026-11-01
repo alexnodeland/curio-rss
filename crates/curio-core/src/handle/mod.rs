@@ -65,7 +65,7 @@ use crate::export::{ExportDisposition, ExportError};
 use crate::feeds::{FeedParseError, OpmlError};
 use crate::fetch::{FetchConfig, FetchError, PolicedClient};
 use crate::import::{ImportError, ImportKind, Rejected};
-use crate::model::{Article, FeedId, FetchStatus};
+use crate::model::{Article, FeedId, FetchErrorKind, FetchStatus};
 use crate::storage::{OpenError, Storage, StorageError};
 
 /// Facade-level errors: every engine subsystem, plus facade concerns.
@@ -191,8 +191,12 @@ pub struct RefreshOutcome {
     /// Existing articles this refresh actually changed (identical
     /// re-listed entries are not counted).
     pub updated_articles: u64,
-    /// Error detail for [`FetchStatus::Error`].
+    /// Error detail for [`FetchStatus::Error`]: a short message naming the
+    /// cause.
     pub error: Option<String>,
+    /// Failure class for [`FetchStatus::Error`] — what a head branches on
+    /// instead of parsing [`Self::error`].
+    pub error_kind: Option<FetchErrorKind>,
 }
 
 /// What one save-to-destination did.

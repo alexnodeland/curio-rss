@@ -20,7 +20,7 @@ use std::time::Duration;
 use reqwest::Method;
 use url::{Host, Url};
 
-use super::client::map_reqwest;
+use super::errors::map_reqwest;
 use super::resolve::{self, DnsLookup, PinningResolver};
 use super::{FetchError, policy};
 

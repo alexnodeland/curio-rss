@@ -118,11 +118,12 @@ pub enum OpenError {
 /// Sorts a raw storage failure during open into its typed class. Errors
 /// that fit no class stay [`OpenError::Storage`].
 pub(crate) fn classify(path: &Path, error: StorageError) -> OpenError {
-    // `Busy` is lock contention the `From<rusqlite::Error>` conversion
-    // already recognised; at open it is the same `Locked` class.
-    let source = match error {
-        StorageError::Sqlite(source) | StorageError::Busy(source) => source,
-        other => return OpenError::Storage(other),
+    // The `From<rusqlite::Error>` conversion already sorted the raw error
+    // into a storage class (`Busy`, `DiskFull`, …); at open those map onto
+    // the open classes below, by the same codes.
+    let source = match error.into_sqlite() {
+        Ok(source) => source,
+        Err(other) => return OpenError::Storage(other),
     };
     let path = path.to_path_buf();
     match source.sqlite_error_code() {
@@ -140,7 +141,7 @@ pub(crate) fn classify(path: &Path, error: StorageError) -> OpenError {
             | ErrorCode::SystemIoFailure
             | ErrorCode::NoLargeFileSupport,
         ) => OpenError::Io { path, source },
-        _ => OpenError::Storage(StorageError::Sqlite(source)),
+        _ => OpenError::Storage(StorageError::from(source)),
     }
 }
 
@@ -200,7 +201,22 @@ mod tests {
                 matches!(classify(path, sqlite(code)), OpenError::Io { .. }),
                 "code {code}"
             );
+            // ...including when the `?` conversion already typed it
+            // (`DiskFull`, `ReadOnly`).
+            let typed = StorageError::from(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ));
+            assert!(
+                matches!(classify(path, typed), OpenError::Io { .. }),
+                "typed code {code}"
+            );
         }
+        let corrupt = StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            None,
+        ));
+        assert!(matches!(classify(path, corrupt), OpenError::Corrupt { .. }));
         assert!(matches!(
             classify(path, sqlite(rusqlite::ffi::SQLITE_ERROR)),
             OpenError::Storage(StorageError::Sqlite(_))

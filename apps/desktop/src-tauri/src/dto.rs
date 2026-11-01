@@ -18,7 +18,7 @@ use std::path::Path;
 
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
-    Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus,
+    Article, ArticleState, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::ListArticles;
@@ -83,6 +83,71 @@ impl From<FetchStatus> for FetchStatusDto {
     }
 }
 
+/// Mirror of [`FetchErrorKind`]: why a fetch failed, for the UI to branch
+/// on (an icon, a localized hint) instead of parsing the English `error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FetchErrorKindDto {
+    /// Malformed, non-http(s), userinfo-bearing or host-less URL.
+    InvalidUrl,
+    /// The host name did not resolve.
+    Dns,
+    /// The SSRF guard refused a non-public address.
+    Blocked,
+    /// Nothing accepted the connection.
+    Refused,
+    /// The connection was reset mid-request.
+    Reset,
+    /// The server's TLS certificate was rejected.
+    TlsCertificate,
+    /// The TLS handshake failed for another reason.
+    TlsHandshake,
+    /// Connecting timed out.
+    ConnectTimeout,
+    /// The server did not finish answering in time.
+    ReadTimeout,
+    /// A redirect could not be followed.
+    Redirect,
+    /// The body exceeded the size cap.
+    TooLarge,
+    /// Any other transport failure.
+    Transport,
+    /// A non-success HTTP status (see `http_status`).
+    Http,
+    /// HTTP 410 — the feed is dead.
+    Gone,
+    /// The URL serves a web page, not a feed.
+    NotAFeed,
+    /// The body looked like a feed but did not parse.
+    Parse,
+    /// Another Curio process was refreshing the feed; nothing was fetched.
+    Busy,
+}
+
+impl From<FetchErrorKind> for FetchErrorKindDto {
+    fn from(kind: FetchErrorKind) -> Self {
+        match kind {
+            FetchErrorKind::InvalidUrl => Self::InvalidUrl,
+            FetchErrorKind::Dns => Self::Dns,
+            FetchErrorKind::Blocked => Self::Blocked,
+            FetchErrorKind::Refused => Self::Refused,
+            FetchErrorKind::Reset => Self::Reset,
+            FetchErrorKind::TlsCertificate => Self::TlsCertificate,
+            FetchErrorKind::TlsHandshake => Self::TlsHandshake,
+            FetchErrorKind::ConnectTimeout => Self::ConnectTimeout,
+            FetchErrorKind::ReadTimeout => Self::ReadTimeout,
+            FetchErrorKind::Redirect => Self::Redirect,
+            FetchErrorKind::TooLarge => Self::TooLarge,
+            FetchErrorKind::Transport => Self::Transport,
+            FetchErrorKind::Http => Self::Http,
+            FetchErrorKind::Gone => Self::Gone,
+            FetchErrorKind::NotAFeed => Self::NotAFeed,
+            FetchErrorKind::Parse => Self::Parse,
+            FetchErrorKind::Busy => Self::Busy,
+        }
+    }
+}
+
 /// Mirror of [`ExportDisposition`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -130,6 +195,8 @@ pub struct FeedDto {
     /// (`null` ⇒ currently healthy). Persisted-derived, so the sidebar health
     /// dot is honest on a cold start before any in-session refresh.
     pub last_error: Option<String>,
+    /// Failure class of that errored fetch, when known.
+    pub last_error_kind: Option<FetchErrorKindDto>,
     /// When the feed last fetched successfully (RFC 3339 UTC), if ever.
     pub last_ok_at: Option<String>,
     /// Feed-level tags (OPML folders land here).
@@ -151,6 +218,7 @@ impl From<Feed> for FeedDto {
             added_at: feed.added_at.to_string(),
             last_fetched_at: feed.last_fetched_at.map(|t| t.to_string()),
             last_error: feed.last_error,
+            last_error_kind: feed.last_error_kind.map(Into::into),
             last_ok_at: feed.last_ok_at.map(|t| t.to_string()),
             tags: feed.tags,
             fetch_full_text: feed.fetch_full_text,
@@ -433,6 +501,8 @@ pub struct RefreshOutcomeDto {
     pub updated_articles: u64,
     /// Error description for `status: "error"`.
     pub error: Option<String>,
+    /// Failure class for `status: "error"`.
+    pub error_kind: Option<FetchErrorKindDto>,
 }
 
 impl From<RefreshOutcome> for RefreshOutcomeDto {
@@ -444,6 +514,7 @@ impl From<RefreshOutcome> for RefreshOutcomeDto {
             new_articles: outcome.new_articles,
             updated_articles: outcome.updated_articles,
             error: outcome.error,
+            error_kind: outcome.error_kind.map(Into::into),
         }
     }
 }
@@ -461,6 +532,8 @@ pub struct FetchRecordDto {
     pub http_status: Option<u16>,
     /// Error description for `status: "error"`.
     pub error: Option<String>,
+    /// Failure class for `status: "error"`, when known.
+    pub error_kind: Option<FetchErrorKindDto>,
     /// New articles stored by this fetch.
     pub articles_new: u32,
     /// Wall-clock duration, if measured.
@@ -475,6 +548,7 @@ impl From<FetchRecord> for FetchRecordDto {
             status: record.status.into(),
             http_status: record.http_status,
             error: record.error,
+            error_kind: record.error_kind.map(Into::into),
             articles_new: record.articles_new,
             duration_ms: record.duration_ms,
         }
@@ -825,6 +899,16 @@ mod tests {
         let snippet = article_snippet(&long).unwrap();
         assert_eq!(snippet.chars().count(), SNIPPET_MAX_CHARS + 1);
         assert!(snippet.ends_with('…'));
+    }
+
+    #[test]
+    fn fetch_error_kinds_cross_the_wire_as_the_core_text_form() {
+        // The UI branches on the same strings `fetch_log` stores and the
+        // CLI prints — one vocabulary, whichever head reports it.
+        for kind in FetchErrorKind::ALL {
+            let json = serde_json::to_value(FetchErrorKindDto::from(kind)).unwrap();
+            assert_eq!(json, kind.as_str(), "{kind:?}");
+        }
     }
 
     #[test]

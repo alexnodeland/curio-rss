@@ -152,7 +152,10 @@ async fn a_429_with_retry_after_is_not_refetched_before_the_deadline() {
 /// a sweep leaves the feed alone. A success ends the run.
 #[tokio::test]
 async fn five_straight_5xx_back_off_exponentially() {
-    let base = Duration::from_millis(40);
+    // Long enough that the immediate second sweep below starts well inside
+    // the first backoff even on a slow CI runner; the test sleeps out
+    // 250 + 500 + 1000 + 2000 ms in all.
+    let base = Duration::from_millis(250);
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(503))

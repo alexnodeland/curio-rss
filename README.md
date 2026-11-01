@@ -56,7 +56,7 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 | 🔎 **Search** | Full-text search over everything (SQLite FTS5), with **match highlighting** in results |
 | ↔️ **Import / export** | OPML in/out + Pocket, Instapaper & Readwise CSV importers |
 | 📝 **Save to notes** | Named destinations → markdown notes with a byte-preserved managed region |
-| 🎨 **Appearance** | 9 built-in themes + System, **custom themes you export & import as YAML**, **Sepia / Paper reading themes** independent of the app theme, a rich live typography preview, RSS-native Reddit layout + **click-to-play YouTube** |
+| 🎨 **Appearance** | 9 built-in themes + System (follows the OS light/dark switch live), **custom themes you export & import as YAML**, **Sepia / Paper reading themes** independent of the app theme, a rich live typography preview, RSS-native Reddit layout + **click-to-play YouTube** |
 | 🔔 **Notifications** | Optional desktop notifications on new articles — per-event toggles, quiet hours, per-feed opt-out |
 | 🔄 **Auto-updates** | Built-in "Check for updates" that installs & relaunches; auto-check / auto-install toggles; signed GitHub-release artifacts |
 | ⌨️ **Keyboard & menus** | Native macOS menu bar, ⌘-chord hotkeys, vim-style keys, tooltips, and a help overlay |

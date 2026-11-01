@@ -6,7 +6,7 @@
 //! registry is owned by `add_destination`/`remove_destination`); the
 //! refusal surfaces here as an `InvalidInput` user error.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use curio_core::CoreHandle;
 use curio_core::storage::Storage;
@@ -39,11 +39,36 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    let locale = menu_locale_change(&key, &value);
-    run_blocking("set_setting", move || set_setting_impl(&core, &key, &value)).await?;
-    if let Some(locale) = locale {
-        crate::menu::apply_locale(&app, locale);
-    }
+    run_blocking("set_setting", move || {
+        set_setting_and_menu(&core, &key, &value, |locale| {
+            crate::menu::apply_locale(&app, locale);
+        })
+    })
+    .await
+}
+
+/// Serialises locale writes with their menu rebuilds: two quick language
+/// changes must leave the menu in the language that was saved last, not in
+/// whichever rebuild happened to finish last.
+static LOCALE_TURN: Mutex<()> = Mutex::new(());
+
+/// Writes `key`; for the locale setting, then rebuilds the menu through
+/// `apply_menu` — the write and its rebuild as one turn under
+/// [`LOCALE_TURN`], so rebuilds land in the order their writes did.
+fn set_setting_and_menu(
+    core: &CoreHandle,
+    key: &str,
+    value: &str,
+    apply_menu: impl FnOnce(Locale),
+) -> Result<(), CommandError> {
+    let Some(locale) = menu_locale_change(key, value) else {
+        return set_setting_impl(core, key, value);
+    };
+    // Poisoning only means an earlier rebuild panicked; the guard protects
+    // no data, so the turn is still safe to take.
+    let _turn = LOCALE_TURN.lock().unwrap_or_else(PoisonError::into_inner);
+    set_setting_impl(core, key, value)?;
+    apply_menu(locale);
     Ok(())
 }
 
@@ -130,5 +155,28 @@ mod tests {
         assert_eq!(menu_locale_change("ui.locale", "de"), Some(Locale::De));
         assert_eq!(menu_locale_change("ui.locale", "xx"), Some(Locale::En));
         assert_eq!(menu_locale_change("ui.theme", "de"), None);
+    }
+
+    #[test]
+    fn a_locale_write_rebuilds_the_menu_after_it_is_saved() {
+        let (_dir, core) = crate::commands::testutil::temp_core();
+        let mut applied = Vec::new();
+        set_setting_and_menu(&core, LOCALE_KEY, "fr", |locale| {
+            // The rebuild runs inside the turn, after the write landed.
+            assert!(LOCALE_TURN.try_lock().is_err());
+            assert_eq!(
+                get_setting_impl(&core, LOCALE_KEY).unwrap().as_deref(),
+                Some("fr")
+            );
+            applied.push(locale);
+        })
+        .unwrap();
+        assert_eq!(applied, vec![Locale::Fr]);
+        // Any other key is a plain write: no rebuild.
+        set_setting_and_menu(&core, "ui.theme", "dark", |_| panic!("rebuilt")).unwrap();
+        assert_eq!(
+            get_setting_impl(&core, "ui.theme").unwrap().as_deref(),
+            Some("dark")
+        );
     }
 }

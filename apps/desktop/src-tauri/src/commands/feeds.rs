@@ -12,8 +12,11 @@ use super::{SharedCore, run_blocking};
 use crate::discovery::DiscoveryDto;
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::{CommandError, ErrorCode};
-use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
-use crate::refresh_scheduler::RefreshScheduler;
+use crate::events::{
+    ArticlesChanged, ConnectivityChanged, FeedsChanged, RefreshFinished, RefreshProgress,
+    emit_or_log,
+};
+use crate::refresh_scheduler::{RefreshScheduler, outcomes_prove_online};
 
 /// Autodiscovers feeds (and a favicon) for what the user typed — a bare
 /// domain, a site, a page, or a feed URL. The core's discovery normalizes
@@ -254,7 +257,8 @@ pub async fn refresh_feed(
 /// Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
 /// (core's own `refresh_all` is sequential and silent — the head loops
 /// `refresh_feed` so the UI can watch; orchestration, not business logic).
-/// A manual refresh resets the background scheduler's interval clock.
+/// A manual refresh resets the background scheduler's interval clock, and
+/// any feed answering clears the scheduler's "Offline" verdict right away.
 #[tauri::command]
 #[specta::specta]
 pub async fn refresh_all(
@@ -264,7 +268,10 @@ pub async fn refresh_all(
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
     let core = Arc::clone(core.inner());
     let outcomes = refresh_all_and_emit(&app, &core).await?;
-    scheduler.mark_refreshed();
+    scheduler.mark_refreshed(&core);
+    if outcomes_prove_online(&outcomes) && scheduler.set_online(true) {
+        emit_or_log(&app, &ConnectivityChanged { online: true });
+    }
     Ok(outcomes)
 }
 
@@ -429,7 +436,7 @@ async fn refresh_feed_impl(
     Ok(core.refresh_feed(FeedId(feed_id)).await?.into())
 }
 
-async fn refresh_all_impl(
+pub(crate) async fn refresh_all_impl(
     core: &Arc<CoreHandle>,
     mut on_progress: impl FnMut(i64, &RefreshOutcomeDto),
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {

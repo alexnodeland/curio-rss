@@ -69,6 +69,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     refreshFeed: { args: [1], response: refreshOutcomeFixture() },
     refreshAll: { args: [], response: [refreshOutcomeFixture()] },
     recentFetches: { args: [1, 10], response: [fetchRecordFixture()] },
+    connectivityOnline: { args: [], response: true },
     listArticles: {
         args: [
             {

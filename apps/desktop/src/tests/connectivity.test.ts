@@ -8,7 +8,8 @@ import { events } from '$lib/bindings';
 import { ConnectivityStore, connectivityStore } from '$lib/state/connectivity.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
-import { cleanup, render } from '@testing-library/svelte';
+import { tooltipStore } from '$lib/state/tooltip.svelte';
+import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, flushIpc, installIpcHarness, unreadCountsFixture } from './ipc-harness';
@@ -25,6 +26,7 @@ describe('connectivity', () => {
         resetUiStores();
         feedsStore.reset();
         connectivityStore.reset();
+        tooltipStore.reset();
         harness?.teardown();
         harness = null;
     });
@@ -97,5 +99,25 @@ describe('connectivity', () => {
         await events.connectivityChanged.emit({ online: true });
         await tick();
         expect(queryByText('Offline')).toBeNull();
+    });
+
+    it('lets keyboard users reach the badge and read its hint', async () => {
+        harness = installIpcHarness({
+            connectivity_online: false,
+            list_feeds: [],
+            get_unread_counts: unreadCountsFixture(),
+        });
+        teardowns.push(await connectivityStore.wire());
+        const { getByRole } = render(Sidebar);
+        await flushIpc();
+
+        const badge = getByRole('img', { name: 'Offline' });
+        expect(badge.tabIndex).toBe(0);
+        await fireEvent.focus(badge);
+        expect(tooltipStore.current?.text).toBe('No network — background refresh is paused');
+        expect(badge.getAttribute('aria-describedby')).toBe(tooltipStore.id);
+
+        await fireEvent.blur(badge);
+        expect(tooltipStore.current).toBeNull();
     });
 });

@@ -4,7 +4,8 @@
  * `tooltip` action via `tooltipStore`). Positions above the trigger by
  * default, flipping below when there is no room; centred on the trigger,
  * then nudged so the whole box stays on screen (a trigger hugging the window
- * edge — the sidebar's offline badge — would otherwise push half of it off). `pointer-events: none` so it never blocks the control under it.
+ * edge — the sidebar's offline badge — would otherwise push half of it off).
+ * `pointer-events: none` so it never blocks the control under it.
  */
 import { tooltipStore } from '$lib/state/tooltip.svelte';
 

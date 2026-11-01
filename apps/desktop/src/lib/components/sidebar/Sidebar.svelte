@@ -249,11 +249,17 @@ function newFolder(): void {
             <span class="brand-name">Curio</span>
             <!-- Offline (#123). In a narrow header the badge is a tile that takes
                  the brand mark's place (same footprint, so nothing reflows); with
-                 room to spare it is a labelled pill after the name. -->
+                 room to spare it is a labelled pill after the name. It is a tab
+                 stop so keyboard users can reveal the hint tooltip (focus shows
+                 it and wires aria-describedby); svelte's a11y table counts an
+                 img as non-interactive, hence the targeted ignore. -->
             {#if connectivityStore.offline}
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                 <span
                     class="offline-badge"
-                    aria-hidden="true"
+                    role="img"
+                    aria-label={t('connectivity.offline')}
+                    tabindex="0"
                     use:tooltip={t('connectivity.offline.hint')}
                     ><Icon name="wifi-off" size={15} strokeWidth={2} /><span class="offline-label"
                         >{t('connectivity.offline')}</span

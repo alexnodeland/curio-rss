@@ -14,8 +14,9 @@
 //! remembers it instead of starting the interval clock from zero.
 //!
 //! Coordination with a manual refresh is the [`RefreshScheduler`]: a manual
-//! refresh calls [`RefreshScheduler::mark_refreshed`], resetting the interval
-//! clock so a scheduled sweep never piles on right after one; an in-flight flag
+//! refresh calls [`RefreshScheduler::record_manual_refresh`], resetting the
+//! interval clock so a scheduled sweep never piles on right after one (unless
+//! the refresh happened offline and fetched nothing); an in-flight flag
 //! keeps two scheduled ticks from overlapping (per-feed locks make overlap
 //! safe but pointless).
 //!
@@ -33,7 +34,8 @@
 //! outright: no fetches, so no feed-health error rows and no "N feeds failed"
 //! notification. The change is announced once as a
 //! [`ConnectivityChanged`] event (the frontend's "Offline" badge), the
-//! interval clock is left alone so the sweep stays due, and every tick
+//! interval clock is left alone so the sweep stays due (a skipped on-launch
+//! sweep is remembered as owed, whatever the interval), and every tick
 //! re-probes until the network returns — then the overdue sweep runs.
 //!
 //! The same tick is also the event-emission retry timer (#118): a failed
@@ -82,10 +84,15 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 pub struct RefreshScheduler {
     last_refresh: Mutex<SystemTime>,
+    /// The on-launch sweep was skipped offline and has not run since: the
+    /// next tick sweeps even when the interval is disabled or not yet due.
+    launch_owed: AtomicBool,
     in_flight: AtomicBool,
     /// The last connectivity verdict; starts optimistic (online), so the
-    /// badge only ever appears after a probe actually failed.
-    online: AtomicBool,
+    /// badge only ever appears after a probe actually failed. A mutex, not
+    /// an atomic: a change and its announcement happen under one lock, so
+    /// two racing verdicts can't reach the frontend in the reverse order.
+    online: Mutex<bool>,
 }
 
 impl Default for RefreshScheduler {
@@ -121,25 +128,51 @@ impl RefreshScheduler {
     fn starting_at(last_refresh: SystemTime) -> Self {
         Self {
             last_refresh: Mutex::new(last_refresh),
+            launch_owed: AtomicBool::new(false),
             in_flight: AtomicBool::new(false),
-            online: AtomicBool::new(true),
+            online: Mutex::new(true),
         }
     }
 
-    /// Resets the interval clock — called after any refresh (manual or
-    /// scheduled) so the next scheduled sweep is a full interval later — and
-    /// persists the time, best-effort, so a relaunch remembers it.
-    pub fn mark_refreshed(&self, core: &CoreHandle) {
-        self.mark_refreshed_at(core, SystemTime::now());
+    /// Books a manual refresh: any feed answering clears the "Offline"
+    /// verdict right away (announced through `announce`), and the interval
+    /// clock resets — unless the network is known down and nothing proved
+    /// otherwise, because then nothing was fetched and the overdue sweep must
+    /// still run once the network is back.
+    pub async fn record_manual_refresh(
+        &self,
+        core: &SharedCore,
+        outcomes: &[RefreshOutcomeDto],
+        announce: impl FnOnce(bool),
+    ) {
+        let reached_network = outcomes_prove_online(outcomes);
+        if reached_network {
+            self.observe(true, announce);
+        }
+        if reached_network || self.is_online() {
+            self.mark_refreshed(core).await;
+        }
     }
 
-    fn mark_refreshed_at(&self, core: &CoreHandle, at: SystemTime) {
+    /// Resets the interval clock — called after a refresh (manual or
+    /// scheduled) so the next scheduled sweep is a full interval later, and
+    /// any owed launch sweep counts as done — and persists the time,
+    /// best-effort and off the async runtime, so a relaunch remembers it.
+    async fn mark_refreshed(&self, core: &SharedCore) {
+        self.mark_refreshed_at(core, SystemTime::now()).await;
+    }
+
+    async fn mark_refreshed_at(&self, core: &SharedCore, at: SystemTime) {
         *self
             .last_refresh
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = at;
+        self.launch_owed.store(false, Ordering::SeqCst);
         let secs = at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if let Err(error) = core.set_setting(LAST_REFRESH_KEY, &secs.to_string()) {
+        let core = Arc::clone(core);
+        let persisted =
+            run_blocking(move || Ok(core.set_setting(LAST_REFRESH_KEY, &secs.to_string())?)).await;
+        if let Err(error) = persisted {
             tracing::warn!(%error, "could not persist the last refresh time");
         }
     }
@@ -152,25 +185,30 @@ impl RefreshScheduler {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Makes the next due-check succeed (in memory only — the persisted time
-    /// still says when the last refresh really happened).
-    fn make_due(&self) {
-        *self
-            .last_refresh
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = UNIX_EPOCH;
+    /// Whether a launch sweep skipped offline still has to run.
+    fn launch_owed(&self) -> bool {
+        self.launch_owed.load(Ordering::SeqCst)
     }
 
     /// The last connectivity verdict (`true` until a probe says otherwise).
     #[must_use]
     pub fn is_online(&self) -> bool {
-        self.online.load(Ordering::SeqCst)
+        *self.online.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Records a connectivity verdict; `true` when it differs from the last
-    /// one — the moment to tell the frontend.
-    pub fn set_online(&self, online: bool) -> bool {
-        self.online.swap(online, Ordering::SeqCst) != online
+    /// Records a connectivity verdict and, when it differs from the last
+    /// one, calls `announce` with it — still holding the lock, so the
+    /// announcements go out in the order the verdicts were recorded.
+    /// Returns whether it changed.
+    pub fn observe(&self, online: bool, announce: impl FnOnce(bool)) -> bool {
+        let mut current = self.online.lock().unwrap_or_else(PoisonError::into_inner);
+        if *current == online {
+            return false;
+        }
+        *current = online;
+        tracing::info!(online, "connectivity changed");
+        announce(online);
+        true
     }
 
     /// Claims the refresh slot; `false` if a scheduled sweep is already running.
@@ -417,18 +455,19 @@ pub fn spawn(handle: AppHandle, core: SharedCore, scheduler: Arc<RefreshSchedule
     });
 }
 
-/// The on-launch sweep. Skipped because the app started offline, it leaves
-/// the interval clock due, so the first tick back online still runs it
-/// instead of waiting out a full interval.
+/// The on-launch sweep. Skipped because the app started offline, it is
+/// remembered as owed, so the first tick back online still runs it — even
+/// with the interval disabled ("refresh on launch only") — instead of
+/// waiting out a full interval or never running at all.
 pub(crate) async fn launch_sweep<P: ConnectivityProbe, E: SweepEffects>(
     scheduler: &RefreshScheduler,
-    core: &CoreHandle,
+    core: &SharedCore,
     probe: &P,
     effects: &E,
 ) -> SweepOutcome {
     let outcome = sweep(scheduler, core, probe, effects).await;
     if outcome == SweepOutcome::Offline {
-        scheduler.make_due();
+        scheduler.launch_owed.store(true, Ordering::SeqCst);
     }
     outcome
 }
@@ -444,18 +483,19 @@ pub(crate) enum TickOutcome {
     Swept(SweepOutcome),
 }
 
-/// One loop iteration after the sleep: sweep when due; otherwise, while the
-/// last probe said offline, re-probe so the badge clears within a tick of the
-/// network coming back (even with the interval disabled).
+/// One loop iteration after the sleep: sweep when due (or a skipped launch
+/// sweep is owed); otherwise, while the last probe said offline, re-probe so
+/// the badge clears within a tick of the network coming back (even with the
+/// interval disabled).
 pub(crate) async fn tick<P: ConnectivityProbe, E: SweepEffects>(
     scheduler: &RefreshScheduler,
-    core: &CoreHandle,
+    core: &SharedCore,
     probe: &P,
     effects: &E,
     interval_minutes: u64,
     now: SystemTime,
 ) -> TickOutcome {
-    if refresh_due(interval_minutes, scheduler.last_refresh(), now) {
+    if scheduler.launch_owed() || refresh_due(interval_minutes, scheduler.last_refresh(), now) {
         return TickOutcome::Swept(sweep(scheduler, core, probe, effects).await);
     }
     if scheduler.is_online() {
@@ -483,7 +523,7 @@ pub(crate) enum SweepOutcome {
 /// failure is an outcome (logged in the feed-health log), never a panic.
 pub(crate) async fn sweep<P: ConnectivityProbe, E: SweepEffects>(
     scheduler: &RefreshScheduler,
-    core: &CoreHandle,
+    core: &SharedCore,
     probe: &P,
     effects: &E,
 ) -> SweepOutcome {
@@ -501,17 +541,14 @@ pub(crate) async fn sweep<P: ConnectivityProbe, E: SweepEffects>(
         Ok(outcomes) => effects.notify(&outcomes),
         Err(error) => tracing::warn!(%error, "scheduled refresh failed"),
     }
-    scheduler.mark_refreshed(core);
+    scheduler.mark_refreshed(core).await;
     scheduler.release();
     SweepOutcome::Refreshed
 }
 
 /// Records a probe verdict and announces it when it changed.
 fn observe<E: SweepEffects>(scheduler: &RefreshScheduler, effects: &E, online: bool) {
-    if scheduler.set_online(online) {
-        tracing::info!(online, "connectivity changed");
-        effects.connectivity_changed(online);
-    }
+    scheduler.observe(online, |online| effects.connectivity_changed(online));
 }
 
 /// Re-drains event intents a failed flush left staged. A no-op (one atomic
@@ -722,7 +759,7 @@ mod tests {
             SweepOutcome::Offline
         );
         assert!(
-            refresh_due(30, scheduler.last_refresh(), SystemTime::now()),
+            scheduler.launch_owed(),
             "the skipped launch sweep stays owed"
         );
         assert_eq!(
@@ -735,6 +772,107 @@ mod tests {
         let outcome = tick(&scheduler, &core, &probe, &effects, 30, SystemTime::now()).await;
         assert_eq!(outcome, TickOutcome::Swept(SweepOutcome::Refreshed));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert!(!scheduler.launch_owed(), "and is paid off");
+    }
+
+    #[tokio::test]
+    async fn a_launch_only_setup_still_runs_the_skipped_launch_sweep() {
+        // "Refresh on launch only": the interval is disabled, so only the
+        // owed launch sweep can bring the feeds up to date.
+        let (_dir, core, server, _feed) = core_with_feed().await;
+        let scheduler = RefreshScheduler::new();
+        let probe = FakeProbe::new(false);
+        let effects = RecordingEffects::new(&core);
+
+        assert_eq!(
+            launch_sweep(&scheduler, &core, &probe, &effects).await,
+            SweepOutcome::Offline
+        );
+        // Still offline: each tick re-probes through the owed sweep, fetching
+        // nothing.
+        let outcome = tick(&scheduler, &core, &probe, &effects, 0, SystemTime::now()).await;
+        assert_eq!(outcome, TickOutcome::Swept(SweepOutcome::Offline));
+        assert!(server.received_requests().await.unwrap().is_empty());
+
+        probe.online.store(true, Ordering::SeqCst);
+        let outcome = tick(&scheduler, &core, &probe, &effects, 0, SystemTime::now()).await;
+        assert_eq!(outcome, TickOutcome::Swept(SweepOutcome::Refreshed));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert_eq!(effects.connectivity(), vec![false, true]);
+
+        // Paid off: with the interval disabled, nothing else runs.
+        let outcome = tick(&scheduler, &core, &probe, &effects, 0, SystemTime::now()).await;
+        assert_eq!(outcome, TickOutcome::Idle);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_manual_refresh_offline_that_reached_nothing_leaves_the_sweep_due() {
+        let (_dir, core) = temp_core();
+        let scheduler = RefreshScheduler::starting_at(UNIX_EPOCH);
+        scheduler.observe(false, |_| {});
+        let announced = Mutex::new(Vec::new());
+
+        let failed = [outcome(FetchStatusDto::Error, None)];
+        scheduler
+            .record_manual_refresh(&core, &failed, |online| {
+                announced.lock().unwrap().push(online);
+            })
+            .await;
+
+        assert!(!scheduler.is_online(), "the badge stays up");
+        assert!(announced.lock().unwrap().is_empty());
+        assert_eq!(
+            scheduler.last_refresh(),
+            UNIX_EPOCH,
+            "the clock is untouched"
+        );
+        assert_eq!(core.get_setting(LAST_REFRESH_KEY).unwrap(), None);
+        assert!(refresh_due(30, scheduler.last_refresh(), SystemTime::now()));
+    }
+
+    #[tokio::test]
+    async fn a_manual_refresh_that_reached_a_server_clears_the_badge_and_the_clock() {
+        let (_dir, core) = temp_core();
+        let scheduler = RefreshScheduler::starting_at(UNIX_EPOCH);
+        scheduler.observe(false, |_| {});
+        scheduler.launch_owed.store(true, Ordering::SeqCst);
+        let announced = Mutex::new(Vec::new());
+
+        let answered = [
+            outcome(FetchStatusDto::Error, None),
+            outcome(FetchStatusDto::Ok, Some(200)),
+        ];
+        scheduler
+            .record_manual_refresh(&core, &answered, |online| {
+                announced.lock().unwrap().push(online);
+            })
+            .await;
+
+        assert!(scheduler.is_online());
+        assert_eq!(*announced.lock().unwrap(), vec![true], "announced once");
+        assert!(scheduler.last_refresh() > UNIX_EPOCH, "the clock reset");
+        assert!(core.get_setting(LAST_REFRESH_KEY).unwrap().is_some());
+        assert!(!scheduler.launch_owed(), "an owed launch sweep is done too");
+    }
+
+    #[tokio::test]
+    async fn a_manual_refresh_while_online_always_resets_the_clock() {
+        // Not known offline: even a refresh where every feed failed counts.
+        let (_dir, core) = temp_core();
+        let scheduler = RefreshScheduler::starting_at(UNIX_EPOCH);
+        let announced = Mutex::new(Vec::new());
+
+        let failed = [outcome(FetchStatusDto::Error, None)];
+        scheduler
+            .record_manual_refresh(&core, &failed, |online| {
+                announced.lock().unwrap().push(online);
+            })
+            .await;
+
+        assert!(scheduler.last_refresh() > UNIX_EPOCH);
+        assert!(scheduler.is_online());
+        assert!(announced.lock().unwrap().is_empty(), "nothing changed");
     }
 
     #[tokio::test]
@@ -765,7 +903,7 @@ mod tests {
     async fn an_offline_badge_clears_even_when_nothing_is_due() {
         let (_dir, core) = temp_core();
         let scheduler = RefreshScheduler::new();
-        scheduler.set_online(false);
+        scheduler.observe(false, |_| {});
         let probe = FakeProbe::new(true);
         let effects = RecordingEffects::new(&core);
 
@@ -877,12 +1015,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mark_refreshed_resets_and_persists_the_clock() {
+    #[tokio::test]
+    async fn mark_refreshed_resets_and_persists_the_clock() {
         let (_dir, core) = temp_core();
         let scheduler = RefreshScheduler::starting_at(UNIX_EPOCH);
         let at = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        scheduler.mark_refreshed_at(&core, at);
+        scheduler.mark_refreshed_at(&core, at).await;
         assert_eq!(scheduler.last_refresh(), at);
         assert_eq!(
             core.get_setting(LAST_REFRESH_KEY).unwrap().as_deref(),
@@ -892,7 +1030,7 @@ mod tests {
         // A relaunch resumes from the persisted time, not from "now".
         assert_eq!(RefreshScheduler::load(&core).last_refresh(), at);
 
-        scheduler.mark_refreshed(&core);
+        scheduler.mark_refreshed(&core).await;
         assert!(scheduler.last_refresh() > at);
     }
 
@@ -907,14 +1045,17 @@ mod tests {
     }
 
     #[test]
-    fn set_online_reports_only_changes() {
+    fn observe_announces_only_changes() {
         let scheduler = RefreshScheduler::new();
+        let announced = Mutex::new(Vec::new());
+        let record = |online| announced.lock().unwrap().push(online);
         assert!(scheduler.is_online(), "optimistic until a probe fails");
-        assert!(!scheduler.set_online(true));
-        assert!(scheduler.set_online(false));
-        assert!(!scheduler.set_online(false));
+        assert!(!scheduler.observe(true, record));
+        assert!(scheduler.observe(false, record));
+        assert!(!scheduler.observe(false, record));
         assert!(!scheduler.is_online());
-        assert!(scheduler.set_online(true));
+        assert!(scheduler.observe(true, record));
+        assert_eq!(*announced.lock().unwrap(), vec![false, true]);
     }
 
     #[test]
@@ -940,6 +1081,7 @@ mod tests {
             new_articles: 0,
             updated_articles: 0,
             error: None,
+            error_kind: None,
         }
     }
 
@@ -978,6 +1120,7 @@ mod tests {
             added_at: Timestamp::now(),
             last_fetched_at: Some(Timestamp::now()),
             last_error: None,
+            last_error_kind: None,
             last_ok_at: Some(Timestamp::now()),
             tags: Vec::new(),
             fetch_full_text: false,

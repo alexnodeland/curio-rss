@@ -70,7 +70,9 @@ at 15 minutes, and notifications on (Settings → General / Notifications).
 - [ ] **Catches up after sleep** — refresh, then close the lid (or Apple menu → Sleep) for longer than the interval. Within about a minute of waking, a refresh runs on its own (the refresh pill appears, `logs/curio.log.*` has a `woke from sleep` line), not up to a full interval later.
 - [ ] **Remembers the last refresh** — with Refresh on launch off, quit and relaunch more than one interval after the last refresh: a refresh runs within about a minute. Relaunch again straight away: none runs until the interval is up.
 - [ ] **Offline is quiet** — turn Wi-Fi off and wait for a scheduled refresh (or relaunch with Refresh on launch on): the sidebar's brand tile turns into the amber "Offline" badge, no feed gets a new error in its health log, and no "feeds failed to refresh" notification appears.
-- [ ] **Back online** — turn Wi-Fi on: within about a minute the badge clears and the overdue refresh runs.
+- [ ] **Back online** — turn Wi-Fi on: within about a minute the badge clears and the overdue refresh runs. A manual Refresh while still offline does not cancel it.
+- [ ] **Launch-only, started offline** — interval set to Off, Refresh on launch on: launch with Wi-Fi off (the badge appears), then turn Wi-Fi on: within about a minute the skipped launch refresh runs.
+- [ ] **Badge by keyboard** — while offline, Tab to the badge: the "No network — background refresh is paused" hint appears with a focus ring.
 
 ## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
 

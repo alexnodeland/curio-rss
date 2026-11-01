@@ -87,4 +87,33 @@ describe('VirtualList', () => {
         await fireEvent.scroll(listbox);
         expect(onnearend).toHaveBeenCalled();
     });
+
+    it('opens at initialScrollTop: the DOM offset and the window both start there', async () => {
+        const { getByRole, container } = render(VirtualListHost, {
+            props: { items: manyItems(200), initialScrollTop: 40 * 50 },
+        });
+        await tick();
+        expect(getByRole('listbox').scrollTop).toBe(2000);
+        const rows = [...container.querySelectorAll('.test-row')];
+        expect(rows[0]?.textContent).toContain('item-46'); // 50 - overscan
+    });
+
+    it('reports the viewport — rows passed, rows on screen, offset — at mount and on scroll', async () => {
+        const reports: { first: number; end: number; scrollTop: number }[] = [];
+        const { getByRole } = render(VirtualListHost, {
+            props: {
+                items: manyItems(200),
+                initialScrollTop: 400,
+                onviewport: (report) => reports.push(report),
+            },
+        });
+        await tick();
+        // 240px viewport over 40px rows from 400px: rows 10..16 on screen.
+        expect(reports[0]).toEqual({ first: 10, end: 16, scrollTop: 400 });
+
+        const listbox = getByRole('listbox');
+        listbox.scrollTop = 420;
+        await fireEvent.scroll(listbox);
+        expect(reports[reports.length - 1]).toEqual({ first: 10, end: 17, scrollTop: 420 });
+    });
 });

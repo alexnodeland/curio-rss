@@ -1,3 +1,15 @@
+<script lang="ts" module>
+/** What the viewport shows right now (see `onviewport`). */
+export interface ViewportReport {
+    /** Rows `[0, first)` have fully scrolled up past the viewport top. */
+    first: number;
+    /** One past the last row intersecting the viewport (no overscan). */
+    end: number;
+    /** The viewport's scroll offset in px. */
+    scrollTop: number;
+}
+</script>
+
 <script lang="ts" generics="T">
 /**
  * The hand-rolled fixed-row-height virtualizer: renders only the rows that
@@ -10,8 +22,12 @@
  * `aria-posinset`/`aria-setsize` themselves (the snippet receives the
  * absolute index). In jsdom (no layout) the measured viewport height is 0,
  * so `fallbackViewportHeight` keeps the math real in component tests.
+ *
+ * The scroll position is the instance's own: an owner showing a different
+ * list mounts a fresh instance (`{#key}`) and hands it that list's remembered
+ * offset through `initialScrollTop`, so no list inherits another's offset.
  */
-import type { Snippet } from 'svelte';
+import { type Snippet, untrack } from 'svelte';
 
 let {
     items,
@@ -21,11 +37,12 @@ let {
     overscan = 4,
     nearEndMargin = 10,
     fallbackViewportHeight = 600,
+    initialScrollTop = 0,
     label,
     activeDescendantId,
     focusNonce = 0,
     onnearend,
-    onscrollpast,
+    onviewport,
     onmove,
     onmenukey,
     row,
@@ -37,6 +54,8 @@ let {
     overscan?: number;
     nearEndMargin?: number;
     fallbackViewportHeight?: number;
+    /** The offset this instance opens at (read once, at mount). */
+    initialScrollTop?: number;
     label: string;
     /** The `id` of the active option — mirrored into `aria-activedescendant`
      *  so a screen reader tracks selection while focus stays on the listbox. */
@@ -47,12 +66,13 @@ let {
     focusNonce?: number;
     onnearend?: () => void;
     /**
-     * The count of rows that have fully scrolled up past the viewport top —
-     * i.e. `items[0..firstVisibleIndex)` are no longer visible above. Fires
-     * whenever that count changes; the owner decides what "passed" means
-     * (mark-on-scroll uses it to mark those rows read).
+     * What the viewport shows: the rows scrolled up past the top, the rows
+     * on screen, and the raw offset. Fires at mount and whenever the scroll
+     * offset or the items change; the owner decides what to make of it
+     * (mark-on-scroll marks rows it saw scroll past; the list remembers its
+     * position per view).
      */
-    onscrollpast?: (firstVisibleIndex: number) => void;
+    onviewport?: (report: ViewportReport) => void;
     /**
      * A listbox navigation key was pressed while the list held focus. The
      * owner moves selection (the same move `j`/`k` make); the listbox itself
@@ -111,7 +131,9 @@ function onKeydown(event: KeyboardEvent): void {
 
 let viewport: HTMLDivElement | undefined = $state();
 let measuredHeight = $state(0);
-let scrollTop = $state(0);
+// The opening offset is read once: later changes to the prop are ignored (a
+// different list is a different instance).
+let scrollTop = $state(untrack(() => Math.max(0, initialScrollTop)));
 
 const viewportHeight = $derived(measuredHeight > 0 ? measuredHeight : fallbackViewportHeight);
 const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
@@ -139,10 +161,30 @@ $effect(() => {
     }
 });
 
-// Rows whose bottom edge has cleared the viewport top have "scrolled past".
-const firstVisibleIndex = $derived(Math.floor(scrollTop / rowHeight));
+// Rows whose bottom edge has cleared the viewport top have "scrolled past";
+// rows from there to the viewport bottom are on screen.
+const firstVisibleIndex = $derived(Math.min(items.length, Math.floor(scrollTop / rowHeight)));
+const endVisibleIndex = $derived(
+    Math.min(items.length, Math.ceil((scrollTop + viewportHeight) / rowHeight)),
+);
 $effect(() => {
-    onscrollpast?.(firstVisibleIndex);
+    void items; // a refetch that swaps rows in place re-reports too
+    onviewport?.({ first: firstVisibleIndex, end: endVisibleIndex, scrollTop });
+});
+
+// Open at the handed-in offset: the DOM container starts at 0, so seat it once
+// on mount (before the scroll-into-view effect below reads it). A browser that
+// clamps the offset fires a scroll event, which re-syncs `scrollTop`.
+let seated = false;
+$effect(() => {
+    if (seated || viewport === undefined) {
+        return;
+    }
+    seated = true;
+    const opening = untrack(() => scrollTop);
+    if (opening > 0) {
+        viewport.scrollTop = opening;
+    }
 });
 
 // Entering the list from elsewhere (the owner bumps `focusNonce`): pull DOM

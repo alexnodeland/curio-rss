@@ -708,7 +708,7 @@ export type ErrorCode =
 "SCHEMA_TOO_NEW" | 
 /**
  *  An outbound fetch failed in a way no finer code names (a refused
- *  redirect, Reddit auth).
+ *  redirect).
  */
 "NETWORK" | 
 /**  Connecting, or the answer, took too long. Params: `host`. */
@@ -736,6 +736,15 @@ export type ErrorCode =
 "TOO_LARGE" | 
 /**  The host is rate-limiting Curio. Params: `host`, `minutes`. */
 "RATE_LIMITED" | 
+/**
+ *  Reddit refused a full-post request for auth reasons. Params:
+ *  `reason` — which action fixes it: `credentials_missing` (add Reddit
+ *  API credentials), `credentials_rejected` (correct them),
+ *  `token_revoked` (retry, else re-create the app),
+ *  `token_unavailable` (retry later), or `unknown` for a reason added
+ *  to the core since — and `status`, the refusal's HTTP status.
+ */
+"REDDIT_AUTH" | 
 /**  Feed/OPML bytes did not parse. */
 "PARSE" | 
 /**

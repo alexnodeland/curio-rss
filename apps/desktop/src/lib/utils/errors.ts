@@ -9,6 +9,7 @@
  */
 import type { CommandError, ErrorCode } from '$lib/bindings';
 import { type MessageKey, localeStore, t } from '$lib/i18n';
+import { en } from '$lib/i18n/en';
 
 /**
  * The localized copy for every code. Typed as a total record, so a code
@@ -32,6 +33,7 @@ export const ERROR_COPY: Record<ErrorCode, MessageKey> = {
     BLOCKED_ADDRESS: 'error.blockedAddress',
     TOO_LARGE: 'error.tooLarge',
     RATE_LIMITED: 'error.rateLimited',
+    REDDIT_AUTH: 'error.redditAuth',
     PARSE: 'error.parse',
     NO_FEED: 'addFeed.noneFound',
     ALREADY_SUBSCRIBED: 'error.alreadySubscribed',
@@ -59,16 +61,46 @@ const BROAD: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
     'IO',
 ]);
 
-/** A `{placeholder}` the params did not fill. */
-const UNFILLED = /\{\w+\}/;
+/**
+ * `REDDIT_AUTH`'s copy by its `reason` param: each names the action that
+ * fixes it. An unknown reason gets the code's generic line.
+ */
+const REDDIT_AUTH_COPY: Readonly<Record<string, MessageKey>> = {
+    credentials_missing: 'error.redditAuth.credentialsMissing',
+    credentials_rejected: 'error.redditAuth.credentialsRejected',
+    token_revoked: 'error.redditAuth.tokenRevoked',
+    token_unavailable: 'error.redditAuth.tokenUnavailable',
+};
+
+/** The copy for `error`: its code's, refined by a param where one picks it. */
+function copyKey(error: CommandError): MessageKey {
+    if (error.code === 'REDDIT_AUTH') {
+        const reason = error.params.reason;
+        if (reason !== undefined && Object.hasOwn(REDDIT_AUTH_COPY, reason)) {
+            return REDDIT_AUTH_COPY[reason];
+        }
+    }
+    return ERROR_COPY[error.code];
+}
+
+/** A copy's `{placeholder}` names (every locale's copy names the same ones). */
+const PLACEHOLDER = /\{(\w+)\}/g;
+
+/** Whether `params` fills every placeholder `key`'s copy names. */
+function filledBy(key: MessageKey, params: Partial<Record<string, string>>): boolean {
+    for (const [, name] of en[key].matchAll(PLACEHOLDER)) {
+        if (params[name] === undefined) return false;
+    }
+    return true;
+}
 
 /** The display string for a command failure, in the active locale. */
 export function commandErrorMessage(error: CommandError): string {
     if (error.kind === 'internal') return t('app.error.internal');
     const english = localeStore.active === 'en';
     if (BROAD.has(error.code) && english) return error.message;
-    const text = t(ERROR_COPY[error.code], error.params);
-    if (!UNFILLED.test(text)) return text;
+    const key = copyKey(error);
+    if (filledBy(key, error.params)) return t(key, error.params);
     // The host promised a param it did not send: never show a raw
     // `{host}` — English has the engine's message, the rest the generic line.
     return english ? error.message : t('app.error.internal');

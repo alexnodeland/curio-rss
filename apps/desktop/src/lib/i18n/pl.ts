@@ -38,6 +38,15 @@ export const pl: Partial<Record<MessageKey, string>> = {
         '{host} wskazuje na prywatny adres sieciowy, którego Curio domyślnie nie pobiera.',
     'error.tooLarge': 'Strona z {host} jest zbyt duża, aby ją wczytać.',
     'error.rateLimited': '{host} ogranicza liczbę żądań. Spróbuj ponownie za około {minutes} min.',
+    'error.redditAuth': 'Reddit odmówił wczytania pełnego posta (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit blokuje anonimowe żądania pełnych postów. Aby je wczytywać, dodaj własne bezpłatne dane dostępowe API Reddita w Ustawienia → API Reddita.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit odrzucił Twoje dane dostępowe API. Sprawdź client id i client secret w Ustawienia → API Reddita albo utwórz aplikację ponownie.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit odmówił dostępu dla Twoich danych dostępowych API. Spróbuj ponownie; jeśli błąd się powtarza, utwórz aplikację ponownie.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit nie mógł teraz wydać tokenu dostępu — możliwe, że ma awarię. Spróbuj ponownie później.',
     'error.parse': 'Curio nie może odczytać tego pliku lub kanału.',
     'error.storage': 'Curio nie może zapisać tej zmiany.',
     'error.duplicate': 'To już istnieje.',

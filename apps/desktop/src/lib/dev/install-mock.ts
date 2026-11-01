@@ -233,8 +233,39 @@ tokens:
                     return articles.length;
                 case 'list_tags':
                     return [...new Set(articles.flatMap((a) => a.tags))].sort();
-                case 'list_destinations':
+                case 'list_destinations': {
+                    // `?destinations=broken` previews a registry the host
+                    // cannot read: an internal failure, shown generically.
+                    if (
+                        new URLSearchParams(window.location.search).get('destinations') === 'broken'
+                    ) {
+                        const failure: CommandError = {
+                            kind: 'internal',
+                            code: 'IO',
+                            params: {},
+                            message: 'destination registry is unreadable: expected value at line 1',
+                            recoverable: false,
+                        };
+                        return Promise.reject(failure);
+                    }
                     return structuredClone(destinations);
+                }
+                case 'load_full_article': {
+                    // `?reddit=<reason>` previews Reddit refusing a full post
+                    // (`credentials_missing`, `token_unavailable`, …).
+                    const reason = new URLSearchParams(window.location.search).get('reddit');
+                    if (reason !== null) {
+                        const failure: CommandError = {
+                            kind: 'user',
+                            code: 'REDDIT_AUTH',
+                            params: { reason, status: '403' },
+                            message: `reddit refused the full post (HTTP 403): ${reason}`,
+                            recoverable: reason.startsWith('token_'),
+                        };
+                        return Promise.reject(failure);
+                    }
+                    return null;
+                }
                 case 'list_articles': {
                     const p = (args.params ?? {}) as Record<string, unknown>;
                     let rows = articles

@@ -33,6 +33,14 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'error.blockedAddress': '{host} 指向私人網絡地址，Curio 預設唔會攞。',
     'error.tooLarge': '{host} 嘅網頁太大，載入唔到。',
     'error.rateLimited': '{host} 限制緊請求，大約 {minutes} 分鐘後再試過。',
+    'error.redditAuth': 'Reddit 拒絕載入完整帖文（HTTP {status}）。',
+    'error.redditAuth.credentialsMissing':
+        'Reddit 封鎖匿名嘅完整帖文請求。喺「設定 → Reddit API」加入你自己嘅免費 Reddit API 憑證，就可以載入。',
+    'error.redditAuth.credentialsRejected':
+        'Reddit 拒絕咗你嘅 API 憑證。喺「設定 → Reddit API」檢查 client id 同 client secret，或者重新建立個 app。',
+    'error.redditAuth.tokenRevoked':
+        'Reddit 拒絕咗你 API 憑證嘅存取權。再試過；如果一直失敗，就重新建立個 app。',
+    'error.redditAuth.tokenUnavailable': 'Reddit 而家發唔到存取權杖，可能出咗故障。遲啲再試過。',
     'error.parse': 'Curio 讀唔到呢個檔案或者訂閱源。',
     'error.storage': 'Curio 儲存唔到呢個更改。',
     'error.duplicate': '呢個已經存在。',

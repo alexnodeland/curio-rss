@@ -102,9 +102,52 @@ describe('commandErrorMessage', () => {
         expect(commandErrorMessage(error)).toBe(de['app.error.internal']);
     });
 
+    it('keeps a param that happens to contain braces', () => {
+        const error = commandErrorFixture({
+            code: 'DESTINATION_MISSING',
+            params: { root: '/vaults/{inbox}' },
+            message: 'destination folder is missing: /vaults/{inbox}',
+            recoverable: true,
+        });
+        localeStore.active = 'de';
+        const text = commandErrorMessage(error);
+        expect(text).toContain('/vaults/{inbox}');
+        expect(text).not.toBe(de['app.error.internal']);
+    });
+
+    it('gives a Reddit auth refusal the guidance its reason names, in every locale', () => {
+        const refusal = (reason: string) =>
+            commandErrorFixture({
+                code: 'REDDIT_AUTH',
+                params: { reason, status: '403' },
+                message: 'reddit blocks anonymous full-post requests (HTTP 403)',
+            });
+        const missing = refusal('credentials_missing');
+        expect(commandErrorMessage(missing)).toBe(en['error.redditAuth.credentialsMissing']);
+        localeStore.active = 'pl';
+        expect(commandErrorMessage(missing)).toBe(pl['error.redditAuth.credentialsMissing']);
+        expect(commandErrorMessage(missing)).not.toBe(pl['error.network']);
+        expect(commandErrorMessage(refusal('token_revoked'))).toBe(
+            pl['error.redditAuth.tokenRevoked'],
+        );
+        // A reason the frontend has no line for: the code's generic one.
+        expect(commandErrorMessage(refusal('something_new'))).toBe(
+            'Reddit odmówił wczytania pełnego posta (HTTP 403).',
+        );
+        const reasons = [
+            'error.redditAuth.credentialsMissing',
+            'error.redditAuth.credentialsRejected',
+            'error.redditAuth.tokenRevoked',
+            'error.redditAuth.tokenUnavailable',
+        ] as const;
+        for (const catalog of [en, es, fr, de, itCatalog, pl, zhHans, yue]) {
+            for (const key of reasons) expect(catalog[key], key).toBeTruthy();
+        }
+    });
+
     it('has copy, in every locale, for every code', () => {
         const codes = Object.keys(ERROR_COPY) as (keyof typeof ERROR_COPY)[];
-        expect(codes.length).toBeGreaterThanOrEqual(26);
+        expect(codes.length).toBeGreaterThanOrEqual(27);
         for (const code of codes) {
             const key = ERROR_COPY[code];
             for (const catalog of [en, es, fr, de, itCatalog, pl, zhHans, yue]) {

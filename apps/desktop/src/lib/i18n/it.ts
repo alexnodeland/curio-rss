@@ -37,6 +37,15 @@ export const it: Partial<Record<MessageKey, string>> = {
         '{host} punta a un indirizzo di rete privato, che Curio non scarica per impostazione predefinita.',
     'error.tooLarge': 'La pagina di {host} è troppo grande da caricare.',
     'error.rateLimited': '{host} sta limitando le richieste. Riprova tra circa {minutes} min.',
+    'error.redditAuth': 'Reddit ha rifiutato di caricare il post completo (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit blocca le richieste anonime di post completi. Aggiungi le tue credenziali gratuite dell’API di Reddit in Impostazioni → API di Reddit per caricarli.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit ha rifiutato le tue credenziali API. Controlla client id e client secret in Impostazioni → API di Reddit, oppure ricrea l’app.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit ha negato l’accesso alle tue credenziali API. Riprova; se continua a non funzionare, ricrea l’app.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit non è riuscito a emettere un token di accesso in questo momento: potrebbe avere un disservizio. Riprova più tardi.',
     'error.parse': 'Curio non è riuscito a leggere questo file o feed.',
     'error.storage': 'Curio non è riuscito a salvare questa modifica.',
     'error.duplicate': 'Esiste già.',

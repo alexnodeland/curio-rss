@@ -38,6 +38,16 @@ export const de: Partial<Record<MessageKey, string>> = {
         '{host} verweist auf eine private Netzwerkadresse, die Curio standardmäßig nicht abruft.',
     'error.tooLarge': 'Die Seite von {host} ist zu groß zum Laden.',
     'error.rateLimited': '{host} begrenzt Anfragen. Bitte in etwa {minutes} Min. erneut versuchen.',
+    'error.redditAuth':
+        'Reddit hat das Laden des vollständigen Beitrags abgelehnt (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit blockiert anonyme Anfragen nach vollständigen Beiträgen. Füge unter Einstellungen → Reddit-API deine eigenen kostenlosen Reddit-API-Zugangsdaten hinzu, um sie zu laden.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit hat deine API-Zugangsdaten abgelehnt. Prüfe Client-ID und Client-Secret unter Einstellungen → Reddit-API oder erstelle die App neu.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit hat den Zugriff für deine API-Zugangsdaten verweigert. Versuche es erneut; wenn es weiter fehlschlägt, erstelle die App neu.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit konnte gerade kein Zugriffstoken ausstellen – möglicherweise gibt es eine Störung. Versuche es später erneut.',
     'error.parse': 'Curio konnte diese Datei bzw. diesen Feed nicht lesen.',
     'error.storage': 'Curio konnte diese Änderung nicht speichern.',
     'error.duplicate': 'Das gibt es bereits.',

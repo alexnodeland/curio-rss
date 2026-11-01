@@ -35,6 +35,15 @@ export const en = {
         '{host} points to a private network address, which Curio doesn’t fetch by default.',
     'error.tooLarge': 'The page from {host} is too large to load.',
     'error.rateLimited': '{host} is limiting requests. Try again in about {minutes} min.',
+    'error.redditAuth': 'Reddit refused to load the full post (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit blocks anonymous requests for full posts. Add your own free Reddit API credentials in Settings → Reddit API to load them.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit refused your API credentials. Check the client id and secret in Settings → Reddit API, or create the app again.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit refused access for your API credentials. Try again; if it keeps failing, create the app again.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit couldn’t issue an access token right now — it may be having an outage. Try again later.',
     'error.parse': 'Curio couldn’t read that file or feed.',
     'error.storage': 'Curio couldn’t save that change.',
     'error.duplicate': 'That already exists.',

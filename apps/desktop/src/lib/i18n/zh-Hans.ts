@@ -31,6 +31,15 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'error.blockedAddress': '{host} 指向私有网络地址，Curio 默认不会获取。',
     'error.tooLarge': '来自 {host} 的页面太大，无法加载。',
     'error.rateLimited': '{host} 正在限制请求，请在大约 {minutes} 分钟后重试。',
+    'error.redditAuth': 'Reddit 拒绝加载完整帖子（HTTP {status}）。',
+    'error.redditAuth.credentialsMissing':
+        'Reddit 会拦截匿名的完整帖子请求。请在“设置 → Reddit API”中添加你自己的免费 Reddit API 凭据以加载完整帖子。',
+    'error.redditAuth.credentialsRejected':
+        'Reddit 拒绝了你的 API 凭据。请在“设置 → Reddit API”中检查 client id 和 client secret，或重新创建应用。',
+    'error.redditAuth.tokenRevoked':
+        'Reddit 拒绝了你的 API 凭据的访问权限。请重试；如果仍然失败，请重新创建应用。',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit 暂时无法签发访问令牌，可能正在发生故障。请稍后重试。',
     'error.parse': 'Curio 无法读取该文件或订阅源。',
     'error.storage': 'Curio 无法保存此更改。',
     'error.duplicate': '该项目已存在。',

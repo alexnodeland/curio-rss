@@ -39,6 +39,15 @@ export const es: Partial<Record<MessageKey, string>> = {
     'error.tooLarge': 'La página de {host} es demasiado grande para cargarla.',
     'error.rateLimited':
         '{host} está limitando las solicitudes. Vuelve a intentarlo en unos {minutes} min.',
+    'error.redditAuth': 'Reddit rechazó cargar la publicación completa (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit bloquea las solicitudes anónimas de publicaciones completas. Añade tus propias credenciales gratuitas de la API de Reddit en Ajustes → API de Reddit para cargarlas.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit rechazó tus credenciales de la API. Revisa el client id y el client secret en Ajustes → API de Reddit, o vuelve a crear la app.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit denegó el acceso a tus credenciales de la API. Vuelve a intentarlo; si sigue fallando, vuelve a crear la app.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit no pudo emitir un token de acceso ahora mismo; puede que tenga una incidencia. Vuelve a intentarlo más tarde.',
     'error.parse': 'Curio no pudo leer ese archivo o feed.',
     'error.storage': 'Curio no pudo guardar ese cambio.',
     'error.duplicate': 'Eso ya existe.',

@@ -41,11 +41,11 @@
 
 use std::collections::BTreeMap;
 
-use curio_core::CoreError;
 use curio_core::export::ExportError;
 use curio_core::fetch::FetchError;
 use curio_core::model::FetchErrorKind;
 use curio_core::storage::{OpenError, StorageError};
+use curio_core::{CoreError, RedditAuthReason};
 use curio_types::ParseDestinationNameError;
 use serde::{Deserialize, Serialize};
 
@@ -84,7 +84,7 @@ pub enum ErrorCode {
     /// The database was written by a newer build of Curio.
     SchemaTooNew,
     /// An outbound fetch failed in a way no finer code names (a refused
-    /// redirect, Reddit auth).
+    /// redirect).
     Network,
     /// Connecting, or the answer, took too long. Params: `host`.
     NetworkTimeout,
@@ -105,6 +105,13 @@ pub enum ErrorCode {
     TooLarge,
     /// The host is rate-limiting Curio. Params: `host`, `minutes`.
     RateLimited,
+    /// Reddit refused a full-post request for auth reasons. Params:
+    /// `reason` — which action fixes it: `credentials_missing` (add Reddit
+    /// API credentials), `credentials_rejected` (correct them),
+    /// `token_revoked` (retry, else re-create the app),
+    /// `token_unavailable` (retry later), or `unknown` for a reason added
+    /// to the core since — and `status`, the refusal's HTTP status.
+    RedditAuth,
     /// Feed/OPML bytes did not parse.
     Parse,
     /// Subscribe-time validation: the page answered but neither it nor
@@ -262,9 +269,11 @@ pub(crate) fn host_of(target: &str) -> String {
 }
 
 /// The command boundary's one log point: an internal-tier error is written
-/// to the diagnostics log exactly once, at `error` level, naming the
-/// `command` that returned it. User-tier errors are the user's to act on
-/// and stay out of the log. Every command routes its result through here —
+/// to the diagnostics log once here, at `error` level, naming the
+/// `command` that returned it. (A panic also leaves its own record, from
+/// the panic hook — and, in a storage writer job, from the writer — which
+/// names where it happened; this one names the command it failed.)
+/// User-tier errors are the user's to act on and stay out of the log. Every command routes its result through here —
 /// `commands::run_blocking` does it for the blocking ones, and a
 /// test pins that each command names itself exactly once.
 ///
@@ -369,7 +378,7 @@ impl From<CoreError> for CommandError {
             } => Self::user(ErrorCode::RateLimited, message, true)
                 .with_param("host", host)
                 .with_param("minutes", retry_after_secs.div_ceil(60).to_string()),
-            CoreError::RedditAuth { .. } => Self::user(ErrorCode::Network, message, true),
+            CoreError::RedditAuth { reason, status } => reddit_auth(reason, status, message),
             CoreError::FeedParse(_) | CoreError::Opml(_) | CoreError::Import(_) => {
                 Self::user(ErrorCode::Parse, message, true)
             }
@@ -401,6 +410,25 @@ impl From<CoreError> for CommandError {
             }
         }
     }
+}
+
+/// A reddit auth refusal: its own code, so every locale gets the guidance
+/// the core's English names (add, correct or re-authorise the credentials)
+/// rather than a generic network line. Only a token problem clears on a
+/// retry; missing or refused credentials fail the same way until the user
+/// changes them in Settings.
+fn reddit_auth(reason: RedditAuthReason, status: u16, message: String) -> CommandError {
+    let (param, recoverable) = match reason {
+        RedditAuthReason::CredentialsMissing => ("credentials_missing", false),
+        RedditAuthReason::CredentialsRejected => ("credentials_rejected", false),
+        RedditAuthReason::TokenRevoked => ("token_revoked", true),
+        RedditAuthReason::TokenUnavailable => ("token_unavailable", true),
+        // A reason added to the core since: the generic Reddit line.
+        _ => ("unknown", true),
+    };
+    CommandError::user(ErrorCode::RedditAuth, message, recoverable)
+        .with_param("reason", param)
+        .with_param("status", status.to_string())
 }
 
 impl From<ParseDestinationNameError> for CommandError {
@@ -502,21 +530,51 @@ mod tests {
 
     #[test]
     fn reddit_auth_refusals_are_user_facing_guidance() {
-        use curio_core::RedditAuthReason;
-        for reason in [
-            RedditAuthReason::CredentialsMissing,
-            RedditAuthReason::CredentialsRejected,
-            RedditAuthReason::TokenRevoked,
-            RedditAuthReason::TokenUnavailable,
+        // Each reason names the action that fixes it, and only a token
+        // problem is worth a Retry.
+        for (reason, param, recoverable) in [
+            (
+                RedditAuthReason::CredentialsMissing,
+                "credentials_missing",
+                false,
+            ),
+            (
+                RedditAuthReason::CredentialsRejected,
+                "credentials_rejected",
+                false,
+            ),
+            (RedditAuthReason::TokenRevoked, "token_revoked", true),
+            (
+                RedditAuthReason::TokenUnavailable,
+                "token_unavailable",
+                true,
+            ),
         ] {
             let error = CommandError::from(CoreError::RedditAuth {
                 reason,
                 status: 403,
             });
-            assert_eq!(error.kind, ErrorKind::User, "{reason:?}");
-            assert_eq!(error.code, ErrorCode::Network, "{reason:?}");
+            assert_eq!(
+                (error.kind, error.code, error.recoverable),
+                (ErrorKind::User, ErrorCode::RedditAuth, recoverable),
+                "{reason:?}"
+            );
+            assert_eq!(
+                error.params.get("reason").map(String::as_str),
+                Some(param),
+                "{reason:?}"
+            );
+            assert_eq!(
+                error.params.get("status").map(String::as_str),
+                Some("403"),
+                "{reason:?}"
+            );
             assert!(error.message.contains("HTTP 403"), "{reason:?}: {error}");
         }
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::RedditAuth).unwrap_or_default(),
+            "\"REDDIT_AUTH\""
+        );
     }
 
     #[test]

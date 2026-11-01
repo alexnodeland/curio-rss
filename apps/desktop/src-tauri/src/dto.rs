@@ -18,7 +18,7 @@ use std::path::Path;
 
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
-    Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewFeed,
+    Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::ListArticles;
@@ -161,22 +161,18 @@ impl From<Feed> for FeedDto {
 /// Args for adding a subscription.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct NewFeedDto {
-    /// Feed URL.
+    /// What to subscribe: a feed URL, or anything discovery understands
+    /// (a site, a bare domain, a page a rewrite rule knows).
     pub url: String,
     /// Optional user-supplied title.
     pub title: Option<String>,
     /// Initial tags.
     pub tags: Vec<String>,
-}
-
-impl From<NewFeedDto> for NewFeed {
-    fn from(new: NewFeedDto) -> Self {
-        Self {
-            url: new.url,
-            title: new.title,
-            tags: new.tags,
-        }
-    }
+    /// Resolve `url` through the core's validating discovery and subscribe
+    /// to the feed it finds — the default. `false` is the explicit
+    /// "subscribe anyway" escape hatch: `url` is only normalized (a bare
+    /// domain gains `https://`), never fetched.
+    pub validate: bool,
 }
 
 /// The longest article-text excerpt the list DTO carries. The extracted

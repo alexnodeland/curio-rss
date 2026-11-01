@@ -1,6 +1,7 @@
 /**
  * Source presets — turning what a user knows (a subreddit, a Mastodon handle,
- * a YouTube channel, "Hacker News") into the feed URL they don't. Pure URL
+ * a YouTube channel, a GitHub repository, a Kill the Newsletter inbox,
+ * "Hacker News") into the feed URL they don't. Pure URL
  * construction over well-known conventions: no new fetch paths, no APIs. The
  * one case that genuinely needs a fetch — resolving a YouTube @handle to its
  * channel id — is left to desktop discovery (which already fetches the page
@@ -13,7 +14,7 @@
 import type { MessageKey } from '$lib/i18n';
 
 /** The platforms this module can recognize from a typed/pasted string. */
-export type SourceKind = 'reddit' | 'mastodon' | 'youtube' | 'hackernews';
+export type SourceKind = 'reddit' | 'mastodon' | 'youtube' | 'github' | 'newsletter' | 'hackernews';
 
 /** A recognized source: the feed URL to subscribe to, plus a folder to suggest. */
 export interface DetectedSource {
@@ -40,6 +41,33 @@ export const HN_PRESETS: readonly HnPreset[] = [
     { id: 'best', labelKey: 'presets.hn.best', feedUrl: 'https://hnrss.org/bestcomments' },
 ] as const;
 
+/**
+ * Kill the Newsletter (kill-the-newsletter.com): a free email-to-feed bridge.
+ * Each inbox it creates is an address `<id>@kill-the-newsletter.com` whose
+ * mail becomes the Atom feed `https://kill-the-newsletter.com/feeds/<id>.xml`.
+ */
+export const KILL_THE_NEWSLETTER_URL = 'https://kill-the-newsletter.com/';
+
+/** First path segments on github.com that are site pages, not repo owners (mirrors the core rewrite). */
+const GITHUB_RESERVED = new Set([
+    'about',
+    'apps',
+    'collections',
+    'enterprise',
+    'explore',
+    'features',
+    'issues',
+    'login',
+    'marketplace',
+    'notifications',
+    'orgs',
+    'pricing',
+    'pulls',
+    'settings',
+    'sponsors',
+    'topics',
+]);
+
 /** Hosts whose `/@handle` path is NOT a Mastodon profile (they reuse the shape). */
 const NON_MASTODON_HOSTS = /(^|\.)(youtube\.com|youtu\.be|twitter\.com|x\.com|threads\.net)$/;
 
@@ -54,7 +82,26 @@ export function detectSource(input: string): DetectedSource | null {
     if (raw === '') {
         return null;
     }
-    return detectReddit(raw) ?? detectYouTube(raw) ?? detectMastodon(raw) ?? detectHackerNews(raw);
+    return (
+        detectReddit(raw) ??
+        detectYouTube(raw) ??
+        detectGitHub(raw) ??
+        detectNewsletter(raw) ??
+        detectMastodon(raw) ??
+        detectHackerNews(raw)
+    );
+}
+
+/**
+ * The hostname of what a user typed — scheme-less input (`example.com`)
+ * included, which `new URL` alone rejects. `null` when it is not a URL.
+ */
+export function hostOf(input: string): string | null {
+    const raw = input.trim();
+    if (raw === '') {
+        return null;
+    }
+    return parseUrl(raw.replace(/^\/+/, ''))?.hostname || null;
 }
 
 /** Parses `raw` as a URL, defaulting a missing scheme to https. */
@@ -119,6 +166,59 @@ function detectYouTube(raw: string): DetectedSource | null {
 
 function youtube(feedUrl: string): DetectedSource {
     return { kind: 'youtube', feedUrl, suggestedTag: 'Video/YouTube' };
+}
+
+/**
+ * A GitHub repository URL → its releases Atom feed (`/tags` → the tags feed);
+ * an already-built `releases.atom` / `tags.atom` URL passes through.
+ */
+function detectGitHub(raw: string): DetectedSource | null {
+    const parsed = parseUrl(raw);
+    if (parsed === null || !/^(www\.)?github\.com$/.test(parsed.hostname.toLowerCase())) {
+        return null;
+    }
+    // `/<owner>/<repo>[.git][/releases|/tags][.atom][/]`
+    const repoPath =
+        /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:\/(releases|tags)(?:\.atom)?)?\/?$/.exec(
+            parsed.pathname,
+        );
+    if (repoPath === null || GITHUB_RESERVED.has(repoPath[1].toLowerCase())) {
+        return null;
+    }
+    const [, owner, repo, feed = 'releases'] = repoPath;
+    return {
+        kind: 'github',
+        feedUrl: `https://github.com/${owner}/${repo}/${feed}.atom`,
+        suggestedTag: 'Dev/GitHub',
+    };
+}
+
+/**
+ * A Kill the Newsletter inbox — its email address or its feed URL — → the
+ * inbox's Atom feed.
+ */
+function detectNewsletter(raw: string): DetectedSource | null {
+    const inbox = /^(?:mailto:)?([a-z0-9]+)@kill-the-newsletter\.com$/i.exec(raw);
+    if (inbox) {
+        return newsletter(inbox[1]);
+    }
+    const parsed = parseUrl(raw);
+    if (
+        parsed === null ||
+        !/^(www\.)?kill-the-newsletter\.com$/.test(parsed.hostname.toLowerCase())
+    ) {
+        return null;
+    }
+    const feed = /^\/feeds\/([a-z0-9]+)(?:\.xml)?$/i.exec(parsed.pathname);
+    return feed ? newsletter(feed[1]) : null;
+}
+
+function newsletter(id: string): DetectedSource {
+    return {
+        kind: 'newsletter',
+        feedUrl: `https://kill-the-newsletter.com/feeds/${id}.xml`,
+        suggestedTag: 'Newsletters',
+    };
 }
 
 /** `@user@instance` or an `https://instance/@user` Mastodon profile URL. */

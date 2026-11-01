@@ -18,7 +18,12 @@ export const commands = {
 	/**
 	 *  Subscribes to a feed and kicks off its first fetch in the background —
 	 *  a new subscription must not sit empty until the next refresh cycle.
-	 *  Duplicate URLs are a storage error (user tier).
+	 *  By default the typed URL is resolved through the core's validating
+	 *  discovery first, so a homepage or a bare domain subscribes to its feed
+	 *  and a page with none is refused (`NO_FEED`) instead of becoming a
+	 *  subscription that fails on every refresh; `validate: false` is the
+	 *  explicit "subscribe anyway" (normalized only). A URL already subscribed
+	 *  — including one a homepage resolved to — is `ALREADY_SUBSCRIBED`.
 	 */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
 	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
@@ -619,6 +624,17 @@ export type ErrorCode =
 "NETWORK" | 
 /**  Feed/OPML bytes did not parse. */
 "PARSE" | 
+/**
+ *  Subscribe-time validation: the page answered but neither it nor
+ *  anything it declares (or the probes found) is a feed. The UI offers
+ *  an explicit "subscribe anyway".
+ */
+"NO_FEED" | 
+/**
+ *  The feed URL (as typed, or as a homepage resolved to) is already a
+ *  subscription.
+ */
+"ALREADY_SUBSCRIBED" | 
 /**  The storage layer failed. */
 "STORAGE" | 
 /**
@@ -878,12 +894,22 @@ export type MenuAction = {
 
 /**  Args for adding a subscription. */
 export type NewFeedDto = {
-	/**  Feed URL. */
+	/**
+	 *  What to subscribe: a feed URL, or anything discovery understands
+	 *  (a site, a bare domain, a page a rewrite rule knows).
+	 */
 	url: string,
 	/**  Optional user-supplied title. */
 	title: string | null,
 	/**  Initial tags. */
 	tags: string[],
+	/**
+	 *  Resolve `url` through the core's validating discovery and subscribe
+	 *  to the feed it finds — the default. `false` is the explicit
+	 *  "subscribe anyway" escape hatch: `url` is only normalized (a bare
+	 *  domain gains `https://`), never fetched.
+	 */
+	validate: boolean,
 };
 
 /**  Mirror of [`OpmlImportOutcome`]. */

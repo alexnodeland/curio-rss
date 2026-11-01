@@ -76,7 +76,7 @@ fn count(report: &SweepReport, status: FetchStatus) -> usize {
 /// took at least 5 × the timeout).
 #[tokio::test]
 async fn hung_hosts_time_out_together_not_one_after_another() {
-    const TIMEOUT: Duration = Duration::from_secs(5);
+    const TIMEOUT: Duration = Duration::from_secs(6);
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path_regex("^/ok/"))

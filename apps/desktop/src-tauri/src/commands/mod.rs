@@ -207,8 +207,11 @@ mod tests {
 
     /// Runs `body` with a capturing subscriber as this thread's default.
     /// The tests run on a current-thread runtime, so the command's
-    /// continuation after the blocking job — where it logs — is on this
-    /// thread too.
+    /// continuation after the blocking job — where the boundary logs — is
+    /// on this thread too. Records emitted on the `spawn_blocking` worker
+    /// are not captured: these tests pin the command boundary's own record,
+    /// not every record a failure produces (a panic's own record comes from
+    /// the panic hook, a writer-job panic's also from the writer).
     async fn capturing<F: std::future::Future<Output = ()>>(body: F) -> Capture {
         let capture = Capture::default();
         let subscriber = Registry::default().with(capture.clone());
@@ -241,8 +244,12 @@ mod tests {
         );
     }
 
+    /// The boundary reports a panicked job once, under the command's name.
+    /// The panic itself is a separate record (the panic hook installed with
+    /// the log, on the worker thread, with its location), so in the real
+    /// log a panic reads as the panic, then the command it failed.
     #[tokio::test]
-    async fn a_panicked_command_job_is_logged_once_as_internal() {
+    async fn a_panicked_command_job_is_reported_once_by_the_boundary() {
         let capture = capturing(async {
             let error = run_blocking("integrity_check", || -> Result<(), CommandError> {
                 panic!("a bug in the job")
@@ -303,19 +310,29 @@ mod tests {
         assert!(capture.errors().is_empty(), "{:?}", capture.errors());
     }
 
-    /// Every `#[tauri::command]` names itself exactly once, in the call
-    /// that logs its internal failures — so none is silent, none logs
-    /// twice, and none logs under another command's name.
+    /// Every `.rs` file under `dir`, recursively.
+    fn rust_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_sources(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Every `#[tauri::command]` — wherever in the crate it is defined —
+    /// names itself exactly once, in the call that logs its internal
+    /// failures — so none is silent, none logs twice, and none logs under
+    /// another command's name.
     #[test]
     fn every_command_routes_its_result_through_the_log_under_its_own_name() {
         let root =
             std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
                 .join("src");
-        let mut files: Vec<_> = std::fs::read_dir(root.join("commands"))
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect();
-        files.push(root.join("notify.rs"));
+        let mut files = Vec::new();
+        rust_sources(&root, &mut files);
         let mut checked = 0;
         for file in files {
             let source = std::fs::read_to_string(&file).unwrap();

@@ -82,9 +82,20 @@ onMount(() => {
             autoCheck: prefsStore.updatesAutoCheck,
             autoInstall: prefsStore.updatesAutoInstall,
             onAvailable: (version) =>
-                toastStore.showToast(t('updates.available', { version }), 'info'),
+                toastStore.showToast(t('updates.available', { version }), 'info', {
+                    action: {
+                        label: t('updates.openSettings'),
+                        run: () => layoutStore.openModal('settings'),
+                    },
+                }),
         });
     })();
+
+    // A deferred commit still in its undo window (an unsubscribe) goes ahead
+    // when the window goes away, rather than being silently lost.
+    const settle = (): void => toastStore.settleAll();
+    window.addEventListener('pagehide', settle);
+    teardowns.push(() => window.removeEventListener('pagehide', settle));
 
     return () => {
         unmounted = true;

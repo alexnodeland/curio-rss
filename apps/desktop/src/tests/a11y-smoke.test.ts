@@ -69,10 +69,24 @@ describe('accessibility smoke', () => {
         expect(violations, violations.join('\n')).toEqual([]);
     });
 
+    it('the empty toast outlet (live regions only) has no axe violations', async () => {
+        const { container } = render(Toasts);
+        expect(container.querySelectorAll('[aria-live]')).toHaveLength(2);
+        const violations = await auditViolations(container);
+        expect(violations, violations.join('\n')).toEqual([]);
+    });
+
     it('the toast outlet has no axe violations', async () => {
         const { container } = render(Toasts);
         toastStore.showToast('note saved', 'success', 0);
-        toastStore.showToast('fetch failed', 'error', 0);
+        toastStore.showToast('fetch failed', 'error', {
+            durationMs: 0,
+            action: { label: 'Retry', run: vi.fn() },
+        });
+        toastStore.showToast('Marked 3 read', 'success', {
+            durationMs: 0,
+            action: { label: 'Undo', run: vi.fn() },
+        });
         await tick();
         const violations = await auditViolations(container);
         expect(violations, violations.join('\n')).toEqual([]);

@@ -1,9 +1,14 @@
 <script lang="ts">
 /**
  * The toast outlet — renders `toastStore.toasts` (queued by the action layer
- * on command failures, and by anything else that needs a transient notice).
- * Errors interrupt as `role="alert"` (assertive); everything else announces
- * politely as `role="status"`. Every toast is dismissible.
+ * on command failures, and by anything else that needs a notice), each with
+ * its optional action button (Undo / Retry) and a close button.
+ *
+ * Announcements ride two permanent, visually hidden live regions mounted with
+ * the outlet — polite for everything, assertive for errors — that exist
+ * before the first toast; a node that mounts already carrying a live role is
+ * often not read (VoiceOver), so the toast cards themselves carry none.
+ * Hovering or focusing the stack pauses every dismiss timer (WCAG 2.2.1).
  */
 import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
@@ -29,14 +34,41 @@ function reducedMotion(): boolean {
 const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
 </script>
 
-<div class="toasts">
+<div class="sr-only" role="status" aria-live="polite" data-live-region="polite">
+    {#each toastStore.politeAnnouncements as line (line.id)}
+        <p>{line.text}</p>
+    {/each}
+</div>
+<div class="sr-only" role="alert" aria-live="assertive" data-live-region="assertive">
+    {#each toastStore.assertiveAnnouncements as line (line.id)}
+        <p>{line.text}</p>
+    {/each}
+</div>
+
+<!-- Pointer or focus on the stack holds every timer; leaving resumes it. A
+     labelled landmark, so a screen-reader user can jump to an Undo / Retry. -->
+<div
+    class="toasts"
+    role="region"
+    aria-label={t('toast.region')}
+    onmouseenter={() => toastStore.pause()}
+    onmouseleave={() => toastStore.resume()}
+    onfocusin={() => toastStore.pause()}
+    onfocusout={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node && event.currentTarget.contains(next))) {
+            toastStore.resume();
+        }
+    }}
+>
     {#each toastStore.toasts as toast (toast.id)}
-        <div
-            class="toast toast-{toast.tone}"
-            role={toast.tone === 'error' ? 'alert' : 'status'}
-            out:fly={leave}
-        >
+        <div class="toast toast-{toast.tone}" out:fly={leave}>
             <span class="toast-message">{toast.message}</span>
+            {#if toast.action !== undefined}
+                <button class="toast-action" onclick={() => toastStore.runAction(toast.id)}
+                    >{toast.action.label}</button
+                >
+            {/if}
             <button
                 class="toast-dismiss"
                 onclick={() => toastStore.dismissToast(toast.id)}
@@ -109,6 +141,23 @@ const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
         flex: 1 1 auto;
         min-width: 0;
         overflow-wrap: break-word;
+    }
+
+    .toast-action {
+        flex: 0 0 auto;
+        padding: var(--space-1) var(--space-2);
+        margin-block: calc(-1 * var(--space-1));
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--accent);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        white-space: nowrap;
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .toast-action:hover {
+        background: var(--hover);
     }
 
     .toast-dismiss {

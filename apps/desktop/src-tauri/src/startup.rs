@@ -269,6 +269,9 @@ pub fn install(app: &AppHandle, core: CoreHandle) -> Result<(), StartupFailure> 
         failure
     })?;
     let core: SharedCore = Arc::new(core);
+    // The menu was built in English before the profile opened; now the
+    // chosen language is known.
+    crate::menu::apply_locale(app, crate::l10n::Locale::from_settings(&core));
     app.manage(Arc::clone(&core));
     app.manage(image_cache::ImageCache::new(
         images,

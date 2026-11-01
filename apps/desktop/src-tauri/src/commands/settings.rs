@@ -10,11 +10,12 @@ use std::sync::Arc;
 
 use curio_core::CoreHandle;
 use curio_core::storage::Storage;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
 use crate::dto::AppInfoDto;
 use crate::error::CommandError;
+use crate::l10n::{LOCALE_KEY, Locale};
 
 /// Reads a setting.
 #[tauri::command]
@@ -27,16 +28,29 @@ pub async fn get_setting(
     run_blocking("get_setting", move || get_setting_impl(&core, &key)).await
 }
 
-/// Writes a setting.
+/// Writes a setting. A new `ui.locale` also rebuilds the native menu in
+/// that language (the notification body reads it fresh each time).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_setting(
+    app: AppHandle,
     core: State<'_, SharedCore>,
     key: String,
     value: String,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking("set_setting", move || set_setting_impl(&core, &key, &value)).await
+    let locale = menu_locale_change(&key, &value);
+    run_blocking("set_setting", move || set_setting_impl(&core, &key, &value)).await?;
+    if let Some(locale) = locale {
+        crate::menu::apply_locale(&app, locale);
+    }
+    Ok(())
+}
+
+/// The locale to rebuild the menu in, when `key` is the locale setting. An
+/// unknown id falls back to English, as the frontend's catalogs do.
+fn menu_locale_change(key: &str, value: &str) -> Option<Locale> {
+    (key == LOCALE_KEY).then(|| Locale::parse(value).unwrap_or_default())
 }
 
 /// Version / profile / schema facts for the about box and doctor panel.
@@ -109,5 +123,12 @@ mod tests {
         assert_eq!(info.version, CoreHandle::version());
         assert_eq!(info.db_schema_version, info.schema_supported);
         assert!(info.profile_dir.ends_with("profile"));
+    }
+
+    #[test]
+    fn only_the_locale_setting_rebuilds_the_menu() {
+        assert_eq!(menu_locale_change("ui.locale", "de"), Some(Locale::De));
+        assert_eq!(menu_locale_change("ui.locale", "xx"), Some(Locale::En));
+        assert_eq!(menu_locale_change("ui.theme", "de"), None);
     }
 }

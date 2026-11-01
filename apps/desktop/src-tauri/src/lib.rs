@@ -20,6 +20,7 @@ pub mod error;
 pub mod events;
 pub mod image_cache;
 pub mod ipc_policy;
+pub mod l10n;
 pub mod logging;
 pub mod menu;
 pub mod notify;

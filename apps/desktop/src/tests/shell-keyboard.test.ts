@@ -14,7 +14,7 @@ import { PREFETCH_SETTLE_MS } from '$lib/state/prefetch';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Page from '../routes/+page.svelte';
 import {
     type IpcHarness,
@@ -160,15 +160,16 @@ describe('shell keyboard wiring', () => {
         expect(harness.callsFor('get_article')).toEqual([{ articleId: 500 }]);
         // Once the selection has settled: the reader's neighbour prefetch (the
         // top row has no previous neighbour) — and only the selection is marked.
-        await new Promise((resolve) => {
-            setTimeout(resolve, PREFETCH_SETTLE_MS * 2);
-        });
-        await flushIpc();
-        expect(harness.callsFor('get_article')).toEqual([
-            { articleId: 500 },
-            { articleId: 499 },
-            { articleId: 498 },
-        ]);
+        await vi.waitFor(
+            () => {
+                expect(harness?.callsFor('get_article')).toEqual([
+                    { articleId: 500 },
+                    { articleId: 499 },
+                    { articleId: 498 },
+                ]);
+            },
+            { timeout: PREFETCH_SETTLE_MS * 20, interval: PREFETCH_SETTLE_MS / 4 },
+        );
         expect(harness.callsFor('mark_read')).toEqual([{ articleId: 500, read: true }]);
         expect(getByRole('button', { name: 'Open in browser' })).toBeTruthy();
     });

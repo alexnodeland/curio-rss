@@ -16,7 +16,7 @@ import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
     type Responder,
@@ -284,6 +284,20 @@ describe('ReaderPane', () => {
     });
 
     describe('j/k: stable chrome and neighbour prefetch', () => {
+        // The prefetch settle delay runs on a fake clock, so "within the delay"
+        // and "after it" never depend on how loaded the test machine is.
+        beforeEach(() => {
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        /** Lets pending IPC replies and effects land, without moving the clock. */
+        async function flush(): Promise<void> {
+            await vi.advanceTimersByTimeAsync(0);
+        }
         /** A loaded window of ten rows, ids 110 down to 101. */
         const ROWS = Array.from({ length: 10 }, (_, i) =>
             articleSummaryFixture({
@@ -314,15 +328,13 @@ describe('ReaderPane', () => {
         async function loadWindow(): Promise<void> {
             articlesStore.filters = ALL_ARTICLES;
             void articlesStore.current; // touch to start the list fetch
-            await flushIpc();
+            await flush();
         }
 
         /** Waits out the prefetch settle delay, then lets the fetches land. */
         async function settle(): Promise<void> {
-            await new Promise((resolve) => {
-                setTimeout(resolve, PREFETCH_SETTLE_MS * 2);
-            });
-            await flushIpc();
+            await vi.advanceTimersByTimeAsync(PREFETCH_SETTLE_MS);
+            await flush();
         }
 
         function fetchedIds(): number[] {
@@ -341,7 +353,7 @@ describe('ReaderPane', () => {
             await loadWindow();
             selectionStore.selectedArticleId = 107;
             const { container, getByRole, getByText, queryByText } = render(ReaderPane);
-            await flushIpc();
+            await flush();
 
             // Body still in flight: the chrome is up, the header comes from the
             // list row, and the body is a skeleton — not a bare "Loading…".
@@ -359,7 +371,7 @@ describe('ReaderPane', () => {
             ).toBe(true);
 
             release(articleFixture({ id: 107, title: 'Row 107', content_html: '<p>Landed</p>' }));
-            await flushIpc();
+            await flush();
 
             expect(getByText('Landed')).toBeTruthy();
             expect(container.querySelector('.body-skeleton')).toBeNull();
@@ -377,7 +389,7 @@ describe('ReaderPane', () => {
             await loadWindow();
             selectionStore.selectedArticleId = ROWS[4].id; // 106
             render(ReaderPane);
-            await flushIpc();
+            await flush();
             // Only the selection until it has sat still for the settle delay.
             expect(fetchedIds()).toEqual([106]);
             await settle();
@@ -434,7 +446,7 @@ describe('ReaderPane', () => {
             ]);
 
             selectionStore.selectedArticleId = null;
-            await flushIpc();
+            await flush();
             expect(articlePrefetcher.owned).toEqual([]);
         });
 
@@ -451,9 +463,9 @@ describe('ReaderPane', () => {
             // Key repeat: two steps onto cached rows, each well inside the
             // settle delay of the one before.
             selectionStore.selectNextArticle(); // → 108, cached
-            await flushIpc();
+            await flush();
             selectionStore.selectNextArticle(); // → 107, cached
-            await flushIpc();
+            await flush();
 
             expect(getByText('Body of 107')).toBeTruthy();
             // No fetch for the outer rows the burst only passed by…
@@ -487,10 +499,10 @@ describe('ReaderPane', () => {
             // stops returning it, so 106 shifts into slot 3 and the selection is
             // no longer in the window.
             await fireEvent.click(getByRole('button', { name: 'Archive' }));
-            await flushIpc();
+            await flush();
             rows = ROWS.filter((row) => row.id !== 107);
             await events.articlesChanged.emit({ feed_id: null });
-            await flushIpc();
+            await flush();
             expect(selectionStore.selectedIndex).toBe(-1);
             await settle();
 

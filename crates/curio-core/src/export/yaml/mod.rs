@@ -27,8 +27,8 @@
 //!   rather than misread — the one difference Curio's own output can hit
 //!   (a multi-line string that also carries one, #249);
 //! - a block scalar header alone at column 0 on the line after its key
-//!   (`key:\n|\n  text`) is refused;
-//! - a lone `-` as a flow collection entry (`[-]`) is refused;
+//!   (`key:\n|\n  text`) is refused (#268);
+//! - a lone `-` as a flow collection entry (`[-]`) is refused (#268);
 //! - a few documents libyaml refused now parse (YAML 1.2 is laxer about,
 //!   e.g., a TAB before a top-level plain scalar).
 

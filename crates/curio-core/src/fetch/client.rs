@@ -2,19 +2,26 @@
 //! manual redirect handling, size caps and politeness built in. rustls is the
 //! default TLS stack; a per-host override may opt into the platform-native
 //! stack (reddit.com, whose CDN fingerprint-blocks rustls).
+//!
+//! Connections are pooled (see `pool.rs`, which also owns the SSRF screen):
+//! one reqwest client per (TLS backend, SSRF policy) for the life of the
+//! [`PolicedClient`].
 
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Mutex;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use reqwest::Method;
 use reqwest::header::{
     ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION,
-    RETRY_AFTER,
+    RETRY_AFTER, USER_AGENT,
 };
-use url::{Host, Url};
+use url::Url;
 
-use super::{FetchError, FetchRequest, FetchResponse, policy};
+use super::pool::Pools;
+use super::resolve::{DnsLookup, SystemLookup};
+use super::{FetchError, FetchRequest, FetchResponse};
 
 /// Default streaming response-body cap: 10 MB.
 pub const DEFAULT_MAX_BODY_BYTES: u64 = 10 * 1024 * 1024;
@@ -70,7 +77,9 @@ pub struct FetchConfig {
     pub accept: String,
     /// Per-host policy overrides, matched by host suffix (first match wins).
     pub host_overrides: Vec<HostOverride>,
-    /// TCP connect timeout.
+    /// TCP connect timeout. It also bounds every DNS lookup, which
+    /// otherwise runs outside both timeouts — a hung resolver fails the
+    /// fetch with [`FetchError::Dns`] instead of stalling it forever.
     pub connect_timeout: Duration,
     /// Total per-request timeout (covers reading the body).
     pub request_timeout: Duration,
@@ -146,6 +155,8 @@ pub struct PolicedClient {
     config: FetchConfig,
     /// Per-host next-allowed-request instants (politeness reservations).
     next_allowed: Mutex<HashMap<String, Instant>>,
+    /// The SSRF screen and the pooled reqwest clients behind it.
+    pools: Pools,
 }
 
 impl Default for PolicedClient {
@@ -155,12 +166,29 @@ impl Default for PolicedClient {
 }
 
 impl PolicedClient {
-    /// A client with the given policy configuration.
+    /// A client with the given policy configuration, resolving through the
+    /// platform resolver.
     #[must_use]
     pub fn new(config: FetchConfig) -> Self {
+        Self::with_lookup(config, Arc::new(SystemLookup))
+    }
+
+    /// A client resolving domain names through `lookup` instead of the
+    /// platform resolver — the seam hermetic tests use to drive the SSRF
+    /// screen, multi-address fallback and the lookup timeout. The policy is
+    /// identical: every address `lookup` returns is screened.
+    #[must_use]
+    pub fn with_lookup(config: FetchConfig, lookup: Arc<dyn DnsLookup>) -> Self {
+        let pools = Pools::new(
+            lookup,
+            config.trusted_addrs.clone(),
+            config.connect_timeout,
+            config.request_timeout,
+        );
         Self {
             config,
             next_allowed: Mutex::new(HashMap::new()),
+            pools,
         }
     }
 
@@ -207,8 +235,9 @@ impl PolicedClient {
         let mut all_permanent = true;
 
         loop {
-            let pinned = self
-                .resolve_and_check(&url, request.allow_private_network)
+            let screened = self
+                .pools
+                .screen(&url, request.allow_private_network)
                 .await?;
             let host_override = self.override_for(&url);
             self.be_polite(&url, host_override).await;
@@ -217,9 +246,10 @@ impl PolicedClient {
                 .and_then(|entry| entry.user_agent.as_deref())
                 .unwrap_or(self.config.user_agent.as_str());
             let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
-            let client = self.build_hop_client(&url, pinned, user_agent, native_tls)?;
-            let mut req = client
-                .get(url.clone())
+            let mut req = self
+                .pools
+                .request(screened, native_tls, Method::GET)?
+                .header(USER_AGENT, user_agent)
                 .header(ACCEPT, self.config.accept.as_str());
             if let Some(host_override) = host_override {
                 for (name, value) in &host_override.extra_headers {
@@ -317,7 +347,7 @@ impl PolicedClient {
         form: &[(&str, &str)],
     ) -> Result<FetchResponse, FetchError> {
         let url = screen_url(raw_url)?;
-        let pinned = self.resolve_and_check(&url, false).await?;
+        let screened = self.pools.screen(&url, false).await?;
         let host_override = self.override_for(&url);
         self.be_polite(&url, host_override).await;
 
@@ -325,9 +355,10 @@ impl PolicedClient {
             .and_then(|entry| entry.user_agent.as_deref())
             .unwrap_or(self.config.user_agent.as_str());
         let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
-        let client = self.build_hop_client(&url, pinned, user_agent, native_tls)?;
-        let mut req = client
-            .post(url.clone())
+        let mut req = self
+            .pools
+            .request(screened, native_tls, Method::POST)?
+            .header(USER_AGENT, user_agent)
             .basic_auth(basic_auth.0, Some(basic_auth.1))
             .form(form);
         if let Some(host_override) = host_override {
@@ -361,93 +392,6 @@ impl PolicedClient {
             retry_after,
             body,
         })
-    }
-
-    /// Resolves the URL's host (DNS first for domain names) and applies
-    /// the address policy to *every* resolved address — one private
-    /// record poisons the lot, so split-horizon/rebinding games with
-    /// mixed record sets cannot slip through. Returns the address to pin
-    /// the connection to for domain-name hosts.
-    async fn resolve_and_check(
-        &self,
-        url: &Url,
-        allow_private: bool,
-    ) -> Result<Option<SocketAddr>, FetchError> {
-        let host = url.host().ok_or_else(|| FetchError::NoHost {
-            url: url.to_string(),
-        })?;
-        let port = url.port_or_known_default().unwrap_or(80);
-        match host {
-            Host::Ipv4(v4) => {
-                self.check_addr(url, IpAddr::V4(v4), allow_private)?;
-                Ok(None)
-            }
-            Host::Ipv6(v6) => {
-                self.check_addr(url, IpAddr::V6(v6), allow_private)?;
-                Ok(None)
-            }
-            Host::Domain(domain) => {
-                let addrs: Vec<SocketAddr> = tokio::net::lookup_host((domain, port))
-                    .await
-                    .map_err(|err| FetchError::Dns {
-                        host: domain.to_owned(),
-                        message: err.to_string(),
-                    })?
-                    .collect();
-                if addrs.is_empty() {
-                    return Err(FetchError::DnsNoAddresses {
-                        host: domain.to_owned(),
-                    });
-                }
-                for addr in &addrs {
-                    self.check_addr(url, addr.ip(), allow_private)?;
-                }
-                Ok(addrs.first().copied())
-            }
-        }
-    }
-
-    fn check_addr(&self, url: &Url, addr: IpAddr, allow_private: bool) -> Result<(), FetchError> {
-        if allow_private || self.config.trusted_addrs.contains(&addr) {
-            return Ok(());
-        }
-        if policy::is_public_address(addr) {
-            return Ok(());
-        }
-        Err(FetchError::PrivateAddress {
-            host: url.host_str().unwrap_or_default().to_owned(),
-            addr,
-        })
-    }
-
-    /// One reqwest client per hop: redirects disabled (we follow them
-    /// ourselves), and for domain-name hosts the connection is pinned to
-    /// the address that was just validated — closing the DNS-rebinding
-    /// window between the check and the connect.
-    fn build_hop_client(
-        &self,
-        url: &Url,
-        pinned: Option<SocketAddr>,
-        user_agent: &str,
-        native_tls: bool,
-    ) -> Result<reqwest::Client, FetchError> {
-        // rustls is the deliberate default for every host; a per-host override
-        // (reddit.com) opts into the platform-native stack to dodge a
-        // ClientHello-fingerprint block. Both backends are compiled in.
-        let tls = if native_tls {
-            reqwest::Client::builder().use_native_tls()
-        } else {
-            reqwest::Client::builder().use_rustls_tls()
-        };
-        let mut builder = tls
-            .user_agent(user_agent)
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(self.config.connect_timeout)
-            .timeout(self.config.request_timeout);
-        if let (Some(addr), Some(domain)) = (pinned, url.domain()) {
-            builder = builder.resolve(domain, addr);
-        }
-        builder.build().map_err(|err| map_reqwest(url, &err))
     }
 
     /// Streams the body, enforcing the size cap (a lying or absent
@@ -548,7 +492,7 @@ fn header_string(response: &reqwest::Response, name: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
+pub(super) fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
     if err.is_timeout() {
         FetchError::Timeout {
             url: url.to_string(),

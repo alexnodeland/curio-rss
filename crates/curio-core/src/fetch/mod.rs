@@ -8,7 +8,12 @@
 //!   address is checked against [`policy::is_public_address`] —
 //!   loopback, RFC 1918, link-local, CGNAT, ULA, multicast and friends are
 //!   rejected unless the per-feed `allow_private_network` flag is set
-//!   (explicit config edit only, never settable from feed content).
+//!   (explicit config edit only, never settable from feed content). The
+//!   connection dials only the screened addresses (all of them, so a dead
+//!   first record falls back to the next), and the lookup is bounded by
+//!   the connect timeout.
+//! - **Pooled connections**: one reqwest client per TLS backend and SSRF
+//!   policy, so keep-alive and TLS sessions are reused across requests.
 //! - **Redirect re-validation**: redirects are followed manually (cap
 //!   [`FetchConfig::max_redirects`], default 5) and every hop re-runs the
 //!   full scheme + DNS + address validation.
@@ -22,8 +27,11 @@
 
 mod client;
 pub mod policy;
+mod pool;
+mod resolve;
 
 pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient, screen_url};
+pub use resolve::{DnsLookup, LookupFuture, SystemLookup};
 
 use std::net::IpAddr;
 

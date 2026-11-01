@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<opml version="1.1">
+  <head><title>Abonnements exportés</title></head>
+  <body>
+    <outline text="Français">
+      <outline type="rss" text="Le Café du Commerce" xmlUrl="https://cafe.example.fr/rss"/>
+      <outline type="rss" text="Grüße aus München" xmlUrl="https://muenchen.example.de/feed"/>
+    </outline>
+    <outline type="rss" text="Señor ¿Qué?" xmlUrl="https://senor.example.es/feed.xml"/>
+  </body>
+</opml>

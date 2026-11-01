@@ -318,6 +318,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'import.running': 'Importazione…',
     'import.done':
         'Importati {feeds, plural, one {# feed} other {# feed}} e {articles, plural, one {# articolo} other {# articoli}}, saltati {skipped, plural, other {#}}',
+    'import.doneWithInvalid':
+        'Importati {feeds, plural, one {# feed} other {# feed}} e {articles, plural, one {# articolo} other {# articoli}}, saltati {skipped, plural, other {#}}; {invalid, plural, one {# voce non valida ignorata} other {# voci non valide ignorate}}',
     'import.hint':
         'OPML importa le iscrizioni ai feed; i CSV di Pocket, Instapaper e Readwise importano gli articoli salvati come elementi da leggere dopo con i loro tag.',
     'doctor.title': 'Diagnosi del database',

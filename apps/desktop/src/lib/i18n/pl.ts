@@ -322,6 +322,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'import.running': 'Importowanie…',
     'import.done':
         'Zaimportowano {feeds, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanałów}} i {articles, plural, one {# artykuł} few {# artykuły} many {# artykułów} other {# artykułów}}, pominięto {skipped, plural, other {#}}',
+    'import.doneWithInvalid':
+        'Zaimportowano {feeds, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanałów}} i {articles, plural, one {# artykuł} few {# artykuły} many {# artykułów} other {# artykułów}}, pominięto {skipped, plural, other {#}}; zignorowano {invalid, plural, one {# nieprawidłowy wpis} few {# nieprawidłowe wpisy} many {# nieprawidłowych wpisów} other {# nieprawidłowego wpisu}}',
     'import.hint':
         'OPML importuje subskrypcje kanałów; pliki CSV z Pocket, Instapaper i Readwise importują zapisane artykuły jako pozycje do przeczytania wraz z ich tagami.',
     'doctor.title': 'Doktor bazy danych',

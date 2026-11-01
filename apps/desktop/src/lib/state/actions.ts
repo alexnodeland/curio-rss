@@ -212,15 +212,28 @@ export async function importFromFile(source: ImportSourceDto = 'opml'): Promise<
             toastCommandError(result.error);
             return;
         }
-        const { feeds_added, articles_added, feeds_skipped, articles_skipped } = result.data;
-        toastStore.showToast(
-            t('import.done', {
-                feeds: feeds_added,
-                articles: articles_added,
-                skipped: feeds_skipped + articles_skipped,
-            }),
-            'success',
-        );
+        const {
+            feeds_added,
+            articles_added,
+            feeds_skipped,
+            articles_skipped,
+            feeds_invalid,
+            articles_invalid,
+        } = result.data;
+        const counts = {
+            feeds: feeds_added,
+            articles: articles_added,
+            skipped: feeds_skipped + articles_skipped,
+        };
+        // Unusable rows (a broken outline, a webcal: or junk URL) never fail
+        // the import, but they are not silent either: the toast says how many
+        // were left out, as a warning rather than a success.
+        const invalid = feeds_invalid + articles_invalid;
+        if (invalid > 0) {
+            toastStore.showToast(t('import.doneWithInvalid', { ...counts, invalid }), 'warning');
+        } else {
+            toastStore.showToast(t('import.done', counts), 'success');
+        }
     } catch {
         toastStore.showToast(t('app.error.internal'), 'error');
     }

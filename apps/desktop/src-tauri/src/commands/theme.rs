@@ -38,8 +38,10 @@ pub async fn read_text_file(
 
 // ------------------------------------------------------------------ impls
 
+/// Atomic (temp file + rename): a failed write never truncates the file
+/// the user is overwriting.
 fn write_text_impl(path: &Path, contents: &str) -> Result<(), CommandError> {
-    std::fs::write(path, contents).map_err(|error| {
+    curio_core::export::write_file_atomic(path, contents.as_bytes()).map_err(|error| {
         CommandError::user(
             ErrorCode::Io,
             format!("could not write the file: {error}"),

@@ -730,6 +730,13 @@ export type FetchStatusDto =
 /**  Anything else (recorded, not raised). */
 "error";
 
+/**  Mirror of [`ImportKind`] — what a dropped import row would have been. */
+export type ImportKindDto = 
+/**  A feed subscription. */
+"feed" | 
+/**  A saved article. */
+"article";
+
 /**
  *  Mirror of [`ImportOutcome`] — feeds and articles counted separately so
  *  the UI can report "N feeds, M articles" without guessing.
@@ -739,10 +746,38 @@ export type ImportOutcomeDto = {
 	feeds_added: number,
 	/**  Feeds skipped (already subscribed). */
 	feeds_skipped: number,
+	/**  Feed rows dropped: unreadable, or with an unusable URL. */
+	feeds_invalid: number,
 	/**  Articles saved as feedless read-later items. */
 	articles_added: number,
 	/**  Articles skipped (already imported). */
 	articles_skipped: number,
+	/**  Article rows dropped: unreadable, or with an unusable URL. */
+	articles_invalid: number,
+	/**
+	 *  Why rows were dropped (the first
+	 *  [`curio_core::MAX_REJECTED_DETAILS`]; the counters stay exact).
+	 */
+	rejected: ImportRejectionDto[],
+};
+
+/**  Mirror of [`RejectReason`] — why an import row was dropped. */
+export type ImportRejectReasonDto = 
+/**  The row itself could not be read. */
+"malformed" | 
+/**  The URL is not a parseable absolute URL. */
+"invalid_url" | 
+/**  The URL is not http(s). */
+"unsupported_scheme";
+
+/**  Mirror of [`Rejected`] — one dropped import row and why. */
+export type ImportRejectionDto = {
+	/**  Feed or article. */
+	kind: ImportKindDto,
+	/**  Why it was dropped. */
+	reason: ImportRejectReasonDto,
+	/**  The offending value (the raw URL) or a description of the damage. */
+	detail: string,
 };
 
 /**  Mirror of [`ImportSource`] — the refugee-import format the user picked. */
@@ -857,6 +892,8 @@ export type OpmlImportOutcomeDto = {
 	added: number,
 	/**  Feeds skipped (already subscribed). */
 	skipped: number,
+	/**  Outlines dropped as unreadable or with an unusable URL. */
+	invalid: number,
 };
 
 /**

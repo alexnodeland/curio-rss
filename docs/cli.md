@@ -273,6 +273,22 @@ curio import subscriptions.opml --from opml         # --from defaults to opml
 curio import pocket-export.csv   --from pocket       # Pocket / Instapaper / Readwise CSV
 ```
 
+Imports are lenient about messy real-world exports. Files up to 50 MiB are
+read in whatever encoding they were written in (a byte-order mark, an XML
+`encoding="…"` declaration, BOM-less UTF-16 as Excel writes it, otherwise
+UTF-8 with a Windows-1252 fallback). OPML with HTML entities (`&nbsp;`,
+`&eacute;`) or bare `&` in titles imports; an outline that cannot be read at
+all is skipped, not fatal. Every URL is trimmed, `feed://…` / `feed:https://…`
+become `https://…`, anything that is not `http(s)` (`webcal:`, `javascript:`)
+is dropped, and duplicates are matched on the normalized URL — so re-importing
+a file adds nothing. Dropped rows are counted (`… N invalid`), each named on
+stderr, by both `curio import` and `curio opml import`; with `--json` they
+come back as `feeds_invalid` / `articles_invalid` (`invalid` for `curio opml
+import`) plus a `rejected` list of `{kind, reason, detail}` (`reason`:
+`malformed`, `invalid_url` or `unsupported_scheme`) — the first 100 rows,
+while the counts stay exact. `curio opml export` replaces its
+target atomically, so a failed write never truncates the previous file.
+
 **Per-host fetch policy.** A few hosts fingerprint-block the honest `curio`
 User-Agent + rustls TLS. `curio-core` carries a built-in per-host override
 (matched by host suffix): `reddit.com` (and `*.reddit.com`) automatically get

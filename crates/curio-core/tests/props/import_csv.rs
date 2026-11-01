@@ -89,8 +89,10 @@ proptest! {
 
     #[test]
     fn generated_pocket_exports_round_trip(rows in rows()) {
-        let items = import::parse(ImportSource::PocketCsv, &pocket_csv(&rows))
+        let parsed = import::parse(ImportSource::PocketCsv, &pocket_csv(&rows))
             .map_err(|err| TestCaseError::fail(err.to_string()))?;
+        prop_assert!(parsed.rejected.is_empty(), "rejected {:?}", parsed.rejected);
+        let items = parsed.items;
         prop_assert_eq!(items.len(), rows.len());
         for (item, row) in items.iter().zip(&rows) {
             prop_assert_eq!(item.kind, ImportKind::Article);

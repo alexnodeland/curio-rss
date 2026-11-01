@@ -1066,6 +1066,7 @@ dependencies = [
  "directories",
  "dom_smoothie",
  "ego-tree",
+ "encoding_rs",
  "feed-rs",
  "fs4",
  "htmd",

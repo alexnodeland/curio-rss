@@ -306,6 +306,8 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'import.running': '匯入緊…',
     'import.done':
         '已匯入 {feeds, plural, other {# 個訂閱源}}同 {articles, plural, other {# 篇文章}}，跳過 {skipped, plural, other {#}} 個',
+    'import.doneWithInvalid':
+        '已匯入 {feeds, plural, other {# 個訂閱源}}同 {articles, plural, other {# 篇文章}}，跳過 {skipped, plural, other {#}} 個，略過 {invalid, plural, other {# 個無效項目}}',
     'import.hint':
         'OPML 會帶入訂閱源；Pocket、Instapaper 同 Readwise 嘅 CSV 會將收藏文章連同標籤帶入，成為稍後睇項目。',
     'doctor.title': '資料庫醫生',

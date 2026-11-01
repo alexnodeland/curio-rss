@@ -461,6 +461,73 @@ fn pocket_csv_imports_articles_as_read_later_via_the_cli() {
     );
 }
 
+#[test]
+fn messy_import_files_import_and_report_their_bad_rows() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    // A UTF-16LE Excel CSV: decoded, and its two unusable URLs reported.
+    let csv = repo_root().join("fixtures/import/pocket-utf16le.csv");
+    let imported = stdout_json(
+        &curio(profile.path())
+            .args(["import", "--from", "pocket"])
+            .arg(&csv)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(imported["articles_added"], 3);
+    assert_eq!(imported["articles_invalid"], 2);
+    assert_eq!(imported["rejected"][0]["kind"], "article");
+    assert_eq!(imported["rejected"][0]["reason"], "unsupported_scheme");
+    assert_eq!(imported["rejected"][0]["detail"], "javascript:alert(1)");
+    assert_eq!(imported["rejected"][1]["reason"], "invalid_url");
+
+    // HTML entities and a broken outline: every usable feed subscribes,
+    // the bad ones are counted on stdout and named on stderr.
+    let opml = repo_root().join("fixtures/opml/messy-entities.opml");
+    curio(profile.path())
+        .args(["opml", "import"])
+        .arg(&opml)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "imported 5 feed(s), skipped 0 already subscribed, 2 invalid",
+        ))
+        .stderr(predicate::str::contains(
+            "skipped invalid entry (unsupported scheme): webcal://calendar.example/events.ics",
+        ));
+    let again = stdout_json(
+        &curio(profile.path())
+            .args(["opml", "import"])
+            .arg(&opml)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(again["added"], 0);
+    assert_eq!(again["skipped"], 5);
+    assert_eq!(again["invalid"], 2);
+    let rejected = again["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 2);
+    assert!(rejected.iter().all(|row| row["kind"] == "feed"));
+    assert!(rejected.iter().any(|row| {
+        row["reason"] == "unsupported_scheme"
+            && row["detail"] == "webcal://calendar.example/events.ics"
+    }));
+    curio(profile.path())
+        .args(["import", "--from", "opml"])
+        .arg(&opml)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "imported 0 feed(s) and 0 article(s); skipped 5 already present, 2 invalid",
+        ))
+        .stderr(predicate::str::contains(
+            "skipped invalid entry (unsupported scheme): webcal://calendar.example/events.ics",
+        ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bulk_save_exports_the_library_idempotently() {
     let server = fixture_server().await;

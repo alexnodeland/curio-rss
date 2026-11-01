@@ -128,6 +128,65 @@ fn a_utf8_header_over_legacy_bytes_yields_to_the_meta() {
 }
 
 #[test]
+fn a_legacy_header_over_utf8_declared_utf8_yields_to_utf8() {
+    // The reverse misconfiguration: an old `charset=ISO-8859-1` default in
+    // front of a page that is UTF-8 and says so.
+    let body = r#"<meta charset="utf-8"><p>Café</p>"#.as_bytes();
+    let text = decode_html(body, Some("text/html; charset=iso-8859-1"));
+    assert_eq!(text, r#"<meta charset="utf-8"><p>Café</p>"#);
+    assert!(matches!(text, Cow::Borrowed(_)), "no transcode, no copy");
+}
+
+#[test]
+fn a_legacy_header_stands_unless_the_utf8_tell_is_complete() {
+    let latin1 =
+        |text: &str| decode_html(text.as_bytes(), Some("text/html; charset=latin1")).into_owned();
+    // Valid non-ASCII UTF-8 but no declaration: the header stands.
+    assert_eq!(latin1("<p>Café</p>"), "<p>CafÃ©</p>");
+    // A declaration naming another legacy encoding: the header stands.
+    assert_eq!(
+        latin1(r#"<meta charset="koi8-r"><p>Café</p>"#),
+        r#"<meta charset="koi8-r"><p>CafÃ©</p>"#
+    );
+    // Bytes that are not UTF-8 under a UTF-8 declaration: the header stands.
+    let body = b"<meta charset=\"utf-8\"><p>Caf\xe9</p>";
+    let text = decode_html(body, Some("text/html; charset=iso-8859-1"));
+    assert!(text.ends_with("<p>Café</p>"), "{text}");
+    // A multi-byte legacy header is not second-guessed: valid UTF-8 can be
+    // valid Shift_JIS too, so the tell is not reliable there.
+    let body = "<meta charset=\"utf-8\"><p>日本</p>".as_bytes();
+    let text = decode_html(body, Some("text/html; charset=shift_jis"));
+    assert!(!text.contains("日本"), "{text}");
+}
+
+#[test]
+fn an_xhtml_page_is_decoded_by_its_xml_declaration() {
+    let mut body = br#"<?xml version="1.0" encoding="windows-1251"?><html><p>"#.to_vec();
+    body.extend(encode(WINDOWS_1251, RUSSIAN));
+    for content_type in [None, Some("application/xhtml+xml"), Some("text/html")] {
+        let text = decode_html(&body, content_type);
+        assert!(text.contains(RUSSIAN), "{content_type:?}: {text}");
+    }
+    // Leading whitespace ahead of the declaration is tolerated.
+    let mut padded = b"\r\n".to_vec();
+    padded.extend_from_slice(&body);
+    assert!(decode_html(&padded, None).contains(RUSSIAN));
+}
+
+#[test]
+fn xhtml_reads_the_xml_declaration_before_the_meta_and_html_the_reverse() {
+    let mut body =
+        br#"<?xml version="1.0" encoding="windows-1251"?><meta charset="koi8-r"><p>"#.to_vec();
+    body.extend(encode(WINDOWS_1251, RUSSIAN));
+    // Served as XML, `<meta>` is inert: the declaration decides.
+    let text = decode_html(&body, Some("application/xhtml+xml"));
+    assert!(text.contains(RUSSIAN), "{text}");
+    // Served as HTML, the meta prescan decides.
+    let text = decode_html(&body, Some("text/html"));
+    assert!(!text.contains(RUSSIAN), "{text}");
+}
+
+#[test]
 fn a_bom_beats_every_declaration() {
     let mut body = b"\xEF\xBB\xBF".to_vec();
     body.extend_from_slice(r#"<meta charset="windows-1251"><p>Café</p>"#.as_bytes());
@@ -161,6 +220,20 @@ fn meta_prescan_quirks_follow_the_html_standard() {
     assert!(decode_html(&body, None).contains(RUSSIAN));
     // A meta with no charset (or no value) is passed over.
     let mut body = br#"<meta name="x"><meta charset><meta charset="windows-1251">"#.to_vec();
+    body.extend(encode(WINDOWS_1251, RUSSIAN));
+    assert!(decode_html(&body, None).contains(RUSSIAN));
+    // `<metadata>` is not a `<meta>`; the real meta after it counts.
+    let mut body = br#"<metadata charset="shift_jis"><meta charset="windows-1251">"#.to_vec();
+    body.extend(encode(WINDOWS_1251, RUSSIAN));
+    assert!(decode_html(&body, None).contains(RUSSIAN));
+    // `<meta>` at the very end of the window has no name terminator.
+    assert_eq!(decode_html(b"<p>x</p><meta", None), "<p>x</p><meta");
+    // A self-closing `<meta/…>` spelling is still a meta.
+    let mut body = br#"<meta/charset="windows-1251">"#.to_vec();
+    body.extend(encode(WINDOWS_1251, RUSSIAN));
+    assert!(decode_html(&body, None).contains(RUSSIAN));
+    // A `charset` substring with no `=` is passed over for the real one.
+    let mut body = br#"<meta name="charset-info" charset = "windows-1251">"#.to_vec();
     body.extend(encode(WINDOWS_1251, RUSSIAN));
     assert!(decode_html(&body, None).contains(RUSSIAN));
     // An unterminated comment ends the prescan.
@@ -259,6 +332,37 @@ fn a_utf8_header_over_valid_utf8_relabels_a_legacy_declaration() {
 }
 
 #[test]
+fn a_legacy_header_over_a_utf8_feed_declared_utf8_keeps_the_utf8() {
+    // `Content-Type: application/rss+xml; charset=iso-8859-1` in front of a
+    // feed that is UTF-8 and declares it: no `CafÃ©` mojibake.
+    let body = feed_with(
+        r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+        "Café".as_bytes(),
+    );
+    let out = feed_to_utf8(&body, Some("application/rss+xml; charset=iso-8859-1"));
+    assert!(matches!(out, Cow::Borrowed(_)), "taken as is");
+    assert!(as_text(&out).contains("<title>Café</title>"));
+}
+
+#[test]
+fn a_legacy_feed_header_stands_without_the_full_utf8_tell() {
+    // No declaration: the header is the only word, and it stands.
+    let body = feed_with("", "Café".as_bytes());
+    let out = feed_to_utf8(&body, Some("text/xml; charset=iso-8859-1"));
+    assert!(as_text(&out).contains("CafÃ©"));
+    // Pure ASCII under a UTF-8 declaration: identical either way, and the
+    // stale declaration is relabelled for the transcoded copy.
+    let body = feed_with(r#"<?xml version="1.0" encoding="utf-8"?>"#, b"Cafe");
+    let out = feed_to_utf8(&body, Some("text/xml; charset=iso-8859-1"));
+    assert!(as_text(&out).contains("<title>Cafe</title>"));
+    // Genuine Latin-1 bytes under a stale UTF-8 declaration: not valid
+    // UTF-8, so the header is right and wins.
+    let body = feed_with(r#"<?xml version="1.0" encoding="utf-8"?>"#, b"Caf\xe9");
+    let out = feed_to_utf8(&body, Some("text/xml; charset=iso-8859-1"));
+    assert!(as_text(&out).contains("<title>Café</title>"));
+}
+
+#[test]
 fn a_utf8_bom_or_leading_whitespace_alone_costs_no_copy() {
     // The parser skips both itself; nothing needs transcoding.
     let mut body = b"\xEF\xBB\xBF".to_vec();
@@ -352,6 +456,12 @@ fn html_pages_are_recognised_by_type_or_by_sniffing() {
         is_html_page(Some(""), b"<p>x</p>"),
         "an unusable type sniffs"
     );
+    // UTF-16 text is full of NULs, but its BOM marks it as text.
+    for big_endian in [false, true] {
+        let body = utf16("<html><p>Привет</p></html>", big_endian);
+        assert!(is_html_page(None, &body));
+        assert!(is_html_page(Some("application/octet-stream"), &body));
+    }
 }
 
 #[test]
@@ -367,7 +477,7 @@ fn pdfs_images_and_other_types_are_not_pages() {
         b"GIF89a",
         b"GIF87a",
         b"RIFF\0\0\0\0WEBPVP8 ",
-        b"\x00\x00\x01\x00",
+        b"\x00\x00\x01\x00", // ICO, caught by its NULs
         b"text with a \0 nul",
     ] {
         assert!(!is_html_page(None, body), "{body:?}");

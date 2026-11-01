@@ -85,8 +85,11 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   request kind (feed / page / image), and the response `Content-Type` carried on
   `FetchResponse`.
 - `fetch::decode` turns bodies into text: BOM → HTTP `charset` → `<meta charset>` (HTML)
-  or the XML declaration (feeds) → UTF-8, so windows-1251 or Shift_JIS sources never
-  come out as mojibake (a feed is transcoded to UTF-8 before feed-rs sees it). Full-page
+  or the XML declaration (feeds, XHTML) → UTF-8, so windows-1251 or Shift_JIS sources
+  never come out as mojibake (a feed is transcoded to UTF-8 before feed-rs sees it). A
+  server-default header that contradicts the document yields to it in both directions: a
+  UTF-8 header over non-UTF-8 bytes, and a single-byte legacy header (`iso-8859-1`) over
+  valid non-ASCII UTF-8 that declares UTF-8. Full-page
   extraction ("load full article", URL clips) runs only on HTML: a PDF or image URL is
   clipped link-only.
 

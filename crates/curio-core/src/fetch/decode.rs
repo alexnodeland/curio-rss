@@ -9,13 +9,21 @@
 //! 3. the document's own declaration — `<meta charset>` /
 //!    `<meta http-equiv="Content-Type">` for HTML (the WHATWG prescan, over
 //!    the first [`PRESCAN_WINDOW`] bytes), the `<?xml … encoding="…"?>`
-//!    declaration for feeds;
+//!    declaration for feeds and XHTML;
 //! 4. UTF-8, lossily (invalid sequences become U+FFFD).
 //!
-//! One pragmatic exception to step 2: a header claiming UTF-8 for bytes
-//! that are *not* valid UTF-8 yields to the document's own declaration.
-//! That is the classic server-wide `AddDefaultCharset UTF-8` misconfiguration
-//! in front of a legacy-encoded page, where the document knows better.
+//! Two pragmatic exceptions to step 2, one for each direction a server-wide
+//! default charset can be wrong about a document that knows better:
+//!
+//! - a header claiming UTF-8 for bytes that are *not* valid UTF-8 yields to
+//!   the document's own declaration (`AddDefaultCharset UTF-8` in front of a
+//!   legacy-encoded page);
+//! - a header naming a single-byte legacy encoding (an old
+//!   `charset=ISO-8859-1` default) yields to UTF-8 when the document
+//!   declares UTF-8 *and* its bytes are valid UTF-8 with non-ASCII in them.
+//!   Legacy single-byte text practically never happens to form valid
+//!   multi-byte UTF-8, so the pair is a reliable tell; transcoding it as
+//!   windows-1252 would turn `Café` into `CafÃ©`.
 //!
 //! Labels resolve through the WHATWG Encoding Standard ([`encoding_rs`]), so
 //! `latin1`, `iso-8859-1` and `us-ascii` all decode as windows-1252, exactly
@@ -54,15 +62,28 @@ pub fn charset_param(content_type: &str) -> Option<&'static Encoding> {
     })
 }
 
-/// Decodes an HTML page to text: BOM → HTTP charset → `<meta charset>` →
-/// UTF-8 (lossy). Borrows when the body is already valid UTF-8 and nothing
-/// says otherwise.
+/// Decodes an HTML page to text: BOM → HTTP charset → the document's
+/// declaration → UTF-8 (lossy). The declaration is `<meta charset>`, then
+/// the `<?xml … encoding="…"?>` declaration an XHTML document carries; for a
+/// page served as `application/xhtml+xml` (an XML document, where `<meta>`
+/// is inert) the XML declaration is read first. Borrows when the body is
+/// already valid UTF-8 and nothing says otherwise.
 #[must_use]
 pub fn decode_html<'a>(body: &'a [u8], content_type: Option<&str>) -> Cow<'a, str> {
     if let Some((encoding, bom_len)) = Encoding::for_bom(body) {
         return encoding.decode_without_bom_handling(&body[bom_len..]).0;
     }
-    let declared = || meta_charset(body);
+    let xhtml = content_type
+        .and_then(mime_essence)
+        .is_some_and(|essence| essence == "application/xhtml+xml");
+    let xml_decl = || xml_decl_encoding(trim_xml_space(body));
+    let declared = || {
+        if xhtml {
+            xml_decl().or_else(|| meta_charset(body))
+        } else {
+            meta_charset(body).or_else(xml_decl)
+        }
+    };
     let encoding = content_type
         .and_then(charset_param)
         .and_then(|header| trust_header(header, body, declared))
@@ -104,9 +125,14 @@ pub fn feed_to_utf8<'a>(body: &'a [u8], content_type: Option<&str>) -> Cow<'a, [
     if encoding == UTF_8 && declared().is_none_or(|label| label == UTF_8) {
         return Cow::Borrowed(body);
     }
-    let text = encoding.decode_without_bom_handling(rest).0;
-    let text = text.trim_start_matches(is_xml_space);
-    Cow::Owned(relabel_xml_decl(text).into_bytes())
+    // One owned buffer, edited in place: transcoding already allocates it
+    // (a body up to the fetch cap), so the trim and the relabel must not
+    // copy it a second time.
+    let mut text = encoding.decode_without_bom_handling(rest).0.into_owned();
+    let leading = text.len() - text.trim_start_matches(is_xml_space).len();
+    text.drain(..leading);
+    relabel_xml_decl(&mut text);
+    Cow::Owned(text.into_bytes())
 }
 
 /// Whether a body is an HTML page worth running extraction on: an HTML or
@@ -123,30 +149,45 @@ pub fn is_html_page(content_type: Option<&str>, body: &[u8]) -> bool {
     }
 }
 
-/// A header that claims UTF-8 for bytes that are not UTF-8 loses to a
-/// declaration in the document; any other header is taken at its word.
+/// The HTTP charset, unless the document plainly knows better (see the
+/// module docs): a UTF-8 header over bytes that are not UTF-8 loses to the
+/// document's declaration, and a single-byte legacy header loses to a UTF-8
+/// declaration over bytes that are valid, non-ASCII UTF-8. Any other header
+/// is taken at its word.
 fn trust_header(
     header: &'static Encoding,
     body: &[u8],
     declared: impl FnOnce() -> Option<&'static Encoding>,
 ) -> Option<&'static Encoding> {
-    if header == UTF_8 && std::str::from_utf8(body).is_err() {
-        return declared().or(Some(header));
+    if header == UTF_8 {
+        if std::str::from_utf8(body).is_err() {
+            return declared().or(Some(header));
+        }
+    } else if header.is_single_byte()
+        && !body.is_ascii()
+        && std::str::from_utf8(body).is_ok()
+        && declared() == Some(UTF_8)
+    {
+        return Some(UTF_8);
     }
     Some(header)
 }
 
 /// Binary signatures (PDF, PNG, JPEG, GIF, WebP) or a NUL byte early on —
-/// text formats never carry one.
+/// text formats never carry one (ICO and most other binaries start with
+/// one). A UTF-16 byte-order mark marks text, NULs and all, so it is
+/// checked first.
 fn sniffs_binary(body: &[u8]) -> bool {
-    const SIGNATURES: [&[u8]; 6] = [
+    const SIGNATURES: [&[u8]; 5] = [
         b"%PDF-",
         b"\x89PNG\r\n\x1a\n",
         b"\xff\xd8\xff",
         b"GIF87a",
         b"GIF89a",
-        b"\x00\x00\x01\x00", // ICO
     ];
+    if Encoding::for_bom(body).is_some() {
+        return false;
+    }
     let is_webp = body.len() >= 12 && &body[..4] == b"RIFF" && &body[8..12] == b"WEBP";
     is_webp
         || SIGNATURES.iter().any(|sig| body.starts_with(sig))
@@ -154,11 +195,17 @@ fn sniffs_binary(body: &[u8]) -> bool {
 }
 
 /// The WHATWG prescan, simplified: the first `<meta>` within
-/// [`PRESCAN_WINDOW`] that carries a `charset` — as its own attribute or
-/// inside an `http-equiv` `content` value — and names a known encoding.
+/// [`PRESCAN_WINDOW`] that carries a `charset=` — as its own attribute or
+/// inside an `http-equiv` `content` value — naming a known encoding.
 /// Per the HTML standard a UTF-16 label here means UTF-8 (the bytes were
 /// readable as ASCII, so they are not UTF-16), and `x-user-defined` means
 /// windows-1252.
+///
+/// The simplification is that attributes are not tokenised: within a tag,
+/// the first `charset` substring followed by `=` counts, wherever it sits
+/// (so `name="charset-info"` is passed over, but a `charset=` inside an
+/// unrelated attribute value would be read). Every miss falls through to
+/// the next step of the chain, ending at UTF-8 — the prescan fails safe.
 fn meta_charset(body: &[u8]) -> Option<&'static Encoding> {
     let window = &body[..body.len().min(PRESCAN_WINDOW)];
     let lower = window.to_ascii_lowercase();
@@ -177,17 +224,21 @@ fn meta_charset(body: &[u8]) -> Option<&'static Encoding> {
             from = start + 4 + end + 3;
             continue;
         }
+        // `<meta` must end the tag name: `<metadata>` is another element.
+        let name_end = start + b"<meta".len();
+        if !lower
+            .get(name_end)
+            .is_some_and(|&b| b == b'/' || b.is_ascii_whitespace())
+        {
+            from = name_end;
+            continue;
+        }
         let tag_end = find(&lower[start..], b">").map_or(lower.len(), |end| start + end);
         let tag = &lower[start..tag_end];
         from = tag_end;
-        let Some(at) = find(tag, b"charset") else {
+        let Some(value) = charset_value(tag) else {
             continue;
         };
-        let value = tag[at + b"charset".len()..]
-            .trim_ascii_start()
-            .strip_prefix(b"=")
-            .map(<[u8]>::trim_ascii_start);
-        let Some(value) = value else { continue };
         let value = value
             .strip_prefix(b"\"")
             .or_else(|| value.strip_prefix(b"'"))
@@ -206,6 +257,19 @@ fn meta_charset(body: &[u8]) -> Option<&'static Encoding> {
             "x-user-defined" => WINDOWS_1252,
             _ => encoding,
         });
+    }
+}
+
+/// The value after the first `charset` in `tag` that is followed by `=`
+/// (optional whitespace around it), with leading whitespace trimmed.
+fn charset_value(tag: &[u8]) -> Option<&[u8]> {
+    let mut from = 0;
+    loop {
+        let at = from + find(&tag[from..], b"charset")?;
+        from = at + b"charset".len();
+        if let Some(value) = tag[from..].trim_ascii_start().strip_prefix(b"=") {
+            return Some(value.trim_ascii_start());
+        }
     }
 }
 
@@ -233,20 +297,21 @@ fn xml_decl_encoding(xml: &[u8]) -> Option<&'static Encoding> {
     })
 }
 
-/// Replaces a leading `<?xml …?>` declaration with one naming UTF-8 (the
-/// bytes it now prefixes); text without a declaration is returned as is.
-fn relabel_xml_decl(text: &str) -> String {
+/// Replaces a leading `<?xml …?>` declaration, in place, with one naming
+/// UTF-8 (the bytes it now prefixes); text without a declaration is left as
+/// is.
+fn relabel_xml_decl(text: &mut String) {
     const UTF8_DECL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
-    match text.strip_prefix("<?xml").and_then(|rest| {
+    let decl_end = text.strip_prefix("<?xml").and_then(|rest| {
         // `<?xml-stylesheet …?>` is a processing instruction, not the
         // declaration: the declaration's name ends at whitespace.
         rest.starts_with(|c: char| c.is_ascii_whitespace())
             .then(|| rest.find("?>"))
             .flatten()
-            .map(|end| &rest[end + 2..])
-    }) {
-        Some(after) => format!("{UTF8_DECL}{after}"),
-        None => text.to_owned(),
+            .map(|end| "<?xml".len() + end + "?>".len())
+    });
+    if let Some(decl_end) = decl_end {
+        text.replace_range(..decl_end, UTF8_DECL);
     }
 }
 

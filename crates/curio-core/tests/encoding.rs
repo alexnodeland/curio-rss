@@ -149,6 +149,35 @@ async fn a_shift_jis_feed_with_an_http_only_charset_ingests_as_japanese() {
 }
 
 #[tokio::test]
+async fn a_utf8_feed_behind_a_stale_latin1_header_keeps_its_accents() {
+    // An old server default (`charset=iso-8859-1`) in front of a feed that
+    // is UTF-8 and declares it: the declaration and the bytes agree, so no
+    // `CafÃ©` reaches the database (or the exported notes).
+    let feed = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Café</title><link>https://example.test/</link>
+<item><title>Crème brûlée</title><link>https://example.test/a</link><guid>a</guid>
+<description>Déjà vu</description></item></channel></rss>"#;
+    let server = MockServer::start().await;
+    serve(
+        &server,
+        "/feed.xml",
+        ResponseTemplate::new(200).set_body_raw(feed, "application/rss+xml; charset=iso-8859-1"),
+    )
+    .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let articles = refresh_once(&core, format!("{}/feed.xml", server.uri())).await;
+    assert_eq!(feed_title(&core).as_deref(), Some("Café"));
+    assert_eq!(articles[0].title, "Crème brûlée");
+    assert!(
+        articles[0].content.text.contains("Déjà vu"),
+        "{}",
+        articles[0].content.text
+    );
+}
+
+#[tokio::test]
 async fn a_utf8_bom_feed_ingests() {
     let server = MockServer::start().await;
     serve(

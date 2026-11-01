@@ -38,8 +38,7 @@ mod pool;
 mod resolve;
 
 pub use client::{
-    DEFAULT_ACCEPT, FetchConfig, HostOverride, IMAGE_ACCEPT, PAGE_ACCEPT, PolicedClient,
-    screen_url,
+    DEFAULT_ACCEPT, FetchConfig, HostOverride, IMAGE_ACCEPT, PAGE_ACCEPT, PolicedClient, screen_url,
 };
 pub use resolve::{DnsLookup, LookupFuture, SystemLookup};
 

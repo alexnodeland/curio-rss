@@ -136,4 +136,23 @@ describe('destinations manager', () => {
         expect(alert?.textContent).toBe(fr['app.error.internal']);
         expect(alert?.textContent).not.toContain('registry');
     });
+
+    it('shows a busy profile as its localized line, without the lock path', async () => {
+        harness = installIpcHarness({
+            list_destinations: rejectWith(
+                commandErrorFixture({
+                    kind: 'user',
+                    code: 'PROFILE_BUSY',
+                    recoverable: true,
+                    message: 'another Curio process holds /Users/me/.curio/events.lock',
+                }),
+            ),
+        });
+        localeStore.active = 'fr';
+        render(DestinationsManager);
+        await flushIpc();
+        const alert = document.querySelector('[role="alert"]');
+        expect(alert?.textContent).toBe(fr['app.error.profileBusy']);
+        expect(alert?.textContent).not.toContain('events.lock');
+    });
 });

@@ -1,6 +1,7 @@
 //! YAML text → `Deserialize`: [`saphyr_parser`] events replayed through a
 //! serde deserializer with `serde_yaml` 0.9's typing rules, so a note
-//! that parsed before still parses, into the same values.
+//! that parsed before still parses, into the same values (bar the known
+//! differences listed in [`super`]).
 //!
 //! Untyped values (`serde_json::Value` for user keys) resolve plain
 //! scalars by [`resolve_plain`]; typed fields read the scalar text

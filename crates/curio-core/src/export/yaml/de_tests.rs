@@ -69,6 +69,117 @@ fn unicode_breaks_fold_in_flow_scalars_and_are_refused_where_shapes_differ() {
     assert!(error::<Value>("\u{2029}k: v\n").contains("U+2028"));
 }
 
+/// Each `(input, expected)` pair is what `serde_yaml` 0.9 read the input
+/// as, recorded from it before the switch.
+#[test]
+fn a_tab_after_a_colon_separates_like_it_did() {
+    for (input, expected) in [
+        ("a:\tb", json!({"a": "b"})),
+        ("a:\t1", json!({"a": 1})),
+        ("a:\t-1", json!({"a": -1})),
+        ("title:\tMy note", json!({"title": "My note"})),
+        ("a:\n  b:\t1", json!({"a": {"b": 1}})),
+        ("a: {b:\tc}", json!({"a": {"b": "c"}})),
+        ("a:\t\tb", json!({"a": "b"})),
+        ("a:\t \tb", json!({"a": "b"})),
+        ("a:\t\"q\"", json!({"a": "q"})),
+        ("a:\t# c\n  b", json!({"a": "b"})),
+        ("- a:\tb\n- c:\td", json!([{"a": "b"}, {"c": "d"}])),
+        (
+            "a:\tb\nc:\td\ne:\t[f:\tg]",
+            json!({"a": "b", "c": "d", "e": [{"f": "g"}]}),
+        ),
+        // Inside quoted and block scalars the TAB is content.
+        ("a: \"x:\ty\"", json!({"a": "x:\ty"})),
+        ("a: |\n  x:\ty\nb:\tz", json!({"a": "x:\ty\n", "b": "z"})),
+        // Non-ASCII before the colon: marks count chars, not bytes.
+        (
+            "ключ:\tзначение\nü:\t2",
+            json!({"ключ": "значение", "ü": 2}),
+        ),
+    ] {
+        assert_eq!(from_str::<Value>(input).unwrap(), expected, "{input:?}");
+    }
+    // Still errors, as they did: a block sequence cannot start there, and
+    // a second `: ` inside a plain value is not a mapping.
+    assert!(from_str::<Value>("a:\t- x").is_err());
+    assert!(from_str::<Value>("a: x:\ty").is_err());
+}
+
+/// Each pair is what `serde_yaml` 0.9 read the input as: libyaml let the
+/// continuation lines of quoted scalars and flow collections sit at any
+/// column.
+#[test]
+fn under_indented_continuation_lines_read_like_they_did() {
+    for (input, expected) in [
+        ("a: \"x\ny\"", json!({"a": "x y"})),
+        ("a: 'x\ny'", json!({"a": "x y"})),
+        ("a:\n  b: \"x\n  y\"", json!({"a": {"b": "x y"}})),
+        ("a:\n  b: \"x\n y\"", json!({"a": {"b": "x y"}})),
+        ("a: \"x\\\ny\"", json!({"a": "xy"})),
+        ("a: 'x\n\n\ny'", json!({"a": "x\n\ny"})),
+        ("- a: \"x\ny\"", json!([{"a": "x y"}])),
+        ("a: [\"x\ny\"]", json!({"a": ["x y"]})),
+        ("a: \"x\n  \ny\"", json!({"a": "x\ny"})),
+        ("a: 'it''s\nok'", json!({"a": "it's ok"})),
+        ("a: \"q\\\"\ny\"", json!({"a": "q\" y"})),
+        ("a: \"x\n\ty\"", json!({"a": "x y"})),
+        ("a:\n  b: \"x\n\ty\"", json!({"a": {"b": "x y"}})),
+        ("tags: [a,\nb]", json!({"tags": ["a", "b"]})),
+        ("a: {b: 1,\nc: 2}", json!({"a": {"b": 1, "c": 2}})),
+        ("a:\n  b: [x,\n  y]", json!({"a": {"b": ["x", "y"]}})),
+        ("a:\n  b: [x,\n y]", json!({"a": {"b": ["x", "y"]}})),
+        ("a:\n  b: [x,\n  y\n]", json!({"a": {"b": ["x", "y"]}})),
+        ("a:\n  b: [x,\n# c\ny]", json!({"a": {"b": ["x", "y"]}})),
+        ("a:\n  b: [\n\"x\",\ny]", json!({"a": {"b": ["x", "y"]}})),
+        // Several repairs in one note, of every kind.
+        (
+            "t:\t[a,\nb]\ns: 'x\r y'\nq:\n  r: \"p\n\tq\"\n",
+            json!({"t": ["a", "b"], "s": "x y", "q": {"r": "p q"}}),
+        ),
+    ] {
+        assert_eq!(from_str::<Value>(input).unwrap(), expected, "{input:?}");
+    }
+    // Refused before as well: a quoted key cannot span lines.
+    assert!(from_str::<Value>("\"x\ny\": 1").is_err());
+}
+
+#[test]
+fn every_tab_separated_key_of_a_long_note_is_repaired() {
+    let mut input = String::new();
+    for i in 0..300 {
+        writeln!(input, "k{i}:\tv").unwrap();
+    }
+    assert_eq!(
+        value(&input).as_object().map(serde_json::Map::len),
+        Some(300)
+    );
+}
+
+/// Each pair is what `serde_yaml` 0.9 read the input as: libyaml took a
+/// lone CR and NEL (U+0085) for line breaks.
+#[test]
+fn lone_cr_and_nel_break_lines_like_they_did() {
+    for (input, expected) in [
+        ("a: \"x\ry\"", json!({"a": "x y"})),
+        ("a: 'x\ry'", json!({"a": "x y"})),
+        ("a: b\rc: d", json!({"a": "b", "c": "d"})),
+        ("a: 'x\r\n  y'", json!({"a": "x y"})),
+        ("a: b\r\nc: d\r\n", json!({"a": "b", "c": "d"})),
+        ("a: 'x\u{85}  y'", json!({"a": "x y"})),
+        ("a: \"x\u{85}  y\"", json!({"a": "x y"})),
+        ("a: x\u{85}b: c", json!({"a": "x", "b": "c"})),
+        ("a: |\n  x\u{85}  y\n", json!({"a": "x\ny\n"})),
+        ("# c\u{85}a: b", json!({"a": "b"})),
+    ] {
+        assert_eq!(from_str::<Value>(input).unwrap(), expected, "{input:?}");
+    }
+    assert!(from_str::<Value>("a: x\ry").is_err());
+    assert!(from_str::<Value>("a: \"x\ry").is_err());
+    // Escaped, they stay content.
+    assert_eq!(value("a: \"x\\ry\\Nz\"\n"), json!({"a": "x\ry\u{85}z"}));
+}
+
 #[derive(Debug, PartialEq, Deserialize)]
 struct Wrapper(u8);
 

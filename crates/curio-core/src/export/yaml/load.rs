@@ -1,12 +1,14 @@
 //! YAML text → the event list the deserializer replays: one document
 //! from [`saphyr_parser`], aliases resolved to the index of the node they
-//! name.
+//! name. Where the parser refuses a spot the old libyaml reader took,
+//! [`super::repair`] mends it and the text is parsed again.
 
 use std::collections::BTreeMap;
 
-use saphyr_parser::{Event as ParserEvent, Parser, ScalarStyle};
+use saphyr_parser::{Event as ParserEvent, Parser, ScalarStyle, ScanError};
 
 use super::Error;
+use super::repair::{normalize_breaks, repair};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Style {
@@ -88,26 +90,66 @@ fn unicode_break_error() -> Error {
     )
 }
 
+/// Bytes the repairs of one document may re-parse in all. Each repair
+/// re-parses the whole text, so this keeps a pathological note (megabytes
+/// of hand-edited quirks) from going quadratic, while ordinary frontmatter
+/// (a few KiB) has room for thousands of repairs.
+const REPARSE_BUDGET: usize = 1 << 24;
+
 pub(super) fn load(input: &str) -> Result<Document, Error> {
-    if input.starts_with(is_unicode_break)
-        || input
+    load_within(input, REPARSE_BUDGET)
+}
+
+fn load_within(input: &str, reparse_budget: usize) -> Result<Document, Error> {
+    let mut text = normalize_breaks(input);
+    if text.starts_with(is_unicode_break)
+        || text
             .split('\n')
             .any(|line| line.starts_with(is_unicode_break))
     {
         return Err(unicode_break_error());
     }
+    let mut reparsed = 0_usize;
+    loop {
+        match parse(&text) {
+            Err(Failure::Scan(err))
+                if reparsed + text.len() <= reparse_budget && repair(&mut text, &err) =>
+            {
+                reparsed += text.len();
+            }
+            Err(Failure::Scan(err)) => return Err(Error::new(err.to_string())),
+            Err(Failure::Load(err)) => return Err(err),
+            Ok(document) => return Ok(document),
+        }
+    }
+}
+
+/// Why one parse failed: the scanner (which [`load`] may repair around)
+/// or the document itself.
+enum Failure {
+    Scan(ScanError),
+    Load(Error),
+}
+
+impl From<Error> for Failure {
+    fn from(err: Error) -> Self {
+        Self::Load(err)
+    }
+}
+
+fn parse(input: &str) -> Result<Document, Failure> {
     let mut events = Vec::new();
     // saphyr anchor id (unique per definition) → index of the anchored event.
     let mut anchors: BTreeMap<usize, usize> = BTreeMap::new();
     let mut documents = 0_usize;
     for next in Parser::new_from_str(input) {
-        let (event, span) = next.map_err(|err| Error::new(err.to_string()))?;
+        let (event, span) = next.map_err(Failure::Scan)?;
         let location = (span.start.line(), span.start.col() + 1);
         let (event, anchor) = match event {
             ParserEvent::DocumentStart(_) => {
                 documents += 1;
                 if documents > 1 {
-                    return Err(Error::new("frontmatter holds more than one YAML document"));
+                    return Err(Error::new("frontmatter holds more than one YAML document").into());
                 }
                 continue;
             }
@@ -128,7 +170,7 @@ pub(super) fn load(input: &str) -> Result<Document, Error> {
                     ScalarStyle::Literal | ScalarStyle::Folded
                         if value.contains(is_unicode_break) =>
                     {
-                        return Err(unicode_break_error().at(location));
+                        return Err(unicode_break_error().at(location).into());
                     }
                     _ => value.into_owned(),
                 };
@@ -164,4 +206,21 @@ pub(super) fn load(input: &str) -> Result<Document, Error> {
         events.push((Event::Void, (1, 1)));
     }
     Ok(Document { events })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn repairs_stop_at_the_reparse_budget() {
+        let input = "a:\tb\nc:\td\n";
+        // Two repairs re-parse the 10-byte text twice.
+        assert!(load_within(input, 20).is_ok());
+        let err = load_within(input, 19).unwrap_err().to_string();
+        assert!(err.contains("valid YAML whitespace"), "{err}");
+        assert!(load_within(input, 0).is_err());
+    }
 }

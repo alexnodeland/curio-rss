@@ -12,15 +12,30 @@
 //! `? ` explicit keys past 128 bytes. The goldens under
 //! `fixtures/export/frontmatter/` pin it.
 //!
-//! Parsing runs on [`saphyr_parser`] (YAML 1.2, safe Rust) and keeps the
-//! old reader's tolerance for hand-edited frontmatter: comments, flow
-//! style, anchors and aliases, block scalars, and `!!str`/`!!int`-style
-//! core tags. Plain scalars resolve by the YAML 1.2 core schema
-//! (`yes`/`on` stay strings).
+//! Parsing runs on [`saphyr_parser`] (YAML 1.2, safe Rust) and reads
+//! hand-edited frontmatter the way the old reader did: comments, flow
+//! style, anchors and aliases, block scalars, `!!str`/`!!int`-style core
+//! tags, and the libyaml leniencies YAML 1.2 dropped, by mending the text
+//! where the parser refuses it: a TAB after `key:`, lone CR and NEL line
+//! breaks, continuation lines of quoted scalars and flow collections at or
+//! left of their key, a comment with no blank before it. Plain scalars
+//! resolve by the YAML 1.2 core schema (`yes`/`on` stay strings).
+//!
+//! Known differences from the old reader:
+//!
+//! - U+2028/U+2029 at a line start or inside a block scalar is refused
+//!   rather than misread — the one difference Curio's own output can hit
+//!   (a multi-line string that also carries one, #249);
+//! - a block scalar header alone at column 0 on the line after its key
+//!   (`key:\n|\n  text`) is refused;
+//! - a lone `-` as a flow collection entry (`[-]`) is refused;
+//! - a few documents libyaml refused now parse (YAML 1.2 is laxer about,
+//!   e.g., a TAB before a top-level plain scalar).
 
 mod de;
 mod emit;
 mod load;
+mod repair;
 mod resolve;
 mod ser;
 

@@ -73,6 +73,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
                                     class="author">u/{author(article)}</span
                                 >{/if}
                             {#if date !== null}<span class="dot">·</span><span
+                                    class="date"
                                     data-first-seen={date.firstSeen || undefined}>{date.text}</span
                                 >{/if}
                         </span>
@@ -174,7 +175,20 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         color: #ff6a33;
     }
 
+    /* On a narrow card the author gives way first, so the date (a longer
+       "First seen …" for a date-less entry) stays whole; only past that does
+       the date itself ellipsize instead of being cut off. */
+    .author,
+    .date {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .author {
+        flex-shrink: 1000;
+        min-width: 1.5em; /* never collapses to a bare dot */
         color: var(--fg-muted);
     }
 

@@ -14,7 +14,8 @@ use crate::feeds::ParsedEntry;
 use crate::fetch::{FetchConfig, FetchRequest};
 use crate::lock::{FileLock, FileLockGuard, LockError};
 use crate::model::{
-    ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewArticle,
+    ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus,
+    NewArticle,
 };
 
 use super::{CoreError, CoreHandle, LOCKS_DIR, RefreshOutcome};
@@ -55,6 +56,7 @@ impl CoreHandle {
         let Some(across_processes) = self.refresh_file_lock(id).await? else {
             return Ok(not_fetched(
                 id,
+                FetchErrorKind::Busy,
                 "another Curio process is still refreshing this feed — skipped",
             ));
         };
@@ -65,6 +67,7 @@ impl CoreHandle {
         if feed.status == FeedStatus::Dead {
             return Ok(not_fetched(
                 id,
+                FetchErrorKind::Gone,
                 "feed is dead (HTTP 410) — refusing to fetch",
             ));
         }
@@ -81,67 +84,7 @@ impl CoreHandle {
         let fetched = self.client.fetch(&request).await;
         let now = Timestamp::now();
         let duration_ms = u32::try_from(started.elapsed().as_millis()).ok();
-
-        let failed = |http_status: Option<u16>, error: String| RefreshOutcome {
-            feed_id: id,
-            status: FetchStatus::Error,
-            http_status,
-            new_articles: 0,
-            updated_articles: 0,
-            error: Some(error),
-        };
-
-        // Conditional-GET validators are preserved on every non-ingest
-        // path — error, 304, 410, unparseable body. Only a successfully
-        // *parsed* 2xx adopts the response's validators (the sketch
-        // clobbered them on any failure).
-        let mut hydrate_pending: Vec<ArticleId> = Vec::new();
-        let outcome = match fetched {
-            Err(err) => {
-                self.preserve_validators(id, &feed, now)?;
-                failed(None, err.to_string())
-            }
-            Ok(response) if response.is_not_modified() => {
-                self.preserve_validators(id, &feed, now)?;
-                RefreshOutcome {
-                    feed_id: id,
-                    status: FetchStatus::NotModified,
-                    http_status: Some(response.status),
-                    new_articles: 0,
-                    updated_articles: 0,
-                    error: None,
-                }
-            }
-            Ok(response) if response.is_gone() => {
-                // 410: the feed is gone for good — auto-pause forever.
-                self.storage.set_feed_status(id, FeedStatus::Dead)?;
-                self.preserve_validators(id, &feed, now)?;
-                failed(
-                    Some(response.status),
-                    "HTTP 410 Gone — feed auto-paused as dead".to_owned(),
-                )
-            }
-            Ok(response) if response.is_success() => {
-                match crate::feeds::parse_fetched_feed(&response) {
-                    Err(err) => {
-                        // A body we could not parse must not update the
-                        // validators, or a broken feed 304s forever.
-                        self.preserve_validators(id, &feed, now)?;
-                        failed(Some(response.status), err.to_string())
-                    }
-                    Ok(parsed) => {
-                        let (outcome, pending) =
-                            self.ingest_parsed(id, &feed, &response, parsed, now)?;
-                        hydrate_pending = pending;
-                        outcome
-                    }
-                }
-            }
-            Ok(response) => {
-                self.preserve_validators(id, &feed, now)?;
-                failed(Some(response.status), format!("HTTP {}", response.status))
-            }
-        };
+        let (outcome, hydrate_pending) = self.settle_fetch(id, &feed, fetched, now)?;
 
         self.storage.record_fetch(FetchRecord {
             feed_id: id,
@@ -149,6 +92,7 @@ impl CoreHandle {
             status: outcome.status,
             http_status: outcome.http_status,
             error: outcome.error.clone(),
+            error_kind: outcome.error_kind,
             articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
             duration_ms,
         })?;
@@ -161,6 +105,84 @@ impl CoreHandle {
         drop(serialized);
         self.hydrate_batch(hydrate_pending).await;
         Ok(outcome)
+    }
+
+    /// Turns one fetch result into the refresh outcome, writing what it
+    /// implies: ingest on a parsed 2xx, the dead mark on a 410, validators
+    /// preserved otherwise. The second return value is the full-text
+    /// hydration queue (see [`Self::ingest_parsed`]).
+    ///
+    /// Conditional-GET validators are preserved on every non-ingest path —
+    /// error, 304, 410, unparseable body. Only a successfully *parsed* 2xx
+    /// adopts the response's validators (the sketch clobbered them on any
+    /// failure).
+    fn settle_fetch(
+        &self,
+        id: FeedId,
+        feed: &Feed,
+        fetched: Result<crate::fetch::FetchResponse, crate::fetch::FetchError>,
+        now: Timestamp,
+    ) -> Result<(RefreshOutcome, Vec<ArticleId>), CoreError> {
+        let failed = |http_status: Option<u16>, kind: FetchErrorKind, error: String| {
+            let outcome = RefreshOutcome {
+                feed_id: id,
+                status: FetchStatus::Error,
+                http_status,
+                new_articles: 0,
+                updated_articles: 0,
+                error: Some(error),
+                error_kind: Some(kind),
+            };
+            (outcome, Vec::new())
+        };
+        let response = match fetched {
+            Ok(response) => response,
+            Err(err) => {
+                self.preserve_validators(id, feed, now)?;
+                return Ok(failed(None, err.kind(), err.to_string()));
+            }
+        };
+        if response.is_not_modified() {
+            self.preserve_validators(id, feed, now)?;
+            let outcome = RefreshOutcome {
+                feed_id: id,
+                status: FetchStatus::NotModified,
+                http_status: Some(response.status),
+                new_articles: 0,
+                updated_articles: 0,
+                error: None,
+                error_kind: None,
+            };
+            return Ok((outcome, Vec::new()));
+        }
+        if response.is_gone() {
+            // 410: the feed is gone for good — auto-pause forever.
+            self.storage.set_feed_status(id, FeedStatus::Dead)?;
+            self.preserve_validators(id, feed, now)?;
+            return Ok(failed(
+                Some(response.status),
+                FetchErrorKind::Gone,
+                "HTTP 410 Gone — feed auto-paused as dead".to_owned(),
+            ));
+        }
+        if !response.is_success() {
+            self.preserve_validators(id, feed, now)?;
+            return Ok(failed(
+                Some(response.status),
+                FetchErrorKind::Http,
+                format!("HTTP {}", response.status),
+            ));
+        }
+        match crate::feeds::parse_fetched_feed(&response) {
+            Ok(parsed) => self.ingest_parsed(id, feed, &response, parsed, now),
+            Err(err) => {
+                // A body we could not parse must not update the
+                // validators, or a broken feed 304s forever.
+                self.preserve_validators(id, feed, now)?;
+                let (kind, message) = unparseable(&response, &err);
+                Ok(failed(Some(response.status), kind, message))
+            }
+        }
     }
 
     /// Hydrates the articles a refresh just inserted (full-text mode),
@@ -287,6 +309,7 @@ impl CoreHandle {
                 new_articles: upserted.inserted,
                 updated_articles: upserted.updated,
                 error: None,
+                error_kind: None,
             },
             hydrate_pending,
         ))
@@ -353,7 +376,7 @@ impl CoreHandle {
 }
 
 /// The outcome of a refresh that refused to fetch (nothing is recorded).
-fn not_fetched(feed_id: FeedId, why: &str) -> RefreshOutcome {
+fn not_fetched(feed_id: FeedId, kind: FetchErrorKind, why: &str) -> RefreshOutcome {
     RefreshOutcome {
         feed_id,
         status: FetchStatus::Error,
@@ -361,7 +384,36 @@ fn not_fetched(feed_id: FeedId, why: &str) -> RefreshOutcome {
         new_articles: 0,
         updated_articles: 0,
         error: Some(why.to_owned()),
+        error_kind: Some(kind),
     }
+}
+
+/// Classifies a 2xx body that did not parse as a feed. A body that sniffs
+/// as an HTML page is [`FetchErrorKind::NotAFeed`] — the subscription
+/// points at a web page — and the message counts the feeds that page
+/// declares (fetch-free discovery over the body already in hand), so the
+/// user knows whether there is a real feed to switch to. Anything else is
+/// a genuine [`FetchErrorKind::Parse`] failure.
+fn unparseable(
+    response: &crate::fetch::FetchResponse,
+    err: &crate::feeds::FeedParseError,
+) -> (FetchErrorKind, String) {
+    let Some(feeds) = crate::feeds::discover::web_page_feeds(response) else {
+        return (FetchErrorKind::Parse, err.to_string());
+    };
+    let message = match feeds.as_slice() {
+        [] => "this is a web page, not a feed — found no feeds on it".to_owned(),
+        [only] => format!(
+            "this is a web page, not a feed — found 1 feed on it: {}",
+            only.url
+        ),
+        [first, ..] => format!(
+            "this is a web page, not a feed — found {} feeds on it (first: {})",
+            feeds.len(),
+            first.url
+        ),
+    };
+    (FetchErrorKind::NotAFeed, message)
 }
 
 /// The feed's cross-process refresh lock file.
@@ -500,6 +552,7 @@ mod tests {
 
         let skipped = core.refresh_feed(feed.id).await.unwrap();
         assert_eq!(skipped.status, FetchStatus::Error);
+        assert_eq!(skipped.error_kind, Some(FetchErrorKind::Busy));
         assert!(
             skipped
                 .error
@@ -516,7 +569,11 @@ mod tests {
         drop(held);
         let refreshed = core.refresh_feed(feed.id).await.unwrap();
         assert_eq!(refreshed.http_status, Some(500));
-        assert_eq!(core.recent_fetches(feed.id, 10).unwrap().len(), 1);
+        assert_eq!(refreshed.error_kind, Some(FetchErrorKind::Http));
+        assert_eq!(refreshed.error.as_deref(), Some("HTTP 500"));
+        let recorded = core.recent_fetches(feed.id, 10).unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].error_kind, Some(FetchErrorKind::Http));
 
         // Unsubscribing deletes the lock file; an unknown feed never
         // mints one.

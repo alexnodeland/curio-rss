@@ -54,6 +54,8 @@ export const commands = {
 	 *  dot is honest on a cold start before any in-session refresh.
 	 */
 	last_error: string | null,
+	/**  Failure class of that errored fetch, when known. */
+	last_error_kind: FetchErrorKindDto | null,
 	/**  When the feed last fetched successfully (RFC 3339 UTC), if ever. */
 	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
@@ -88,6 +90,8 @@ export const commands = {
 	 *  dot is honest on a cold start before any in-session refresh.
 	 */
 	last_error: string | null,
+	/**  Failure class of that errored fetch, when known. */
+	last_error_kind: FetchErrorKindDto | null,
 	/**  When the feed last fetched successfully (RFC 3339 UTC), if ever. */
 	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
@@ -693,6 +697,8 @@ export type FeedDto = {
 	 *  dot is honest on a cold start before any in-session refresh.
 	 */
 	last_error: string | null,
+	/**  Failure class of that errored fetch, when known. */
+	last_error_kind: FetchErrorKindDto | null,
 	/**  When the feed last fetched successfully (RFC 3339 UTC), if ever. */
 	last_ok_at: string | null,
 	/**  Feed-level tags (OPML folders land here). */
@@ -719,6 +725,46 @@ export type FeedStatusDto =
  */
 export type FeedsChanged = null;
 
+/**
+ *  Mirror of [`FetchErrorKind`]: why a fetch failed, for the UI to branch
+ *  on (an icon, a localized hint) instead of parsing the English `error`.
+ */
+export type FetchErrorKindDto = 
+/**  Malformed, non-http(s), userinfo-bearing or host-less URL. */
+"invalid_url" | 
+/**  The host name did not resolve. */
+"dns" | 
+/**  The SSRF guard refused a non-public address. */
+"blocked" | 
+/**  Nothing accepted the connection. */
+"refused" | 
+/**  The connection was reset mid-request. */
+"reset" | 
+/**  The server's TLS certificate was rejected. */
+"tls_certificate" | 
+/**  The TLS handshake failed for another reason. */
+"tls_handshake" | 
+/**  Connecting timed out. */
+"connect_timeout" | 
+/**  The server did not finish answering in time. */
+"read_timeout" | 
+/**  A redirect could not be followed. */
+"redirect" | 
+/**  The body exceeded the size cap. */
+"too_large" | 
+/**  Any other transport failure. */
+"transport" | 
+/**  A non-success HTTP status (see `http_status`). */
+"http" | 
+/**  HTTP 410 — the feed is dead. */
+"gone" | 
+/**  The URL serves a web page, not a feed. */
+"not_a_feed" | 
+/**  The body looked like a feed but did not parse. */
+"parse" | 
+/**  Another Curio process was refreshing the feed; nothing was fetched. */
+"busy";
+
 /**  Mirror of [`FetchRecord`] — the feed-health surface. */
 export type FetchRecordDto = {
 	/**  The fetched feed. */
@@ -731,6 +777,8 @@ export type FetchRecordDto = {
 	http_status: number | null,
 	/**  Error description for `status: "error"`. */
 	error: string | null,
+	/**  Failure class for `status: "error"`, when known. */
+	error_kind: FetchErrorKindDto | null,
 	/**  New articles stored by this fetch. */
 	articles_new: number,
 	/**  Wall-clock duration, if measured. */
@@ -980,6 +1028,8 @@ export type RefreshOutcomeDto = {
 	updated_articles: number,
 	/**  Error description for `status: "error"`. */
 	error: string | null,
+	/**  Failure class for `status: "error"`. */
+	error_kind: FetchErrorKindDto | null,
 };
 
 /**  One feed finished during `refresh_all` — drive the progress UI. */

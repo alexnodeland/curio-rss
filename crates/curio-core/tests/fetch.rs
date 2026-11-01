@@ -17,8 +17,9 @@ use std::time::{Duration, Instant};
 
 use curio_core::fetch::{
     DEFAULT_ACCEPT, DnsLookup, FetchConfig, FetchError, FetchKind, FetchRequest, HostOverride,
-    IMAGE_ACCEPT, LookupFuture, PAGE_ACCEPT, PolicedClient,
+    IMAGE_ACCEPT, LookupFuture, PAGE_ACCEPT, PolicedClient, TimeoutPhase, TransportKind,
 };
+use curio_core::model::FetchErrorKind;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -580,9 +581,145 @@ async fn read_timeout_is_enforced() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, FetchError::Timeout { .. }),
-        "expected Timeout, got {err:?}"
+        matches!(
+            err,
+            FetchError::Timeout {
+                phase: TimeoutPhase::Read,
+                ..
+            }
+        ),
+        "expected a read Timeout, got {err:?}"
     );
+    assert_eq!(err.kind(), FetchErrorKind::ReadTimeout);
+}
+
+/// A connection that never finishes establishing is the *connect*
+/// timeout, typed through a real reqwest error: the TCP accept succeeds
+/// but the server never answers the TLS handshake, which reqwest's
+/// connect timeout covers.
+#[tokio::test]
+async fn a_stalled_handshake_is_a_connect_timeout() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        // Hold every accepted socket open, silently.
+        let mut held = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            held.push(stream);
+        }
+    });
+
+    let mut config = fast_config();
+    config.connect_timeout = Duration::from_millis(200);
+    config.request_timeout = Duration::from_secs(10);
+    let started = Instant::now();
+    let err = PolicedClient::new(config)
+        .fetch(&allowed(format!("https://127.0.0.1:{port}/feed.xml")))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            FetchError::Timeout {
+                phase: TimeoutPhase::Connect,
+                ..
+            }
+        ),
+        "expected a connect Timeout, got {err:?}"
+    );
+    assert_eq!(err.kind(), FetchErrorKind::ConnectTimeout);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the connect timeout, not the request timeout, fired"
+    );
+}
+
+/// A loopback port with nothing listening on it.
+fn closed_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+    // dropped: the port is closed again
+}
+
+#[tokio::test]
+async fn a_closed_port_is_a_refused_connection_naming_the_cause_once() {
+    let url = format!("http://127.0.0.1:{}/feed.xml", closed_port());
+    let err = PolicedClient::new(fast_config())
+        .fetch(&allowed(&url))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            FetchError::Transport {
+                kind: TransportKind::Refused,
+                ..
+            }
+        ),
+        "expected a refused connection, got {err:?}"
+    );
+    assert_eq!(err.kind(), FetchErrorKind::Refused);
+    let message = err.to_string();
+    assert_eq!(message.matches(&url).count(), 1, "{message}");
+    assert!(!message.contains("error sending request"), "{message}");
+    assert!(message.to_lowercase().contains("refused"), "{message}");
+}
+
+/// A TLS server on `127.0.0.1` presenting a freshly minted self-signed
+/// certificate; returns its port. Each connection runs the handshake and
+/// is dropped — the client is expected to abort it.
+async fn self_signed_tls_server() -> u16 {
+    use tokio_rustls::rustls;
+    let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(cert.key_pair.serialize_der().into());
+    let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(vec![cert.cert.der().clone()], key)
+    .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let _ = acceptor.accept(stream).await;
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn a_self_signed_certificate_is_a_tls_certificate_error() {
+    let url = format!(
+        "https://127.0.0.1:{}/feed.xml",
+        self_signed_tls_server().await
+    );
+    let err = PolicedClient::new(fast_config())
+        .fetch(&allowed(&url))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            FetchError::Transport {
+                kind: TransportKind::TlsCertificate,
+                ..
+            }
+        ),
+        "expected a TLS certificate error, got {err:?}"
+    );
+    assert_eq!(err.kind(), FetchErrorKind::TlsCertificate);
+    let message = err.to_string();
+    assert_eq!(message.matches(&url).count(), 1, "{message}");
+    // The cause the TLS stack reported, not reqwest's summary.
+    assert!(message.contains("certificate"), "{message}");
+    assert!(!message.contains("error sending request"), "{message}");
 }
 
 #[tokio::test]

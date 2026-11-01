@@ -95,6 +95,10 @@ pub struct Feed {
     /// `fetch_log`, so the sidebar health dot is honest on a cold start,
     /// before any in-session refresh has run.
     pub last_error: Option<String>,
+    /// Failure class of that most recent errored attempt — set whenever
+    /// [`Self::last_error`] is, except for attempts recorded before the
+    /// kind was tracked.
+    pub last_error_kind: Option<FetchErrorKind>,
     /// When the feed last fetched *successfully* (`ok`/`not_modified`), if ever.
     /// Also derived from `fetch_log`.
     pub last_ok_at: Option<Timestamp>,
@@ -322,6 +326,110 @@ impl FetchStatus {
     }
 }
 
+/// What class of failure a fetch attempt hit — the machine-readable half
+/// of an errored [`RefreshOutcome`](crate::RefreshOutcome) /
+/// [`FetchRecord`], next to its short human message. Stable: persisted in
+/// `fetch_log.error_kind` as [`Self::as_str`], so heads can branch on it
+/// (an icon, a localized hint, a "subscribe to the real feed" action)
+/// without parsing English text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FetchErrorKind {
+    /// The URL is malformed, not http(s), carries userinfo or has no host.
+    InvalidUrl,
+    /// The host name did not resolve.
+    Dns,
+    /// The SSRF guard refused a non-public address (contract W1).
+    Blocked,
+    /// The server refused the connection (nothing listening on the port).
+    Refused,
+    /// The connection was reset or aborted mid-request.
+    Reset,
+    /// The server's TLS certificate was rejected (self-signed, expired,
+    /// wrong host, unknown issuer).
+    TlsCertificate,
+    /// The TLS handshake failed for another reason (protocol or cipher
+    /// mismatch, a fatal alert, a non-TLS server on an https port).
+    TlsHandshake,
+    /// Connecting took longer than the connect timeout.
+    ConnectTimeout,
+    /// The server accepted the connection but did not finish answering
+    /// within the request timeout.
+    ReadTimeout,
+    /// A redirect could not be followed (too many hops, no `Location`, a
+    /// redirected POST, an off-origin hop where that is refused).
+    Redirect,
+    /// The response body exceeded the size cap.
+    TooLarge,
+    /// Any other transport-level failure.
+    Transport,
+    /// The server answered with a non-success HTTP status (the code is in
+    /// the outcome's `http_status`).
+    Http,
+    /// HTTP 410 Gone — or the feed is already marked dead for it.
+    Gone,
+    /// The URL serves a web page, not a feed (the message says how many
+    /// feeds the page links to).
+    NotAFeed,
+    /// The body looked like a feed but did not parse.
+    Parse,
+    /// Another Curio process kept refreshing this feed; nothing was
+    /// fetched.
+    Busy,
+}
+
+impl FetchErrorKind {
+    /// Every kind, in declaration order.
+    pub const ALL: [Self; 17] = [
+        Self::InvalidUrl,
+        Self::Dns,
+        Self::Blocked,
+        Self::Refused,
+        Self::Reset,
+        Self::TlsCertificate,
+        Self::TlsHandshake,
+        Self::ConnectTimeout,
+        Self::ReadTimeout,
+        Self::Redirect,
+        Self::TooLarge,
+        Self::Transport,
+        Self::Http,
+        Self::Gone,
+        Self::NotAFeed,
+        Self::Parse,
+        Self::Busy,
+    ];
+
+    /// The stored TEXT form (`snake_case`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidUrl => "invalid_url",
+            Self::Dns => "dns",
+            Self::Blocked => "blocked",
+            Self::Refused => "refused",
+            Self::Reset => "reset",
+            Self::TlsCertificate => "tls_certificate",
+            Self::TlsHandshake => "tls_handshake",
+            Self::ConnectTimeout => "connect_timeout",
+            Self::ReadTimeout => "read_timeout",
+            Self::Redirect => "redirect",
+            Self::TooLarge => "too_large",
+            Self::Transport => "transport",
+            Self::Http => "http",
+            Self::Gone => "gone",
+            Self::NotAFeed => "not_a_feed",
+            Self::Parse => "parse",
+            Self::Busy => "busy",
+        }
+    }
+
+    /// Parses the stored TEXT form.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == s)
+    }
+}
+
 /// One `fetch_log` row: a single fetch attempt against a feed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchRecord {
@@ -335,6 +443,9 @@ pub struct FetchRecord {
     pub http_status: Option<u16>,
     /// Error description for [`FetchStatus::Error`].
     pub error: Option<String>,
+    /// Failure class for [`FetchStatus::Error`] (`None` for rows recorded
+    /// before the kind was tracked).
+    pub error_kind: Option<FetchErrorKind>,
     /// Number of new articles stored from this fetch.
     pub articles_new: u32,
     /// Wall-clock duration of the attempt, if measured.
@@ -365,6 +476,16 @@ mod tests {
             assert_eq!(FetchStatus::parse(status.as_str()), Some(status));
         }
         assert_eq!(FetchStatus::parse("bogus"), None);
+    }
+
+    #[test]
+    fn fetch_error_kind_round_trips_its_text_form() {
+        let mut seen = std::collections::HashSet::new();
+        for kind in FetchErrorKind::ALL {
+            assert!(seen.insert(kind.as_str()), "duplicate text for {kind:?}");
+            assert_eq!(FetchErrorKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(FetchErrorKind::parse("bogus"), None);
     }
 
     #[test]

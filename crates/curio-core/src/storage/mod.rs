@@ -57,6 +57,35 @@ pub enum StorageError {
          is writing to it; try again in a moment"
     )]
     Busy(#[source] rusqlite::Error),
+    /// A write collided with a UNIQUE constraint — the row already exists
+    /// (subscribing to a feed URL that is already subscribed, for one).
+    #[error("{entity} already exists")]
+    Duplicate {
+        /// What already exists (`"feed"`, `"article"`, `"tag"`, …; `"row"`
+        /// for a table with no friendlier name).
+        entity: &'static str,
+        /// The constraint failure `SQLite` reported.
+        #[source]
+        source: rusqlite::Error,
+    },
+    /// The disk holding the profile is full (`SQLITE_FULL`). Nothing was
+    /// written; the operation succeeds once space is freed.
+    #[error("the disk holding the profile database is full — free some space and try again")]
+    DiskFull(#[source] rusqlite::Error),
+    /// The profile database cannot be written (`SQLITE_READONLY` /
+    /// `SQLITE_PERM`): the file, its folder or the volume is read-only, or
+    /// permissions changed under the running app.
+    #[error(
+        "the profile database is read-only — check the permissions of the profile folder \
+         and the volume it is on"
+    )]
+    ReadOnly(#[source] rusqlite::Error),
+    /// `SQLite` found the database file corrupt mid-session
+    /// (`SQLITE_CORRUPT` / `SQLITE_NOTADB`) — distinct from
+    /// [`StorageError::Corrupt`], a single stored value that failed to
+    /// parse.
+    #[error("the profile database is corrupt: {0}")]
+    DatabaseCorrupt(#[source] rusqlite::Error),
     /// The writer thread has shut down and can no longer accept
     /// commands.
     #[error("the storage writer thread is gone")]
@@ -115,16 +144,66 @@ pub enum StorageError {
 }
 
 impl From<rusqlite::Error> for StorageError {
-    /// Lock contention (`SQLITE_BUSY` / `SQLITE_LOCKED` after the busy
-    /// timeout) becomes the typed, user-actionable [`StorageError::Busy`];
-    /// every other `SQLite` failure stays [`StorageError::Sqlite`].
+    /// Sorts a `SQLite` failure by its (extended) result code into the
+    /// class a head can act on: lock contention (`SQLITE_BUSY` /
+    /// `SQLITE_LOCKED` after the busy timeout) → [`StorageError::Busy`], a
+    /// UNIQUE / PRIMARY KEY collision → [`StorageError::Duplicate`],
+    /// `SQLITE_FULL` → [`StorageError::DiskFull`], `SQLITE_READONLY` /
+    /// `SQLITE_PERM` → [`StorageError::ReadOnly`], `SQLITE_CORRUPT` /
+    /// `SQLITE_NOTADB` → [`StorageError::DatabaseCorrupt`]. Every other
+    /// failure stays [`StorageError::Sqlite`] — including
+    /// `SQLITE_CORRUPT_VTAB`, a search index out of step with its content
+    /// table: a rebuild fixes that, so it is no corrupt database.
     fn from(err: rusqlite::Error) -> Self {
-        match err.sqlite_error_code() {
-            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
-                Self::Busy(err)
+        use rusqlite::ErrorCode;
+        let (code, extended) = match &err {
+            rusqlite::Error::SqliteFailure(failure, _) => (failure.code, failure.extended_code),
+            _ => return Self::Sqlite(err),
+        };
+        match code {
+            ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => Self::Busy(err),
+            ErrorCode::ConstraintViolation
+                if matches!(
+                    extended,
+                    rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                        | rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+                ) =>
+            {
+                Self::Duplicate {
+                    entity: duplicate_entity(&err),
+                    source: err,
+                }
             }
+            ErrorCode::DiskFull => Self::DiskFull(err),
+            ErrorCode::ReadOnly | ErrorCode::PermissionDenied => Self::ReadOnly(err),
+            ErrorCode::DatabaseCorrupt if extended == rusqlite::ffi::SQLITE_CORRUPT_VTAB => {
+                Self::Sqlite(err)
+            }
+            ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase => Self::DatabaseCorrupt(err),
             _ => Self::Sqlite(err),
         }
+    }
+}
+
+/// Names what a UNIQUE / PRIMARY KEY failure collided with, from the table
+/// `SQLite` names in its message (`UNIQUE constraint failed: feeds.url`).
+fn duplicate_entity(err: &rusqlite::Error) -> &'static str {
+    let rusqlite::Error::SqliteFailure(_, Some(message)) = err else {
+        return "row";
+    };
+    let table = message
+        .rsplit(": ")
+        .next()
+        .and_then(|columns| columns.split('.').next())
+        .unwrap_or_default();
+    match table {
+        "feeds" => "feed",
+        "articles" => "article",
+        "article_state" => "article state",
+        "tags" => "tag",
+        "article_tags" => "article tag",
+        "settings" => "setting",
+        _ => "row",
     }
 }
 
@@ -134,6 +213,21 @@ impl StorageError {
     #[must_use]
     pub fn is_busy(&self) -> bool {
         matches!(self, Self::Busy(_))
+    }
+
+    /// The raw `SQLite` error behind a class that came straight from one
+    /// (see the `From<rusqlite::Error>` conversion); `Err(self)` for the
+    /// storage layer's own failures.
+    pub(crate) fn into_sqlite(self) -> Result<rusqlite::Error, Self> {
+        match self {
+            Self::Sqlite(source)
+            | Self::Busy(source)
+            | Self::DiskFull(source)
+            | Self::ReadOnly(source)
+            | Self::DatabaseCorrupt(source)
+            | Self::Duplicate { source, .. } => Ok(source),
+            other => Err(other),
+        }
     }
 }
 
@@ -304,7 +398,8 @@ impl Storage {
     /// # Errors
     ///
     /// Returns [`StorageError::Sqlite`] with `SQLITE_CORRUPT_VTAB` if the
-    /// index no longer matches the content table.
+    /// index no longer matches the content table (never
+    /// [`StorageError::DatabaseCorrupt`]: a desynced index is rebuildable).
     pub fn fts_integrity_check(&self) -> Result<(), StorageError> {
         self.write(|conn| {
             conn.execute(
@@ -373,6 +468,107 @@ mod tests {
             None,
         ));
         assert!(locked.is_busy(), "SQLITE_LOCKED is contention too");
+    }
+
+    fn sqlite(code: i32) -> StorageError {
+        StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ))
+    }
+
+    #[test]
+    fn result_codes_map_to_distinct_classes() {
+        assert!(matches!(
+            sqlite(rusqlite::ffi::SQLITE_BUSY),
+            StorageError::Busy(_)
+        ));
+        assert!(matches!(
+            sqlite(rusqlite::ffi::SQLITE_FULL),
+            StorageError::DiskFull(_)
+        ));
+        assert!(!sqlite(rusqlite::ffi::SQLITE_FULL).is_busy());
+        for code in [rusqlite::ffi::SQLITE_READONLY, rusqlite::ffi::SQLITE_PERM] {
+            assert!(
+                matches!(sqlite(code), StorageError::ReadOnly(_)),
+                "code {code}"
+            );
+        }
+        for code in [rusqlite::ffi::SQLITE_CORRUPT, rusqlite::ffi::SQLITE_NOTADB] {
+            assert!(
+                matches!(sqlite(code), StorageError::DatabaseCorrupt(_)),
+                "code {code}"
+            );
+        }
+        // A desynced FTS index is rebuildable — no corrupt database.
+        assert!(matches!(
+            sqlite(rusqlite::ffi::SQLITE_CORRUPT_VTAB),
+            StorageError::Sqlite(_)
+        ));
+        // Another constraint (CHECK, NOT NULL, FOREIGN KEY) is no duplicate.
+        assert!(matches!(
+            sqlite(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+            StorageError::Sqlite(_)
+        ));
+        assert!(matches!(
+            sqlite(rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY),
+            StorageError::Duplicate { entity: "row", .. }
+        ));
+        // Every class keeps the raw error as its source.
+        for err in [
+            sqlite(rusqlite::ffi::SQLITE_FULL),
+            sqlite(rusqlite::ffi::SQLITE_READONLY),
+            sqlite(rusqlite::ffi::SQLITE_CORRUPT),
+        ] {
+            assert!(std::error::Error::source(&err).is_some(), "{err:?}");
+            assert!(err.into_sqlite().is_ok());
+        }
+        assert!(StorageError::WriterGone.into_sqlite().is_err());
+    }
+
+    /// A real `SQLITE_FULL`: the database may not grow past its page cap.
+    #[test]
+    fn a_full_database_is_disk_full() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (x BLOB)").unwrap();
+        let pages: i64 = conn
+            .query_row("PRAGMA page_count", [], |row| row.get(0))
+            .unwrap();
+        conn.pragma_update(None, "max_page_count", pages).unwrap();
+        let err = StorageError::from(
+            conn.execute("INSERT INTO t VALUES (zeroblob(1000000))", [])
+                .unwrap_err(),
+        );
+        assert!(matches!(err, StorageError::DiskFull(_)), "{err:?}");
+        assert!(err.to_string().contains("disk"), "{err}");
+    }
+
+    /// A real UNIQUE collision names the table's entity.
+    #[test]
+    fn a_unique_collision_is_a_duplicate_of_its_entity() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE feeds (url TEXT UNIQUE); CREATE TABLE odd (k TEXT UNIQUE);
+             INSERT INTO feeds VALUES ('a'); INSERT INTO odd VALUES ('a');",
+        )
+        .unwrap();
+        let feed = StorageError::from(
+            conn.execute("INSERT INTO feeds VALUES ('a')", [])
+                .unwrap_err(),
+        );
+        assert!(
+            matches!(feed, StorageError::Duplicate { entity: "feed", .. }),
+            "{feed:?}"
+        );
+        assert_eq!(feed.to_string(), "feed already exists");
+        let other = StorageError::from(
+            conn.execute("INSERT INTO odd VALUES ('a')", [])
+                .unwrap_err(),
+        );
+        assert!(
+            matches!(other, StorageError::Duplicate { entity: "row", .. }),
+            "{other:?}"
+        );
     }
 
     #[test]

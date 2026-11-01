@@ -232,6 +232,7 @@ mod tests {
             new_articles,
             updated_articles: 0,
             error: None,
+            error_kind: None,
         }
     }
 
@@ -302,6 +303,7 @@ mod tests {
             new_articles: 5,
             updated_articles: 0,
             error: None,
+            error_kind: None,
         };
         let heard = RefreshOutcomeDto {
             feed_id: 2,
@@ -310,6 +312,7 @@ mod tests {
             new_articles: 2,
             updated_articles: 0,
             error: None,
+            error_kind: None,
         };
         // Feed 1's 5 new articles are muted; only feed 2's 2 count.
         assert_eq!(

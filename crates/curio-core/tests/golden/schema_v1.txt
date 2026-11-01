@@ -126,7 +126,7 @@ CREATE TABLE fetch_log (
     error        TEXT,
     articles_new INTEGER NOT NULL DEFAULT 0,
     duration_ms  INTEGER
-)
+, error_kind TEXT)
 
 -- table settings
 CREATE TABLE settings (

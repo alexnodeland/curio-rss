@@ -30,9 +30,15 @@
 //! - An `Accept` header per [`FetchKind`] (feed / page / image), and the
 //!   response `Content-Type` surfaced on [`FetchResponse::content_type`] —
 //!   [`decode`] turns bodies into text by it.
+//! - **Typed failures**: every [`FetchError`] has a stable
+//!   [`crate::model::FetchErrorKind`] ([`FetchError::kind`]); transport
+//!   failures are classified by their source chain (refused, reset, TLS
+//!   certificate vs handshake, connect vs read timeout) and carry the root
+//!   cause, not reqwest's URL-repeating summary.
 
 mod client;
 pub mod decode;
+mod errors;
 pub mod policy;
 mod pool;
 mod resolve;
@@ -40,9 +46,8 @@ mod resolve;
 pub use client::{
     DEFAULT_ACCEPT, FetchConfig, HostOverride, IMAGE_ACCEPT, PAGE_ACCEPT, PolicedClient, screen_url,
 };
+pub use errors::{FetchError, TimeoutPhase, TransportKind};
 pub use resolve::{DnsLookup, LookupFuture, SystemLookup};
-
-use std::net::IpAddr;
 
 /// What a fetch is for — picks the `Accept` header it sends.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -164,120 +169,4 @@ impl FetchResponse {
     pub fn feed_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
         decode::feed_to_utf8(&self.body, self.content_type.as_deref())
     }
-}
-
-/// Errors of the policed fetch path.
-#[derive(Debug, thiserror::Error)]
-pub enum FetchError {
-    /// The URL failed to parse.
-    #[error("invalid url {url:?}: {message}")]
-    InvalidUrl {
-        /// The offending URL.
-        url: String,
-        /// Parse-failure detail.
-        message: String,
-    },
-    /// The URL scheme is not http or https.
-    #[error("unsupported scheme {scheme:?} in {url:?} — only http/https are fetched")]
-    UnsupportedScheme {
-        /// The offending scheme.
-        scheme: String,
-        /// The offending URL.
-        url: String,
-    },
-    /// The URL carries userinfo (`user:pass@host`), a classic SSRF
-    /// confusion vector — always rejected.
-    #[error("url {url:?} carries userinfo, which is never allowed")]
-    UserinfoForbidden {
-        /// The offending URL.
-        url: String,
-    },
-    /// The URL has no host.
-    #[error("url {url:?} has no host")]
-    NoHost {
-        /// The offending URL.
-        url: String,
-    },
-    /// DNS resolution failed.
-    #[error("dns resolution failed for {host:?}: {message}")]
-    Dns {
-        /// The host that failed to resolve.
-        host: String,
-        /// Resolver detail.
-        message: String,
-    },
-    /// DNS resolved to no addresses at all.
-    #[error("dns returned no addresses for {host:?}")]
-    DnsNoAddresses {
-        /// The host that resolved empty.
-        host: String,
-    },
-    /// The SSRF guard rejected a non-public address. Set the per-feed
-    /// `allow_private_network` flag (config edit) to exempt a feed.
-    #[error(
-        "refusing to fetch {host:?}: resolved address {addr} is not public \
-         (set allow_private_network on the feed to permit this)"
-    )]
-    PrivateAddress {
-        /// The host (or IP literal) that was rejected.
-        host: String,
-        /// The offending resolved address.
-        addr: IpAddr,
-    },
-    /// A POST answered with a redirect. Never followed: silently
-    /// re-POSTing credentials across hops is exactly the surprise the
-    /// policed client exists to prevent.
-    #[error("{url:?} answered a POST with a redirect — refusing to follow")]
-    RedirectNotAllowed {
-        /// The offending URL.
-        url: String,
-    },
-    /// The redirect cap was exceeded.
-    #[error("too many redirects (limit {limit}) fetching {url:?}")]
-    TooManyRedirects {
-        /// The configured hop limit.
-        limit: u32,
-        /// The URL the fetch started from.
-        url: String,
-    },
-    /// A redirect pointed off the request's origin while
-    /// [`FetchRequest::same_origin_redirects`] was set. The target was
-    /// never requested.
-    #[error("{url:?} redirected off its origin to {location:?} — not followed")]
-    CrossOriginRedirect {
-        /// The URL that answered with the redirect.
-        url: String,
-        /// The cross-origin redirect target.
-        location: String,
-        /// Redirect hops already followed before the refused one.
-        hops: u32,
-    },
-    /// A redirect status arrived without a usable `Location` header.
-    #[error("redirect from {url:?} carried no usable Location header")]
-    MissingRedirectLocation {
-        /// The URL that responded with the bad redirect.
-        url: String,
-    },
-    /// The response body exceeded the size cap.
-    #[error("response body exceeds the {limit}-byte cap fetching {url:?}")]
-    BodyTooLarge {
-        /// The configured cap in bytes.
-        limit: u64,
-        /// The URL whose body was too large.
-        url: String,
-    },
-    /// The request timed out (connect or read).
-    #[error("timeout fetching {url:?}")]
-    Timeout {
-        /// The URL that timed out.
-        url: String,
-    },
-    /// Any other transport-level failure.
-    #[error("transport error fetching {url:?}: {message}")]
-    Transport {
-        /// The URL that failed.
-        url: String,
-        /// Transport detail.
-        message: String,
-    },
 }

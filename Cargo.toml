@@ -128,7 +128,14 @@ insta = { version = "1", features = ["glob"] }
 jsonschema = { version = "0.33", default-features = false }
 predicates = "3"
 proptest = "1"
+# A throwaway self-signed certificate, minted at test time (no key material
+# in the repo), for the hermetic TLS-failure fetch test. ring, not aws-lc:
+# ring is the provider already in the tree via reqwest's rustls.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 tempfile = "3"
+# The 127.0.0.1 TLS server of that test. Already in the tree via reqwest;
+# ring for the same reason.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 wiremock = "0.6"
 
 [workspace.lints.rust]

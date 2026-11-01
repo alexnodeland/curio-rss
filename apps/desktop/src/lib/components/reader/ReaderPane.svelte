@@ -45,6 +45,7 @@ import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
+import { articleDate, isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
 import Icon from '$components/common/Icon.svelte';
@@ -69,7 +70,14 @@ const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: Mess
  */
 type ReaderHead = Pick<
     ArticleDto,
-    'id' | 'feed_id' | 'title' | 'source_url' | 'author' | 'published_at' | 'word_count'
+    | 'id'
+    | 'feed_id'
+    | 'title'
+    | 'source_url'
+    | 'author'
+    | 'published_at'
+    | 'saved_at'
+    | 'word_count'
 >;
 
 /** Body placeholder line widths: a few paragraphs of ragged prose. */
@@ -240,6 +248,28 @@ function feedTitle(current: Pick<ReaderHead, 'feed_id'>): string | null {
         return null;
     }
     return feed.title ?? feed.url;
+}
+
+/**
+ * A link-less feed entry has no page of its own — its `source_url` is the
+ * feed's URL — so it offers no open-in-browser or load-full action and its
+ * title is plain text (core never hydrates it either).
+ */
+function linkless(current: ReaderHead): boolean {
+    return isLinkless(current, feedsStore.feeds);
+}
+
+/**
+ * The header's date: the publication time, or — when the feed declared none —
+ * when Curio first saw the article, labelled as such. `''` when unparseable.
+ */
+function dateLabel(current: ReaderHead): { text: string; firstSeen: boolean } {
+    const { iso, firstSeen } = articleDate(current);
+    const date = formatIntlDateTime(new Date(iso));
+    if (date === '' || !firstSeen) {
+        return { text: date, firstSeen };
+    }
+    return { text: t('article.date.firstSeen', { date }), firstSeen };
 }
 
 // Displaying an article marks it read — once per selection, not per render,
@@ -441,29 +471,34 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                         </div>
                     {/if}
                 </div>
-                <button
-                    class="tool"
-                    disabled={hydrating || current === null}
-                    aria-busy={hydrating}
-                    aria-label={t('reader.action.loadFull')}
-                    use:tooltip={t('reader.action.loadFull')}
-                    onclick={() => void hydrate(selectedId)}
-                >
-                    <Icon name="article" />
-                </button>
-                <button
-                    class="tool"
-                    disabled={header === null}
-                    aria-label={t('reader.action.openInBrowser')}
-                    use:tooltip={t('reader.action.openInBrowser')}
-                    onclick={() => {
-                        if (header !== null) {
-                            void openInBrowser(selectedId, header.source_url);
-                        }
-                    }}
-                >
-                    <Icon name="external" />
-                </button>
+                <!-- A link-less entry has no page of its own: no load-full or
+                     open-in-browser. Unknown until the row is in hand, so the
+                     buttons stay (disabled) while the header is loading. -->
+                {#if header === null || !linkless(header)}
+                    <button
+                        class="tool"
+                        disabled={hydrating || current === null}
+                        aria-busy={hydrating}
+                        aria-label={t('reader.action.loadFull')}
+                        use:tooltip={t('reader.action.loadFull')}
+                        onclick={() => void hydrate(selectedId)}
+                    >
+                        <Icon name="article" />
+                    </button>
+                    <button
+                        class="tool"
+                        disabled={header === null}
+                        aria-label={t('reader.action.openInBrowser')}
+                        use:tooltip={t('reader.action.openInBrowser')}
+                        onclick={() => {
+                            if (header !== null) {
+                                void openInBrowser(selectedId, header.source_url);
+                            }
+                        }}
+                    >
+                        <Icon name="external" />
+                    </button>
+                {/if}
             </div>
             <!-- Key on the selection so switching articles remounts the
                  scroll body at the top instead of inheriting the previous scroll
@@ -500,6 +535,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     style:--para-spacing={typographyStore.paragraphSpacing}
                 >
                     {#if header !== null}
+                        {@const date = dateLabel(header)}
                         <header class="reader-header">
                             {#if feedTitle(header) !== null}
                                 {@const label = feedTitle(header) ?? ''}
@@ -513,20 +549,33 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                                 </div>
                             {/if}
                             <h1 class="reader-title" id="reader-title-{selectedId}">
-                                <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
-                                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-                                <a href={header.source_url} onclick={(event) => openSource(event, header)}>
+                                {#if linkless(header)}
+                                    <!-- No page of its own: linking would open the feed XML. -->
                                     {header.title}
-                                </a>
+                                {:else}
+                                    <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
+                                    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                                    <a href={header.source_url} onclick={(event) => openSource(event, header)}>
+                                        {header.title}
+                                    </a>
+                                {/if}
                             </h1>
                             <p class="reader-meta">
                                 {#if header.author !== null}
                                     <span>{header.author}</span>
                                 {/if}
-                                {#if header.published_at !== null}
-                                    {@const published = formatIntlDateTime(new Date(header.published_at))}
-                                    {#if published !== ''}
-                                        <span>{published}</span>
+                                {#if date.text !== ''}
+                                    {#if date.firstSeen}
+                                        <!-- The hint is a pointer tooltip; the sr-only
+                                             copy gives assistive tech the same note,
+                                             since a plain span never takes focus. -->
+                                        <span data-first-seen use:tooltip={t('article.date.firstSeenHint')}
+                                            >{date.text}<span class="sr-only">
+                                                ({t('article.date.firstSeenHint')})</span
+                                            ></span
+                                        >
+                                    {:else}
+                                        <span>{date.text}</span>
                                     {/if}
                                 {/if}
                                 {#if header.word_count !== null}

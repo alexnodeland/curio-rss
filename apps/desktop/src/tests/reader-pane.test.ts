@@ -6,7 +6,7 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
  * j/k path: a toolbar + header that stay mounted while a body loads, and the
  * neighbour prefetch that lets the next step render straight from cache.
  */
-import { events } from '$lib/bindings';
+import { events, type ArticleDto } from '$lib/bindings';
 import { localeStore } from '$lib/i18n';
 import { keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS } from '$lib/keyboard/registry';
@@ -24,6 +24,7 @@ import {
     articleStateFixture,
     articleSummaryFixture,
     commandErrorFixture,
+    feedFixture,
     flushIpc,
     installIpcHarness,
     rejectWith,
@@ -515,5 +516,123 @@ describe('ReaderPane', () => {
             ]);
             unwire();
         });
+    });
+});
+
+describe('ReaderPane — link-less and date-less feed entries', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        cleanup();
+        resetQueryCache();
+        articlesStore.reset();
+        selectionStore.reset();
+        resetUiStores();
+        harness?.teardown();
+        harness = null;
+    });
+
+    const FEED_URL = 'https://example.org/feed.xml';
+
+    function responders(overrides: Partial<ArticleDto>): Record<string, Responder> {
+        return {
+            ...baseResponders(),
+            get_article: articleFixture({
+                id: 100,
+                title: 'The article',
+                feed_id: 1,
+                ...overrides,
+            }),
+            list_feeds: [feedFixture({ id: 1, url: FEED_URL, title: 'Example Feed' })],
+        };
+    }
+
+    it('a link-less entry offers no open-in-browser / load-full, and its title is not a link', async () => {
+        harness = installIpcHarness(responders({ source_url: FEED_URL }));
+        selectionStore.selectedArticleId = 100;
+        const { getByRole, queryByRole } = render(ReaderPane);
+        await flushIpc();
+
+        const title = getByRole('heading', { level: 1 });
+        expect(title.textContent?.trim()).toBe('The article');
+        expect(title.querySelector('a')).toBeNull();
+        expect(queryByRole('button', { name: 'Open in browser' })).toBeNull();
+        expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
+        // The rest of the toolbar is untouched.
+        expect(getByRole('button', { name: 'Star' })).toBeTruthy();
+    });
+
+    it('a link-less list row hides both actions before its body lands', async () => {
+        // The header renders from the list row while get_article is pending;
+        // the row already tells the link-less case apart.
+        harness = installIpcHarness({
+            ...responders({}),
+            get_article: () => new Promise(() => undefined),
+            list_articles: [
+                articleSummaryFixture({
+                    id: 100,
+                    title: 'The row',
+                    feed_id: 1,
+                    source_url: FEED_URL,
+                    published_at: null,
+                    saved_at: '2026-07-02T10:00:00.000Z',
+                }),
+            ],
+        });
+        articlesStore.filters = ALL_ARTICLES;
+        void articlesStore.current; // touch to start the list fetch
+        await flushIpc();
+        selectionStore.selectedArticleId = 100;
+        const { container, getByRole, queryByRole } = render(ReaderPane);
+        await flushIpc();
+
+        const title = getByRole('heading', { level: 1 });
+        expect(title.textContent?.trim()).toBe('The row');
+        expect(title.querySelector('a')).toBeNull();
+        expect(queryByRole('button', { name: 'Open in browser' })).toBeNull();
+        expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
+        expect(container.querySelector('.body-skeleton')).not.toBeNull();
+        const date = container.querySelector('.reader-meta [data-first-seen]');
+        expect(date?.textContent).toMatch(/^First seen .*2026/);
+        // Assistive tech gets the hint the pointer tooltip shows.
+        expect(date?.querySelector('.sr-only')?.textContent).toContain(
+            'The feed gave no publication date',
+        );
+    });
+
+    it('an entry with its own link keeps the link and both actions', async () => {
+        harness = installIpcHarness(responders({ source_url: 'https://example.org/post/100' }));
+        selectionStore.selectedArticleId = 100;
+        const { getByRole } = render(ReaderPane);
+        await flushIpc();
+
+        const link = getByRole('heading', { level: 1 }).querySelector('a');
+        expect(link?.getAttribute('href')).toBe('https://example.org/post/100');
+        expect(getByRole('button', { name: 'Open in browser' })).toBeTruthy();
+        expect(getByRole('button', { name: 'Load full article' })).toBeTruthy();
+    });
+
+    it('a date-less entry shows its first-seen date, marked as first seen', async () => {
+        harness = installIpcHarness(
+            responders({ published_at: null, saved_at: '2026-07-02T10:00:00.000Z' }),
+        );
+        selectionStore.selectedArticleId = 100;
+        const { container } = render(ReaderPane);
+        await flushIpc();
+
+        const date = container.querySelector('.reader-meta [data-first-seen]');
+        expect(date?.textContent).toMatch(/^First seen .*2026/);
+    });
+
+    it('a dated entry shows its publication date, unmarked', async () => {
+        harness = installIpcHarness(responders({ published_at: '2026-07-01T09:00:00.000Z' }));
+        selectionStore.selectedArticleId = 100;
+        const { container } = render(ReaderPane);
+        await flushIpc();
+
+        const meta = container.querySelector('.reader-meta');
+        expect(meta?.querySelector('[data-first-seen]')).toBeNull();
+        expect(meta?.textContent).toContain('2026');
+        expect(meta?.textContent).not.toContain('First seen');
     });
 });

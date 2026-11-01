@@ -129,6 +129,11 @@ jump, and <kbd>Enter</kbd> or <kbd>→</kbd> moves focus into the article so the
 arrow and page keys scroll it; <kbd>←</kbd> or <kbd>Esc</kbd> returns to the
 list. Reorder a feed inside its folder with <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
 
+A feed entry published without a link of its own has no page to open, so
+<kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it
+and its title is plain text. An entry the feed gave no date is dated by the
+day Curio first saw it, labelled **First seen**.
+
 macOS command chords (also in the menu bar):
 <kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·
 <kbd>⌘1</kbd>–<kbd>⌘4</kbd> All / Starred / Read-later / Archived.

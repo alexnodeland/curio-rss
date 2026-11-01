@@ -344,8 +344,11 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join(" ");
                 checked += 1;
-                // An infallible body (`Ok(state.clone())`) has nothing to log.
-                if body.starts_with("Ok(") && !body.contains('?') && !body.contains("Err") {
+                // An infallible body — one that ends in `Ok(…)` and has no
+                // `?` or `Err` on the way (`Ok(state.clone())`,
+                // `pending.stage(id); Ok(())`) — has nothing to log.
+                let tail = body.rsplit("; ").next().unwrap_or_default();
+                if tail.starts_with("Ok(") && !body.contains('?') && !body.contains("Err") {
                     continue;
                 }
                 let literal = format!("\"{name}\"");

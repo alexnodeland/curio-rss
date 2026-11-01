@@ -308,6 +308,9 @@ tokens:
                         error: null,
                         error_kind: null,
                     }));
+                // `?offline=1` previews the sidebar's "Offline" badge.
+                case 'connectivity_online':
+                    return new URLSearchParams(window.location.search).get('offline') !== '1';
                 case 'get_app_info':
                     return {
                         version: '0.5.0',

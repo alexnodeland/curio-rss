@@ -12,7 +12,10 @@ use super::{SharedCore, run_blocking};
 use crate::discovery::DiscoveryDto;
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::{CommandError, ErrorCode};
-use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
+use crate::events::{
+    ArticlesChanged, ConnectivityChanged, FeedsChanged, RefreshFinished, RefreshProgress,
+    emit_or_log,
+};
 use crate::refresh_scheduler::RefreshScheduler;
 
 /// Autodiscovers feeds (and a favicon) for what the user typed — a bare
@@ -254,7 +257,9 @@ pub async fn refresh_feed(
 /// Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
 /// (core's own `refresh_all` is sequential and silent — the head loops
 /// `refresh_feed` so the UI can watch; orchestration, not business logic).
-/// A manual refresh resets the background scheduler's interval clock.
+/// Any feed answering clears the scheduler's "Offline" verdict right away; a
+/// manual refresh resets the background scheduler's interval clock, except
+/// one made while offline that reached nothing (the overdue sweep stays due).
 #[tauri::command]
 #[specta::specta]
 pub async fn refresh_all(
@@ -264,7 +269,11 @@ pub async fn refresh_all(
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
     let core = Arc::clone(core.inner());
     let outcomes = refresh_all_and_emit(&app, &core).await?;
-    scheduler.mark_refreshed();
+    scheduler
+        .record_manual_refresh(&core, &outcomes, |online| {
+            emit_or_log(&app, &ConnectivityChanged { online });
+        })
+        .await;
     Ok(outcomes)
 }
 
@@ -429,7 +438,7 @@ async fn refresh_feed_impl(
     Ok(core.refresh_feed(FeedId(feed_id)).await?.into())
 }
 
-async fn refresh_all_impl(
+pub(crate) async fn refresh_all_impl(
     core: &Arc<CoreHandle>,
     mut on_progress: impl FnMut(i64, &RefreshOutcomeDto),
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {

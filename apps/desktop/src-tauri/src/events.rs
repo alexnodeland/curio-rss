@@ -43,6 +43,16 @@ pub struct RefreshFinished {
     pub outcomes: Vec<RefreshOutcomeDto>,
 }
 
+/// The background scheduler's connectivity verdict changed (#123): a probe
+/// before a scheduled sweep found the network gone — the sweep was skipped,
+/// so no feed errors were recorded — or back. Drives the "Offline" badge;
+/// fires on change only, and `connectivity_online` answers the current state.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+pub struct ConnectivityChanged {
+    /// Whether the network is reachable.
+    pub online: bool,
+}
+
 /// A native menu item was chosen — the head emits its id and the frontend
 /// routes it through the same action layer as a keyboard shortcut (so the
 /// menu, shortcuts, and toolbars stay one source of behavior). `id` is a

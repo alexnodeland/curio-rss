@@ -44,12 +44,28 @@
 //!    <bench-id>` checks the log before `github-action-benchmark` reads it;
 //!    and the tracker
 //!    keeps its `alert-threshold` with `fail-on-alert: true`.
+//! 7. **Automatic release tagging** (issue #298). `release-tag.yml` runs on
+//!    pushes to `main` only, never on a fork, holds no secret but
+//!    `GITHUB_TOKEN` and deploys to no environment; its write grants sit on a
+//!    job that checks nothing out and runs no build tool; it creates the tag
+//!    through the API's create-ref call (which refuses an existing ref),
+//!    never moves or deletes one, and dispatches `release.yml` on the tag
+//!    ref. It is the only workflow that creates tags. `release.yml` has a
+//!    `workflow_dispatch` trigger, its real-key step runs on exactly the tag
+//!    ref ([`TAG_REF_CONDITION`]), and nothing in it reads
+//!    `github.event_name` — a dispatch on the tag must release for real in
+//!    every step, not in half of them.
 
 use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
 use crate::yaml::{self, Value};
+
+mod tagging;
+
+pub use tagging::releases_on_tag_dispatch;
+use tagging::{real_release_by_ref, release_tagger, tag_creation};
 
 /// Secret names (prefix match) that sign updates for every user. Each
 /// reference must sit in the single signing step's `env`.
@@ -97,6 +113,14 @@ const CI_WORKFLOW: &str = "ci.yml";
 const RELEASE_WORKFLOW: &str = "release.yml";
 /// The heavy tier: 3-OS bundles, the e2e smoke, the cold-start bench.
 const NIGHTLY_WORKFLOW: &str = "nightly.yml";
+/// Tags a merged version bump and dispatches the release on the tag.
+pub const RELEASE_TAG_WORKFLOW: &str = "release-tag.yml";
+
+/// The condition (whitespace outside string literals removed, without
+/// `${{ }}` or outer parentheses) under which `release.yml` signs with the
+/// real key: the run is on a `v*` tag ref — a tag push and a dispatch on the
+/// tag alike.
+pub const TAG_REF_CONDITION: &str = "startsWith(github.ref,'refs/tags/v')";
 
 /// Runner images GitHub has retired. A job on one is never picked up: it sits
 /// queued until GitHub cancels it after 24h, failing the whole run.
@@ -188,8 +212,15 @@ pub fn lint(files: &[WorkflowFile<'_>]) -> Vec<String> {
         let ci = parsed.iter().find(|wf| wf.name == CI_WORKFLOW);
         out.extend(release_gate(release, ci));
         out.extend(release_assets(release));
+        out.extend(real_release_by_ref(release));
     } else {
         out.push(format!("{RELEASE_WORKFLOW}: missing"));
+    }
+    out.extend(tag_creation(&parsed));
+    if let Some(tagger) = parsed.iter().find(|wf| wf.name == RELEASE_TAG_WORKFLOW) {
+        out.extend(release_tagger(tagger));
+    } else {
+        out.push(format!("{RELEASE_TAG_WORKFLOW}: missing"));
     }
     for wf in &parsed {
         out.extend(retired_runners(wf));
@@ -1311,10 +1342,17 @@ mod tests {
 
     const CI: &str = "on:\n  pull_request:\n  workflow_call:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v4.4.0\n      - run: cargo test\n";
 
+    /// The sign job's environment line in [`RELEASE`].
+    const ENV_LINE: &str = "    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}\n";
+    /// The key step's head in [`RELEASE`].
+    const KEY_STEP: &str =
+        "      - name: Sign\n        if: startsWith(github.ref, 'refs/tags/v')\n";
+
     /// A minimal release.yml with the shape the lint demands.
     const RELEASE: &str = r#"on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 jobs:
   gate:
     uses: ./.github/workflows/ci.yml
@@ -1327,11 +1365,12 @@ jobs:
   sign:
     needs: build
     runs-on: ubuntu-latest
-    environment: updater-signing
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}
     steps:
       - uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v4.4.0
       - run: npm ci --ignore-scripts
       - name: Sign
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -1409,6 +1448,42 @@ jobs:
           fail-on-alert: true
 "#;
 
+    /// A minimal release-tag.yml with the shape the lint demands.
+    const RELEASE_TAG: &str = r#"on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  plan:
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v4.4.0
+      - id: plan
+        run: cargo run -p xtask -- release-tag >> "$GITHUB_OUTPUT"
+  tag:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Tag
+        run: |
+          object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$TAG" -f object=abc -f type=commit --jq .sha)"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$object"
+      - name: Dispatch
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+"#;
+
     fn run(ci: &str, release: &str) -> Vec<String> {
         run_all(ci, release, NIGHTLY)
     }
@@ -1417,7 +1492,15 @@ jobs:
         run_all(CI, RELEASE, nightly)
     }
 
+    fn run_tagger(tagger: &str) -> Vec<String> {
+        run_files(CI, RELEASE, NIGHTLY, tagger)
+    }
+
     fn run_all(ci: &str, release: &str, nightly: &str) -> Vec<String> {
+        run_files(ci, release, nightly, RELEASE_TAG)
+    }
+
+    fn run_files(ci: &str, release: &str, nightly: &str, tagger: &str) -> Vec<String> {
         lint(&[
             WorkflowFile {
                 name: "ci.yml",
@@ -1430,6 +1513,10 @@ jobs:
             WorkflowFile {
                 name: "nightly.yml",
                 source: nightly,
+            },
+            WorkflowFile {
+                name: "release-tag.yml",
+                source: tagger,
             },
         ])
     }
@@ -1844,6 +1931,10 @@ jobs:
                 name: "release.yml",
                 source: RELEASE,
             },
+            WorkflowFile {
+                name: "release-tag.yml",
+                source: RELEASE_TAG,
+            },
         ]);
         assert_eq!(without, vec!["nightly.yml: missing".to_owned()]);
     }
@@ -1887,7 +1978,7 @@ jobs:
         assert_flags(&violations, "has no trailing `# <version>` comment");
 
         let bare = RELEASE.replace(&pinned, &format!("actions/setup-node@{SHA}"));
-        assert_flags(&run(CI, &bare), "release.yml:18:");
+        assert_flags(&run(CI, &bare), "release.yml:19:");
 
         let job_level = RELEASE.replace(
             "uses: ./.github/workflows/ci.yml",
@@ -1955,7 +2046,11 @@ jobs:
         assert_flags(&run(CI, &downstream), "job `release` has `if: … always()");
 
         // Ordinary conditions keep the implied `success()`.
-        for condition in ["${{ github.event_name == 'push' }}", "success()", "true"] {
+        for condition in [
+            "${{ startsWith(github.ref, 'refs/tags/v') }}",
+            "success()",
+            "true",
+        ] {
             let plain = RELEASE.replace(
                 "    needs: gate\n",
                 &format!("    needs: gate\n    if: {condition}\n"),
@@ -2134,86 +2229,95 @@ jobs:
         );
     }
 
-    /// The `RELEASE` fixture plus a `workflow_dispatch` dry run, its sign
-    /// job selecting `environment` (YAML text) and its key step guarded by
-    /// `key_if` (`None` = no `if:`).
-    fn with_dry_run(environment: &str, key_if: Option<&str>) -> String {
+    /// The `RELEASE` fixture with its sign job selecting `environment` (YAML
+    /// text) and its key step guarded by `key_if` (`None` = no `if:`).
+    fn with_sign(environment: &str, key_if: Option<&str>) -> String {
         let key_step = key_if.map_or_else(
             || "      - name: Sign\n".to_owned(),
             |condition| format!("      - name: Sign\n        if: {condition}\n"),
         );
         RELEASE
-            .replace(
-                "  push:\n    tags: [\"v*\"]\n",
-                "  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n",
-            )
-            .replace(
-                "    environment: updater-signing\n",
-                &format!("    environment: {environment}\n"),
-            )
-            .replace("      - name: Sign\n", &key_step)
+            .replace(ENV_LINE, &format!("    environment: {environment}\n"))
+            .replace(KEY_STEP, &key_step)
+    }
+
+    /// `violations` without the tag-ref rule's own message, for the
+    /// environment checks that hold for any key-step condition.
+    fn besides_tag_ref_rule(violations: Vec<String>) -> Vec<String> {
+        violations
+            .into_iter()
+            .filter(|v| !v.contains("signs with the real key on"))
+            .collect()
     }
 
     #[test]
     fn the_signing_job_must_deploy_to_the_signing_environment() {
-        let dropped = RELEASE.replace("    environment: updater-signing\n", "");
+        let dropped = RELEASE.replace(ENV_LINE, "");
         assert_flags(
             &run(CI, &dropped),
             "job `sign` holds the signing key but declares no `environment:`",
         );
-        let renamed = RELEASE.replace(
-            "    environment: updater-signing\n",
-            "    environment: production\n",
-        );
+        let renamed = RELEASE.replace(ENV_LINE, "    environment: production\n");
         assert_flags(
             &run(CI, &renamed),
             "job `sign` deploys to `production`, not `updater-signing`",
         );
         let mapping = RELEASE.replace(
-            "    environment: updater-signing\n",
-            "    environment:\n      name: updater-signing\n      url: https://example.invalid\n",
+            ENV_LINE,
+            "    environment:\n      name: ${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}\n      url: https://example.invalid\n",
         );
         assert_eq!(run(CI, &mapping), Vec::<String>::new());
         let empty_mapping = RELEASE.replace(
-            "    environment: updater-signing\n",
+            ENV_LINE,
             "    environment:\n      url: https://example.invalid\n",
         );
         assert_flags(&run(CI, &empty_mapping), "declares no `environment:`");
+
+        // A tag-push-only release may deploy unconditionally (there is no
+        // dry run to keep out of the tag-only rule); what fails it is the
+        // missing dispatch trigger the tagger needs, not the environment.
+        let push_only = with_sign("updater-signing", None).replace("  workflow_dispatch:\n", "");
+        let violations = run(CI, &push_only);
+        assert!(
+            !violations.iter().any(|v| v.contains("environment")),
+            "{violations:#?}"
+        );
+        assert_flags(&violations, "release.yml: no `workflow_dispatch` trigger");
     }
 
     #[test]
     fn the_dry_run_selects_the_environment_exactly_when_the_key_step_runs() {
-        let push = "github.event_name == 'push'";
-        let conditional = "${{ github.event_name == 'push' && 'updater-signing' || '' }}";
+        let tag_ref = "startsWith(github.ref, 'refs/tags/v')";
+        let conditional = "${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}";
 
         // The committed shape: environment and key step share the condition,
         // in either `if:` spelling.
         assert_eq!(
-            run(CI, &with_dry_run(conditional, Some(push))),
+            run(CI, &with_sign(conditional, Some(tag_ref))),
             Vec::<String>::new()
         );
         assert_eq!(
             run(
                 CI,
-                &with_dry_run(conditional, Some(&format!("${{{{ {push} }}}}")))
+                &with_sign(conditional, Some(&format!("${{{{ {tag_ref} }}}}")))
             ),
             Vec::<String>::new()
         );
 
         // Unconditional: the dispatch run would wait on the tag-only rule.
         assert_flags(
-            &run(CI, &with_dry_run("updater-signing", Some(push))),
+            &run(CI, &with_sign("updater-signing", Some(tag_ref))),
             "job `sign` always deploys to `updater-signing`, so the `workflow_dispatch` dry run",
         );
 
         // The key step outruns the environment: unguarded, or guarded by a
         // different condition.
         assert_flags(
-            &run(CI, &with_dry_run(conditional, None)),
+            &run(CI, &with_sign(conditional, None)),
             "but the key step runs on `every event`",
         );
         assert_flags(
-            &run(CI, &with_dry_run(conditional, Some("always()"))),
+            &run(CI, &with_sign(conditional, Some("always()"))),
             "but the key step runs on `always()`",
         );
 
@@ -2221,9 +2325,9 @@ jobs:
         assert_flags(
             &run(
                 CI,
-                &with_dry_run(
-                    "${{ github.event_name == 'push' && 'production' || '' }}",
-                    Some(push),
+                &with_sign(
+                    "${{ startsWith(github.ref, 'refs/tags/v') && 'production' || '' }}",
+                    Some(tag_ref),
                 ),
             ),
             "not `updater-signing`",
@@ -2235,47 +2339,266 @@ jobs:
     /// deploys to `true` while the real key step runs.
     #[test]
     fn a_top_level_or_in_the_environment_condition_must_be_parenthesised() {
-        let either = "github.event_name == 'push' || github.event_name == 'release'";
+        let either = "startsWith(github.ref, 'refs/tags/v') || github.ref_type == 'tag'";
         let unparenthesised = format!("${{{{ {either} && 'updater-signing' || '' }}}}");
         assert_flags(
-            &run(CI, &with_dry_run(&unparenthesised, Some(either))),
+            &run(CI, &with_sign(&unparenthesised, Some(either))),
             "whose top-level `||` binds looser than `&&`",
         );
         let parenthesised = format!("${{{{ ({either}) && 'updater-signing' || '' }}}}");
         assert_eq!(
-            run(CI, &with_dry_run(&parenthesised, Some(either))),
+            besides_tag_ref_rule(run(CI, &with_sign(&parenthesised, Some(either)))),
             Vec::<String>::new()
         );
         // The key step's own `if:` may carry the same parentheses.
         assert_eq!(
-            run(
+            besides_tag_ref_rule(run(
                 CI,
-                &with_dry_run(&parenthesised, Some(&format!("(({either}))")))
-            ),
+                &with_sign(&parenthesised, Some(&format!("(({either}))")))
+            )),
             Vec::<String>::new()
         );
         // An `||` inside parentheses or a string literal is not top-level.
-        let nested = "github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_type == 'branch')";
+        let nested = "startsWith(github.ref, 'refs/tags/v') && (github.ref_type == 'tag' || github.ref_type == 'branch')";
         assert_eq!(
-            run(
+            besides_tag_ref_rule(run(
                 CI,
-                &with_dry_run(
+                &with_sign(
                     &format!("${{{{ {nested} && 'updater-signing' || '' }}}}"),
                     Some(nested)
                 )
-            ),
+            )),
             Vec::<String>::new()
         );
         let literal = "github.ref_name != 'a || b'";
         assert_eq!(
-            run(
+            besides_tag_ref_rule(run(
                 CI,
-                &with_dry_run(
+                &with_sign(
                     &format!("${{{{ {literal} && 'updater-signing' || '' }}}}"),
                     Some(literal)
                 )
-            ),
+            )),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn the_real_release_is_decided_by_the_tag_ref_alone() {
+        // The v0.5.0 shape: key step and environment on the event name — a
+        // dispatch on the tag would be a dry run.
+        let by_event = with_sign(
+            "${{ github.event_name == 'push' && 'updater-signing' || '' }}",
+            Some("github.event_name == 'push'"),
+        );
+        let violations = run(CI, &by_event);
+        assert_flags(
+            &violations,
+            "release.yml: job `sign` step 3 signs with the real key on `github.event_name=='push'`, not on the tag ref",
+        );
+        assert_flags(
+            &violations,
+            "`jobs.sign.environment` reads `github.event_name`",
+        );
+
+        // Any other step deciding by the event splits a dispatch on the tag.
+        let draft_by_event = RELEASE.replace(
+            "      - uses: softprops/action-gh-release@",
+            "      - if: github.event_name == 'push'\n        uses: softprops/action-gh-release@",
+        );
+        assert_flags(
+            &run(CI, &draft_by_event),
+            "`jobs.release.steps.1.if` reads `github.event_name`",
+        );
+
+        // No dispatch trigger: the tagger's dispatch has nothing to run.
+        let push_only = RELEASE.replace("  workflow_dispatch:\n", "");
+        assert_flags(
+            &run(CI, &push_only),
+            "release.yml: no `workflow_dispatch` trigger — release-tag.yml cannot dispatch",
+        );
+    }
+
+    #[test]
+    fn the_tagger_is_required_and_runs_on_main_pushes_alone() {
+        let missing = lint(&[
+            WorkflowFile {
+                name: "ci.yml",
+                source: CI,
+            },
+            WorkflowFile {
+                name: "release.yml",
+                source: RELEASE,
+            },
+            WorkflowFile {
+                name: "nightly.yml",
+                source: NIGHTLY,
+            },
+        ]);
+        assert_eq!(missing, vec!["release-tag.yml: missing".to_owned()]);
+
+        for (from, to) in [
+            ("on:\n  push:\n", "on:\n  pull_request:\n  push:\n"),
+            ("on:\n  push:\n", "on:\n  workflow_dispatch:\n  push:\n"),
+            ("    branches: [main]\n", "    branches: [main, release]\n"),
+            (
+                "    branches: [main]\n",
+                "    branches: [main]\n    tags: [\"v*\"]\n",
+            ),
+            ("    branches: [main]\n", ""),
+        ] {
+            assert_flags(
+                &run_tagger(&RELEASE_TAG.replace(from, to)),
+                "must run on `push: branches: [main]` alone",
+            );
+        }
+
+        let forks = RELEASE_TAG.replace("    if: ${{ !github.event.repository.fork }}\n", "");
+        assert_flags(
+            &run_tagger(&forks),
+            "job `plan` has no `if: ${{ !github.event.repository.fork }}`",
+        );
+    }
+
+    #[test]
+    fn the_tagger_holds_no_secret_and_writes_from_a_codeless_job() {
+        for secret in [
+            "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+            "${{ secrets.RELEASE_PAT }}",
+            "${{ secrets['GH_PAT'] }}",
+        ] {
+            let leaked = RELEASE_TAG.replace(
+                "GH_TOKEN: ${{ github.token }}",
+                &format!("GH_TOKEN: {secret}"),
+            );
+            assert_flags(
+                &run_tagger(&leaked),
+                "`jobs.tag.env.GH_TOKEN` reads a secret",
+            );
+        }
+        let token = RELEASE_TAG.replace("${{ github.token }}", "${{ secrets.GITHUB_TOKEN }}");
+        assert_eq!(run_tagger(&token), Vec::<String>::new());
+
+        let environment = RELEASE_TAG.replace(
+            "    needs: plan\n",
+            "    needs: plan\n    environment: updater-signing\n",
+        );
+        assert_flags(
+            &run_tagger(&environment),
+            "job `tag` deploys to an environment",
+        );
+
+        let workflow_write = RELEASE_TAG.replace(
+            "permissions:\n  contents: read\n",
+            "permissions: write-all\n",
+        );
+        assert_flags(
+            &run_tagger(&workflow_write),
+            "workflow-level `permissions` grant write",
+        );
+
+        let checkout = RELEASE_TAG.replace(
+            "      - name: Tag\n",
+            &format!("      - uses: actions/checkout@{SHA} # v4.4.0\n      - name: Tag\n"),
+        );
+        assert_flags(
+            &run_tagger(&checkout),
+            "job `tag` step 1 uses `actions/checkout@",
+        );
+        let builds = RELEASE_TAG.replace(
+            "      - name: Dispatch\n",
+            "      - run: cargo run -p xtask -- release-tag\n      - name: Dispatch\n",
+        );
+        assert_flags(
+            &run_tagger(&builds),
+            "job `tag` step 2 runs `cargo` beside a write token",
+        );
+        let reusable = RELEASE_TAG.replace(
+            "  tag:\n    needs: plan\n",
+            "  call:\n    needs: plan\n    permissions:\n      contents: write\n    uses: ./.github/workflows/ci.yml\n  tag:\n    needs: plan\n",
+        );
+        assert_flags(
+            &run_tagger(&reusable),
+            "job `call` grants write to a reusable workflow",
+        );
+
+        // Write grants on the read-only planner would put the token beside
+        // cargo and the checkout.
+        let planner_writes = RELEASE_TAG.replace(
+            "    runs-on: ubuntu-latest\n    outputs:\n",
+            "    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n    outputs:\n",
+        );
+        let violations = run_tagger(&planner_writes);
+        assert_flags(&violations, "job `plan` step 1 uses `actions/checkout@");
+        assert_flags(
+            &violations,
+            "job `plan` step 2 runs `cargo` beside a write token",
+        );
+    }
+
+    #[test]
+    fn the_tagger_creates_by_api_never_moves_and_dispatches_on_the_tag() {
+        let no_ref = RELEASE_TAG.replace(
+            "          gh api \"repos/$GITHUB_REPOSITORY/git/refs\" -f ref=\"refs/tags/$TAG\" -f sha=\"$object\"\n",
+            "",
+        );
+        assert_flags(
+            &run_tagger(&no_ref),
+            "no `gh api …/git/refs` step creates the tag",
+        );
+
+        let no_dispatch = RELEASE_TAG.replace(
+            "        run: gh workflow run release.yml --repo \"$GITHUB_REPOSITORY\" --ref \"$TAG\"\n",
+            "        run: gh workflow run release.yml --repo \"$GITHUB_REPOSITORY\"\n",
+        );
+        assert_flags(
+            &run_tagger(&no_dispatch),
+            "no step runs `gh workflow run release.yml --ref <tag>`",
+        );
+
+        for mover in [
+            "gh api -X PATCH \"repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG\" -f sha=\"$object\" -F force=true",
+            "gh api --method DELETE \"repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG\"",
+        ] {
+            let moved = RELEASE_TAG.replace(
+                "      - name: Dispatch\n",
+                &format!("      - run: {mover}\n      - name: Dispatch\n"),
+            );
+            assert_flags(&run_tagger(&moved), "which moves or deletes a ref");
+        }
+    }
+
+    #[test]
+    fn only_the_tagger_creates_tags() {
+        for step in [
+            "git tag -a v1.0.0 -m release && git push origin refs/tags/v1.0.0",
+            "gh release create v1.0.0 --draft",
+            "gh api repos/o/r/git/refs -f ref=refs/tags/v1.0.0 -f sha=abc",
+        ] {
+            let tagging_ci = CI.replace(
+                "      - run: cargo test\n",
+                &format!("      - run: {step}\n"),
+            );
+            let violations = run(&tagging_ci, RELEASE);
+            assert_flags(&violations, "ci.yml: job `test` step 2 runs `");
+            assert_flags(
+                &violations,
+                "which creates a tag — only release-tag.yml creates tags",
+            );
+        }
+        let listing = CI.replace(
+            "      - run: cargo test\n",
+            "      - run: git tag --list && git describe --tags\n",
+        );
+        assert_eq!(run(&listing, RELEASE), Vec::<String>::new());
+
+        let named = RELEASE.replace(
+            "          draft: true\n",
+            "          draft: true\n          tag_name: v9.9.9\n",
+        );
+        assert_flags(
+            &run(CI, &named),
+            "sets `tag_name`, which creates a missing tag",
         );
     }
 

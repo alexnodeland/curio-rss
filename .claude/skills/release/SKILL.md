@@ -5,13 +5,16 @@ description: Cut a Curio release — version bump, changelog, tag, artifacts. Us
 
 # Release
 
-The tag-triggered pipeline (`.github/workflows/release.yml`,
-`docs/release/runbook.md` §2) re-runs the full CI suite on the tagged commit,
-builds the macOS universal bundle with no secrets, signs the updater archive
-in one isolated step, and drafts a GitHub release carrying SHA256SUMS,
-CycloneDX SBOMs and a build-provenance attestation. A human publishes the
-draft. The Linux/Windows release channels are still to come. A release is
-exactly this:
+Merging the version-bump PR is the release decision. On that push to `main`,
+`.github/workflows/release-tag.yml` tags `vX.Y.Z` on the bump commit and
+dispatches the release pipeline on the tag (`.github/workflows/release.yml`,
+`docs/release/runbook.md` §2), which re-runs the full CI suite on the tagged
+commit, builds the macOS universal bundle with no secrets, signs the updater
+archive in one isolated step (after the maintainer approves the
+`updater-signing` deployment), and drafts a GitHub release carrying
+SHA256SUMS, CycloneDX SBOMs and a build-provenance attestation. A human
+publishes the draft. The Linux/Windows release channels are still to come. A
+release is exactly this:
 
 1. **Green gate first**: `just ci` locally AND CI green on `main`. No
    release from a red or dirty tree.
@@ -26,23 +29,48 @@ exactly this:
    `schemas/CHANGELOG.md` records it and no vN file was edited in place
    (`git diff <last-tag> -- schemas/`).
 4. **Changelog**: summarize commit subjects since the last tag under a new
-   version heading (CHANGELOG.md at root once releases begin).
+   `## [X.Y.Z] — <date>` heading at the top of `CHANGELOG.md`, **in the bump
+   PR** (its squash-merge is the commit that gets tagged) — the tagger
+   refuses a bump whose CHANGELOG does not lead with its version, and the
+   release notes are that first section.
 5. **Dry run**: if `release.yml` changed since the last tag, dispatch it on
    `main` (Actions → release → Run workflow) and check the
-   `release-dry-run` artifact before tagging. An agent whose token can't
-   dispatch workflows (HTTP 403) says so in its hand-off instead of
+   `release-dry-run` artifact before merging the bump. An agent whose token
+   can't dispatch workflows (HTTP 403) says so in its hand-off instead of
    skipping silently; the tag run's own `gate` job still re-runs CI.
-6. **Tag**: annotated tag `vX.Y.Z` on the release commit (the squash-merge
-   of the bump PR, green on CI). Agents may create **and push** the tag
-   (`git push origin vX.Y.Z`; maintainer decision, 2026-11-01), then watch
-   the release run to its draft — where the git transport allows it: the
-   Claude Code cloud-session git proxy accepts branch pushes but refuses
-   tag pushes (HTTP 403), so there the agent creates the annotated tag and
-   hands the maintainer the exact `git tag`/`git push` commands instead of
-   retrying or routing around the refusal. A pushed tag is never moved or deleted;
-   a broken release ships as the next patch version. Approving the `sign`
-   job's `updater-signing` deployment and publishing the draft stay with
-   the maintainer.
+6. **Merge = tag**: squash-merge the bump PR on green. `release-tag.yml`
+   then creates the annotated tag `vX.Y.Z` on that squash-merge (message:
+   `Curio X.Y.Z` + the CHANGELOG heading) and dispatches `release.yml` on
+   it; later pushes find the tag and do nothing. Nobody pushes the tag by
+   hand. After the merge, check the `release-tag` run: green means the
+   `release` run on `vX.Y.Z` is waiting at its `sign` job.
+   - **If `release-tag`'s plan refuses**, it says why, and every push to
+     `main` stays red until it is fixed:
+     - the bump commit's CHANGELOG doesn't lead with the version. The tag
+       always goes on the commit that introduced the version, so a
+       CHANGELOG-only fix PR changes nothing: either bump to a new version
+       (its section on top), or push `vX.Y.Z` by hand on the commit that
+       fixes the CHANGELOG (it still carries the version);
+     - the bump commit's own `release.yml` would dry-run a dispatch (every
+       version up to and including 0.5.0 — GitHub runs the workflow file at
+       the tag): push the tag by hand with the exact commands the error
+       prints (runbook §2, *Fallback*).
+
+     Agents may create **and push** that tag (maintainer decision,
+     2026-11-01), then watch the release run to its draft, where the git
+     transport allows it: the Claude Code cloud-session git proxy accepts
+     branch pushes but refuses tag pushes (HTTP 403), so there the agent
+     hands the maintainer the exact `git tag`/`git push` commands instead of
+     retrying or routing around the refusal.
+   - **If the `tag` job fails after creating the tag** (its `Explain the
+     recovery` step says so), don't re-run it and don't hand-push: dispatch
+     `release.yml` on the existing tag (Actions → release → Run workflow →
+     Tags → `vX.Y.Z`; runbook §2). An agent whose token can't dispatch
+     workflows hands that step to the maintainer.
+   - A tag, once pushed or created, is never moved or deleted; a broken
+     release ships as the next patch version.
+   - Approving the `sign` job's `updater-signing` deployment and
+     publishing the draft stay with the maintainer.
    Once the tag exists, a follow-up PR adds its migration fixture:
    generate `fixtures/db/vX.Y.Z.db` from a checkout of the tag (recipe in
    `fixtures/db/generate.rs`) and add a case to

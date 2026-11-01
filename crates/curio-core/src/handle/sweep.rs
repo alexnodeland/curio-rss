@@ -11,6 +11,12 @@
 //! of one host's feeds in the list never holds the others up. A per-feed
 //! `Err` (the feed was removed mid-sweep, a transient storage error, a
 //! panicking parse) becomes that feed's outcome; it never aborts the sweep.
+//!
+//! A full-text feed's new articles go to the sweep's hydration queue (see
+//! the `hydrate` module) as soon as the feed is refreshed: their pages load
+//! [`RefreshOptions::hydrate_concurrency`] at a time alongside the feeds
+//! still refreshing, so the feed's slot moves straight on to the next
+//! feed. The sweep — and its report — ends once both are done.
 
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
@@ -19,6 +25,7 @@ use std::pin::pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use futures_util::FutureExt;
 use futures_util::StreamExt;
 use futures_util::future::{Either, select};
 use futures_util::stream::FuturesUnordered;
@@ -26,6 +33,8 @@ use tokio::sync::{Notify, watch};
 
 use crate::model::{Feed, FeedId, FeedStatus, FetchStatus};
 
+use super::hydrate::{DEFAULT_HYDRATE_CONCURRENCY, Hydrated, Hydration, HydrationQueue};
+use super::refresh::Refreshed;
 use super::{CoreError, CoreHandle, RefreshOutcome};
 
 /// How many feeds a sweep refreshes at once unless told otherwise.
@@ -36,12 +45,16 @@ pub const DEFAULT_REFRESH_CONCURRENCY: usize = 8;
 pub struct RefreshOptions {
     /// Feeds in flight at once; `0` is treated as `1`.
     pub concurrency: usize,
+    /// Full-text article pages hydrated at once, on top of the feeds in
+    /// flight; `0` is treated as `1`.
+    pub hydrate_concurrency: usize,
 }
 
 impl Default for RefreshOptions {
     fn default() -> Self {
         Self {
             concurrency: DEFAULT_REFRESH_CONCURRENCY,
+            hydrate_concurrency: DEFAULT_HYDRATE_CONCURRENCY,
         }
     }
 }
@@ -127,7 +140,11 @@ impl CoreHandle {
     /// module docs), `on_progress` called as each one finishes (in
     /// completion order, with a running `done`/`total`), and every
     /// per-feed `Err` turned into an [`FetchStatus::Error`] outcome so
-    /// the sweep always runs to the end.
+    /// the sweep always runs to the end. A full-text feed's new articles
+    /// are hydrated in the sweep's own queue, up to
+    /// `options.hydrate_concurrency` pages at once, while the remaining
+    /// feeds refresh; a feed's progress fires once the feed is settled,
+    /// its hydrations after it, and the sweep returns once they are done.
     ///
     /// **One sweep at a time.** A request made while another sweep is in
     /// flight joins it: it waits for that sweep and returns its report
@@ -137,8 +154,8 @@ impl CoreHandle {
     /// again once it is over. (If the running sweep's caller gives up on
     /// it, a joined request starts a sweep of its own.)
     ///
-    /// [`Self::cancel_refresh`] stops the sweep: no further feed starts,
-    /// fetches in flight (feed and full-text page fetches alike) are
+    /// [`Self::cancel_refresh`] stops the sweep: no further feed or page
+    /// starts, fetches in flight (feed and full-text page fetches alike) are
     /// dropped, and the report comes back with [`SweepReport::cancelled`]
     /// set and no outcomes for the feeds that were not refreshed.
     pub async fn refresh_many(
@@ -230,39 +247,71 @@ impl CoreHandle {
     ) -> SweepReport {
         let total = targets.len();
         let mut slots: Vec<Option<RefreshOutcome>> = (0..total).map(|_| None).collect();
-        let mut queue =
+        let mut feeds =
             WorkQueue::new(targets.into_iter().enumerate().map(|(index, (id, url))| {
                 let host = url.and_then(|url| self.client.paced_host(&url));
-                (index, id, host)
+                (FeedJob { index, id }, host)
             }));
-        let refresh = |work: Work| async move {
-            let outcome = match self.refresh_feed_until(work.id, Some(cancel)).await {
-                Ok(outcome) => outcome,
+        let mut pages = HydrationQueue::default();
+        let refresh = |work: Work<FeedJob>| async move {
+            let refreshed = match self.refresh_feed_until(work.job.id, Some(cancel)).await {
+                Ok(refreshed) => refreshed,
                 Err(err) => {
-                    tracing::warn!(feed = %work.id, %err, "feed refresh failed; the sweep carries on");
-                    Some(errored(work.id, &err))
+                    tracing::warn!(feed = %work.job.id, %err, "feed refresh failed; the sweep carries on");
+                    Some(Refreshed {
+                        outcome: errored(work.job.id, &err),
+                        hydrate: Vec::new(),
+                    })
                 }
             };
-            (work, outcome)
+            Finished::Feed(work, refreshed)
+        };
+        let hydrate = |work: Work<Hydration>| {
+            self.hydrate_queued(work, Some(cancel))
+                .map(|(work, hydrated)| Finished::Page(work, hydrated))
         };
         let concurrency = options.concurrency.max(1);
+        let hydrate_concurrency = options.hydrate_concurrency.max(1);
+        // Feed refreshes and page hydrations share one set of futures,
+        // each kind within its own budget.
         let mut in_flight = FuturesUnordered::new();
+        let (mut feeds_out, mut pages_out) = (0, 0);
         let mut done = 0;
         loop {
             // A cancelled sweep starts nothing new. `take` comes back
-            // empty while every waiting feed's host is busy; a feed
+            // empty while every waiting job's host is busy; a job
             // finishing frees its host for the next round.
-            while in_flight.len() < concurrency && !cancel.is_cancelled() {
-                let Some(work) = queue.take() else { break };
-                in_flight.push(refresh(work));
+            if !cancel.is_cancelled() {
+                while feeds_out < concurrency {
+                    let Some(work) = feeds.take() else { break };
+                    feeds_out += 1;
+                    in_flight.push(Either::Left(refresh(work)));
+                }
+                while pages_out < hydrate_concurrency {
+                    let Some(work) = pages.take() else { break };
+                    pages_out += 1;
+                    in_flight.push(Either::Right(hydrate(work)));
+                }
             }
-            let Some((work, outcome)) = in_flight.next().await else {
+            let Some(finished) = in_flight.next().await else {
                 break;
             };
-            queue.release(work.lane);
+            let (work, refreshed) = match finished {
+                Finished::Page(work, hydrated) => {
+                    pages_out -= 1;
+                    pages.settle(&work, hydrated);
+                    continue;
+                }
+                Finished::Feed(work, refreshed) => (work, refreshed),
+            };
+            feeds_out -= 1;
+            feeds.release(work.lane);
             // A fetch the cancel abandoned has no outcome: that feed was
             // not refreshed, like the ones never started.
-            let Some(outcome) = outcome else { continue };
+            let Some(Refreshed { outcome, hydrate }) = refreshed else {
+                continue;
+            };
+            pages.extend(&self.client, hydrate);
             done += 1;
             on_progress(SweepProgress {
                 sweep_id,
@@ -270,7 +319,7 @@ impl CoreHandle {
                 total,
                 outcome: &outcome,
             });
-            if let Some(slot) = slots.get_mut(work.index) {
+            if let Some(slot) = slots.get_mut(work.job.index) {
                 *slot = Some(outcome);
             }
         }
@@ -284,6 +333,14 @@ impl CoreHandle {
             joined: false,
         }
     }
+}
+
+/// One finished job of a sweep.
+enum Finished {
+    /// A feed refresh — `None` when the cancel abandoned its fetch.
+    Feed(Work<FeedJob>, Option<Refreshed>),
+    /// A full-text page hydration.
+    Page(Work<Hydration>, Hydrated),
 }
 
 /// A per-feed `Err` as that feed's outcome. It carries no
@@ -307,62 +364,84 @@ fn errored(feed_id: FeedId, err: &CoreError) -> RefreshOutcome {
 
 /// One feed of a sweep's work list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Work {
+struct FeedJob {
     /// Its position in the requested order.
     index: usize,
     id: FeedId,
-    /// Its host lane in the [`WorkQueue`].
-    lane: usize,
 }
 
-/// A sweep's work list, handed out fairly across hosts. Each
-/// politeness-paced host gets a lane with at most one feed in flight; the
-/// feeds of unpaced hosts (and of feeds whose URL is unknown) share one
-/// lane without that cap. The lanes take turns, each keeping its feeds in
-/// the requested order.
+/// One job handed out by a [`WorkQueue`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Work<T> {
+    pub(super) job: T,
+    /// Its host lane in the queue.
+    pub(super) lane: usize,
+}
+
+/// A work list handed out fairly across hosts — a sweep's feeds, the
+/// full-text hydration queue's pages. Each politeness-paced host gets a
+/// lane with at most one job in flight; the jobs of unpaced hosts (and of
+/// unknown URLs) share one lane without that cap. The lanes take turns,
+/// each keeping its jobs in the order they were queued.
 #[derive(Debug)]
-struct WorkQueue {
-    lanes: Vec<Lane>,
+pub(super) struct WorkQueue<T> {
+    lanes: Vec<Lane<T>>,
+    by_host: HashMap<Option<String>, usize>,
     /// The lane the next [`WorkQueue::take`] looks at first.
     turn: usize,
 }
 
+impl<T> Default for WorkQueue<T> {
+    fn default() -> Self {
+        Self {
+            lanes: Vec::new(),
+            by_host: HashMap::new(),
+            turn: 0,
+        }
+    }
+}
+
 #[derive(Debug)]
-struct Lane {
-    pending: VecDeque<Work>,
-    /// One feed in flight at most (a paced host's lane).
+struct Lane<T> {
+    pending: VecDeque<Work<T>>,
+    /// One job in flight at most (a paced host's lane).
     capped: bool,
-    /// A capped lane's feed is in flight.
+    /// A capped lane's job is in flight.
     busy: bool,
 }
 
-impl WorkQueue {
-    /// Lanes in the order their hosts first appear; `host` is the feed's
+impl<T> WorkQueue<T> {
+    /// Lanes in the order their hosts first appear; `host` is the job's
     /// paced host, `None` for an unpaced or unknown one.
-    fn new(feeds: impl IntoIterator<Item = (usize, FeedId, Option<String>)>) -> Self {
-        let mut lanes: Vec<Lane> = Vec::new();
-        let mut by_host: HashMap<Option<String>, usize> = HashMap::new();
-        for (index, id, host) in feeds {
-            let capped = host.is_some();
-            let lane = *by_host.entry(host).or_insert_with(|| {
-                lanes.push(Lane {
-                    pending: VecDeque::new(),
-                    capped,
-                    busy: false,
-                });
-                lanes.len() - 1
-            });
-            if let Some(entry) = lanes.get_mut(lane) {
-                entry.pending.push_back(Work { index, id, lane });
-            }
+    fn new(jobs: impl IntoIterator<Item = (T, Option<String>)>) -> Self {
+        let mut queue = Self::default();
+        for (job, host) in jobs {
+            queue.push(job, host);
         }
-        Self { lanes, turn: 0 }
+        queue
     }
 
-    /// The next feed to start: the first lane, from this turn on, with a
-    /// feed waiting and room in flight. `None` when every waiting feed's
-    /// host already has one in flight, or no feed is left.
-    fn take(&mut self) -> Option<Work> {
+    /// Queues `job` at the back of its host's lane.
+    pub(super) fn push(&mut self, job: T, host: Option<String>) {
+        let capped = host.is_some();
+        let lanes = &mut self.lanes;
+        let lane = *self.by_host.entry(host).or_insert_with(|| {
+            lanes.push(Lane {
+                pending: VecDeque::new(),
+                capped,
+                busy: false,
+            });
+            lanes.len() - 1
+        });
+        if let Some(entry) = lanes.get_mut(lane) {
+            entry.pending.push_back(Work { job, lane });
+        }
+    }
+
+    /// The next job to start: the first lane, from this turn on, with a
+    /// job waiting and room in flight. `None` when every waiting job's
+    /// host already has one in flight, or no job is left.
+    pub(super) fn take(&mut self) -> Option<Work<T>> {
         let count = self.lanes.len();
         for step in 0..count {
             let at = (self.turn + step) % count;
@@ -381,8 +460,8 @@ impl WorkQueue {
         None
     }
 
-    /// A feed of `lane` finished: its host may take the next one.
-    fn release(&mut self, lane: usize) {
+    /// A job of `lane` finished: its host may take the next one.
+    pub(super) fn release(&mut self, lane: usize) {
         if let Some(lane) = self.lanes.get_mut(lane) {
             lane.busy = false;
         }
@@ -624,8 +703,13 @@ mod tests {
         assert!(matches!(slot.claim(), Claim::Run(_)));
     }
 
-    fn ids(works: &[Work]) -> Vec<i64> {
-        works.iter().map(|work| work.id.0).collect()
+    fn ids(works: &[Work<FeedJob>]) -> Vec<i64> {
+        works.iter().map(|work| work.job.id.0).collect()
+    }
+
+    fn feed(index: usize, host: Option<String>) -> (FeedJob, Option<String>) {
+        let id = FeedId(i64::try_from(index).unwrap());
+        (FeedJob { index, id }, host)
     }
 
     /// One paced host's long run of feeds does not crowd the others out:
@@ -635,13 +719,13 @@ mod tests {
     fn the_work_queue_takes_turns_between_hosts() {
         let host = |name: &str| Some(name.to_owned());
         let feeds = [
-            (0, FeedId(0), host("reddit.com")),
-            (1, FeedId(1), host("reddit.com")),
-            (2, FeedId(2), host("reddit.com")),
-            (3, FeedId(3), host("a.example")),
-            (4, FeedId(4), None),
-            (5, FeedId(5), None),
-            (6, FeedId(6), host("b.example")),
+            feed(0, host("reddit.com")),
+            feed(1, host("reddit.com")),
+            feed(2, host("reddit.com")),
+            feed(3, host("a.example")),
+            feed(4, None),
+            feed(5, None),
+            feed(6, host("b.example")),
         ];
         let mut queue = WorkQueue::new(feeds);
         let mut started = Vec::new();
@@ -655,15 +739,21 @@ mod tests {
         let reddit = started.first().unwrap().lane;
         queue.release(reddit);
         let next = queue.take().unwrap();
-        assert_eq!((next.index, next.id), (1, FeedId(1)));
+        assert_eq!(
+            next.job,
+            FeedJob {
+                index: 1,
+                id: FeedId(1)
+            }
+        );
         assert!(queue.take().is_none(), "reddit.com is busy again");
         queue.release(reddit);
-        assert_eq!(queue.take().unwrap().id, FeedId(2));
+        assert_eq!(queue.take().unwrap().job.id, FeedId(2));
         queue.release(reddit);
         assert!(queue.take().is_none(), "every feed has started");
         // Releasing a lane that does not exist is harmless.
         queue.release(99);
-        assert!(WorkQueue::new([]).take().is_none());
+        assert!(WorkQueue::<FeedJob>::new([]).take().is_none());
     }
 
     #[test]

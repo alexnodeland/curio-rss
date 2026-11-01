@@ -49,19 +49,28 @@ impl CoreHandle {
     /// stored before the feed's URL was redirect-adopted). Extracting the
     /// feed XML as if it were the article would replace the real body.
     ///
+    /// Only the page fetch runs on the async runtime the call is awaited
+    /// on: the storage reads and writes, the page decode and the
+    /// readability extraction run on the blocking pool, so a large page
+    /// never stalls that runtime.
+    ///
     /// # Errors
     ///
     /// [`CoreError::NotFound`] for an unknown article; fetch, content or
-    /// storage errors.
+    /// storage errors; [`CoreError::Panicked`] when the extraction panics.
     pub async fn hydrate_article(&self, id: ArticleId) -> Result<Article, CoreError> {
-        let article = self
-            .storage
-            .get_article(id)?
-            .ok_or(CoreError::NotFound { entity: "article" })?;
-        let feed = match article.feed_id {
-            Some(feed_id) => self.storage.get_feed(feed_id)?,
-            None => None,
-        };
+        let (article, feed) = self
+            .on_blocking_pool(move |storage| {
+                let article = storage
+                    .get_article(id)?
+                    .ok_or(CoreError::NotFound { entity: "article" })?;
+                let feed = match article.feed_id {
+                    Some(feed_id) => storage.get_feed(feed_id)?,
+                    None => None,
+                };
+                Ok((article, feed))
+            })
+            .await?;
         // Matched against the feed's *current* URL only: the store keeps no
         // URL history, so a link-less row saved under a URL the feed no
         // longer has — and that no longer redirects to it (the user edited
@@ -102,23 +111,27 @@ impl CoreHandle {
         {
             return Ok(article);
         }
-        let processed = content::process_full_page(&response.html_text(), &response.final_url)?;
-        // A mis-scored thin page must not clobber real feed content.
-        if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len() {
-            return Ok(article);
-        }
-        self.storage.update_article_content(
-            id,
-            &ArticleContent {
-                html: processed.html,
-                text: processed.text,
-            },
-            Some(processed.word_count),
-            ContentOrigin::FullText,
-        )?;
-        self.storage
-            .get_article(id)?
-            .ok_or(CoreError::NotFound { entity: "article" })
+        self.on_blocking_pool(move |storage| {
+            let processed = content::process_full_page(&response.html_text(), &response.final_url)?;
+            // A mis-scored thin page must not clobber real feed content.
+            if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len()
+            {
+                return Ok(article);
+            }
+            storage.update_article_content(
+                id,
+                &ArticleContent {
+                    html: processed.html,
+                    text: processed.text,
+                },
+                Some(processed.word_count),
+                ContentOrigin::FullText,
+            )?;
+            storage
+                .get_article(id)?
+                .ok_or(CoreError::NotFound { entity: "article" })
+        })
+        .await
     }
 
     /// Saves a single URL as a feedless read-later article — the
@@ -311,7 +324,11 @@ impl CoreHandle {
         {
             Ok(enriched) => {
                 self.enrich_breaker.record_success();
-                self.store_enriched(id, &article.source_url, &enriched.html)
+                let source_url = article.source_url.clone();
+                self.on_blocking_pool(move |storage| {
+                    store_enriched(storage, id, &source_url, &enriched.html)
+                })
+                .await
             }
             Err(EnrichError::Http {
                 status: 429,
@@ -380,37 +397,6 @@ impl CoreHandle {
                 Ok(None)
             }
         }
-    }
-
-    /// Stores a provider's enriched body. Provider output IS the main
-    /// content already — it only passes the sanitize gate (readability's
-    /// boilerplate extraction would drop the appended media figures).
-    /// The API is authoritative for its own posts, so it may replace
-    /// longer feed content — but never with nothing (`Ok(None)` sends
-    /// the caller down the generic path instead).
-    #[cfg(feature = "enrich-reddit")]
-    fn store_enriched(
-        &self,
-        id: ArticleId,
-        source_url: &str,
-        raw_html: &str,
-    ) -> Result<Option<Article>, CoreError> {
-        let html = content::sanitize(raw_html, Some(source_url));
-        let text = content::plain_text(&html);
-        let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
-        if text.trim().is_empty() && content::first_image(&html).is_none() {
-            return Ok(None);
-        }
-        self.storage.update_article_content(
-            id,
-            &ArticleContent { html, text },
-            Some(word_count),
-            ContentOrigin::Enriched,
-        )?;
-        self.storage
-            .get_article(id)?
-            .ok_or(CoreError::NotFound { entity: "article" })
-            .map(Some)
     }
 
     /// Full-text search (escaped FTS5 — user input is never raw MATCH).
@@ -502,4 +488,35 @@ fn reddit_rate_limited(remaining: Option<std::time::Duration>) -> CoreError {
         host: "reddit.com".to_owned(),
         retry_after_secs: remaining.map_or(60, |d| d.as_secs().max(1)),
     }
+}
+
+/// Stores a provider's enriched body. Provider output IS the main
+/// content already — it only passes the sanitize gate (readability's
+/// boilerplate extraction would drop the appended media figures).
+/// The API is authoritative for its own posts, so it may replace
+/// longer feed content — but never with nothing (`Ok(None)` sends
+/// the caller down the generic path instead).
+#[cfg(feature = "enrich-reddit")]
+fn store_enriched(
+    storage: &crate::storage::Storage,
+    id: ArticleId,
+    source_url: &str,
+    raw_html: &str,
+) -> Result<Option<Article>, CoreError> {
+    let html = content::sanitize(raw_html, Some(source_url));
+    let text = content::plain_text(&html);
+    let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
+    if text.trim().is_empty() && content::first_image(&html).is_none() {
+        return Ok(None);
+    }
+    storage.update_article_content(
+        id,
+        &ArticleContent { html, text },
+        Some(word_count),
+        ContentOrigin::Enriched,
+    )?;
+    storage
+        .get_article(id)?
+        .ok_or(CoreError::NotFound { entity: "article" })
+        .map(Some)
 }

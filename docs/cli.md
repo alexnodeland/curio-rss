@@ -36,7 +36,7 @@ future head.
 | `curio init [dir]` | Scaffold a profile (`curio.toml`, `curio.db`, events log) |
 | `curio feed add <url> [--tags …]` | Subscribe — to a feed URL, or the validated feed autodiscovered from a site, page or bare domain |
 | `curio feed list` / `curio feed rm <id>` | List / unsubscribe |
-| `curio fetch` | Refresh every feed; reports new-article counts |
+| `curio fetch` | Refresh every feed that is due; reports new-article counts |
 | `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
 | `curio show <id>` | Render an article as markdown in the terminal |
 | `curio star` / `later` / `archive` / `tag` / `untag` `<id>` | Flip state — each is a `curio.events.v1` event |
@@ -234,8 +234,8 @@ Email newsletters can be subscribed as feeds too: see
 `feed rm` emits the `feed.removed` negation and keeps the articles.
 
 ```sh
-curio fetch                 # refresh every active feed
-curio fetch example.com     # or just one
+curio fetch                 # refresh every feed that is due
+curio fetch example.com     # or just one, now
 ```
 
 `fetch` refreshes up to 8 feeds at once, so a few unreachable hosts
@@ -249,8 +249,7 @@ order, and new/updated article counts —
 "updated" counts only entries that actually changed; a feed re-listing
 identical items reports `0 updated` and rewrites no articles. The
 engine does conditional GET (ETag/Last-Modified preserved on every error
-path), honors permanent redirects, auto-pauses a feed forever on HTTP 410,
-and stores only sanitized content — raw feed HTML never reaches the
+path), honors permanent redirects, and stores only sanitized content — raw feed HTML never reaches the
 database. An article whose full text was loaded (load-full, a feed's
 full-text mode, or Reddit enrichment) keeps that body: later refreshes of
 a feed still listing the item update its title and metadata, never revert
@@ -263,8 +262,22 @@ reported ("connection refused", "invalid peer certificate: UnknownIssuer",
 stable `error_kind` next to `error` for scripts to branch on: `invalid_url`,
 `dns`, `blocked` (the SSRF guard), `refused`, `reset`, `tls_certificate`,
 `tls_handshake`, `connect_timeout`, `read_timeout`, `redirect`, `too_large`,
-`transport`, `http` (see `http_status`), `gone` (HTTP 410), `not_a_feed`,
-`parse`, or `busy` (another Curio process was refreshing the feed).
+`transport`, `http` (see `http_status`), `rate_limited` (HTTP 429, or a 503
+with `Retry-After`), `gone` (HTTP 410), `not_a_feed`, `parse`, or `busy`
+(another Curio process was refreshing the feed).
+
+A bare `curio fetch` fetches only the feeds that are **due**. A feed that
+failed waits before it is retried — 15 minutes after the first failure,
+doubling with each one after it, up to a day. A host that answers 429 (or
+503 with `Retry-After`) is left alone until the time it asked for, by
+`curio fetch <feed>` too. A feed that declares how often it changes
+(`<ttl>`, `sy:updatePeriod`, or a `Cache-Control: max-age` from its
+server) is not fetched more often than that, up to once a day. A feed that
+keeps failing — 10 times in a row over at least 3 days — is paused
+(`curio feed list --json` shows `auto_paused_at` and `next_attempt_at`), and a feed that answers
+HTTP 410 twice in a row is marked dead. `curio fetch <feed>` refreshes one
+feed straight away whatever its backoff, which is how you retry one by
+hand. Each feed's fetch log keeps its latest 50 attempts.
 
 Sloppy feeds are normalized on the way in. An entry with no publication
 date takes its last-updated date, and a date in the future is clamped to

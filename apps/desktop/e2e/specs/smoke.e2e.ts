@@ -106,9 +106,12 @@ describe('Curio desktop — smoke', () => {
     });
 
     // 2. Add a feed through the add-feed modal, pointed at the 127.0.0.1 stub.
-    //    The subscription lands in the sidebar — and because a UI-typed URL can
-    //    never carry the W1 exemption, the SSRF guard refuses its first fetch:
-    //    the row turns unhealthy and the stub never sees a request for it.
+    //    Subscribe validates first, and because a UI-typed URL can never carry
+    //    the W1 exemption the SSRF guard refuses that check: the modal offers
+    //    the explicit "use this URL directly" instead of subscribing. Taking
+    //    it, the subscription lands in the sidebar, the guard refuses its
+    //    first fetch too, the row turns unhealthy, and the stub never sees a
+    //    request for it.
     it('adds a feed through the modal, and the SSRF guard keeps loopback unfetched', async () => {
         const url = `${stubBase}${ADDED_FEED_PATH}`;
         await $('[data-testid="three-pane"]').click();
@@ -117,6 +120,10 @@ describe('Curio desktop — smoke', () => {
         await input.waitForDisplayed({ timeout: 10_000 });
         await input.setValue(url);
         await $('[data-testid="add-feed-submit"]').click();
+
+        const unvalidated = await $('[data-testid="add-feed-unvalidated"]');
+        await unvalidated.waitForDisplayed({ timeout: 20_000 });
+        await unvalidated.click();
 
         const row = await $(feedRow(url));
         await row.waitForExist({ timeout: 20_000 });

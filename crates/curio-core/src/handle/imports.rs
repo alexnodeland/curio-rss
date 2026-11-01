@@ -1,7 +1,9 @@
 //! Imports (OPML and refugee files) and OPML export.
 
+use std::collections::HashSet;
+
 use crate::feeds::OpmlFeed;
-use crate::import::{self, ImportKind, ImportSource, ImportedItem};
+use crate::import::{self, ImportKind, ImportSource, ImportedItem, Rejected};
 use crate::model::{ArticleContent, NewArticle, NewFeed};
 
 use super::{CoreError, CoreHandle, ImportOutcome, OpmlImportOutcome};
@@ -21,41 +23,97 @@ impl CoreHandle {
         Ok(OpmlImportOutcome {
             added: outcome.feeds_added,
             skipped: outcome.feeds_skipped,
+            invalid: outcome.feeds_invalid,
+            rejected: outcome.rejected,
         })
     }
 
     /// Parses `content` as `source` and applies it — the one entry point
     /// for every refugee import (OPML, Pocket, Instapaper, Readwise).
     ///
+    /// Lenient: an outline or row that cannot be read, or whose URL is
+    /// unusable, is counted in the outcome's `*_invalid` counters (with its
+    /// reason in `rejected`) instead of failing the file.
+    ///
     /// # Errors
     ///
-    /// [`CoreError::Import`] if the file cannot be parsed, plus the storage
-    /// and emission errors of [`CoreHandle::import_items`].
+    /// [`CoreError::Import`] if the file cannot be parsed at all, plus the
+    /// storage and emission errors of [`CoreHandle::import_items`].
     pub fn import_file(
         &self,
         source: ImportSource,
         content: &str,
     ) -> Result<ImportOutcome, CoreError> {
-        self.import_items(import::parse(source, content)?)
+        let parsed = import::parse(source, content)?;
+        // Rows the parser could not read lead the report; the URL check
+        // below appends the rest.
+        let mut outcome = ImportOutcome::default();
+        for rejected in parsed.rejected {
+            outcome.reject(rejected);
+        }
+        self.apply_items(&mut outcome, parsed.items)?;
+        Ok(outcome)
     }
 
     /// Applies a neutral [`ImportedItem`] stream: feed items become
     /// subscriptions (each emits `feed.added`), article items become
     /// feedless read-later saves — upserted, flagged read-later, and
-    /// tagged, each flagging/tagging staging its own event. URLs already
-    /// present (a subscribed feed, a previously imported article) are
-    /// skipped, so re-importing the same export is idempotent. Every
-    /// staged event flushes in a single emission at the end.
+    /// tagged, each flagging/tagging staging its own event. Every URL is
+    /// first normalized ([`import::normalize_url`]); one that is not a
+    /// usable http(s) URL is counted as invalid, not imported. URLs already
+    /// present (a subscribed feed, a previously imported article — compared
+    /// in normalized form, so `HTTPS://Example.com` matches
+    /// `https://example.com/`; an article imported before normalization
+    /// also matches on its URL as spelled) are skipped, so re-importing the
+    /// same export is idempotent. Every staged event flushes in a single emission at
+    /// the end.
     ///
     /// # Errors
     ///
     /// Storage or emission errors.
     pub fn import_items(&self, items: Vec<ImportedItem>) -> Result<ImportOutcome, CoreError> {
         let mut outcome = ImportOutcome::default();
-        for item in items {
+        self.apply_items(&mut outcome, items)?;
+        Ok(outcome)
+    }
+
+    /// [`CoreHandle::import_items`] accumulating into an existing outcome.
+    fn apply_items(
+        &self,
+        outcome: &mut ImportOutcome,
+        items: Vec<ImportedItem>,
+    ) -> Result<(), CoreError> {
+        // Every subscription in normalized form: an existing feed stored as
+        // `HTTPS://Example.com` still dedupes against `https://example.com/`.
+        let mut known_feeds: HashSet<String> = self
+            .storage
+            .list_feeds()?
+            .into_iter()
+            .map(|feed| import::normalize_url(&feed.url).unwrap_or(feed.url))
+            .collect();
+        for mut item in items {
+            let raw_url = std::mem::take(&mut item.url);
+            item.url = match import::normalize_url(&raw_url) {
+                Ok(url) => url,
+                Err(reason) => {
+                    outcome.reject(Rejected {
+                        kind: item.kind,
+                        reason,
+                        detail: raw_url,
+                    });
+                    continue;
+                }
+            };
             match item.kind {
                 ImportKind::Feed => {
-                    if self.storage.get_feed_by_url(&item.url)?.is_some() {
+                    // The snapshot catches older spellings; the per-row
+                    // lookup catches a feed another head (CLI and desktop
+                    // share the DB) added since the snapshot, so the
+                    // `feeds.url UNIQUE` race stays a microsecond window
+                    // rather than the whole import.
+                    if !known_feeds.insert(item.url.clone())
+                        || self.storage.get_feed_by_url(&item.url)?.is_some()
+                    {
                         outcome.feeds_skipped += 1;
                         continue;
                     }
@@ -70,7 +128,19 @@ impl CoreHandle {
                     let title = item.title.unwrap_or_else(|| item.url.clone());
                     let key =
                         crate::feeds::dedupe_key(None, Some(&item.url), &title, item.saved_at);
-                    if self.storage.article_id_by_dedupe_key(None, &key)?.is_some() {
+                    // Imports before URL normalization keyed an article on
+                    // its URL as the file spelled it (`link:https://Example.com`);
+                    // matching that legacy key too keeps re-importing an
+                    // old export idempotent across the upgrade.
+                    let legacy_key =
+                        crate::feeds::dedupe_key(None, Some(&raw_url), &title, item.saved_at);
+                    if self.storage.article_id_by_dedupe_key(None, &key)?.is_some()
+                        || (legacy_key != key
+                            && self
+                                .storage
+                                .article_id_by_dedupe_key(None, &legacy_key)?
+                                .is_some())
+                    {
                         outcome.articles_skipped += 1;
                         continue;
                     }
@@ -104,7 +174,7 @@ impl CoreHandle {
             }
         }
         self.emit();
-        Ok(outcome)
+        Ok(())
     }
 
     /// Exports every subscription as OPML 2.0.

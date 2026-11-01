@@ -172,6 +172,7 @@ export const es: Partial<Record<MessageKey, string>> = {
     'addFeed.noneFound':
         'No se encontraron feeds en esa página: prueba con la URL directa del feed.',
     'addFeed.useUrl': 'Usar esta URL directamente',
+    'addFeed.unreachable': 'No se pudo acceder a esa dirección para buscar un feed.',
     'addFeed.already': 'Ya estás suscrito a este feed.',
     'addFeed.added': 'Suscrito a {title}',
     'addFeed.saveLink': 'Guardar para leer más tarde',
@@ -189,6 +190,11 @@ export const es: Partial<Record<MessageKey, string>> = {
     'presets.reddit': 'Reddit',
     'presets.youtube': 'YouTube',
     'presets.mastodon': 'Mastodon',
+    'presets.github': 'Versiones de GitHub',
+    'presets.newsletter': 'Boletín',
+    'presets.newsletter.hint':
+        'Los boletines llegan por correo. Crea un buzón en Kill the Newsletter, suscríbete al boletín con esa dirección y pega aquí la dirección o la URL de su feed. Los boletines de Substack no necesitan buzón: pega su dirección web.',
+    'presets.newsletter.open': 'Abrir Kill the Newsletter',
     'presets.hn': 'Hacker News',
     'presets.hn.frontpage': 'Portada',
     'presets.hn.newest': 'Más recientes',
@@ -320,6 +326,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'import.running': 'Importando…',
     'import.done':
         'Se importaron {feeds, plural, one {# feed} other {# feeds}} y {articles, plural, one {# artículo} other {# artículos}}, se omitieron {skipped, plural, other {#}}',
+    'import.doneWithInvalid':
+        'Se importaron {feeds, plural, one {# feed} other {# feeds}} y {articles, plural, one {# artículo} other {# artículos}}, se omitieron {skipped, plural, other {#}}; {invalid, plural, one {se ignoró # entrada no válida} other {se ignoraron # entradas no válidas}}',
     'import.hint':
         'OPML importa las suscripciones a feeds; los CSV de Pocket, Instapaper y Readwise importan los artículos guardados como elementos de leer más tarde con sus etiquetas.',
     'doctor.title': 'Doctor de la base de datos',

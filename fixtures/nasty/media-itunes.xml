@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>A podcast with every namespace</title>
+    <link>https://pod.example.com/</link>
+    <description>Episodes.</description>
+    <itunes:author>Pod Host</itunes:author>
+    <itunes:image href="https://pod.example.com/cover.jpg"/>
+    <itunes:category text="Technology"><itunes:category text="Podcasting"/></itunes:category>
+    <item>
+      <title>Episode with a thumbnail</title>
+      <guid>ep-1</guid>
+      <enclosure url="https://pod.example.com/ep1.mp3" length="1234" type="audio/mpeg"/>
+      <itunes:duration>01:02:03</itunes:duration>
+      <itunes:explicit>no</itunes:explicit>
+      <media:thumbnail url="https://pod.example.com/ep1-thumb.jpg"/>
+      <media:content url="https://pod.example.com/ep1.jpg" medium="image" type="image/jpeg"/>
+    </item>
+    <item>
+      <title>Episode with an image enclosure only</title>
+      <guid>ep-2</guid>
+      <enclosure url="https://pod.example.com/ep2.png" length="99" type="image/png"/>
+    </item>
+    <item>
+      <title>Episode with media text only</title>
+      <guid>ep-3</guid>
+      <media:group>
+        <media:description>Show notes &lt;script&gt;alert(1)&lt;/script&gt; as text.</media:description>
+        <media:thumbnail url="javascript:alert(1)"/>
+      </media:group>
+    </item>
+  </channel>
+</rss>

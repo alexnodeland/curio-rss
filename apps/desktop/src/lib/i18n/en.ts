@@ -185,6 +185,7 @@ export const en = {
     'addFeed.candidates': 'Feeds found',
     'addFeed.noneFound': 'No feeds found on that page — try the direct feed URL.',
     'addFeed.useUrl': 'Use this URL directly',
+    'addFeed.unreachable': 'Couldn’t reach that address to check it for a feed.',
     'addFeed.already': 'You are already subscribed to this feed.',
     'addFeed.added': 'Subscribed to {title}',
     'addFeed.saveLink': 'Save to Read Later',
@@ -202,6 +203,11 @@ export const en = {
     'presets.reddit': 'Reddit',
     'presets.youtube': 'YouTube',
     'presets.mastodon': 'Mastodon',
+    'presets.github': 'GitHub releases',
+    'presets.newsletter': 'Newsletter',
+    'presets.newsletter.hint':
+        'Newsletters arrive by email. Create an inbox at Kill the Newsletter, sign up to the newsletter with its address, then paste that address or its feed URL here. Substack newsletters need no inbox — paste their web address.',
+    'presets.newsletter.open': 'Open Kill the Newsletter',
     'presets.hn': 'Hacker News',
     'presets.hn.frontpage': 'Front page',
     'presets.hn.newest': 'Newest',
@@ -331,6 +337,8 @@ export const en = {
     'import.running': 'Importing…',
     'import.done':
         'Imported {feeds, plural, one {# feed} other {# feeds}} and {articles, plural, one {# article} other {# articles}}, skipped {skipped, plural, other {#}}',
+    'import.doneWithInvalid':
+        'Imported {feeds, plural, one {# feed} other {# feeds}} and {articles, plural, one {# article} other {# articles}}, skipped {skipped, plural, other {#}}; ignored {invalid, plural, one {# invalid entry} other {# invalid entries}}',
     'import.hint':
         'OPML brings in feed subscriptions; Pocket, Instapaper and Readwise CSVs bring in saved articles as read-later items with their tags.',
 

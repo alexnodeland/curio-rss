@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>&lt;script&gt;alert("feed title")&lt;/script&gt;</title>
+    <link>javascript:alert(1)</link>
+    <description>Stored-XSS attempts inside feed content.</description>
+    <item>
+      <title>Payloads <![CDATA[<img src=x onerror=alert(1)>]]></title>
+      <link>https://xss.example.com/one</link>
+      <guid>xss-1</guid>
+      <content:encoded><![CDATA[
+        <p>Fine <strong>content</strong>.</p>
+        <script>alert(1)</script>
+        <img src="x" onerror="alert(2)">
+        <a href="javascript:alert(3)">js link</a>
+        <a href="  JaVaScRiPt:alert(4)">spaced js link</a>
+        <a href="data:text/html;base64,PHNjcmlwdD5hbGVydCg1KTwvc2NyaXB0Pg==">data link</a>
+        <iframe src="https://evil.example/"></iframe>
+        <svg onload="alert(6)"><circle r="1"/></svg>
+        <math><mi xlink:href="javascript:alert(7)">x</mi></math>
+        <form action="https://evil.example/"><input name="q"><button>go</button></form>
+        <div style="background:url(javascript:alert(8))">styled</div>
+        <base href="https://evil.example/">
+        <meta http-equiv="refresh" content="0;url=https://evil.example/">
+        <noscript><p title="</noscript><img src=x onerror=alert(9)>"></p></noscript>
+        <a href="relative/ok">relative ok</a>
+      ]]></content:encoded>
+    </item>
+    <item>
+      <title>Entity-encoded payload</title>
+      <guid>xss-2</guid>
+      <description>&lt;img src=x onerror=alert(10)&gt;&lt;a href="&#106;avascript:alert(11)"&gt;entity js&lt;/a&gt;</description>
+    </item>
+  </channel>
+</rss>

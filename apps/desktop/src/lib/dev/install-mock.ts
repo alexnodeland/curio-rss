@@ -45,7 +45,7 @@ function devStartupFailure(): StartupFailureDto | null {
         message: DEV_STARTUP_MESSAGES[requested],
         profile_dir: hasProfile ? DEV_PROFILE : null,
         backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
-        app_version: '0.4.0',
+        app_version: '0.5.0',
     };
 }
 
@@ -307,7 +307,7 @@ tokens:
                     }));
                 case 'get_app_info':
                     return {
-                        version: '0.4.0',
+                        version: '0.5.0',
                         profile_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
                         db_schema_version: 5,
                         schema_supported: true,
@@ -346,13 +346,36 @@ tokens:
                 case 'export_text_file':
                     return null;
                 case 'import_opml':
-                    return { added: 4, skipped: 1 };
+                    return { added: 4, skipped: 1, invalid: 0 };
                 case 'import_file':
+                    // A CSV source plays the messy-export path (rows with
+                    // unusable URLs are counted, not fatal); OPML stays clean.
+                    if (args.source !== 'opml') {
+                        return {
+                            feeds_added: 0,
+                            feeds_skipped: 0,
+                            feeds_invalid: 0,
+                            articles_added: 12,
+                            articles_skipped: 3,
+                            articles_invalid: 2,
+                            rejected: [
+                                {
+                                    kind: 'article',
+                                    reason: 'unsupported_scheme',
+                                    detail: 'javascript:void(0)',
+                                },
+                                { kind: 'article', reason: 'invalid_url', detail: 'n/a' },
+                            ],
+                        };
+                    }
                     return {
                         feeds_added: 4,
                         feeds_skipped: 1,
+                        feeds_invalid: 0,
                         articles_added: 12,
                         articles_skipped: 0,
+                        articles_invalid: 0,
+                        rejected: [],
                     };
                 case 'export_opml':
                     return null;
@@ -362,6 +385,9 @@ tokens:
                     // normalization, rewrites, probing or validation): a
                     // YouTube @handle resolves to its channel videos feed,
                     // anything else to itself.
+                    if (/nofeed/i.test(query)) {
+                        return { feeds: [], favicon: null };
+                    }
                     if (/youtube\.com\/@/.test(query)) {
                         return {
                             feeds: [
@@ -382,8 +408,30 @@ tokens:
                     return String(args.url ?? '');
                 case 'copy_diagnostics_bundle':
                     return { token: 'dev-token', path: '/Users/alex/curio-diagnostics.zip' };
-                case 'add_feed':
+                case 'add_feed': {
+                    // A canned stand-in for subscribe-time validation: a URL
+                    // mentioning `nofeed` has no feed, one mentioning
+                    // `offline` is unreachable — unless `validate: false`
+                    // (the "use this URL directly" escape hatch).
+                    const newFeed = args.newFeed as { url: string; validate: boolean };
+                    if (newFeed.validate && /nofeed/i.test(newFeed.url)) {
+                        throw {
+                            kind: 'user',
+                            code: 'NO_FEED',
+                            message: `no feed found at ${newFeed.url}`,
+                            recoverable: false,
+                        };
+                    }
+                    if (newFeed.validate && /offline/i.test(newFeed.url)) {
+                        throw {
+                            kind: 'user',
+                            code: 'NETWORK',
+                            message: `could not reach ${newFeed.url}: connection refused`,
+                            recoverable: true,
+                        };
+                    }
                     return structuredClone(feeds[0]);
+                }
                 case 'remove_feed':
                 case 'update_feed_metadata':
                     return null;

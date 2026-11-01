@@ -52,7 +52,7 @@ interface ContractCase<K extends CommandName> {
 const cases: { [K in CommandName]: ContractCase<K> } = {
     discoverFeeds: { args: ['https://example.org'], response: discoveryFixture() },
     addFeed: {
-        args: [{ url: 'https://example.org/feed.xml', title: null, tags: [] }],
+        args: [{ url: 'https://example.org/feed.xml', title: null, tags: [], validate: true }],
         response: feedFixture(),
     },
     removeFeed: { args: [1], response: null },

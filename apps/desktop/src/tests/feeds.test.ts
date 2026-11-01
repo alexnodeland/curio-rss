@@ -151,6 +151,7 @@ describe('feeds store', () => {
             url: 'https://example.org/feed.xml',
             title: null,
             tags: [],
+            validate: true,
         });
         expect(added.status).toBe('ok');
 

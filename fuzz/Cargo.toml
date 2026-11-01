@@ -1,0 +1,57 @@
+# cargo-fuzz targets over curio-core's untrusted-input entry points (issue
+# #133). Deliberately OUTSIDE the cargo workspace (the empty [workspace]
+# below, plus `exclude` in the root manifest): libFuzzer needs a nightly
+# toolchain and sanitizer flags, so the stable gate (`just ci`) never builds
+# this crate. The nightly workflow's `fuzz` job runs every target for 10
+# minutes and fails on a crash; locally, `just fuzz <target> [seconds]`.
+#
+# Cargo.lock is not committed: the job copies the workspace's lock in first,
+# so the fuzzed dependency versions are exactly the ones that ship.
+[package]
+name = "curio-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+curio-core = { path = "../crates/curio-core" }
+libfuzzer-sys = "0.4"
+# The inertness audit (crates/curio-core/tests/common/inert.rs) is shared
+# with the integration suites by `#[path]`; it parses with scraper.
+scraper = "0.27"
+
+[workspace]
+
+# Every target here must also be in nightly.yml's fuzz matrix — xtask's
+# workflow lint (`just workflows`) fails when one is missing.
+[[bin]]
+name = "feed_parse"
+path = "fuzz_targets/feed_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "opml"
+path = "fuzz_targets/opml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "content_pipeline"
+path = "fuzz_targets/content_pipeline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "url_screen"
+path = "fuzz_targets/url_screen.rs"
+test = false
+doc = false
+bench = false

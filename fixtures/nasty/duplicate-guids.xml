@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Duplicate guids</title>
+    <link>https://dup.example.com/</link>
+    <description>Two items share one guid; two more repeat a link.</description>
+    <item>
+      <title>First copy</title>
+      <link>https://dup.example.com/a</link>
+      <guid>same-guid</guid>
+    </item>
+    <item>
+      <title>Second copy</title>
+      <link>https://dup.example.com/b</link>
+      <guid>  same-guid  </guid>
+    </item>
+    <item>
+      <title>No guid, repeated link</title>
+      <link>https://dup.example.com/a</link>
+    </item>
+    <item>
+      <title>No guid, repeated link (again)</title>
+      <link>https://dup.example.com/a</link>
+    </item>
+  </channel>
+</rss>

@@ -18,7 +18,12 @@ export const commands = {
 	/**
 	 *  Subscribes to a feed and kicks off its first fetch in the background —
 	 *  a new subscription must not sit empty until the next refresh cycle.
-	 *  Duplicate URLs are a storage error (user tier).
+	 *  By default the typed URL is resolved through the core's validating
+	 *  discovery first, so a homepage or a bare domain subscribes to its feed
+	 *  and a page with none is refused (`NO_FEED`) instead of becoming a
+	 *  subscription that fails on every refresh; `validate: false` is the
+	 *  explicit "subscribe anyway" (normalized only). A URL already subscribed
+	 *  — including one a homepage resolved to — is `ALREADY_SUBSCRIBED`.
 	 */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
 	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
@@ -626,6 +631,17 @@ export type ErrorCode =
 "NETWORK" | 
 /**  Feed/OPML bytes did not parse. */
 "PARSE" | 
+/**
+ *  Subscribe-time validation: the page answered but neither it nor
+ *  anything it declares (or the probes found) is a feed. The UI offers
+ *  an explicit "subscribe anyway".
+ */
+"NO_FEED" | 
+/**
+ *  The feed URL (as typed, or as a homepage resolved to) is already a
+ *  subscription.
+ */
+"ALREADY_SUBSCRIBED" | 
 /**  The storage layer failed. */
 "STORAGE" | 
 /**
@@ -737,6 +753,13 @@ export type FetchStatusDto =
 /**  Anything else (recorded, not raised). */
 "error";
 
+/**  Mirror of [`ImportKind`] — what a dropped import row would have been. */
+export type ImportKindDto = 
+/**  A feed subscription. */
+"feed" | 
+/**  A saved article. */
+"article";
+
 /**
  *  Mirror of [`ImportOutcome`] — feeds and articles counted separately so
  *  the UI can report "N feeds, M articles" without guessing.
@@ -746,10 +769,38 @@ export type ImportOutcomeDto = {
 	feeds_added: number,
 	/**  Feeds skipped (already subscribed). */
 	feeds_skipped: number,
+	/**  Feed rows dropped: unreadable, or with an unusable URL. */
+	feeds_invalid: number,
 	/**  Articles saved as feedless read-later items. */
 	articles_added: number,
 	/**  Articles skipped (already imported). */
 	articles_skipped: number,
+	/**  Article rows dropped: unreadable, or with an unusable URL. */
+	articles_invalid: number,
+	/**
+	 *  Why rows were dropped (the first
+	 *  [`curio_core::MAX_REJECTED_DETAILS`]; the counters stay exact).
+	 */
+	rejected: ImportRejectionDto[],
+};
+
+/**  Mirror of [`RejectReason`] — why an import row was dropped. */
+export type ImportRejectReasonDto = 
+/**  The row itself could not be read. */
+"malformed" | 
+/**  The URL is not a parseable absolute URL. */
+"invalid_url" | 
+/**  The URL is not http(s). */
+"unsupported_scheme";
+
+/**  Mirror of [`Rejected`] — one dropped import row and why. */
+export type ImportRejectionDto = {
+	/**  Feed or article. */
+	kind: ImportKindDto,
+	/**  Why it was dropped. */
+	reason: ImportRejectReasonDto,
+	/**  The offending value (the raw URL) or a description of the damage. */
+	detail: string,
 };
 
 /**  Mirror of [`ImportSource`] — the refugee-import format the user picked. */
@@ -850,12 +901,22 @@ export type MenuAction = {
 
 /**  Args for adding a subscription. */
 export type NewFeedDto = {
-	/**  Feed URL. */
+	/**
+	 *  What to subscribe: a feed URL, or anything discovery understands
+	 *  (a site, a bare domain, a page a rewrite rule knows).
+	 */
 	url: string,
 	/**  Optional user-supplied title. */
 	title: string | null,
 	/**  Initial tags. */
 	tags: string[],
+	/**
+	 *  Resolve `url` through the core's validating discovery and subscribe
+	 *  to the feed it finds — the default. `false` is the explicit
+	 *  "subscribe anyway" escape hatch: `url` is only normalized (a bare
+	 *  domain gains `https://`), never fetched.
+	 */
+	validate: boolean,
 };
 
 /**  Mirror of [`OpmlImportOutcome`]. */
@@ -864,6 +925,8 @@ export type OpmlImportOutcomeDto = {
 	added: number,
 	/**  Feeds skipped (already subscribed). */
 	skipped: number,
+	/**  Outlines dropped as unreadable or with an unusable URL. */
+	invalid: number,
 };
 
 /**

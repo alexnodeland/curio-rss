@@ -170,6 +170,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'addFeed.candidates': 'Feed trovati',
     'addFeed.noneFound': 'Nessun feed trovato in questa pagina — prova con l’URL diretto del feed.',
     'addFeed.useUrl': 'Usa direttamente questo URL',
+    'addFeed.unreachable': 'Impossibile raggiungere questo indirizzo per cercare un feed.',
     'addFeed.already': 'Sei già iscritto a questo feed.',
     'addFeed.added': 'Iscritto a {title}',
     'addFeed.saveLink': 'Salva per dopo',
@@ -186,6 +187,11 @@ export const it: Partial<Record<MessageKey, string>> = {
     'presets.reddit': 'Reddit',
     'presets.youtube': 'YouTube',
     'presets.mastodon': 'Mastodon',
+    'presets.github': 'Release di GitHub',
+    'presets.newsletter': 'Newsletter',
+    'presets.newsletter.hint':
+        'Le newsletter arrivano via email. Crea una casella su Kill the Newsletter, iscriviti alla newsletter con quell’indirizzo, poi incolla qui l’indirizzo o l’URL del suo feed. Le newsletter Substack non richiedono una casella: incolla il loro indirizzo web.',
+    'presets.newsletter.open': 'Apri Kill the Newsletter',
     'presets.hn': 'Hacker News',
     'presets.hn.frontpage': 'Prima pagina',
     'presets.hn.newest': 'Più recenti',
@@ -318,6 +324,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'import.running': 'Importazione…',
     'import.done':
         'Importati {feeds, plural, one {# feed} other {# feed}} e {articles, plural, one {# articolo} other {# articoli}}, saltati {skipped, plural, other {#}}',
+    'import.doneWithInvalid':
+        'Importati {feeds, plural, one {# feed} other {# feed}} e {articles, plural, one {# articolo} other {# articoli}}, saltati {skipped, plural, other {#}}; {invalid, plural, one {# voce non valida ignorata} other {# voci non valide ignorate}}',
     'import.hint':
         'OPML importa le iscrizioni ai feed; i CSV di Pocket, Instapaper e Readwise importano gli articoli salvati come elementi da leggere dopo con i loro tag.',
     'doctor.title': 'Diagnosi del database',

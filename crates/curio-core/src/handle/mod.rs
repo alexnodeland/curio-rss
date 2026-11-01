@@ -64,7 +64,7 @@ use crate::events::EventsError;
 use crate::export::{ExportDisposition, ExportError};
 use crate::feeds::{FeedParseError, OpmlError};
 use crate::fetch::{FetchConfig, FetchError, PolicedClient};
-use crate::import::ImportError;
+use crate::import::{ImportError, ImportKind, Rejected};
 use crate::model::{Article, FeedId, FetchStatus};
 use crate::storage::{OpenError, Storage, StorageError};
 
@@ -243,26 +243,63 @@ impl BulkSaveOutcome {
 }
 
 /// Outcome of an OPML import.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OpmlImportOutcome {
     /// Feeds newly subscribed.
     pub added: usize,
     /// Feeds skipped because the URL was already subscribed.
     pub skipped: usize,
+    /// Outlines dropped as unreadable or with an unusable URL.
+    pub invalid: usize,
+    /// Why outlines were dropped — the first [`MAX_REJECTED_DETAILS`] of
+    /// them, in document order (`invalid` stays exact past the cap).
+    pub rejected: Vec<Rejected>,
 }
+
+/// How many [`Rejected`] rows an [`ImportOutcome`] keeps in detail. The
+/// counters stay exact past it; the list only has to explain the failures,
+/// not mirror a garbage file row for row.
+pub const MAX_REJECTED_DETAILS: usize = 100;
 
 /// Outcome of a general [`CoreHandle::import_file`] / [`CoreHandle::import_items`]
 /// run, split by kind so the UI can report "N feeds, M articles" honestly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ImportOutcome {
     /// Feeds newly subscribed.
     pub feeds_added: usize,
     /// Feeds skipped because the URL was already subscribed.
     pub feeds_skipped: usize,
+    /// Feed rows dropped: unreadable, or with an unusable URL.
+    pub feeds_invalid: usize,
     /// Articles saved as feedless read-later items.
     pub articles_added: usize,
     /// Articles skipped because the URL was already imported.
     pub articles_skipped: usize,
+    /// Article rows dropped: unreadable, or with an unusable URL.
+    pub articles_invalid: usize,
+    /// Why rows were dropped — the first [`MAX_REJECTED_DETAILS`] of them,
+    /// in document order.
+    pub rejected: Vec<Rejected>,
+}
+
+impl ImportOutcome {
+    /// Counts one dropped row against its kind and keeps its reason while
+    /// the detail list has room.
+    fn reject(&mut self, rejected: Rejected) {
+        match rejected.kind {
+            ImportKind::Feed => self.feeds_invalid += 1,
+            ImportKind::Article => self.articles_invalid += 1,
+        }
+        tracing::info!(
+            kind = ?rejected.kind,
+            reason = ?rejected.reason,
+            detail = %rejected.detail,
+            "import row dropped"
+        );
+        if self.rejected.len() < MAX_REJECTED_DETAILS {
+            self.rejected.push(rejected);
+        }
+    }
 }
 
 /// The engine service object. Heads hold an `Arc<CoreHandle>` and

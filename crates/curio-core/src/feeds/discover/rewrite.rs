@@ -106,7 +106,7 @@ fn reddit(segments: &[&str]) -> Option<String> {
 /// `/<owner>/<repo>[/releases|/tags]` → the releases (or tags) Atom feed.
 fn github(segments: &[&str]) -> Option<String> {
     // First path segments that are GitHub pages, not repository owners.
-    const RESERVED: [&str; 16] = [
+    const RESERVED: [&str; 18] = [
         "about",
         "apps",
         "collections",
@@ -120,9 +120,11 @@ fn github(segments: &[&str]) -> Option<String> {
         "orgs",
         "pricing",
         "pulls",
+        "search",
         "settings",
         "sponsors",
         "topics",
+        "trending",
     ];
     let (owner, repo, feed) = match segments {
         [owner, repo] | [owner, repo, "releases"] => (*owner, *repo, "releases"),
@@ -226,6 +228,8 @@ mod tests {
         ),
         ("https://github.com/rust-lang", &[]),
         ("https://github.com/settings/profile", &[]),
+        ("https://github.com/trending/rust", &[]),
+        ("https://github.com/search/advanced", &[]),
         ("https://github.com/rust-lang/rust/issues", &[]),
         ("https://github.com/rust-lang/rust/releases.atom", &[]),
         // YouTube

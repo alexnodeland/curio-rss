@@ -20,3 +20,8 @@
 *.db   binary
 *.gz   binary
 *.zip  binary
+
+# Encoding fixtures for the lenient importer: their bytes (UTF-16LE + BOM,
+# CRLF, Latin-1) are the point, so no line-ending or text normalization.
+fixtures/import/pocket-utf16le.csv binary
+fixtures/opml/latin1.opml binary

@@ -78,7 +78,7 @@ pub struct NoteParts {
 ///
 /// [`ExportError::Yaml`] if the frontmatter fails to serialize.
 pub fn render_note(frontmatter: &ArticleFrontmatter, body: &str) -> Result<String, ExportError> {
-    let yaml = serde_yaml::to_string(frontmatter)?;
+    let yaml = super::yaml::to_string(frontmatter)?;
     Ok(assemble(&yaml, "\n", body, "\n"))
 }
 
@@ -153,7 +153,7 @@ pub(crate) fn parse_note(
     path: &Path,
 ) -> Result<(NoteParts, ArticleFrontmatter), ExportError> {
     let parts = split_note(content, path)?;
-    let frontmatter = serde_yaml::from_str(&parts.yaml).map_err(|err| ExportError::NoteParse {
+    let frontmatter = super::yaml::from_str(&parts.yaml).map_err(|err| ExportError::NoteParse {
         path: path.to_path_buf(),
         message: format!("frontmatter does not parse as curio.frontmatter.v1: {err}"),
     })?;
@@ -190,7 +190,7 @@ pub fn replace_managed(
     let (parts, old) = parse_note(existing, path)?;
     let mut merged = fresh.clone();
     merged.extra = old.extra; // unknown keys are the user's — keep them
-    let yaml = serde_yaml::to_string(&merged)?;
+    let yaml = super::yaml::to_string(&merged)?;
     Ok(assemble(
         &yaml,
         &parts.before_region,
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(parts.region, "line one\n\nline two");
         assert_eq!(parts.before_region, "\n");
         assert_eq!(parts.after_region, "\n");
-        let fm: ArticleFrontmatter = serde_yaml::from_str(&parts.yaml).unwrap();
+        let fm: ArticleFrontmatter = super::super::yaml::from_str(&parts.yaml).unwrap();
         assert_eq!(fm.title, "T");
     }
 

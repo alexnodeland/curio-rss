@@ -119,12 +119,44 @@ pub struct ExportOutcome {
 }
 
 /// Export failures.
+///
+/// Filesystem failures are sorted by what the user can do about them:
+/// [`ExportError::PermissionDenied`] (fix the folder's permissions, or the
+/// read-only volume), [`ExportError::DiskFull`] (free some space) and
+/// [`ExportError::DestinationMissing`] (reconnect the vault); anything else
+/// is [`ExportError::Io`]. [`ExportError::io`] does the sorting, and every
+/// filesystem call site builds its error through it.
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
-    /// Filesystem failure.
+    /// Filesystem failure of no more specific class.
     #[error("export io at {path}: {source}")]
     Io {
         /// The path being touched.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+    /// The destination (or a folder or file inside it) cannot be written:
+    /// its permissions refuse Curio (`EACCES`/`EPERM`, Windows "access
+    /// denied"), or it sits on a read-only volume (`EROFS`). Exporting
+    /// again succeeds once the permissions are fixed.
+    #[error(
+        "cannot write {path}: permission denied or read-only — check the destination \
+         folder's permissions, and that its volume is not mounted read-only"
+    )]
+    PermissionDenied {
+        /// The path that refused the write.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+    /// The disk (or the user's quota) holding the destination is full
+    /// (`ENOSPC`/`EDQUOT`, Windows `ERROR_DISK_FULL`). The atomic writes
+    /// leave the previous note intact; exporting again succeeds once space
+    /// is freed.
+    #[error("the disk holding {path} is full — free some space and export again")]
+    DiskFull {
+        /// The path whose write ran out of space.
         path: PathBuf,
         /// The underlying error.
         source: std::io::Error,
@@ -179,6 +211,25 @@ pub enum ExportError {
     },
 }
 
+impl ExportError {
+    /// Sorts a filesystem failure at `path` into its class:
+    /// [`ExportError::PermissionDenied`] for a permission refusal or a
+    /// read-only filesystem, [`ExportError::DiskFull`] for an exhausted
+    /// disk or quota, [`ExportError::Io`] for anything else.
+    #[must_use]
+    pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        use std::io::ErrorKind;
+        let path = path.into();
+        match source.kind() {
+            ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => {
+                Self::PermissionDenied { path, source }
+            }
+            ErrorKind::StorageFull | ErrorKind::QuotaExceeded => Self::DiskFull { path, source },
+            _ => Self::Io { path, source },
+        }
+    }
+}
+
 /// A note whose bytes are already durably on disk but whose manifest
 /// update is deliberately held back, so the facade can stage the
 /// matching event intent *between* the two writes.
@@ -228,7 +279,8 @@ impl StagedExport {
     ///
     /// # Errors
     ///
-    /// [`ExportError::Io`] on manifest write failures.
+    /// A filesystem error (sorted by [`ExportError::io`]) on manifest
+    /// write failures.
     pub fn commit(self) -> Result<ExportOutcome, ExportError> {
         if let Some(pending) = self.pending {
             write_manifest(&pending.root, &pending.manifest)?;

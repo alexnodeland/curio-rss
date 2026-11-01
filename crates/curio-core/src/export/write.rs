@@ -50,10 +50,7 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 /// sequence) and created exclusively, so concurrent writes never share
 /// one.
 pub(super) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
-    let io_err = |source| ExportError::Io {
-        path: path.to_path_buf(),
-        source,
-    };
+    let io_err = |source| ExportError::io(path, source);
     let dir = path.parent().ok_or_else(|| ExportError::Containment {
         path: path.display().to_string(),
     })?;
@@ -61,10 +58,9 @@ pub(super) fn write_atomic(root: &Path, path: &Path, bytes: &[u8]) -> Result<(),
     // created here, and each new entry needs its parent flushed too.
     let existing_ancestor = dir.ancestors().find(|a| a.is_dir()).map(Path::to_path_buf);
     std::fs::create_dir_all(dir).map_err(io_err)?;
-    let canonical_root = root.canonicalize().map_err(|source| ExportError::Io {
-        path: root.to_path_buf(),
-        source,
-    })?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|source| ExportError::io(root, source))?;
     let canonical_dir = dir.canonicalize().map_err(io_err)?;
     if !canonical_dir.starts_with(&canonical_root) {
         return Err(ExportError::Containment {
@@ -133,8 +129,18 @@ fn temp_path(dir: &Path, path: &Path) -> PathBuf {
 /// it over `path` (see [`land_with`]).
 fn land_via_temp(tmp: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
     use std::io::Write as _;
-    land_with(tmp, path, |file| file.write_all(bytes))
-        .map_err(|(path, source)| ExportError::Io { path, source })
+    land_via_temp_with(tmp, path, |file| file.write_all(bytes))
+}
+
+/// [`land_via_temp`] with the temp file's contents produced by `fill` —
+/// the seam the injected-failure tests use to fail mid-write. The failure
+/// is sorted into its class by [`ExportError::io`].
+fn land_via_temp_with(
+    tmp: &Path,
+    path: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> Result<(), ExportError> {
+    land_with(tmp, path, fill).map_err(|(path, source)| ExportError::io(path, source))
 }
 
 /// Fills the fresh temp file `tmp` via `fill`, flushes it, and renames it
@@ -247,6 +253,114 @@ mod tests {
             .collect()
     }
 
+    /// The path a filesystem-class export error names. A directory
+    /// squatting on a name is `EISDIR`/`EEXIST` on unix but "access denied"
+    /// on Windows, so those injected failures sort into `Io` or
+    /// `PermissionDenied` depending on the OS.
+    fn failed_fs_path(err: &ExportError) -> Option<&Path> {
+        match err {
+            ExportError::Io { path, .. }
+            | ExportError::PermissionDenied { path, .. }
+            | ExportError::DiskFull { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn filesystem_failures_are_sorted_by_what_the_user_can_do() {
+        use std::error::Error as _;
+        use std::io::{Error, ErrorKind};
+        let path = Path::new("/vault/curio/note.md");
+        let class = |source: Error| match ExportError::io(path, source) {
+            ExportError::PermissionDenied { .. } => "permission",
+            ExportError::DiskFull { .. } => "full",
+            ExportError::Io { .. } => "io",
+            other => panic!("not a filesystem class: {other:?}"),
+        };
+        for (kind, expected) in [
+            (ErrorKind::PermissionDenied, "permission"),
+            (ErrorKind::ReadOnlyFilesystem, "permission"),
+            (ErrorKind::StorageFull, "full"),
+            (ErrorKind::QuotaExceeded, "full"),
+            (ErrorKind::NotFound, "io"),
+            (ErrorKind::IsADirectory, "io"),
+            (ErrorKind::Other, "io"),
+        ] {
+            assert_eq!(class(Error::from(kind)), expected, "{kind:?}");
+        }
+        // The codes the OS actually reports sort the same way.
+        #[cfg(unix)]
+        for (errno, expected) in [
+            (1, "permission"),  // EPERM
+            (13, "permission"), // EACCES
+            (30, "permission"), // EROFS
+            (28, "full"),       // ENOSPC
+            (5, "io"),          // EIO
+        ] {
+            assert_eq!(class(Error::from_raw_os_error(errno)), expected, "{errno}");
+        }
+        #[cfg(windows)]
+        for (code, expected) in [
+            (5, "permission"), // ERROR_ACCESS_DENIED
+            (112, "full"),     // ERROR_DISK_FULL
+            (39, "full"),      // ERROR_HANDLE_DISK_FULL
+        ] {
+            assert_eq!(class(Error::from_raw_os_error(code)), expected, "{code}");
+        }
+
+        // The message names the path once and says what to do; the OS
+        // error stays reachable as the source.
+        for (err, advice) in [
+            (
+                ExportError::io(path, Error::from(ErrorKind::PermissionDenied)),
+                "check the destination folder's permissions",
+            ),
+            (
+                ExportError::io(path, Error::from(ErrorKind::StorageFull)),
+                "free some space",
+            ),
+        ] {
+            let message = err.to_string();
+            assert!(message.contains(advice), "{message}");
+            assert_eq!(
+                message.matches("/vault/curio/note.md").count(),
+                1,
+                "{message}"
+            );
+            assert!(err.source().is_some(), "{err:?}");
+        }
+    }
+
+    /// Injected failures half-way through a note write: a full disk and a
+    /// permission refusal reach the caller as their typed classes, naming
+    /// the temp file, with the previous note intact and no temp stray.
+    #[test]
+    fn a_full_disk_or_refused_write_mid_note_is_typed() {
+        use std::io::{Error, ErrorKind, Write as _};
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("note.md");
+        std::fs::write(&target, b"previous note").unwrap();
+        for (kind, full) in [
+            (ErrorKind::StorageFull, true),
+            (ErrorKind::PermissionDenied, false),
+        ] {
+            let tmp = temp_path(root.path(), &target);
+            let err = land_via_temp_with(&tmp, &target, |file| {
+                file.write_all(b"half a no")?;
+                Err(Error::new(kind, "injected"))
+            })
+            .unwrap_err();
+            let typed = if full {
+                matches!(&err, ExportError::DiskFull { path, .. } if *path == tmp)
+            } else {
+                matches!(&err, ExportError::PermissionDenied { path, .. } if *path == tmp)
+            };
+            assert!(typed, "{kind:?}: {err:?}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"previous note");
+            assert_eq!(temp_strays(root.path()), Vec::<String>::new());
+        }
+    }
+
     #[test]
     fn write_atomic_creates_parents_and_lands_the_bytes() {
         let root = tempfile::tempdir().unwrap();
@@ -272,10 +386,9 @@ mod tests {
         std::fs::create_dir_all(target.join("occupied")).unwrap();
 
         let err = write_atomic(root.path(), &target, b"bytes").unwrap_err();
-        assert!(
-            matches!(&err, ExportError::Io { path, .. } if *path == target),
-            "{err}"
-        );
+        assert_eq!(failed_fs_path(&err), Some(target.as_path()), "{err}");
+        #[cfg(unix)]
+        assert!(matches!(err, ExportError::Io { .. }), "{err:?}");
         assert_eq!(temp_strays(&dir), Vec::<String>::new());
         assert!(
             target.join("occupied").is_dir(),
@@ -296,10 +409,9 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
 
         let err = land_via_temp(&tmp, &target, b"bytes").unwrap_err();
-        assert!(
-            matches!(&err, ExportError::Io { path, .. } if *path == tmp),
-            "{err}"
-        );
+        assert_eq!(failed_fs_path(&err), Some(tmp.as_path()), "{err}");
+        #[cfg(unix)]
+        assert!(matches!(err, ExportError::Io { .. }), "{err:?}");
         assert!(!target.exists());
         assert!(tmp.is_dir(), "the squatting directory is untouched");
 

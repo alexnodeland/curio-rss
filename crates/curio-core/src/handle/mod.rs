@@ -41,12 +41,14 @@ mod destinations;
 mod feeds;
 mod imports;
 mod maintenance;
+mod reddit_auth;
 mod refresh;
 mod settings;
 mod sink;
 mod state;
 mod sweep;
 
+pub use reddit_auth::RedditAuthReason;
 pub use sweep::{DEFAULT_REFRESH_CONCURRENCY, RefreshOptions, SweepProgress, SweepReport};
 
 use std::collections::HashMap;
@@ -67,6 +69,7 @@ use crate::fetch::{FetchConfig, FetchError, PolicedClient};
 use crate::import::{ImportError, ImportKind, Rejected};
 use crate::model::{Article, FeedId, FetchErrorKind, FetchStatus};
 use crate::storage::{OpenError, Storage, StorageError};
+use reddit_auth::reddit_auth_message;
 
 /// Facade-level errors: every engine subsystem, plus facade concerns.
 #[derive(Debug, thiserror::Error)]
@@ -145,13 +148,18 @@ pub enum CoreError {
         /// Seconds until the breaker re-tries.
         retry_after_secs: u64,
     },
-    /// Reddit refused the request for auth reasons (missing, rejected,
-    /// or revoked credentials) — actionable by the user, so the detail
-    /// is surfaced verbatim.
-    #[error("{detail}")]
+    /// Reddit refused the request for auth reasons — actionable by the
+    /// user, and `reason` says which action: add credentials, fix them,
+    /// or re-authorize the app.
+    #[error("{}", reddit_auth_message(*reason, *status))]
     RedditAuth {
-        /// The user-facing guidance.
-        detail: String,
+        /// Why reddit refused.
+        reason: RedditAuthReason,
+        /// The HTTP status of the refusal (of the token grant for
+        /// [`RedditAuthReason::CredentialsRejected`], of the post request
+        /// otherwise — for [`RedditAuthReason::TokenUnavailable`], the
+        /// anonymous fallback's).
+        status: u16,
     },
     /// A blocking engine task (a refresh's parse/ingest/storage half)
     /// panicked — a bug. The panic is contained: only this operation

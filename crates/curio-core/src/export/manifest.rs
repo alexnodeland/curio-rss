@@ -34,7 +34,8 @@ pub fn manifest_path(root: &Path) -> PathBuf {
 ///
 /// # Errors
 ///
-/// [`ExportError::Io`] on read failures other than not-found;
+/// A filesystem error (sorted by [`ExportError::io`]) on read failures
+/// other than not-found;
 /// [`ExportError::ManifestParse`] when the file exists but does not
 /// parse — refusing to guess and clobber the oracle.
 pub fn load_manifest(root: &Path) -> Result<ManifestV1, ExportError> {
@@ -44,7 +45,7 @@ pub fn load_manifest(root: &Path) -> Result<ManifestV1, ExportError> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ManifestV1::new());
         }
-        Err(source) => return Err(ExportError::Io { path, source }),
+        Err(source) => return Err(ExportError::io(path, source)),
     };
     parse_manifest(&raw, path)
 }
@@ -99,20 +100,18 @@ fn is_conflict_copy(name: &str) -> bool {
 ///
 /// # Errors
 ///
-/// [`ExportError::Io`] when `.curio/` exists but cannot be listed.
+/// A filesystem error (sorted by [`ExportError::io`]) when `.curio/`
+/// exists but cannot be listed.
 pub fn manifest_conflict_copies(root: &Path) -> Result<Vec<PathBuf>, ExportError> {
     let dir = root.join(".curio");
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => return Err(ExportError::Io { path: dir, source }),
+        Err(source) => return Err(ExportError::io(dir, source)),
     };
     let mut copies = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|source| ExportError::Io {
-            path: dir.clone(),
-            source,
-        })?;
+        let entry = entry.map_err(|source| ExportError::io(&dir, source))?;
         let is_file = entry.file_type().is_ok_and(|t| t.is_file());
         if is_file && entry.file_name().to_str().is_some_and(is_conflict_copy) {
             copies.push(entry.path());
@@ -136,7 +135,8 @@ pub fn manifest_conflict_copies(root: &Path) -> Result<Vec<PathBuf>, ExportError
 ///
 /// # Errors
 ///
-/// [`ExportError::Io`] when `.curio/` cannot be listed.
+/// A filesystem error (sorted by [`ExportError::io`]) when `.curio/`
+/// cannot be listed.
 pub(super) fn merge_conflict_copies(
     root: &Path,
     manifest: &mut ManifestV1,
@@ -144,10 +144,7 @@ pub(super) fn merge_conflict_copies(
     let mut merged = Vec::new();
     for path in manifest_conflict_copies(root)? {
         let loaded = std::fs::read_to_string(&path)
-            .map_err(|source| ExportError::Io {
-                path: path.clone(),
-                source,
-            })
+            .map_err(|source| ExportError::io(&path, source))
             .and_then(|raw| parse_manifest(&raw, path.clone()));
         let copy = match loaded {
             Ok(copy) => copy,
@@ -214,7 +211,7 @@ fn settle_contested_paths(root: &Path, manifest: &mut ManifestV1) {
 ///
 /// # Errors
 ///
-/// [`ExportError::Io`] on write failures.
+/// A filesystem error (sorted by [`ExportError::io`]) on write failures.
 pub fn write_manifest(root: &Path, manifest: &ManifestV1) -> Result<(), ExportError> {
     let path = manifest_path(root);
     write_atomic(root, &path, manifest.to_canonical_json().as_bytes())?;
@@ -225,10 +222,7 @@ pub fn write_manifest(root: &Path, manifest: &ManifestV1) -> Result<(), ExportEr
 /// destination scaffolded by an older build picks up the lock file too.
 fn ensure_gitignore(root: &Path) -> Result<(), ExportError> {
     let gitignore = root.join(".curio").join(".gitignore");
-    let io_err = |source| ExportError::Io {
-        path: gitignore.clone(),
-        source,
-    };
+    let io_err = |source| ExportError::io(&gitignore, source);
     let current = match std::fs::read_to_string(&gitignore) {
         Ok(current) => current,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),

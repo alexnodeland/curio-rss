@@ -48,6 +48,11 @@ let showNewsletterHelp = $state(false);
 // Why the last subscribe (or find) could not validate the URL — the cue to
 // offer subscribing to it unvalidated. `null`: nothing failed.
 let unverified = $state<'noFeed' | 'unreachable' | null>(null);
+// Bumped by every edit of the URL (`resetDiscovery`). A find or subscribe
+// captures it before awaiting the core — which can take the whole discovery
+// budget — and drops its result if the URL changed meanwhile, so a late
+// reply about an earlier URL never unlocks the escape hatch for a new one.
+let generation = 0;
 
 // What the typed string resolves to, if it's a recognized source (a
 // subreddit, Mastodon handle, YouTube channel, HN URL). A YouTube @handle
@@ -75,6 +80,7 @@ function targetUrl(): string {
 /** Clears any prior discovery result — the candidates belong to an earlier URL
  *  and must not survive an edit, or `add()` would subscribe to a stale one. */
 function resetDiscovery(): void {
+    generation += 1;
     candidates = [];
     selectedUrl = null;
     searched = false;
@@ -127,8 +133,12 @@ async function find(): Promise<void> {
     }
     finding = true;
     triedRemoteFavicon = false;
+    const asked = generation;
     try {
         const result = await commands.discoverFeeds(query);
+        if (asked !== generation) {
+            return; // the URL was edited while discovery ran: this answer is stale
+        }
         if (result.status === 'error') {
             toastCommandError(result.error);
             if (result.error.code === 'NETWORK') {
@@ -174,6 +184,7 @@ async function add(validate = true): Promise<void> {
         return;
     }
     adding = true;
+    const asked = generation;
     try {
         const existing = await commands.getFeedByUrl(target);
         if (existing.status === 'error') {
@@ -191,7 +202,7 @@ async function add(validate = true): Promise<void> {
         }
         const result = await feedsStore.addFeed({ url: target, title: null, tags, validate });
         if (result.status === 'error') {
-            subscribeFailed(result.error);
+            subscribeFailed(result.error, asked !== generation);
             return;
         }
         toastStore.showToast(
@@ -207,18 +218,25 @@ async function add(validate = true): Promise<void> {
 }
 
 /** Presents a refused subscribe: a duplicate warns, an unvalidated URL
- *  offers the escape hatch, anything else toasts. */
-function subscribeFailed(error: CommandError): void {
+ *  offers the escape hatch, anything else toasts. `stale`: the URL was
+ *  edited while the subscribe ran, so the refusal is about a URL no longer
+ *  in the field — it must not offer the escape hatch for the new one. */
+function subscribeFailed(error: CommandError, stale: boolean): void {
     switch (error.code) {
         case 'ALREADY_SUBSCRIBED':
             toastStore.showToast(t('addFeed.already'), 'warning');
             return;
         case 'NO_FEED':
-            // Said inline, beside the escape hatch — no toast on top.
-            unverified = 'noFeed';
+            // Said inline, beside the escape hatch — no toast on top, and
+            // nothing at all once the field shows a different URL.
+            if (!stale) {
+                unverified = 'noFeed';
+            }
             return;
         case 'NETWORK':
-            unverified = 'unreachable';
+            if (!stale) {
+                unverified = 'unreachable';
+            }
             toastCommandError(error);
             return;
         default:

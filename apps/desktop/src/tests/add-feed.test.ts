@@ -389,6 +389,73 @@ describe('AddFeedModal', () => {
         expect(queryByTestId('add-feed-unvalidated')).toBeNull();
     });
 
+    it('drops a late subscribe refusal once the URL was edited meanwhile', async () => {
+        let refuse: (error: unknown) => void = () => {};
+        harness = installIpcHarness(
+            base({
+                add_feed: () =>
+                    new Promise((_resolve, reject) => {
+                        refuse = reject;
+                    }),
+            }),
+        );
+        const { getByText, queryByTestId, queryByText, getByPlaceholderText } = render(
+            AddFeedModal,
+            { onclose: vi.fn() },
+        );
+        const input = getByPlaceholderText('https://example.com');
+
+        await fireEvent.input(input, { target: { value: 'https://first.example' } });
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+        // The validating subscribe is still in flight: the user edits the URL.
+        await fireEvent.input(input, { target: { value: 'https://second.example' } });
+        refuse(
+            commandErrorFixture({
+                kind: 'user',
+                code: 'NO_FEED',
+                message: 'no feed found at https://first.example',
+            }),
+        );
+        await flushIpc();
+
+        // The refusal was about the first URL: no escape hatch for the second.
+        expect(queryByText('No feeds found on that page — try the direct feed URL.')).toBeNull();
+        expect(queryByTestId('add-feed-unvalidated')).toBeNull();
+    });
+
+    it('drops a late unreachable discovery once the URL was edited meanwhile', async () => {
+        let refuse: (error: unknown) => void = () => {};
+        harness = installIpcHarness(
+            base({
+                discover_feeds: () =>
+                    new Promise((_resolve, reject) => {
+                        refuse = reject;
+                    }),
+            }),
+        );
+        const { getByText, queryByTestId, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+        const input = getByPlaceholderText('https://example.com');
+
+        await fireEvent.input(input, { target: { value: 'https://first.example' } });
+        await fireEvent.click(getByText('Find feeds'));
+        await flushIpc();
+        await fireEvent.input(input, { target: { value: 'https://second.example' } });
+        refuse(
+            commandErrorFixture({
+                kind: 'user',
+                code: 'NETWORK',
+                message: 'could not reach https://first.example',
+            }),
+        );
+        await flushIpc();
+
+        expect(queryByTestId('add-feed-unvalidated')).toBeNull();
+        expect(toastStore.toasts).toHaveLength(0);
+    });
+
     it('warns when the typed address resolves to a feed already subscribed', async () => {
         harness = installIpcHarness(
             base({

@@ -1,13 +1,18 @@
 # Release runbook
 
 How a Curio release is cut. Distribution is an **unsigned** macOS Homebrew cask
-(Apple enrollment skipped, Windows deferred — docs/design/decisions.md). Three
+(Apple enrollment skipped, Windows deferred — docs/design/decisions.md). Four
 workflows back this: the per-PR gate (`ci.yml`), the nightly/on-demand tier
 (`nightly.yml`: the 3-OS `tauri build` matrix, the Linux/Windows smoke, and the
-cold-start bench), and the tag-triggered `release.yml` (builds the unsigned
-macOS **universal** DMG, renames it to the cask's stable name, and drafts the
-GitHub release). macOS correctness is signed off by hand via
-[`macos-checklist.md`](macos-checklist.md).
+cold-start bench), the tagger (`release-tag.yml`: tags a merged version bump
+and dispatches the release on that tag), and `release.yml`, which runs on the
+tag (builds the unsigned macOS **universal** DMG, renames it to the cask's
+stable name, and drafts the GitHub release). macOS correctness is signed off
+by hand via [`macos-checklist.md`](macos-checklist.md).
+
+**In short:** merge the version-bump PR → approve the `sign` job's
+`updater-signing` deployment → publish the draft. Nobody pushes a tag by hand
+unless the tagger refuses (§2, *Fallback*).
 
 ## 0. Preconditions
 
@@ -22,12 +27,57 @@ GitHub release). macOS correctness is signed off by hand via
 ## 1. Version bump
 
 - [ ] Bump `version` in `Cargo.toml` (`[workspace.package]`), `apps/desktop/package.json`, and `apps/desktop/src-tauri/tauri.conf.json` to `X.Y.Z` (keep them in lockstep).
-- [ ] Update `CHANGELOG` for `vX.Y.Z`.
-- [ ] PR the bump; merge on green.
+- [ ] Update `CHANGELOG` for `vX.Y.Z` — its `## [X.Y.Z]` section must lead
+      the file in the bump commit itself (the tagger refuses otherwise, and
+      the release notes are that first section).
+- [ ] PR the bump; merge on green. **Merging is the release decision.**
 
-## 2. Tag → automated draft release
+## 2. Merge → tag → automated draft release
 
-Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
+On every push to `main`,
+[`release-tag.yml`](../../.github/workflows/release-tag.yml) reads
+`[workspace.package] version`. When `vX.Y.Z` is already tagged it does nothing
+(the usual push, and every re-run). Otherwise its read-only `plan` job
+(`cargo run -p xtask -- release-tag`) finds the commit that introduced the
+version — the bump PR's squash-merge, even when later commits have landed — and
+its `tag` job, which checks nothing out, creates the annotated tag `vX.Y.Z`
+there with `GITHUB_TOKEN` (message: `Curio X.Y.Z` plus the rest of the
+CHANGELOG heading) and dispatches `release.yml` on the tag ref. The tag is
+created through the API's create-ref call, which refuses a ref that exists, so
+an existing tag is never moved or deleted. Forks never run it.
+
+Why a dispatch: a tag created with `GITHUB_TOKEN` fires no `push: tags` event
+(GitHub suppresses runs its own token triggers), but `workflow_dispatch` is the
+documented exception. A dispatch on the tag ref keeps `github.ref =
+refs/tags/vX.Y.Z`, and `release.yml` decides "real release vs dry run" by that
+ref alone, so the dispatched run is a real release exactly like a tag push:
+same `gate`, same `updater-signing` approval.
+
+The plan **fails instead of tagging** (an `::error::` on the `release-tag` run)
+when:
+
+- the bump commit's `CHANGELOG.md` does not lead with `## [X.Y.Z]`; or
+- the bump commit's own `release.yml` would not release a tag-ref dispatch for
+  real. GitHub runs the workflow file **at the tag**, and a `release.yml` that
+  decides by the event name (every version up to and including 0.5.0) treats
+  any dispatch as a dry run. Tagging from here would then only dry-run, and the
+  tag would keep a hand-pushed one from ever triggering the real release. The
+  error prints the exact fallback commands.
+
+**Fallback (manual tag push).** When the tagger refuses, or Actions is
+unavailable, push the annotated tag by hand from a machine with tag-push
+rights (Claude Code cloud sessions cannot: their git proxy refuses tag pushes).
+A tag push runs the same `release.yml`; the tagger's next run sees the tag and
+does nothing.
+
+```sh
+git fetch origin && git checkout <bump-commit-sha>
+git tag -a vX.Y.Z -m "Curio X.Y.Z — <CHANGELOG heading date/title>"
+git push origin vX.Y.Z          # → release.yml drafts the release
+```
+
+Either way, [`release.yml`](../../.github/workflows/release.yml) then runs on
+the tag:
 
 1. **`gate`** re-runs the whole CI suite (`ci.yml`, called as a reusable
    workflow) on the tagged commit. Every other job `needs` it, so a tag on a
@@ -40,7 +90,8 @@ Pushing the tag triggers [`release.yml`](../../.github/workflows/release.yml):
    step that runs nothing but the prebuilt `tauri signer sign` (installed with
    `npm ci --ignore-scripts` from the lockfile — no build scripts, no vite
    plugins, no npm lifecycle scripts). It writes the updater manifest
-   `latest.json`. On a tag push the job deploys to the **`updater-signing`
+   `latest.json`. On a tag ref (a tag push or the tagger's dispatch on the
+   tag) the job deploys to the **`updater-signing`
    environment** (below), so it **waits for your approval**: open the run →
    **Review deployments** → tick `updater-signing` → **Approve and deploy**.
    The key step fails fast with a pointer here if the environment is not
@@ -64,7 +115,14 @@ action, a job that skips the gate (or runs on `always()` / `failure()` /
 the key step that runs project code, backgrounds a process or writes
 `GITHUB_ENV`/`GITHUB_PATH`, a signing job that drops its `updater-signing`
 environment (or selects it under any condition other than the key step's own
-`if:`), or a missing checksum/SBOM/attestation asset.
+`if:`), a real-key step guarded by anything but the tag ref (or any
+`github.event_name` in `release.yml` — a dispatch on the tag must release for
+real in every step), or a missing checksum/SBOM/attestation asset. For the
+tagger it fails on any trigger but `push` to `main`, a missing fork guard, any
+secret but `GITHUB_TOKEN`, an environment, a write grant on a job that checks
+out code or runs a build tool, a command that moves or deletes a ref, or a
+missing create-ref call or tag-ref dispatch — and it fails any **other**
+workflow that creates a tag.
 It holds the nightly tier §0 relies on too: no retired runner image, no
 `continue-on-error`, bundle uploads that fail when empty, and a cold-start
 `bench` the tracker can read — criterion run statelessly (`CRITERION_HOME`
@@ -81,11 +139,13 @@ secret of the GitHub environment `updater-signing`, which admits `v*` tags
 alone and waits for a maintainer's approval. A workflow on any branch — even
 one with write access that references `secrets.TAURI_SIGNING_PRIVATE_KEY` —
 then reads it as empty, and a sign job nobody approved never starts.
-`release.yml` selects the environment only on a tag push (on the
-`workflow_dispatch` dry run the name is empty, i.e. no environment, so the dry
-run is not held at the tag-only rule).
+`release.yml` selects the environment only on a tag ref — a tag push or the
+tagger's dispatch on the tag (on the `workflow_dispatch` dry run from `main`
+the name is empty, i.e. no environment, so the dry run is not held at the
+tag-only rule).
 
-**Order matters.** Do steps 1–4 **before the next `v*` tag is pushed**.
+**Order matters.** Do steps 1–4 **before the next `v*` tag is created** —
+i.e. before the next version-bump PR merges, since the tagger tags it.
 GitHub silently auto-creates an environment that a job references but that
 does not exist yet, and creates it with **no** protection rules. So the key
 step first checks the `UPDATER_SIGNING_READY` variable, which exists only on
@@ -144,14 +204,14 @@ Verify (after any change to the environment, and once after the setup):
 `main` runs all of the above except the publish steps: it signs with a
 throwaway key generated on the runner, mints no attestation, drafts no
 release, and uploads the would-be assets as the `release-dry-run` run
-artifact. Use it after any change to `release.yml`, or before tagging.
+artifact. Use it after any change to `release.yml`, or before merging a
+bump.
 
-```sh
-git checkout main && git pull
-git tag -a vX.Y.Z -m "Curio vX.Y.Z"
-git push origin vX.Y.Z          # → release.yml drafts the release
-```
-
+- [ ] The `release-tag` run for the bump's merge is green and created
+      `vX.Y.Z` on the bump commit (its summary names the commit), and a
+      `release` run on `vX.Y.Z` started (Actions → release, event
+      `workflow_dispatch`, branch `vX.Y.Z`). If `release-tag` failed, read
+      its error: fix the CHANGELOG in a new bump, or use the fallback above.
 - [ ] Approve the `sign` job's `updater-signing` deployment (the run waits
       there after `build`) — check that the run is for your tag first.
 - [ ] `release.yml` run for the tag is green and a **draft** `vX.Y.Z` release

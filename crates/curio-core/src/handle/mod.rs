@@ -42,11 +42,13 @@ mod feeds;
 mod imports;
 mod maintenance;
 mod refresh;
+mod schedule;
 mod settings;
 mod sink;
 mod state;
 mod sweep;
 
+pub use schedule::RefreshPolicy;
 pub use sweep::{DEFAULT_REFRESH_CONCURRENCY, RefreshOptions, SweepProgress, SweepReport};
 
 use std::collections::HashMap;
@@ -175,6 +177,9 @@ pub struct CoreOptions {
     /// [`crate::storage::ALLOW_NETWORK_FS_ENV`] variable
     /// ([`crate::storage::network_fs_override_from_env`]).
     pub allow_network_fs: bool,
+    /// The per-feed refresh schedule: backoff, `Retry-After`, refresh
+    /// hints and auto-pause.
+    pub refresh: RefreshPolicy,
 }
 
 /// What one feed refresh did.
@@ -285,6 +290,8 @@ pub struct CoreHandle {
     /// How long a refresh waits for another process to finish refreshing
     /// the same feed (derived from the fetch timeouts at open).
     refresh_lock_wait: Duration,
+    /// The per-feed refresh schedule (see [`RefreshPolicy`]).
+    refresh_policy: RefreshPolicy,
     /// The one refresh sweep allowed in flight (see
     /// [`CoreHandle::refresh_many`]): a second request joins it.
     sweep: sweep::SweepSlot,
@@ -379,6 +386,7 @@ impl CoreHandle {
             client: PolicedClient::new(options.fetch),
             refresh_locks: Mutex::new(HashMap::new()),
             refresh_lock_wait,
+            refresh_policy: options.refresh,
             sweep: sweep::SweepSlot::default(),
             #[cfg(feature = "enrich-reddit")]
             enrich_breaker: crate::enrich::Breaker::default(),

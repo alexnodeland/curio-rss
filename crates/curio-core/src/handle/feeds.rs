@@ -176,6 +176,26 @@ impl CoreHandle {
         Ok(self.storage.set_feed_status(id, status)?)
     }
 
+    /// Sets a feed's own refresh interval in minutes (`None` clears it):
+    /// sweeps then leave the feed alone for at least that long after each
+    /// attempt (`Some(0)` clears it too). It can only slow a feed down —
+    /// sweeps still run on the head's global schedule. DB-local, no
+    /// contract event.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::Storage`] wrapping `NotFound` for an unknown feed;
+    /// storage errors.
+    pub fn set_feed_refresh_interval(
+        &self,
+        id: FeedId,
+        minutes: Option<u32>,
+    ) -> Result<(), CoreError> {
+        // A zero interval means no interval of the feed's own.
+        let minutes = minutes.filter(|&minutes| minutes > 0);
+        Ok(self.storage.set_feed_refresh_interval(id, minutes)?)
+    }
+
     /// Fills in feed metadata learned from a fetch, without clobbering
     /// anything already set (human edits win over parsed values) — the
     /// fetch-fill counterpart to [`Self::set_feed_metadata`]. DB-local, no

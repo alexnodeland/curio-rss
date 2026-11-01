@@ -17,7 +17,9 @@ use futures_util::StreamExt;
 use futures_util::stream;
 use tokio::sync::{Notify, watch};
 
-use crate::model::{FeedId, FeedStatus, FetchStatus};
+use curio_types::Timestamp;
+
+use crate::model::{FeedId, FetchStatus};
 
 use super::{CoreError, CoreHandle, RefreshOutcome};
 
@@ -73,9 +75,10 @@ pub struct SweepReport {
 }
 
 impl CoreHandle {
-    /// Refreshes every active feed at the default concurrency. Per-feed
-    /// failures land in their outcome rows. Joins a sweep already in
-    /// flight (see [`Self::refresh_many`]).
+    /// Refreshes every *due* feed at the default concurrency (see
+    /// [`Self::refresh_all_with`]). Per-feed failures land in their
+    /// outcome rows. Joins a sweep already in flight (see
+    /// [`Self::refresh_many`]).
     ///
     /// # Errors
     ///
@@ -87,8 +90,11 @@ impl CoreHandle {
             .outcomes)
     }
 
-    /// Refreshes every active feed as one sweep — see
-    /// [`Self::refresh_many`].
+    /// Refreshes every *due* feed as one sweep — see
+    /// [`Self::refresh_many`]. A feed is due when it is active and
+    /// outside its backoff / `Retry-After` / refresh-hint window
+    /// ([`crate::model::Feed::is_due`]); the others are not fetched and
+    /// get no outcome.
     ///
     /// # Errors
     ///
@@ -98,17 +104,18 @@ impl CoreHandle {
         options: RefreshOptions,
         on_progress: impl FnMut(SweepProgress<'_>),
     ) -> Result<SweepReport, CoreError> {
-        let active = self
+        let due = self
             .on_blocking_pool(|storage| {
+                let now = Timestamp::now();
                 Ok(storage
                     .list_feeds()?
                     .into_iter()
-                    .filter(|feed| feed.status == FeedStatus::Active)
+                    .filter(|feed| feed.is_due(now))
                     .map(|feed| feed.id)
                     .collect::<Vec<_>>())
             })
             .await?;
-        Ok(self.refresh_many(active, options, on_progress).await)
+        Ok(self.refresh_many(due, options, on_progress).await)
     }
 
     /// Refreshes `ids` as one sweep: up to `options.concurrency` feeds in

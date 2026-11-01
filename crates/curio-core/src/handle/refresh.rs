@@ -16,10 +16,12 @@ use crate::feeds::ParsedEntry;
 use crate::fetch::{FetchConfig, FetchError, FetchRequest, FetchResponse};
 use crate::lock::{FileLock, FileLockGuard, LockError};
 use crate::model::{
-    ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewArticle,
+    ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus,
+    NewArticle,
 };
 use crate::storage::Storage;
 
+use super::schedule::{self, Attempt, RefreshPolicy};
 use super::sweep::RefreshCancel;
 use super::{CoreError, CoreHandle, LOCKS_DIR, RefreshOutcome};
 
@@ -45,6 +47,13 @@ impl CoreHandle {
     /// fresher pair a parallel successful refresh just stored (the
     /// conditional-GET validator race). Different feeds still refresh in
     /// parallel.
+    ///
+    /// Every settled attempt also schedules the feed's next one (see
+    /// [`RefreshPolicy`]). This one-feed refresh ignores a failure
+    /// backoff — it is how a user retries by hand — but not a host's
+    /// running `Retry-After`: until that deadline it returns a
+    /// [`FetchStatus::Error`] outcome without fetching or recording
+    /// anything.
     ///
     /// Should another process hold the feed's lock longer than one
     /// refresh can take (it is stuck), the call gives up without fetching
@@ -96,6 +105,14 @@ impl CoreHandle {
                 "feed is dead (HTTP 410) — refusing to fetch",
             ));
         }
+        // A host's Retry-After binds every refresh, manual ones included;
+        // a plain failure backoff only binds sweeps.
+        if let Some(until) = schedule::rate_limited_until(&feed, Timestamp::now()) {
+            return Ok(not_fetched(
+                id,
+                &format!("the host asked Curio to wait — next attempt after {until}"),
+            ));
+        }
 
         let started = Instant::now();
         let request = FetchRequest {
@@ -118,8 +135,11 @@ impl CoreHandle {
         let now = Timestamp::now();
         let duration_ms = u32::try_from(started.elapsed().as_millis()).ok();
 
+        let policy = self.refresh_policy;
         let settled = self
-            .on_blocking_pool(move |storage| settle(storage, id, &feed, fetched, now, duration_ms))
+            .on_blocking_pool(move |storage| {
+                settle(storage, &policy, &feed, fetched, now, duration_ms)
+            })
             .await?;
         if settled.url_adopted {
             // The URL is the identity key of feed.added/feed.removed;
@@ -256,39 +276,107 @@ struct Settled {
 }
 
 /// The blocking half of a refresh: maps the fetch result onto feed state
-/// (parse → ingest on success, validators preserved on every other path)
-/// and records the fetch-log row. Runs on the blocking pool, inside the
-/// caller's per-feed locks.
+/// (parse → ingest on success, validators preserved on every other path),
+/// works out the feed's next attempt (see [`RefreshPolicy`]) and settles
+/// the fetch-log row together with that schedule. Runs on the blocking
+/// pool, inside the caller's per-feed locks.
 fn settle(
     storage: &Storage,
-    id: FeedId,
+    policy: &RefreshPolicy,
     feed: &Feed,
     fetched: Result<FetchResponse, FetchError>,
     now: Timestamp,
     duration_ms: Option<u32>,
 ) -> Result<Settled, CoreError> {
-    let failed = |http_status: Option<u16>, error: String| RefreshOutcome {
-        feed_id: id,
-        status: FetchStatus::Error,
-        http_status,
-        new_articles: 0,
-        updated_articles: 0,
-        error: Some(error),
-    };
-
+    let id = feed.id;
     // Conditional-GET validators are preserved on every non-ingest
     // path — error, 304, 410, unparseable body. Only a successfully
     // *parsed* 2xx adopts the response's validators (the sketch
     // clobbered them on any failure).
     let mut hydrate_pending: Vec<ArticleId> = Vec::new();
     let mut url_adopted = false;
-    let outcome = match fetched {
-        Err(err) => {
-            preserve_validators(storage, id, feed, now)?;
-            failed(None, err.to_string())
+    let parsed = match fetched {
+        Ok(response) if response.is_success() => {
+            match crate::feeds::parse_feed(&response.body, Some(&response.final_url)) {
+                Ok(parsed) => Ok((response, parsed)),
+                // A body we could not parse must not update the
+                // validators, or a broken feed 304s forever.
+                Err(err) => Err((
+                    failed(id, Some(response.status), err.to_string()),
+                    Attempt::Failed {
+                        kind: FetchErrorKind::Parse,
+                        retry_after: None,
+                    },
+                )),
+            }
         }
-        Ok(response) if response.is_not_modified() => {
+        other => Err(unsuccessful(feed, other)),
+    };
+    let (outcome, attempt) = match parsed {
+        Ok((response, parsed)) => {
+            let hint = parsed.meta.refresh_hint.max(response.max_age);
+            let ingested = ingest_parsed(storage, id, feed, &response, parsed, now)?;
+            hydrate_pending = ingested.hydrate_pending;
+            url_adopted = ingested.url_adopted;
+            (ingested.outcome, Attempt::Succeeded { hint })
+        }
+        Err(unsuccessful) => {
             preserve_validators(storage, id, feed, now)?;
+            unsuccessful
+        }
+    };
+
+    storage.settle_fetch(
+        FetchRecord {
+            feed_id: id,
+            fetched_at: now,
+            status: outcome.status,
+            http_status: outcome.http_status,
+            error: outcome.error.clone(),
+            articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
+            duration_ms,
+        },
+        policy.after(feed, attempt, now),
+    )?;
+    Ok(Settled {
+        outcome,
+        hydrate_pending,
+        url_adopted,
+    })
+}
+
+/// An errored outcome.
+fn failed(feed_id: FeedId, http_status: Option<u16>, error: String) -> RefreshOutcome {
+    RefreshOutcome {
+        feed_id,
+        status: FetchStatus::Error,
+        http_status,
+        new_articles: 0,
+        updated_articles: 0,
+        error: Some(error),
+    }
+}
+
+/// The outcome and schedule input of every fetch result but a 2xx: a
+/// transport/policy error, 304, 410, a rate limit or another status.
+fn unsuccessful(
+    feed: &Feed,
+    fetched: Result<FetchResponse, FetchError>,
+) -> (RefreshOutcome, Attempt) {
+    let id = feed.id;
+    let failure = |kind, retry_after| Attempt::Failed { kind, retry_after };
+    match fetched {
+        Err(err) => {
+            let kind = match err {
+                FetchError::Dns { .. }
+                | FetchError::DnsNoAddresses { .. }
+                | FetchError::Timeout { .. }
+                | FetchError::Transport { .. } => FetchErrorKind::Network,
+                _ => FetchErrorKind::Refused,
+            };
+            (failed(id, None, err.to_string()), failure(kind, None))
+        }
+        Ok(response) if response.is_not_modified() => (
             RefreshOutcome {
                 feed_id: id,
                 status: FetchStatus::NotModified,
@@ -296,53 +384,54 @@ fn settle(
                 new_articles: 0,
                 updated_articles: 0,
                 error: None,
-            }
-        }
+            },
+            Attempt::Succeeded {
+                hint: response.max_age,
+            },
+        ),
         Ok(response) if response.is_gone() => {
-            // 410: the feed is gone for good — auto-pause forever.
-            storage.set_feed_status(id, FeedStatus::Dead)?;
-            preserve_validators(storage, id, feed, now)?;
-            failed(
-                Some(response.status),
-                "HTTP 410 Gone — feed auto-paused as dead".to_owned(),
+            // 410: gone for good — once a second 410 in a row confirms
+            // it (the schedule marks the feed dead then).
+            let error = if feed.last_error_kind == Some(FetchErrorKind::Gone) {
+                "HTTP 410 Gone again — feed marked dead"
+            } else {
+                "HTTP 410 Gone — the feed is marked dead if the next attempt says so too"
+            };
+            (
+                failed(id, Some(response.status), error.to_owned()),
+                failure(FetchErrorKind::Gone, None),
             )
         }
-        Ok(response) if response.is_success() => {
-            match crate::feeds::parse_feed(&response.body, Some(&response.final_url)) {
-                Err(err) => {
-                    // A body we could not parse must not update the
-                    // validators, or a broken feed 304s forever.
-                    preserve_validators(storage, id, feed, now)?;
-                    failed(Some(response.status), err.to_string())
-                }
-                Ok(parsed) => {
-                    let ingested = ingest_parsed(storage, id, feed, &response, parsed, now)?;
-                    hydrate_pending = ingested.hydrate_pending;
-                    url_adopted = ingested.url_adopted;
-                    ingested.outcome
-                }
-            }
+        Ok(response) if response.is_rate_limited() => {
+            let error = match response.retry_after {
+                Some(wait) => format!(
+                    "HTTP {} — the host is rate-limiting Curio (Retry-After: {} s)",
+                    response.status,
+                    wait.as_secs()
+                ),
+                None => format!("HTTP {} — the host is rate-limiting Curio", response.status),
+            };
+            (
+                failed(id, Some(response.status), error),
+                failure(FetchErrorKind::RateLimited, response.retry_after),
+            )
         }
         Ok(response) => {
-            preserve_validators(storage, id, feed, now)?;
-            failed(Some(response.status), format!("HTTP {}", response.status))
+            let kind = if response.status >= 500 {
+                FetchErrorKind::Server
+            } else {
+                FetchErrorKind::Client
+            };
+            (
+                failed(
+                    id,
+                    Some(response.status),
+                    format!("HTTP {}", response.status),
+                ),
+                failure(kind, response.retry_after),
+            )
         }
-    };
-
-    storage.record_fetch(FetchRecord {
-        feed_id: id,
-        fetched_at: now,
-        status: outcome.status,
-        http_status: outcome.http_status,
-        error: outcome.error.clone(),
-        articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
-        duration_ms,
-    })?;
-    Ok(Settled {
-        outcome,
-        hydrate_pending,
-        url_adopted,
-    })
+    }
 }
 
 /// Stamps `last_fetched_at` while keeping the stored conditional-GET

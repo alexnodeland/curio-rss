@@ -12,7 +12,9 @@ use std::time::Duration;
 use curio_core::events::{FoldedState, read_all};
 use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
-use curio_core::model::{ArticleContent, FeedStatus, FetchStatus, NewArticle, NewFeed};
+use curio_core::model::{
+    ArticleContent, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
+};
 use curio_core::storage::ListArticles;
 use curio_core::{CoreHandle, CoreOptions, ImportSource};
 use curio_types::{Destination, DestinationName, EventPayload};
@@ -369,10 +371,11 @@ async fn concurrent_refreshes_from_two_handles_cannot_clobber_validators() {
 }
 
 #[tokio::test]
-async fn http_410_auto_pauses_the_feed_for_good() {
+async fn a_confirmed_http_410_marks_the_feed_dead_for_good() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(410))
+        .expect(2)
         .mount(&server)
         .await;
 
@@ -380,8 +383,16 @@ async fn http_410_auto_pauses_the_feed_for_good() {
     let core = open_core(profile.path());
     let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
 
+    // One 410 could be a CDN glitch: the feed stays subscribed.
     let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.status, FetchStatus::Error);
+    assert_eq!(outcome.http_status, Some(410));
+    let stored = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.status, FeedStatus::Active);
+    assert_eq!(stored.last_error_kind, Some(FetchErrorKind::Gone));
+
+    // The second 410 in a row confirms it.
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.http_status, Some(410));
     assert_eq!(
         core.get_feed(feed.id).unwrap().unwrap().status,

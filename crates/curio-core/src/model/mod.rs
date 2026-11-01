@@ -105,6 +105,91 @@ pub struct Feed {
     /// Full-text mode: fetch + readability-extract the source page of
     /// every new article at refresh time (for content-free feeds).
     pub fetch_full_text: bool,
+    /// Failed fetch attempts in a row (reset by any success, or by a
+    /// resume). Drives the backoff and the auto-pause.
+    pub consecutive_failures: u32,
+    /// The earliest time a refresh sweep fetches this feed again — set
+    /// by a backoff, a server's `Retry-After`, the feed's own refresh
+    /// hint (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`) or
+    /// [`Self::refresh_interval_min`]. `None` ⇒ due on every sweep.
+    pub next_attempt_at: Option<Timestamp>,
+    /// What kind of failure the most recent errored attempt was; `None`
+    /// once a fetch succeeds.
+    pub last_error_kind: Option<FetchErrorKind>,
+    /// The user's per-feed refresh interval in minutes: sweeps leave the
+    /// feed alone for at least this long after each attempt. `None` ⇒
+    /// the global schedule (and the feed's own hints) decide.
+    pub refresh_interval_min: Option<u32>,
+    /// When the current run of failed attempts began; `None` while the
+    /// feed is healthy.
+    pub failing_since: Option<Timestamp>,
+    /// When the engine paused this feed by itself after a run of failed
+    /// fetches; `None` for an active feed or one the user paused.
+    pub auto_paused_at: Option<Timestamp>,
+}
+
+impl Feed {
+    /// Whether a refresh sweep should fetch this feed at `now`: it is
+    /// active and not inside a backoff / `Retry-After` / refresh-hint
+    /// window.
+    #[must_use]
+    pub fn is_due(&self, now: Timestamp) -> bool {
+        self.status == FeedStatus::Active && self.next_attempt_at.is_none_or(|next| next <= now)
+    }
+}
+
+/// The class of a failed fetch attempt — what the backoff, the 410
+/// confirmation and the rate-limit guard key on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchErrorKind {
+    /// HTTP 429, or a 503 carrying `Retry-After`: the host asked us to
+    /// slow down. Not even a manual refresh fetches before the deadline.
+    RateLimited,
+    /// HTTP 410. A second one in a row marks the feed dead.
+    Gone,
+    /// Any other 5xx.
+    Server,
+    /// Any other non-2xx/304 status (404, 403, …).
+    Client,
+    /// No response: DNS, connect, timeout, TLS or transport failure.
+    Network,
+    /// The policed client refused the request (private address, bad URL,
+    /// redirect limits, body cap).
+    Refused,
+    /// A 2xx whose body is not a recognizable feed.
+    Parse,
+}
+
+impl FetchErrorKind {
+    /// The stored TEXT form.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RateLimited => "rate_limited",
+            Self::Gone => "gone",
+            Self::Server => "server",
+            Self::Client => "client",
+            Self::Network => "network",
+            Self::Refused => "refused",
+            Self::Parse => "parse",
+        }
+    }
+
+    /// Parses the stored TEXT form.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        [
+            Self::RateLimited,
+            Self::Gone,
+            Self::Server,
+            Self::Client,
+            Self::Network,
+            Self::Refused,
+            Self::Parse,
+        ]
+        .into_iter()
+        .find(|kind| kind.as_str() == s)
+    }
 }
 
 /// Input for subscribing to a feed.
@@ -346,6 +431,22 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn fetch_error_kind_round_trips_its_text_form() {
+        for kind in [
+            FetchErrorKind::RateLimited,
+            FetchErrorKind::Gone,
+            FetchErrorKind::Server,
+            FetchErrorKind::Client,
+            FetchErrorKind::Network,
+            FetchErrorKind::Refused,
+            FetchErrorKind::Parse,
+        ] {
+            assert_eq!(FetchErrorKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(FetchErrorKind::parse("bogus"), None);
+    }
 
     #[test]
     fn feed_status_round_trips_its_text_form() {

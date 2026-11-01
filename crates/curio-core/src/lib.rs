@@ -43,8 +43,8 @@ pub mod storage;
 pub use curio_types as types;
 pub use handle::{
     BulkSaveOutcome, CoreError, CoreHandle, CoreOptions, DEFAULT_REFRESH_CONCURRENCY,
-    ImportOutcome, OpmlImportOutcome, RefreshOptions, RefreshOutcome, SaveOutcome, SavedUrl,
-    SweepProgress, SweepReport,
+    ImportOutcome, OpmlImportOutcome, RefreshOptions, RefreshOutcome, RefreshPolicy, SaveOutcome,
+    SavedUrl, SweepProgress, SweepReport,
 };
 pub use import::{ImportError, ImportKind, ImportSource, ImportedItem};
 

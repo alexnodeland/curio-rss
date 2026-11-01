@@ -2,7 +2,7 @@
 //! list/search query compilers, and the raw-row -> domain-type parsers.
 
 use super::{ARTICLE_COLS, FEED_COLS, ListArticles};
-use crate::model::{Article, ArticleContent, ArticleId, Feed, FeedId, FeedStatus};
+use crate::model::{Article, ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchErrorKind};
 use crate::storage::StorageError;
 use curio_types::{CurioId, EventEnvelope, Timestamp};
 use rusqlite::types::ToSql;
@@ -252,6 +252,12 @@ pub(super) struct RawFeed {
     fetch_full_text: bool,
     last_error: Option<String>,
     last_ok_at: Option<String>,
+    consecutive_failures: u32,
+    next_attempt_at: Option<String>,
+    last_error_kind: Option<String>,
+    refresh_interval_min: Option<u32>,
+    failing_since: Option<String>,
+    auto_paused_at: Option<String>,
 }
 
 pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
@@ -271,6 +277,12 @@ pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         fetch_full_text: row.get(12)?,
         last_error: row.get(13)?,
         last_ok_at: row.get(14)?,
+        consecutive_failures: row.get(15)?,
+        next_attempt_at: row.get(16)?,
+        last_error_kind: row.get(17)?,
+        refresh_interval_min: row.get(18)?,
+        failing_since: row.get(19)?,
+        auto_paused_at: row.get(20)?,
     })
 }
 
@@ -298,6 +310,20 @@ impl RawFeed {
                 message: err.to_string(),
             })?,
             fetch_full_text: self.fetch_full_text,
+            consecutive_failures: self.consecutive_failures,
+            next_attempt_at: parse_opt_ts("feeds.next_attempt_at", self.next_attempt_at)?,
+            last_error_kind: self
+                .last_error_kind
+                .map(|kind| {
+                    FetchErrorKind::parse(&kind).ok_or_else(|| StorageError::Corrupt {
+                        column: "feeds.last_error_kind",
+                        message: format!("unknown error kind {kind:?}"),
+                    })
+                })
+                .transpose()?,
+            refresh_interval_min: self.refresh_interval_min,
+            failing_since: parse_opt_ts("feeds.failing_since", self.failing_since)?,
+            auto_paused_at: parse_opt_ts("feeds.auto_paused_at", self.auto_paused_at)?,
         })
     }
 }

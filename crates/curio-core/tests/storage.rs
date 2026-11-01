@@ -9,10 +9,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use curio_core::model::{
-    ArticleContent, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchRecord, FetchStatus,
-    NewArticle, NewFeed,
+    ArticleContent, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchErrorKind, FetchRecord,
+    FetchStatus, NewArticle, NewFeed,
 };
-use curio_core::storage::{ListArticles, OpenError, Storage, StorageError};
+use curio_core::storage::{
+    FETCH_LOG_KEEP, FeedSchedule, ListArticles, OpenError, Storage, StorageError,
+};
 use curio_types::{EventPayload, Timestamp};
 
 fn temp_storage() -> (tempfile::TempDir, Storage) {
@@ -1166,6 +1168,171 @@ fn fetch_log_round_trips_newest_first() {
     );
 }
 
+fn attempt(feed_id: FeedId, status: FetchStatus) -> FetchRecord {
+    FetchRecord {
+        feed_id,
+        fetched_at: Timestamp::now(),
+        status,
+        http_status: None,
+        error: (status == FetchStatus::Error).then(|| "boom".to_owned()),
+        articles_new: 0,
+        duration_ms: None,
+    }
+}
+
+/// However often a feed is refreshed, its fetch log keeps only the newest
+/// rows — and trimming one feed's log never touches another's.
+#[test]
+fn the_fetch_log_stays_bounded_per_feed() {
+    let (_dir, storage) = temp_storage();
+    let add = |url: &str| {
+        storage
+            .add_feed(NewFeed {
+                url: url.to_owned(),
+                title: None,
+                tags: vec![],
+            })
+            .unwrap()
+            .0
+    };
+    let busy = add("https://busy.example/feed.xml");
+    let quiet = add("https://quiet.example/feed.xml");
+    storage
+        .record_fetch(attempt(quiet.id, FetchStatus::Ok))
+        .unwrap();
+    for n in 0..500 {
+        let status = if n % 2 == 0 {
+            FetchStatus::Ok
+        } else {
+            FetchStatus::Error
+        };
+        storage.record_fetch(attempt(busy.id, status)).unwrap();
+    }
+    let keep = usize::try_from(FETCH_LOG_KEEP).unwrap();
+    assert_eq!(storage.recent_fetches(busy.id, 1_000).unwrap().len(), keep);
+    assert_eq!(storage.recent_fetches(quiet.id, 1_000).unwrap().len(), 1);
+    // The derived health still reads the newest attempt.
+    let busy = storage.get_feed(busy.id).unwrap().unwrap();
+    assert_eq!(busy.last_error.as_deref(), Some("boom"));
+    assert!(busy.last_ok_at.is_some());
+}
+
+/// `settle_fetch` writes the log row and the feed's schedule together;
+/// switching the feed back to active forgets the failure run.
+#[test]
+fn settling_a_fetch_stores_the_schedule_and_resuming_clears_it() {
+    let (_dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let now = Timestamp::now();
+    let later = Timestamp::from_unix_millis(now.unix_millis() + 60_000).unwrap();
+    let failing = FeedSchedule {
+        consecutive_failures: 3,
+        next_attempt_at: Some(later),
+        last_error_kind: Some(FetchErrorKind::Server),
+        failing_since: Some(now),
+        status: None,
+    };
+    storage
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), failing)
+        .unwrap();
+    let stored = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.consecutive_failures, 3);
+    assert_eq!(stored.next_attempt_at, Some(later));
+    assert_eq!(stored.last_error_kind, Some(FetchErrorKind::Server));
+    assert_eq!(stored.failing_since, Some(now));
+    assert_eq!(stored.status, FeedStatus::Active);
+    assert_eq!(stored.auto_paused_at, None);
+    assert!(!stored.is_due(now));
+    assert_eq!(storage.recent_fetches(feed.id, 10).unwrap().len(), 1);
+
+    // An auto-pause stamps when it happened.
+    let record = attempt(feed.id, FetchStatus::Error);
+    let paused_at = record.fetched_at;
+    storage
+        .settle_fetch(
+            record,
+            FeedSchedule {
+                status: Some(FeedStatus::Paused),
+                ..failing
+            },
+        )
+        .unwrap();
+    let stored = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.status, FeedStatus::Paused);
+    assert_eq!(stored.auto_paused_at, Some(paused_at));
+
+    // Resume: a clean slate, due at once.
+    storage
+        .set_feed_status(feed.id, FeedStatus::Active)
+        .unwrap();
+    let stored = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.consecutive_failures, 0);
+    assert_eq!(stored.next_attempt_at, None);
+    assert_eq!(stored.last_error_kind, None);
+    assert_eq!(stored.failing_since, None);
+    assert_eq!(stored.auto_paused_at, None);
+    assert!(stored.is_due(now));
+
+    // A user pause keeps the schedule but is never marked automatic.
+    storage
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), failing)
+        .unwrap();
+    storage
+        .set_feed_status(feed.id, FeedStatus::Paused)
+        .unwrap();
+    let stored = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.consecutive_failures, 3);
+    assert_eq!(stored.auto_paused_at, None);
+
+    assert!(matches!(
+        storage.settle_fetch(attempt(FeedId(999), FetchStatus::Ok), failing),
+        Err(StorageError::NotFound { entity: "feed" })
+    ));
+}
+
+#[test]
+fn a_feed_refresh_interval_round_trips() {
+    let (_dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    assert_eq!(feed.refresh_interval_min, None);
+    storage
+        .set_feed_refresh_interval(feed.id, Some(90))
+        .unwrap();
+    assert_eq!(
+        storage
+            .get_feed(feed.id)
+            .unwrap()
+            .unwrap()
+            .refresh_interval_min,
+        Some(90)
+    );
+    storage.set_feed_refresh_interval(feed.id, None).unwrap();
+    assert_eq!(
+        storage
+            .get_feed(feed.id)
+            .unwrap()
+            .unwrap()
+            .refresh_interval_min,
+        None
+    );
+    assert!(matches!(
+        storage.set_feed_refresh_interval(FeedId(999), Some(5)),
+        Err(StorageError::NotFound { entity: "feed" })
+    ));
+}
+
 #[test]
 fn feed_health_derives_from_the_latest_fetch_outcome() {
     let (_dir, storage) = temp_storage();
@@ -1868,8 +2035,83 @@ fn migration_0008_adds_the_dead_letter_table_to_a_v7_database() {
     }
 
     let storage = Storage::open(&path).unwrap();
-    assert_eq!(Storage::schema_version(), 8);
-    assert_eq!(storage.db_schema_version().unwrap(), 8);
+    let latest = Storage::schema_version();
+    assert!(latest >= 8);
+    assert_eq!(storage.db_schema_version().unwrap(), latest);
     assert_eq!(storage.quarantined_intent_count().unwrap(), 0);
-    assert!(dir.path().join("curio.db.pre-v8.bak").is_file());
+    assert!(
+        dir.path()
+            .join(format!("curio.db.pre-v{latest}.bak"))
+            .is_file()
+    );
+}
+
+/// Migration 0009 gives existing feeds an empty schedule (due on the next
+/// sweep, no failures) and trims each feed's fetch log to its newest 50
+/// rows — the only rows the log keeps from now on.
+#[test]
+fn migration_0009_schedules_existing_feeds_and_trims_their_fetch_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../src/storage/migrations/0001_init.sql"),
+            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+            include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+            include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 8).unwrap();
+        for (id, url) in [(1, "https://a.example/feed"), (2, "https://b.example/feed")] {
+            conn.execute(
+                "INSERT INTO feeds (id, url, added_at, modified_at) \
+                 VALUES (?1, ?2, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+                (id, url),
+            )
+            .unwrap();
+        }
+        let mut insert = conn
+            .prepare(
+                "INSERT INTO fetch_log (feed_id, fetched_at, status) \
+                 VALUES (?1, '2026-01-01T00:00:00.000Z', ?2)",
+            )
+            .unwrap();
+        for n in 0..120 {
+            // Feed 1's newest row is an error, so the health column has
+            // something to show after the trim.
+            insert
+                .execute((1, if n == 119 { "error" } else { "ok" }))
+                .unwrap();
+        }
+        for _ in 0..3 {
+            insert.execute((2, "ok")).unwrap();
+        }
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(storage.db_schema_version().unwrap(), 9);
+    assert!(dir.path().join("curio.db.pre-v9.bak").is_file());
+    let fetches = |id| storage.recent_fetches(FeedId(id), 1_000).unwrap();
+    assert_eq!(fetches(1).len(), 50);
+    assert_eq!(
+        fetches(1)[0].status,
+        FetchStatus::Error,
+        "the newest rows stay"
+    );
+    assert_eq!(fetches(2).len(), 3, "a short log is untouched");
+    for feed in storage.list_feeds().unwrap() {
+        assert_eq!(feed.consecutive_failures, 0);
+        assert_eq!(feed.next_attempt_at, None);
+        assert_eq!(feed.last_error_kind, None);
+        assert_eq!(feed.refresh_interval_min, None);
+        assert_eq!(feed.failing_since, None);
+        assert_eq!(feed.auto_paused_at, None);
+        assert!(feed.is_due(Timestamp::now()));
+    }
 }

@@ -75,7 +75,19 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   UA/delay class is disclosed in PRIVACY.md.
 - Conditional GET with `etag`/`last_modified` **preserved on error paths** (the sketch
   clobbered them on any failure).
-- Permanent-redirect stored-URL updates; 410 dead-feed auto-pause; feed-health tracking.
+- Permanent-redirect stored-URL updates; feed-health tracking.
+- **Per-feed scheduling** (`handle/schedule.rs`, `RefreshPolicy`): every settled attempt
+  writes its `fetch_log` row and the feed's schedule in one transaction —
+  `consecutive_failures`, `next_attempt_at`, `last_error_kind`, `failing_since`. A
+  failure backs off exponentially (15 min doubling to 24 h, up to 10% jitter); a
+  `Retry-After` (seconds or HTTP-date) longer than that wins and holds even a manual
+  refresh; a success waits for the longest of the per-feed `refresh_interval_min` and
+  the feed's own hints (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`, capped at
+  24 h). Sweeps fetch only due feeds. A 410 marks a feed dead only when the previous
+  attempt was a 410 too; 10 failures in a row over at least 3 days auto-pause it
+  (`auto_paused_at`), and resuming clears the run. A page host's 429 during full-text
+  hydration is `RateLimited`, which stops the batch. `fetch_log` keeps the newest 50
+  rows per feed.
 - **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
   both heads: `buffer_unordered` over the feed list, 8 feeds in flight by default (the
   per-host politeness reservations still queue same-host requests), so a few hung hosts

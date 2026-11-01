@@ -1,0 +1,12 @@
+<article>
+<h1>Image dimensions reserve the box</h1>
+<p>Plain pixel integers survive ingest so the reader can hold the image's aspect ratio while it loads.</p>
+<figure><img src="https://cdn.example.com/chart.png" width="640" height="360" alt="a chart"><figcaption>Kept as written.</figcaption></figure>
+<p>The common <code>px</code> slip and stray whitespace are normalized:</p>
+<img src="https://cdn.example.com/photo.jpg" width="1200px" height=" 800 " alt="normalized">
+<p>Percentages, zero, exponents, signs and oversized values are not intrinsic sizes and are dropped:</p>
+<img src="https://cdn.example.com/a.png" width="100%" height="0" alt="percent and zero">
+<img src="https://cdn.example.com/b.png" width="1e3" height="-40" alt="exponent and sign">
+<img src="https://cdn.example.com/c.png" width="20001" height="auto" alt="oversized and auto">
+<p>Dimensions mean nothing on other elements: <span width="10" height="10">plain text</span>.</p>
+</article>

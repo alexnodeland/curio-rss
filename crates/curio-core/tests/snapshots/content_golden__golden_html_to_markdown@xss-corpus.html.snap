@@ -9,7 +9,7 @@ Every vector below must be inert in the stored output.
 
 Event handler in attribute.
 
-![](https://example.com/posts/x) javascript: link data: link [handler on a good link](https://example.com/ok) "> ![lazy with handler](https://example.com/lazy.png)
+![](https://example.com/posts/x) javascript: link data: link [handler on a good link](https://example.com/ok) "> ![lazy with handler](https://example.com/lazy.png) ![hostile dimensions](https://example.com/dim.png) ![oversized dimensions](https://example.com/huge.png)
 
 Hostile id, dir and lang.
 

@@ -421,8 +421,32 @@ export const previewArticles: PreviewArticle[] = [
         {},
         'https://picsum.photos/seed/freight/900/600',
     ),
-    linklessUndated(
+    // A reader stress test, shaped the way ingest stores it (footnote ids and
+    // fragment hrefs in the `user-content-` namespace, img width/height kept):
+    // a 12-column table and a narrow one that fits, footnotes, long inline
+    // code, a zoomable image with a reserved aspect ratio, and an image whose
+    // fetch fails (`.invalid`).
+    mk(
         121,
+        2,
+        'Tables, Footnotes and Other Hazards',
+        'Robin Rendle',
+        '2026-06-29T09:00:00.000Z',
+        700,
+        `<p>Long-form web writing leans on a handful of structures that reading apps routinely mangle: the data table that is wider than the column, the footnote<sup id="user-content-fnref1"><a href="#user-content-fn1">1</a></sup> that jumps nowhere, and the file path like <code>~/Library/Application Support/io.github.alexnodeland.curio/profiles/default/state.sqlite3-wal</code> that refuses to wrap.</p>
+<table><thead><tr><th>Typeface</th><th>Designer</th><th>Year</th><th>Classification</th><th>Weights</th><th>Italics</th><th>Optical sizes</th><th>Variable</th><th>Licence</th><th>x-height</th><th>Contrast</th><th>Best for</th></tr></thead><tbody><tr><td>Source Serif 4</td><td>Frank Grießhammer</td><td>2014</td><td>Transitional</td><td>8</td><td>Yes</td><td>Yes</td><td>Yes</td><td>OFL</td><td>Medium</td><td>Moderate</td><td>Long reads</td></tr><tr><td>Inter</td><td>Rasmus Andersson</td><td>2017</td><td>Neo-grotesque</td><td>9</td><td>Yes</td><td>Yes</td><td>Yes</td><td>OFL</td><td>Tall</td><td>Low</td><td>Interfaces</td></tr><tr><td>Literata</td><td>TypeTogether</td><td>2015</td><td>Contemporary serif</td><td>8</td><td>Yes</td><td>Yes</td><td>Yes</td><td>OFL</td><td>Medium</td><td>Moderate</td><td>E-books</td></tr></tbody></table>
+<p>A table that fits the column stays plain content, sized to what it holds:</p>
+<table><caption>Reading-surface tints</caption><thead><tr><th>Theme</th><th>Ground</th><th>Ink</th></tr></thead><tbody><tr><td>Sepia</td><td>Warm cream</td><td>Brown</td></tr><tr><td>Paper</td><td>Off-white</td><td>Charcoal</td></tr></tbody></table>
+<p>Images should hold their space while they load, open large when you want a closer look<sup id="user-content-fnref2"><a href="#user-content-fn2">2</a></sup>, and disappear cleanly when they cannot be fetched at all.</p>
+<figure><img src="${gradientPoster('#10b981', '#6366f1')}" width="1200" height="630" alt="A green-to-indigo gradient"/><figcaption>Click to zoom; Escape closes.</figcaption></figure>
+<figure><img src="https://images.example.invalid/missing.png" width="800" height="450" alt="An image that will never load"/><figcaption>This caption folds away with its failed image.</figcaption></figure>
+<p>Everything after this sentence is the notes section.</p>
+<ol><li id="user-content-fn1"><p>A footnote is a promise to the reader that the aside is worth the detour. <a href="#user-content-fnref1">↩</a></p></li><li id="user-content-fn2"><p>The lightbox restores focus to the image you opened it from. <a href="#user-content-fnref2">↩</a></p></li></ol>`,
+        {},
+        ['layout', 'typography'],
+    ),
+    linklessUndated(
+        122,
         2,
         'Weeknotes: margins, measures, and a new notebook',
         '2026-07-06T07:40:00.000Z',

@@ -1,0 +1,22 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/image-dimensions.html
+---
+# Image dimensions reserve the box
+
+Plain pixel integers survive ingest so the reader can hold the image's aspect ratio while it loads.
+
+![a chart](https://cdn.example.com/chart.png)
+
+Kept as written.
+
+The common `px` slip and stray whitespace are normalized:
+
+![normalized](https://cdn.example.com/photo.jpg)
+
+Percentages, zero, exponents, signs and oversized values are not intrinsic sizes and are dropped:
+
+![percent and zero](https://cdn.example.com/a.png) ![exponent and sign](https://cdn.example.com/b.png) ![oversized and auto](https://cdn.example.com/c.png)
+
+Dimensions mean nothing on other elements: plain text.

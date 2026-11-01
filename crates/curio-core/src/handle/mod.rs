@@ -154,7 +154,8 @@ pub enum CoreError {
         reason: RedditAuthReason,
         /// The HTTP status of the refusal (of the token grant for
         /// [`RedditAuthReason::CredentialsRejected`], of the post request
-        /// otherwise).
+        /// otherwise — for [`RedditAuthReason::TokenUnavailable`], the
+        /// anonymous fallback's).
         status: u16,
     },
     /// A blocking engine task (a refresh's parse/ingest/storage half)
@@ -185,6 +186,13 @@ pub enum RedditAuthReason {
     /// if reddit keeps refusing, the app needs re-authorizing or
     /// re-creating.
     TokenRevoked,
+    /// Credentials are installed, but no access token could be had for a
+    /// reason other than a refusal — the token endpoint failed (a 5xx
+    /// during an outage), was unreachable or timed out, or answered with
+    /// an unreadable payload — and reddit blocks the anonymous fallback.
+    /// Nothing is wrong with the credentials: trying again later is the
+    /// fix.
+    TokenUnavailable,
 }
 
 /// The user-facing guidance for a [`CoreError::RedditAuth`].
@@ -202,6 +210,11 @@ fn reddit_auth_message(reason: RedditAuthReason, status: u16) -> String {
             "reddit refused the access token for the stored API credentials (HTTP {status}) — \
              the app's access may have been revoked; try again, and if it keeps failing, \
              re-create the app"
+        ),
+        RedditAuthReason::TokenUnavailable => format!(
+            "reddit could not issue an access token for the stored API credentials, and it \
+             blocks anonymous full-post requests (HTTP {status}) — reddit may be having an \
+             outage, or is unreachable; try again later"
         ),
     }
 }

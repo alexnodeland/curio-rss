@@ -234,15 +234,16 @@ impl CoreHandle {
     }
 
     /// BYO OAuth (D15): trades the installed credentials for a bearer.
-    /// `Ok((None, _))` = no credentials, or a failed grant, which degrades
-    /// to the unauthenticated endpoint; the second value is the status of
-    /// a grant the token endpoint *refused* (400/401/403), remembered so
-    /// that if reddit then blocks the anonymous request the user hears
-    /// their credentials were refused, not that they have none. A 429 from
-    /// the token endpoint is a rate limit like any other: it trips the
-    /// breaker and is returned as [`CoreError::RateLimited`].
+    /// `Ok((None, None))` = no credentials installed; `Ok((None,
+    /// Some(_)))` = a failed grant, which degrades to the unauthenticated
+    /// endpoint and is remembered so that if reddit then blocks the
+    /// anonymous request the user hears what actually went wrong — their
+    /// credentials were refused, or the token endpoint was unavailable —
+    /// not that they have none. A 429 from the token endpoint is a rate
+    /// limit like any other: it trips the breaker and is returned as
+    /// [`CoreError::RateLimited`].
     #[cfg(feature = "enrich-reddit")]
-    async fn reddit_bearer(&self) -> Result<(Option<String>, Option<u16>), CoreError> {
+    async fn reddit_bearer(&self) -> Result<(Option<String>, Option<GrantFailure>), CoreError> {
         use crate::enrich::EnrichError;
 
         match self.reddit_auth.bearer(&self.client).await {
@@ -256,15 +257,15 @@ impl CoreHandle {
                 Err(reddit_rate_limited(self.enrich_breaker.open_remaining()))
             }
             Err(err) => {
-                let refused = match err {
+                let failure = match err {
                     EnrichError::Http {
                         status: status @ (400 | 401 | 403),
                         ..
-                    } => Some(status),
-                    _ => None,
+                    } => GrantFailure::Refused(status),
+                    _ => GrantFailure::Unavailable,
                 };
                 tracing::warn!(%err, "reddit token grant failed; using the public endpoint");
-                Ok((None, refused))
+                Ok((None, Some(failure)))
             }
         }
     }
@@ -293,7 +294,7 @@ impl CoreHandle {
         if !self.enrich_breaker.closed() {
             return Err(reddit_rate_limited(self.enrich_breaker.open_remaining()));
         }
-        let (bearer, grant_refused) = self.reddit_bearer().await?;
+        let (bearer, grant_failure) = self.reddit_bearer().await?;
         let api_origin = self.reddit_auth.api_origin();
         let auth = match (bearer.as_deref(), api_origin.as_deref()) {
             (Some(bearer), Some(api_origin)) => Some(reddit::PostAuth { bearer, api_origin }),
@@ -347,10 +348,21 @@ impl CoreHandle {
                 // fallback fetch; the guidance IS the answer. Installed
                 // credentials the token endpoint refused are what to fix.
                 tracing::warn!(article = %id, status, "anonymous reddit JSON refused");
-                Err(match grant_refused {
-                    Some(grant_status) => CoreError::RedditAuth {
+                Err(match grant_failure {
+                    Some(GrantFailure::Refused(grant_status)) => CoreError::RedditAuth {
                         reason: RedditAuthReason::CredentialsRejected,
                         status: grant_status,
+                    },
+                    Some(GrantFailure::Unavailable) => CoreError::RedditAuth {
+                        reason: RedditAuthReason::TokenUnavailable,
+                        status,
+                    },
+                    // No grant was attempted. Credentials installed
+                    // meanwhile (a concurrent `set_reddit_api`) are not
+                    // missing — the next attempt uses them.
+                    None if self.reddit_auth.configured() => CoreError::RedditAuth {
+                        reason: RedditAuthReason::TokenUnavailable,
+                        status,
                     },
                     None => CoreError::RedditAuth {
                         reason: RedditAuthReason::CredentialsMissing,
@@ -468,6 +480,18 @@ impl CoreHandle {
     pub fn unread_counts(&self) -> Result<BTreeMap<Option<FeedId>, u64>, CoreError> {
         Ok(self.storage.unread_counts()?)
     }
+}
+
+/// Why trading the installed reddit credentials for a bearer failed
+/// (a 429 aside, which is a rate limit).
+#[cfg(feature = "enrich-reddit")]
+#[derive(Debug, Clone, Copy)]
+enum GrantFailure {
+    /// The token endpoint refused the credentials (400/401/403).
+    Refused(u16),
+    /// Any other failure: a 5xx, a transport error or timeout, a
+    /// malformed token payload.
+    Unavailable,
 }
 
 /// The hard stop for a throttled reddit: no request until the breaker's

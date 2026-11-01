@@ -136,16 +136,19 @@ pub enum ExportError {
         /// The underlying error.
         source: std::io::Error,
     },
-    /// The destination (or a folder or file inside it) cannot be written:
-    /// its permissions refuse Curio (`EACCES`/`EPERM`, Windows "access
-    /// denied"), or it sits on a read-only volume (`EROFS`). Exporting
-    /// again succeeds once the permissions are fixed.
+    /// The destination (or a folder or file inside it) cannot be read or
+    /// written: its permissions refuse Curio (`EACCES`/`EPERM`, Windows
+    /// "access denied"), or a write hit a read-only volume (`EROFS`). Both
+    /// directions land here — an export reads existing notes and the
+    /// manifest as well as writing them — so the message names neither.
+    /// Exporting again succeeds once the permissions are fixed.
     #[error(
-        "cannot write {path}: permission denied or read-only — check the destination \
-         folder's permissions, and that its volume is not mounted read-only"
+        "cannot access {path}: permission denied or read-only — check that Curio may \
+         read and write the destination folder and its notes, and that its volume is \
+         not mounted read-only"
     )]
     PermissionDenied {
-        /// The path that refused the write.
+        /// The path that refused the access.
         path: PathBuf,
         /// The underlying error.
         source: std::io::Error,

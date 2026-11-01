@@ -1727,6 +1727,53 @@ async fn refused_reddit_credentials_are_typed_as_rejected_not_missing() {
     assert!(!message.contains("add your own"), "{message}");
 }
 
+/// Installed credentials whose grant fails for a reason other than a
+/// refusal (a reddit outage: the token endpoint answers 500) degrade to the
+/// anonymous request — and when reddit blocks that too, the user is told
+/// the token endpoint was unavailable, never to add credentials they have.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn a_failed_reddit_grant_is_typed_as_unavailable_not_missing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/access_token"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/outage/title.json"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+        client_id: "cid".to_owned(),
+        client_secret: "s3cr3t".to_owned(),
+        token_url: format!("{}/api/v1/access_token", server.uri()),
+        api_origin: server.uri(),
+    }));
+    let id = stored_reddit_post(&core, &server, "outage");
+
+    let err = core.hydrate_article(id).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::CoreError::RedditAuth {
+                reason: curio_core::RedditAuthReason::TokenUnavailable,
+                status: 403,
+            }
+        ),
+        "{err:?}"
+    );
+    let message = err.to_string();
+    assert!(message.contains("try again later"), "{message}");
+    assert!(!message.contains("add your own"), "{message}");
+}
+
 /// Credentials that grant a token reddit then refuses on the post itself:
 /// typed as a revoked token (dropped, so the next call re-grants), not as
 /// missing or wrong credentials.

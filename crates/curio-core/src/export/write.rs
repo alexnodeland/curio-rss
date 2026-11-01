@@ -134,13 +134,26 @@ fn land_via_temp(tmp: &Path, path: &Path, bytes: &[u8]) -> Result<(), ExportErro
 
 /// [`land_via_temp`] with the temp file's contents produced by `fill` —
 /// the seam the injected-failure tests use to fail mid-write. The failure
-/// is sorted into its class by [`ExportError::io`].
+/// is sorted into its class by [`ExportError::io`]. The user-facing
+/// classes ([`ExportError::PermissionDenied`], [`ExportError::DiskFull`])
+/// name the note being written, never the hidden temp file the user would
+/// not find; a plain [`ExportError::Io`] keeps the exact path that failed.
 fn land_via_temp_with(
     tmp: &Path,
     path: &Path,
     fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
 ) -> Result<(), ExportError> {
-    land_with(tmp, path, fill).map_err(|(path, source)| ExportError::io(path, source))
+    land_with(tmp, path, fill).map_err(|(failed, source)| match ExportError::io(failed, source) {
+        ExportError::PermissionDenied { source, .. } => ExportError::PermissionDenied {
+            path: path.to_path_buf(),
+            source,
+        },
+        ExportError::DiskFull { source, .. } => ExportError::DiskFull {
+            path: path.to_path_buf(),
+            source,
+        },
+        other => other,
+    })
 }
 
 /// Fills the fresh temp file `tmp` via `fill`, flushes it, and renames it
@@ -288,7 +301,9 @@ mod tests {
         ] {
             assert_eq!(class(Error::from(kind)), expected, "{kind:?}");
         }
-        // The codes the OS actually reports sort the same way.
+        // The codes the OS actually reports sort the same way. EPERM,
+        // EACCES, EROFS, ENOSPC and EIO share their numbers across unix;
+        // EDQUOT does not, so it is checked per platform.
         #[cfg(unix)]
         for (errno, expected) in [
             (1, "permission"),  // EPERM
@@ -299,6 +314,10 @@ mod tests {
         ] {
             assert_eq!(class(Error::from_raw_os_error(errno)), expected, "{errno}");
         }
+        #[cfg(target_os = "linux")]
+        assert_eq!(class(Error::from_raw_os_error(122)), "full", "EDQUOT"); // linux EDQUOT
+        #[cfg(target_os = "macos")]
+        assert_eq!(class(Error::from_raw_os_error(69)), "full", "EDQUOT"); // darwin EDQUOT
         #[cfg(windows)]
         for (code, expected) in [
             (5, "permission"), // ERROR_ACCESS_DENIED
@@ -313,7 +332,7 @@ mod tests {
         for (err, advice) in [
             (
                 ExportError::io(path, Error::from(ErrorKind::PermissionDenied)),
-                "check the destination folder's permissions",
+                "check that Curio may read and write the destination folder",
             ),
             (
                 ExportError::io(path, Error::from(ErrorKind::StorageFull)),
@@ -333,7 +352,8 @@ mod tests {
 
     /// Injected failures half-way through a note write: a full disk and a
     /// permission refusal reach the caller as their typed classes, naming
-    /// the temp file, with the previous note intact and no temp stray.
+    /// the note (not the hidden temp file), with the previous note intact
+    /// and no temp stray.
     #[test]
     fn a_full_disk_or_refused_write_mid_note_is_typed() {
         use std::io::{Error, ErrorKind, Write as _};
@@ -351,11 +371,13 @@ mod tests {
             })
             .unwrap_err();
             let typed = if full {
-                matches!(&err, ExportError::DiskFull { path, .. } if *path == tmp)
+                matches!(&err, ExportError::DiskFull { path, .. } if *path == target)
             } else {
-                matches!(&err, ExportError::PermissionDenied { path, .. } if *path == tmp)
+                matches!(&err, ExportError::PermissionDenied { path, .. } if *path == target)
             };
             assert!(typed, "{kind:?}: {err:?}");
+            let message = err.to_string();
+            assert!(!message.contains("curio-tmp"), "{message}");
             assert_eq!(std::fs::read(&target).unwrap(), b"previous note");
             assert_eq!(temp_strays(root.path()), Vec::<String>::new());
         }
@@ -397,8 +419,8 @@ mod tests {
     }
 
     /// Injected temp-write failure: the temp name itself is occupied (by a
-    /// directory, and by a file), so creating the temp file fails. The
-    /// error names the temp path, nothing lands at the target, and the
+    /// directory, and by a file), so creating the temp file fails. A plain
+    /// `Io` error names the temp path, nothing lands at the target, and the
     /// squatter — not ours — is left exactly as it was.
     #[test]
     fn a_failed_temp_write_reports_the_temp_path() {
@@ -409,7 +431,13 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
 
         let err = land_via_temp(&tmp, &target, b"bytes").unwrap_err();
-        assert_eq!(failed_fs_path(&err), Some(tmp.as_path()), "{err}");
+        // A plain Io names the exact (temp) path; on Windows the squat is
+        // "access denied", a user-facing class, which names the note.
+        let expected = match &err {
+            ExportError::PermissionDenied { .. } => target.as_path(),
+            _ => tmp.as_path(),
+        };
+        assert_eq!(failed_fs_path(&err), Some(expected), "{err}");
         #[cfg(unix)]
         assert!(matches!(err, ExportError::Io { .. }), "{err:?}");
         assert!(!target.exists());

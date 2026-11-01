@@ -312,6 +312,7 @@ mod tests {
             RedditAuthReason::CredentialsMissing,
             RedditAuthReason::CredentialsRejected,
             RedditAuthReason::TokenRevoked,
+            RedditAuthReason::TokenUnavailable,
         ] {
             let error = CommandError::from(CoreError::RedditAuth {
                 reason,

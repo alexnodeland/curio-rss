@@ -20,7 +20,8 @@ use futures_util::stream::FuturesUnordered;
 use crate::fetch::PolicedClient;
 use crate::model::{ArticleId, FeedId};
 
-use super::sweep::{RefreshCancel, Work, WorkQueue, until_cancelled};
+use super::sweep::{RefreshCancel, until_cancelled};
+use super::work_queue::{Work, WorkQueue};
 use super::{CoreError, CoreHandle};
 
 /// How many article pages are hydrated at once unless told otherwise.

@@ -18,7 +18,7 @@
 //! still refreshing, so the feed's slot moves straight on to the next
 //! feed. The sweep — and its report — ends once both are done.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::pin;
@@ -35,6 +35,7 @@ use crate::model::{Feed, FeedId, FeedStatus, FetchStatus};
 
 use super::hydrate::{DEFAULT_HYDRATE_CONCURRENCY, Hydrated, Hydration, HydrationQueue};
 use super::refresh::Refreshed;
+use super::work_queue::{Work, WorkQueue};
 use super::{CoreError, CoreHandle, RefreshOutcome};
 
 /// How many feeds a sweep refreshes at once unless told otherwise.
@@ -370,104 +371,6 @@ struct FeedJob {
     id: FeedId,
 }
 
-/// One job handed out by a [`WorkQueue`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Work<T> {
-    pub(super) job: T,
-    /// Its host lane in the queue.
-    pub(super) lane: usize,
-}
-
-/// A work list handed out fairly across hosts — a sweep's feeds, the
-/// full-text hydration queue's pages. Each politeness-paced host gets a
-/// lane with at most one job in flight; the jobs of unpaced hosts (and of
-/// unknown URLs) share one lane without that cap. The lanes take turns,
-/// each keeping its jobs in the order they were queued.
-#[derive(Debug)]
-pub(super) struct WorkQueue<T> {
-    lanes: Vec<Lane<T>>,
-    by_host: HashMap<Option<String>, usize>,
-    /// The lane the next [`WorkQueue::take`] looks at first.
-    turn: usize,
-}
-
-impl<T> Default for WorkQueue<T> {
-    fn default() -> Self {
-        Self {
-            lanes: Vec::new(),
-            by_host: HashMap::new(),
-            turn: 0,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Lane<T> {
-    pending: VecDeque<Work<T>>,
-    /// One job in flight at most (a paced host's lane).
-    capped: bool,
-    /// A capped lane's job is in flight.
-    busy: bool,
-}
-
-impl<T> WorkQueue<T> {
-    /// Lanes in the order their hosts first appear; `host` is the job's
-    /// paced host, `None` for an unpaced or unknown one.
-    fn new(jobs: impl IntoIterator<Item = (T, Option<String>)>) -> Self {
-        let mut queue = Self::default();
-        for (job, host) in jobs {
-            queue.push(job, host);
-        }
-        queue
-    }
-
-    /// Queues `job` at the back of its host's lane.
-    pub(super) fn push(&mut self, job: T, host: Option<String>) {
-        let capped = host.is_some();
-        let lanes = &mut self.lanes;
-        let lane = *self.by_host.entry(host).or_insert_with(|| {
-            lanes.push(Lane {
-                pending: VecDeque::new(),
-                capped,
-                busy: false,
-            });
-            lanes.len() - 1
-        });
-        if let Some(entry) = lanes.get_mut(lane) {
-            entry.pending.push_back(Work { job, lane });
-        }
-    }
-
-    /// The next job to start: the first lane, from this turn on, with a
-    /// job waiting and room in flight. `None` when every waiting job's
-    /// host already has one in flight, or no job is left.
-    pub(super) fn take(&mut self) -> Option<Work<T>> {
-        let count = self.lanes.len();
-        for step in 0..count {
-            let at = (self.turn + step) % count;
-            let Some(lane) = self.lanes.get_mut(at) else {
-                continue;
-            };
-            if lane.busy {
-                continue;
-            }
-            if let Some(work) = lane.pending.pop_front() {
-                lane.busy = lane.capped;
-                self.turn = (at + 1) % count;
-                return Some(work);
-            }
-        }
-        None
-    }
-
-    /// A job of `lane` finished: its host may take the next one.
-    pub(super) fn release(&mut self, lane: usize) {
-        if let Some(lane) = self.lanes.get_mut(lane) {
-            lane.busy = false;
-        }
-    }
-}
-
 /// Runs `work` to the end — or, once `cancel` fires, drops it at the
 /// await it is parked on and returns `None`.
 pub(super) async fn until_cancelled<T>(
@@ -701,59 +604,6 @@ mod tests {
         assert!(matches!(slot.claim(), Claim::Join(_)));
         drop(second);
         assert!(matches!(slot.claim(), Claim::Run(_)));
-    }
-
-    fn ids(works: &[Work<FeedJob>]) -> Vec<i64> {
-        works.iter().map(|work| work.job.id.0).collect()
-    }
-
-    fn feed(index: usize, host: Option<String>) -> (FeedJob, Option<String>) {
-        let id = FeedId(i64::try_from(index).unwrap());
-        (FeedJob { index, id }, host)
-    }
-
-    /// One paced host's long run of feeds does not crowd the others out:
-    /// the hosts take turns, a paced host never has two feeds out at once,
-    /// and the unpaced lane has no such cap.
-    #[test]
-    fn the_work_queue_takes_turns_between_hosts() {
-        let host = |name: &str| Some(name.to_owned());
-        let feeds = [
-            feed(0, host("reddit.com")),
-            feed(1, host("reddit.com")),
-            feed(2, host("reddit.com")),
-            feed(3, host("a.example")),
-            feed(4, None),
-            feed(5, None),
-            feed(6, host("b.example")),
-        ];
-        let mut queue = WorkQueue::new(feeds);
-        let mut started = Vec::new();
-        while let Some(work) = queue.take() {
-            started.push(work);
-        }
-        // One per paced host, every unpaced feed, lanes in turn.
-        assert_eq!(ids(&started), [0, 3, 4, 6, 5]);
-        assert!(queue.take().is_none(), "reddit.com is busy");
-
-        let reddit = started.first().unwrap().lane;
-        queue.release(reddit);
-        let next = queue.take().unwrap();
-        assert_eq!(
-            next.job,
-            FeedJob {
-                index: 1,
-                id: FeedId(1)
-            }
-        );
-        assert!(queue.take().is_none(), "reddit.com is busy again");
-        queue.release(reddit);
-        assert_eq!(queue.take().unwrap().job.id, FeedId(2));
-        queue.release(reddit);
-        assert!(queue.take().is_none(), "every feed has started");
-        // Releasing a lane that does not exist is harmless.
-        queue.release(99);
-        assert!(WorkQueue::<FeedJob>::new([]).take().is_none());
     }
 
     #[test]

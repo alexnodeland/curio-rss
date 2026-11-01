@@ -20,7 +20,8 @@
 //! on a timer) or the next open drains the backlog.
 //!
 //! The operation surface is one `impl CoreHandle` block per concern:
-//! `feeds`, `refresh` (one feed), `sweep` (many feeds), `hydrate` (the
+//! `feeds`, `refresh` (one feed), `sweep` (many feeds, with `work_queue`
+//! handing out its jobs fairly across hosts), `hydrate` (the
 //! full-text page queue), `articles`,
 //! `state`, `destinations`, `imports`, `settings` and `maintenance`. This
 //! file holds the shared types, `open` /
@@ -49,6 +50,7 @@ mod settings;
 mod sink;
 mod state;
 mod sweep;
+mod work_queue;
 
 pub use hydrate::DEFAULT_HYDRATE_CONCURRENCY;
 pub use reddit_auth::RedditAuthReason;

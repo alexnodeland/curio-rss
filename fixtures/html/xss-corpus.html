@@ -22,6 +22,8 @@
 <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="placeholder"><noscript><img src="javascript:alert(1)" onerror="alert(1)"><script>alert(1)</script><p onclick="alert(1)">noscript text</p></noscript>
 <noscript><img src="x" alt="</noscript><script>alert(1)</script>"></noscript>
 <img data-src="https://example.com/lazy.png" data-orig-src="javascript:alert(1)" onerror="alert(1)" style="x" alt="lazy with handler">
+<img src="https://example.com/dim.png" width="javascript:alert(1)" height="1;onerror=alert(1)" alt="hostile dimensions">
+<img src="https://example.com/huge.png" width="99999999999" height="&quot; onload=&quot;alert(1)" alt="oversized dimensions">
 <p id="location" dir="rtl onmouseover=alert(1)" lang="en&quot; onclick=&quot;alert(1)">Hostile id, dir and lang.</p>
 <p id="x&quot; onclick=&quot;alert(1)" class="language-js" dir="ltr" lang="en">Hostile quoted id.</p>
 <a href="#&quot; onclick=&quot;alert(1)">quoted fragment</a>

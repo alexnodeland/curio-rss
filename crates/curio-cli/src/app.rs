@@ -1,5 +1,6 @@
 //! The opened application: profile dir + config + engine handle.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
@@ -189,16 +190,20 @@ fn load_reddit_credentials(core: &CoreHandle) {
     }
 }
 
-/// Applies curio.toml onto the engine: destinations are reconciled (never
-/// recreated once exported to — a vanished vault must stay visible),
-/// and per-feed W1 flags are pushed onto matching subscriptions.
-fn reconcile(core: &CoreHandle, config: &ProfileConfig) -> anyhow::Result<()> {
+/// Applies curio.toml onto the engine: destinations are seeded (each
+/// declared `name → root` once — a destination another head removed or
+/// re-rooted since stays that way, and one already exported to is never
+/// recreated, so a vanished vault stays visible), and per-feed W1 flags
+/// are pushed onto matching subscriptions.
+pub(crate) fn reconcile(core: &CoreHandle, config: &ProfileConfig) -> anyhow::Result<()> {
+    let mut declared = BTreeMap::new();
     for (name, root) in &config.destinations {
         let name: DestinationName = name
             .parse()
             .with_context(|| format!("invalid destination name {name:?} in curio.toml"))?;
-        core.reconcile_destination(name, root.clone())?;
+        declared.insert(name, root.clone());
     }
+    core.reconcile_destinations(declared)?;
     for (url, overrides) in &config.feeds {
         if let Some(feed) = core.get_feed_by_url(url)?
             && feed.allow_private_network != overrides.allow_private_network

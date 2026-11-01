@@ -35,6 +35,10 @@ use same_file::Handle;
 const MIN_BACKOFF: Duration = Duration::from_millis(1);
 const MAX_BACKOFF: Duration = Duration::from_millis(10);
 
+/// [`FileLock::acquire_async`] waits are for whole critical sections that
+/// span network I/O (seconds, not microseconds), so it polls less often.
+const ASYNC_MAX_BACKOFF: Duration = Duration::from_millis(50);
+
 /// After this long waiting, say so in the log — the wait is real.
 const WAIT_NOTICE_AFTER: Duration = Duration::from_secs(1);
 
@@ -72,6 +76,38 @@ impl FileLock {
     /// The lock file's path.
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// [`FileLock::acquire`] for async callers: waits up to `timeout` with
+    /// `tokio` sleeps between attempts, so a wait never blocks the
+    /// runtime thread (other tasks on it, possibly the holder, keep
+    /// running). Each attempt itself never blocks.
+    pub(crate) async fn acquire_async(
+        &self,
+        timeout: Duration,
+    ) -> Result<FileLockGuard, LockError> {
+        let started = Instant::now();
+        let mut backoff = MIN_BACKOFF;
+        let mut noticed = false;
+        loop {
+            match self.acquire(Duration::ZERO) {
+                Err(LockError::TimedOut { .. }) => {}
+                acquired => return acquired,
+            }
+            let waited = started.elapsed();
+            if waited >= timeout {
+                return Err(LockError::TimedOut { waited });
+            }
+            if !noticed && waited >= WAIT_NOTICE_AFTER {
+                noticed = true;
+                tracing::info!(
+                    path = %self.path.display(),
+                    "waiting for another Curio process to release a lock"
+                );
+            }
+            tokio::time::sleep(backoff.min(timeout.saturating_sub(waited))).await;
+            backoff = (backoff * 2).min(ASYNC_MAX_BACKOFF);
+        }
     }
 
     /// Takes the lock, waiting up to `timeout` for another holder to let
@@ -270,5 +306,39 @@ mod tests {
     fn opening_an_unwritable_path_is_an_io_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(FileLock::open(dir.path().join("missing").join("x.lock")).is_err());
+    }
+
+    /// The async wait runs on a current-thread runtime, so it must yield
+    /// between attempts: the task that releases the lock shares the thread.
+    #[tokio::test]
+    async fn an_async_waiter_yields_until_the_holder_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.lock");
+        let holder = FileLock::open(&path).unwrap();
+        let waiter = FileLock::open(&path).unwrap();
+        let guard = holder.acquire(Duration::from_secs(1)).unwrap();
+        let release = async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            drop(guard);
+        };
+        let (acquired, ()) = tokio::join!(waiter.acquire_async(Duration::from_secs(10)), release);
+        let _held = acquired.unwrap();
+        assert!(matches!(
+            holder.acquire(Duration::ZERO),
+            Err(LockError::TimedOut { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_async_waiter_times_out_while_the_holder_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.lock");
+        let holder = FileLock::open(&path).unwrap();
+        let waiter = FileLock::open(&path).unwrap();
+        let _guard = holder.acquire(Duration::from_secs(1)).unwrap();
+        match waiter.acquire_async(Duration::from_millis(60)).await {
+            Err(LockError::TimedOut { waited }) => assert!(waited >= Duration::from_millis(60)),
+            other => panic!("expected a timeout, got {other:?}"),
+        }
     }
 }

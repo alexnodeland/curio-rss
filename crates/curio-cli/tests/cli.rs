@@ -581,6 +581,65 @@ async fn a_vanished_vault_is_refused_not_recreated() {
     assert!(vault.join(".curio/manifest.json").is_file());
 }
 
+/// #114: curio.toml seeds destinations; it does not own them. A
+/// destination removed in the desktop app (a second engine handle on the
+/// same profile, open the whole time) stays removed after later CLI runs,
+/// and one the desktop adds shows up in `curio dest list` without
+/// touching curio.toml.
+#[test]
+fn a_destination_removed_in_the_desktop_stays_removed_after_a_cli_run() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let vault = parent.path().join("vault");
+    curio(profile.path()).arg("init").assert().success();
+    let desktop = curio_core::CoreHandle::open(profile.path()).unwrap();
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let listed = |profile: &std::path::Path| -> Vec<String> {
+        stdout_json(
+            &curio(profile)
+                .args(["dest", "list", "--json"])
+                .assert()
+                .success(),
+        )
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|dest| dest["name"].as_str().unwrap().to_owned())
+        .collect()
+    };
+    assert_eq!(listed(profile.path()), ["vault"]);
+
+    let vault_name: curio_types::DestinationName = "vault".parse().unwrap();
+    desktop.remove_destination(&vault_name).unwrap();
+    desktop
+        .add_destination("notes".parse().unwrap(), parent.path().join("notes"))
+        .unwrap();
+    // Every CLI command reconciles curio.toml, which still declares vault.
+    assert_eq!(listed(profile.path()), ["notes"]);
+    assert_eq!(listed(profile.path()), ["notes"]);
+    let names: Vec<String> = desktop
+        .destinations()
+        .unwrap()
+        .into_iter()
+        .map(|dest| dest.name.to_string())
+        .collect();
+    assert_eq!(names, ["notes"], "the desktop's view agrees");
+    let config = std::fs::read_to_string(profile.path().join("curio.toml")).unwrap();
+    assert!(config.contains("vault"), "curio.toml itself is untouched");
+
+    // `curio dest add` is the explicit act: it registers the name again.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    assert_eq!(listed(profile.path()), ["notes", "vault"]);
+}
+
 #[test]
 fn reddit_credentials_have_a_full_cli_surface_and_never_echo_the_secret() {
     let profile = tempfile::tempdir().unwrap();

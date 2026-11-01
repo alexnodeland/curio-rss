@@ -28,6 +28,7 @@ pub use netfs::{
     ALLOW_NETWORK_FS_ENV, NetworkFsKind, detect_network_fs, network_fs_override_from_env,
 };
 pub use open::OpenError;
+pub(crate) use repo::SettingsTx;
 pub use repo::{ListArticles, PendingIntent, UpsertOutcome};
 
 use pool::ReadPool;

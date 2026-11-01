@@ -45,10 +45,11 @@ mod settings;
 mod sink;
 mod state;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -112,8 +113,8 @@ pub enum CoreError {
         name: String,
     },
     /// The settings key is owned by the facade (the `"destinations"`
-    /// registry, `"destinations.exported"`) and cannot be read or
-    /// written as a raw value.
+    /// registry, `"destinations.exported"`, `"destinations.seeded"`) and
+    /// cannot be read or written as a raw value.
     #[error("the {key:?} settings key is facade-owned — use the destination operations")]
     ReservedSettingKey {
         /// The refused key.
@@ -264,14 +265,14 @@ pub struct CoreHandle {
     /// cleared by the next successful drain.
     events_backlog: AtomicBool,
     client: PolicedClient,
-    destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
-    /// Destinations that completed an export since they were
-    /// (re-)registered: their root and `.curio/` marker must still exist
-    /// (see [`CoreHandle::save_to_destination`]).
-    exported_destinations: RwLock<BTreeSet<DestinationName>>,
-    /// Per-feed refresh serialization (see [`CoreHandle::refresh_feed`]).
-    /// Bounded by the subscription count; `remove_feed` drops entries.
+    /// Per-feed refresh serialization inside this process (see
+    /// [`CoreHandle::refresh_feed`]); the per-feed lock files under
+    /// `.curio/locks/` serialize across processes. Bounded by the
+    /// subscription count; `remove_feed` drops entries.
     refresh_locks: Mutex<HashMap<FeedId, Arc<AsyncMutex<()>>>>,
+    /// How long a refresh waits for another process to finish refreshing
+    /// the same feed (derived from the fetch timeouts at open).
+    refresh_lock_wait: Duration,
     /// Circuit breaker over enrichment calls (D8/D14): repeated provider
     /// failures skip enrichment for a cool-down instead of stalling
     /// every hydrate.
@@ -354,17 +355,15 @@ impl CoreHandle {
                 false
             }
         };
-        let destinations = destinations::load_destinations(&storage)?;
-        let exported_destinations = destinations::load_exported(&storage)?;
+        let refresh_lock_wait = refresh::lock_wait(&options.fetch);
         let core = Self {
             profile_dir,
             storage,
             events: Mutex::new(events),
             events_backlog: AtomicBool::new(!attached),
             client: PolicedClient::new(options.fetch),
-            destinations: RwLock::new(destinations),
-            exported_destinations: RwLock::new(exported_destinations),
             refresh_locks: Mutex::new(HashMap::new()),
+            refresh_lock_wait,
             #[cfg(feature = "enrich-reddit")]
             enrich_breaker: crate::enrich::Breaker::default(),
             #[cfg(feature = "enrich-reddit")]
@@ -471,9 +470,13 @@ impl CoreError {
 /// the `events/` contract directory (see [`EventLog`]).
 const EVENTS_LOCK_FILE: &str = "events.lock";
 
-/// Lines `.curio/.gitignore` must carry: the events directory and its
-/// lock file.
-const GITIGNORE_LINES: [&str; 2] = ["events/", EVENTS_LOCK_FILE];
+/// The directory of the cross-process per-feed refresh locks, inside
+/// `.curio/` (see [`CoreHandle::refresh_feed`]).
+const LOCKS_DIR: &str = "locks";
+
+/// Lines `.curio/.gitignore` must carry: the events directory, its lock
+/// file and the refresh locks.
+const GITIGNORE_LINES: [&str; 3] = ["events/", EVENTS_LOCK_FILE, "locks/"];
 
 /// Writes `.curio/.gitignore`, or appends whichever required lines an
 /// existing one (from an older build, or hand-edited) lacks.
@@ -565,21 +568,21 @@ mod tests {
         ensure_gitignore(&path).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "events/\nevents.lock\n"
+            "events/\nevents.lock\nlocks/\n"
         );
 
-        // An older build's file (no lock line, no trailing newline) gains
-        // only the missing line; the user's own lines stay.
+        // An older build's file (no lock lines, no trailing newline) gains
+        // only the missing lines; the user's own lines stay.
         std::fs::write(&path, "events/\n*.bak").unwrap();
         ensure_gitignore(&path).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "events/\n*.bak\nevents.lock\n"
+            "events/\n*.bak\nevents.lock\nlocks/\n"
         );
         ensure_gitignore(&path).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "events/\n*.bak\nevents.lock\n",
+            "events/\n*.bak\nevents.lock\nlocks/\n",
             "idempotent"
         );
     }

@@ -39,7 +39,7 @@ pub async fn list_destinations(
     core: State<'_, SharedCore>,
 ) -> Result<Vec<DestinationDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || Ok(list_destinations_impl(&core))).await
+    run_blocking(move || list_destinations_impl(&core)).await
 }
 
 /// Unregisters a destination name. Exported notes are untouched.
@@ -92,11 +92,12 @@ fn add_destination_impl(
     Ok(core.add_destination(name, root)?)
 }
 
-fn list_destinations_impl(core: &CoreHandle) -> Vec<DestinationDto> {
-    core.destinations()
+fn list_destinations_impl(core: &CoreHandle) -> Result<Vec<DestinationDto>, CommandError> {
+    Ok(core
+        .destinations()?
         .into_iter()
         .map(DestinationDto::from)
-        .collect()
+        .collect())
 }
 
 fn remove_destination_impl(core: &CoreHandle, name: &str) -> Result<(), CommandError> {
@@ -138,13 +139,13 @@ mod tests {
         let (dir, core) = temp_core();
         let root = dir.path().join("vault");
         add_destination_impl(&core, "vault", root.clone()).unwrap();
-        let listed = list_destinations_impl(&core);
+        let listed = list_destinations_impl(&core).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "vault");
         assert!(root.is_dir(), "registration creates the root");
 
         remove_destination_impl(&core, "vault").unwrap();
-        assert_eq!(list_destinations_impl(&core).len(), 0);
+        assert_eq!(list_destinations_impl(&core).unwrap().len(), 0);
         let error = remove_destination_impl(&core, "vault").unwrap_err();
         assert_eq!(error.code, ErrorCode::UnknownDestination);
     }

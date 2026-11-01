@@ -19,7 +19,12 @@ import SettingsModal from '$components/modals/SettingsModal.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { t } from '$lib/i18n';
-import { createMatcher, shouldIgnoreKeyEvent } from '$lib/keyboard/registry';
+import {
+    createMatcher,
+    eventKeyName,
+    paneShortcut,
+    shouldIgnoreKeyEvent,
+} from '$lib/keyboard/registry';
 import { handleShortcut } from '$lib/state/actions';
 import { menuStore } from '$lib/state/menu.svelte';
 import { searchStore } from '$lib/state/search.svelte';
@@ -66,6 +71,20 @@ function handleEscapeStepback(event: KeyboardEvent): boolean {
     return true;
 }
 
+/**
+ * Whether nothing in particular holds focus — `<body>` (app launch, or the
+ * focused element was unmounted) or the skip-link's `<main>` target. The
+ * article list is the default pane, so its keys (↑/↓, Enter/→) work from
+ * here too: the reader's empty-state hint is true from the first keystroke.
+ */
+function isUnfocused(target: EventTarget | null): boolean {
+    return (
+        target === document.body ||
+        target === document.documentElement ||
+        (target instanceof HTMLElement && target.id === 'main-content')
+    );
+}
+
 function onKeydown(event: KeyboardEvent): void {
     // An open menu owns the keyboard entirely (its own level handles Escape,
     // arrows, activation); never let app shortcuts fire underneath it.
@@ -92,7 +111,15 @@ function onKeydown(event: KeyboardEvent): void {
     if (handleEscapeStepback(event)) {
         return;
     }
-    const result = matcher.handle(event.key);
+    const key = eventKeyName(event);
+    const paneId = isUnfocused(event.target) ? paneShortcut('list', key) : null;
+    if (paneId !== null) {
+        event.preventDefault();
+        matcher.reset();
+        handleShortcut(paneId);
+        return;
+    }
+    const result = matcher.handle(key);
     if (result.kind === 'none') {
         return;
     }

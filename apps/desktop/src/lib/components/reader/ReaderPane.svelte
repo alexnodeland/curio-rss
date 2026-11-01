@@ -4,6 +4,12 @@
  * (read / star / read-later / archive / open-in-browser), and the sanitized
  * body. Reads ride the query cache (invalidated by the Rust-emitted
  * events); displaying an article marks it read, idempotently, core-side.
+ *
+ * Keyboard: the scroll body is a focusable region. Enter / → in the list
+ * (`selectionStore.focusReader`) moves focus here, ← / Esc hand it back, and
+ * Space / Shift+Space page it (the shell's global keys, via
+ * `registerReaderBody`). The empty-state hint is built from the registry, so
+ * it only ever names keys that are bound.
  */
 import {
     type ArticleDto,
@@ -12,12 +18,16 @@ import {
     type FeedDto,
     commands,
 } from '$lib/bindings';
-import { formatIntlDateTime, t } from '$lib/i18n';
+import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
+import { advertisedKeys, keyLabel } from '$lib/keyboard/labels';
+import { type ShortcutId, eventKeyName, paneShortcut } from '$lib/keyboard/registry';
 import {
+    handleShortcut,
     loadFullArticle,
     markReadOnOpen,
     openInBrowser,
     promoteSelected,
+    registerReaderBody,
     toggleArchived,
     toggleRead,
     toggleReadLater,
@@ -35,6 +45,14 @@ import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
 import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
+import { untrack } from 'svelte';
+
+/** The empty-state hint, as registry actions: each part prints its bound keys. */
+const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: MessageKey }[] = [
+    { ids: ['nav.previousArticle', 'nav.nextArticle'], label: 'reader.hint.move' },
+    { ids: ['nav.focusReader'], label: 'reader.hint.read' },
+    { ids: ['help.toggle'], label: 'reader.hint.help' },
+];
 
 /** A stable per-feed hue for the monogram chip, derived from the title. */
 function feedHue(label: string): number {
@@ -43,6 +61,75 @@ function feedHue(label: string): number {
         hash = (hash * 31 + label.charCodeAt(i)) % 360;
     }
     return hash;
+}
+
+/** The mounted scroll body (re-bound per article by the `{#key}` below). */
+let scrollBody = $state<HTMLElement | null>(null);
+
+/**
+ * The reader body owns the keyboard. Switching articles (j/k, Space at the
+ * end) remounts the body, dropping DOM focus onto `<body>`; while this holds,
+ * the new body takes it back. Any focus landing outside the body clears it.
+ */
+let holdFocus = false;
+/** A `focusReader` request not yet honoured (the article was still loading). */
+let focusPending = false;
+let seenFocusNonce = untrack(() => selectionStore.readerFocusNonce);
+
+$effect(() => {
+    const nonce = selectionStore.readerFocusNonce;
+    const body = scrollBody;
+    if (nonce !== seenFocusNonce) {
+        seenFocusNonce = nonce;
+        focusPending = true;
+        holdFocus = true;
+    }
+    if (body === null || !holdFocus) {
+        return;
+    }
+    const active = document.activeElement;
+    // Reclaim only a request or focus that was dropped — never steal it from
+    // the search field or a dialog that took it in the meantime.
+    if (focusPending || active === null || active === document.body) {
+        focusPending = false;
+        body.focus();
+    }
+});
+
+$effect(() => {
+    const body = scrollBody;
+    return body === null ? undefined : registerReaderBody(body);
+});
+
+function onWindowFocusIn(event: FocusEvent): void {
+    const target = event.target;
+    const inside = scrollBody !== null && target instanceof Node && scrollBody.contains(target);
+    holdFocus = inside;
+    if (!inside) {
+        focusPending = false;
+    }
+}
+
+/**
+ * The reader's pane keys (← / Esc back to the list). ← only from the body
+ * itself — a focused link or media control inside keeps its own arrows; Esc
+ * from anywhere in it, and it stops there so the shell's Escape step-back
+ * doesn't also deselect the article.
+ */
+function onBodyKeydown(event: KeyboardEvent): void {
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+    }
+    if (event.key !== 'Escape' && event.target !== event.currentTarget) {
+        return;
+    }
+    const id = paneShortcut('reader', eventKeyName(event));
+    if (id === null) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    handleShortcut(id);
 }
 
 let showTypography = $state(false);
@@ -136,11 +223,21 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 }
 </script>
 
+<svelte:window onfocusin={onWindowFocusIn} />
+
 <div class="reader">
     {#if selectionStore.selectedArticleId === null}
         <EmptyState icon="sparkle" title={t('reader.empty')}>
             {#snippet hint()}
-                <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>→</kbd> or <kbd>Enter</kbd> to read · <kbd>?</kbd> for shortcuts
+                {#each HINT as part, index (part.label)}
+                    {#if index > 0}
+                        <span class="hint-sep" aria-hidden="true">·</span>
+                    {/if}
+                    <span class="hint-part">
+                        {#each part.ids.flatMap(advertisedKeys) as key (key)}<kbd>{keyLabel(key)}</kbd>{/each}
+                        {t(part.label)}
+                    </span>
+                {/each}
             {/snippet}
         </EmptyState>
     {:else}
@@ -211,6 +308,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     aria-label={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
                     use:tooltip={{
                         text: flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive'),
+                        kbd: 'E',
                     }}
                     onclick={() => void toggleArchived(current.id)}
                 >
@@ -284,12 +382,22 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <!-- Key on the article id so switching articles remounts the scroll
                  body at the top instead of inheriting the previous scroll offset. -->
             {#key current.id}
-            <!-- tabindex=-1: clicking into the article focuses the scroll body,
-                 so the platform's native key scrolling works. -->
+            <!-- A focusable region named by the article title: Tab, a click,
+                 or Enter / → from the list land here, so the platform's native
+                 key scrolling works; ← / Esc hand the keyboard back. A focusable
+                 scrollable region (tabindex 0, named) is the WAI-ARIA / axe
+                 `scrollable-region-focusable` pattern, but svelte's a11y table
+                 treats region as static — hence the two targeted ignores. -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
             <div
                 class="reader-scroll"
-                tabindex="-1"
+                role="region"
+                aria-labelledby="reader-title-{current.id}"
+                tabindex="0"
                 data-reading-theme={typographyStore.readingTheme}
+                bind:this={scrollBody}
+                onkeydown={onBodyKeydown}
             >
                 <article
                     class="reader-article"
@@ -315,7 +423,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                                 <span class="feed-name">{label}</span>
                             </div>
                         {/if}
-                        <h1 class="reader-title">
+                        <h1 class="reader-title" id="reader-title-{current.id}">
                             <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
                             <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
                             <a href={current.source_url} onclick={(event) => openSource(event, current)}>
@@ -379,7 +487,15 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         font-size: var(--text-xs);
     }
 
-    /* Empty state */
+    /* Empty-state hint: one unbreakable group per action. */
+    .hint-part {
+        white-space: nowrap;
+    }
+
+    .hint-sep {
+        margin: 0 var(--space-1);
+    }
+
     .reader-toolbar {
         flex: 0 0 auto;
         display: flex;
@@ -447,8 +563,15 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         overflow-y: auto;
     }
 
-    /* Focused for ↑/↓ scrolling (→ from the list): a soft inset frame rather
-       than a hard ring around the whole column. */
+    /* Space / Shift+Space page with a glide, unless motion is reduced. */
+    @media (prefers-reduced-motion: no-preference) {
+        .reader-scroll {
+            scroll-behavior: smooth;
+        }
+    }
+
+    /* Focused for ↑/↓ scrolling (Enter / → from the list): a soft inset frame
+       rather than a hard ring around the whole column. */
     .reader-scroll:focus-visible {
         outline: none;
         box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent), transparent 66%);

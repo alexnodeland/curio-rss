@@ -321,7 +321,7 @@ describe('actions — mark the current view read (Shift+A)', () => {
     }
 
     it('a feed view rides the bulk command for that feed', async () => {
-        harness = installIpcHarness({ mark_all_read: 4 });
+        harness = installIpcHarness({ mark_all_read: [1, 2, 3, 4] });
         articlesStore.filters = { ...ALL_ARTICLES, feedId: 3 };
         await markViewRead();
         expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: 3 }]);
@@ -336,7 +336,7 @@ describe('actions — mark the current view read (Shift+A)', () => {
                 feedFixture({ id: 3, url: 'https://c.example/feed', tags: ['News'] }),
             ],
             get_unread_counts: unreadCountsFixture(),
-            mark_all_read: (args) => (args.feedId === 1 ? 2 : 5),
+            mark_all_read: (args) => (args.feedId === 1 ? [1, 2] : [3, 4, 5, 6, 7]),
         });
         feedsStore.prime();
         await flushIpc();

@@ -185,6 +185,17 @@ tokens:
                     return structuredClone(byId(args.articleId as number)?.tags ?? []);
                 case 'mark_read':
                     return flip(byId(args.articleId as number), 'read', args.read as boolean);
+                case 'mark_all_read':
+                    // The ids actually flipped (the undo snapshot), ascending.
+                    return articles
+                        .filter((a) => args.feedId == null || a.summary.feed_id === args.feedId)
+                        .filter((a) => flip(a, 'read', true))
+                        .map((a) => a.summary.id)
+                        .sort((x, y) => x - y);
+                case 'mark_read_many':
+                    return (args.articleIds as number[]).filter((id) =>
+                        flip(byId(id), 'read', args.read as boolean),
+                    ).length;
                 case 'set_starred':
                     return flip(byId(args.articleId as number), 'starred', args.starred as boolean);
                 case 'set_read_later':
@@ -441,6 +452,8 @@ tokens:
                     return structuredClone(feeds[0]);
                 }
                 case 'remove_feed':
+                case 'stage_feed_removal':
+                case 'unstage_feed_removal':
                 case 'update_feed_metadata':
                     return null;
                 // Startup recovery: `?startup=<class>` (and `&backup=0` for

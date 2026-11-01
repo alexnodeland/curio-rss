@@ -14,7 +14,7 @@ import {
     type RefreshOutcomeDto,
     commands,
 } from '$lib/bindings';
-import { SvelteSet } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import {
     feedInFolder,
@@ -104,8 +104,51 @@ export class FeedsStore {
         void this.#countsQuery;
     }
 
+    /**
+     * Feeds unsubscribed in the UI whose backend removal is still waiting out
+     * its undo window: hidden from every view until the removal lands (or
+     * the undo brings them back).
+     */
+    #hiddenFeeds = new SvelteSet<number>();
+
+    /**
+     * Feeds whose removal landed, each with the feed list that was showing
+     * then (still listing it): hidden only while that same list is on screen.
+     */
+    #removedFeeds = new SvelteMap<number, FeedDto[] | undefined>();
+
+    /** The subscriptions as the UI shows them (pending unsubscribes hidden). */
     get feeds(): FeedDto[] {
-        return this.#feedsQuery.data ?? [];
+        const all = this.#feedsQuery.data ?? [];
+        if (this.#hiddenFeeds.size === 0 && this.#removedFeeds.size === 0) {
+            return all;
+        }
+        const shown = this.#feedsQuery.data;
+        return all.filter(
+            (feed) =>
+                !this.#hiddenFeeds.has(feed.id) &&
+                !(this.#removedFeeds.has(feed.id) && this.#removedFeeds.get(feed.id) === shown),
+        );
+    }
+
+    /** Forgets removed feeds whose stale list has since been replaced. */
+    #pruneRemovedFeeds(): void {
+        const shown = this.#feedsQuery.data;
+        for (const [feedId, list] of this.#removedFeeds) {
+            if (list !== shown) {
+                this.#removedFeeds.delete(feedId);
+            }
+        }
+    }
+
+    /** Hides a feed pending its deferred unsubscribe. */
+    hideFeed(feedId: number): void {
+        this.#hiddenFeeds.add(feedId);
+    }
+
+    /** Shows a hidden feed again (undo, or the removal failed). */
+    unhideFeed(feedId: number): void {
+        this.#hiddenFeeds.delete(feedId);
     }
 
     get loading(): boolean {
@@ -311,13 +354,27 @@ export class FeedsStore {
         return { status: 'ok', data: null };
     }
 
-    /** Marks every feed in a folder subtree read. Returns the first failure. */
-    async markFolderRead(folder: FeedFolder): Promise<CommandResult<null>> {
+    /**
+     * Marks every feed in a folder subtree read, all or nothing: returns the
+     * ids it flipped (the undo snapshot), or — on the first per-feed failure —
+     * puts the feeds already marked back to unread and returns that failure,
+     * so a folder is never left half-marked.
+     */
+    async markFolderRead(folder: FeedFolder): Promise<CommandResult<number[]>> {
+        const flipped: number[] = [];
         for (const id of subtreeFeedIds(folder)) {
             const result = await commands.markAllRead(id);
-            if (result.status === 'error') return result;
+            if (result.status === 'error') {
+                if (flipped.length > 0) {
+                    // Best effort: if the rollback fails too, the original
+                    // error is still what the user needs to see.
+                    await commands.markReadMany(flipped, false);
+                }
+                return result;
+            }
+            flipped.push(...result.data);
         }
-        return { status: 'ok', data: null };
+        return { status: 'ok', data: flipped };
     }
 
     /** Rewrites collapse/pending paths under `oldPath` to `newPath` (folder rename). */
@@ -372,6 +429,8 @@ export class FeedsStore {
         this.#collapsedFolders.clear();
         this.#pendingFolders.clear();
         this.#mutedNotifyFeeds.clear();
+        this.#hiddenFeeds.clear();
+        this.#removedFeeds.clear();
         this.#clearRefreshWatchdog();
         this.refreshing = false;
         this.refreshOutcomes = [];
@@ -385,9 +444,26 @@ export class FeedsStore {
     /** Unsubscribes. Stored articles survive. Any folder the feed emptied by
      *  leaving stays visible (re-scaffolded) rather than vanishing with it. */
     async removeFeed(feedId: number): Promise<CommandResult<null>> {
-        const vacatedTags = this.feeds.find((candidate) => candidate.id === feedId)?.tags ?? [];
+        // Read the unfiltered list: a feed in its undo window is hidden from `feeds`.
+        const vacatedTags =
+            (this.#feedsQuery.data ?? []).find((candidate) => candidate.id === feedId)?.tags ?? [];
         const result = await commands.removeFeed(feedId);
-        if (result.status === 'ok') this.#preserveEmptiedFolders(vacatedTags, [], feedId);
+        if (result.status === 'ok') {
+            this.#preserveEmptiedFolders(vacatedTags, [], feedId);
+            if (this.#hiddenFeeds.has(feedId)) {
+                // Keep it out of view while the list on screen is the one
+                // fetched before the removal: it ends with the next list that
+                // lands, which no longer has the feed. Waiting on a refetch
+                // instead isn't enough — one a newer refetch superseded lands
+                // nothing, and a failed one leaves this stale list up — and
+                // tying the hide to the stale list means a reused id is never
+                // hidden.
+                this.#pruneRemovedFeeds();
+                this.#removedFeeds.set(feedId, this.#feedsQuery.data);
+                this.#hiddenFeeds.delete(feedId);
+                void this.#feedsQuery.refetch();
+            }
+        }
         return result;
     }
 

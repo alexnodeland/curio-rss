@@ -92,10 +92,12 @@ const ASIDE_SCOPES: &[&str] = &[
 ];
 
 /// Extracts the main content of an **already sanitized** HTML document
-/// or fragment, returning its inner HTML. Page chrome is removed, the
-/// tightest container around the prose is chosen, then widened so no
-/// content-bearing sibling block is lost. When nothing scores (bare
-/// text, unstructured markup), the whole body passes through.
+/// or fragment, returning its inner HTML — wrapped in a `<div dir lang>`
+/// when a direction or language applied to the winning container, so
+/// they survive. Page chrome is removed, the tightest container around
+/// the prose is chosen, then widened so no content-bearing sibling block
+/// is lost. When nothing scores (bare text, unstructured markup), the
+/// whole body passes through.
 #[must_use]
 pub fn extract_main_content(sanitized_html: &str) -> String {
     let mut document = Html::parse_document(sanitized_html);
@@ -113,8 +115,37 @@ pub fn extract_main_content(sanitized_html: &str) -> String {
         .and_then(ElementRef::wrap)
         .map_or_else(
             || sanitized_html.to_owned(),
-            |el| el.inner_html().trim().to_owned(),
+            |el| with_direction(el, el.inner_html().trim()),
         )
+}
+
+/// `inner` (the winner's inner HTML), wrapped in a `<div>` carrying the
+/// `dir`/`lang` that applied to the winner — its own, else the nearest
+/// ancestor's. Taking only the inner HTML would otherwise drop them, and
+/// container-level direction (`<article dir="rtl">`) is how RTL content
+/// usually arrives. Values are re-filtered here, so the wrapper can never
+/// carry more than the sanitize gate admits.
+fn with_direction(winner: ElementRef<'_>, inner: &str) -> String {
+    let inherited = |name: &str| {
+        std::iter::once(winner)
+            .chain(winner.ancestors().filter_map(ElementRef::wrap))
+            .find_map(|el| el.value().attr(name))
+            .map(str::trim)
+    };
+    let dir = inherited("dir")
+        .map(str::to_ascii_lowercase)
+        .filter(|dir| matches!(dir.as_str(), "ltr" | "rtl" | "auto"));
+    let lang = inherited("lang").filter(|lang| {
+        !lang.is_empty()
+            && lang.len() <= 35
+            && lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    });
+    if dir.is_none() && lang.is_none() {
+        return inner.to_owned();
+    }
+    let dir = dir.map_or_else(String::new, |dir| format!(" dir=\"{dir}\""));
+    let lang = lang.map_or_else(String::new, |lang| format!(" lang=\"{lang}\""));
+    format!("<div{dir}{lang}>{inner}</div>")
 }
 
 /// Whether an **already sanitized** fragment carries page chrome (a
@@ -512,6 +543,34 @@ mod tests {
         let main = extract_main_content(html);
         assert!(main.contains("Just a fragment."));
         assert!(main.contains("Nothing fancy."));
+    }
+
+    #[test]
+    fn the_winners_direction_and_language_wrap_its_content() {
+        let html = "<article dir=\"RTL\" lang=\"ar\"><h1>عنوان</h1>\
+            <p>فقرة طويلة بما يكفي لتسجيل النقاط في المستخرج.</p></article>";
+        let main = extract_main_content(html);
+        assert!(
+            main.starts_with("<div dir=\"rtl\" lang=\"ar\"><h1>عنوان</h1>"),
+            "{main}"
+        );
+        assert!(main.ends_with("</div>"), "{main}");
+    }
+
+    #[test]
+    fn direction_is_inherited_from_an_ancestor_of_the_winner() {
+        let html = "<section dir=\"rtl\"><div><p>First paragraph of real text.</p>\
+            <p>Second paragraph of real text.</p></div></section>";
+        let main = extract_main_content(html);
+        assert!(main.starts_with("<div dir=\"rtl\"><p>First"), "{main}");
+    }
+
+    #[test]
+    fn hostile_direction_values_do_not_reach_the_wrapper() {
+        let html = "<article dir=\"rtl&quot; onclick=&quot;x\" lang=\"en x\">\
+            <p>Paragraph text long enough to score.</p></article>";
+        let main = extract_main_content(html);
+        assert!(main.starts_with("<p>"), "{main}");
     }
 
     #[test]

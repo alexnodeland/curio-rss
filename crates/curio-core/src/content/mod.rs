@@ -29,7 +29,10 @@
 //! Markdown conversion is a DOM walk (htmd); the sketch's regex
 //! converter and render-time sanitization are banned.
 
+mod embeds;
 mod extract;
+mod footnotes;
+mod lazy_images;
 mod markdown;
 mod readable;
 mod sanitize;
@@ -90,7 +93,10 @@ pub fn process(raw_html: &str, base_url: Option<&str>) -> ProcessedContent {
 /// to find the article body amid nav/comments/chrome, then the extractor's
 /// output passes the sanitize gate, then any `nav` or page-level
 /// `header`/`footer`/`aside` the readability pass kept inside its container
-/// is dropped by the same rule the feed extractor uses. `url` is the article's final (post-redirect) URL — the relative-link
+/// is dropped by the same rule the feed extractor uses. The gate's
+/// lazy-image and embed softening also runs *before* extraction, since the
+/// extractor would otherwise delete the iframes and `<noscript>` fallbacks
+/// it works from. `url` is the article's final (post-redirect) URL — the relative-link
 /// base and scheme-allowlist context.
 ///
 /// # Errors
@@ -117,7 +123,12 @@ pub struct ProcessedPage {
 ///
 /// [`ContentError::Readability`] if the page cannot be parsed or scored.
 pub fn process_page(raw_html: &str, url: &str) -> Result<ProcessedPage, ContentError> {
-    let (extracted, meta) = extract_full_page_with_meta(raw_html, url)?;
+    // Soften before extracting: the extractor deletes every iframe outside
+    // its short video-host list, and every `<noscript>`, so embed
+    // placeholders and lazy-image fallbacks must exist before it runs.
+    let base = url::Url::parse(url).ok();
+    let softened = sanitize::soften(raw_html, base.as_ref());
+    let (extracted, meta) = extract_full_page_with_meta(&softened, url)?;
     let html = extract::strip_page_chrome(&sanitize(&extracted, Some(url)));
     let text = plain_text(&html);
     let word_count = u32::try_from(text.split_whitespace().count()).unwrap_or(u32::MAX);
@@ -299,6 +310,65 @@ mod tests {
             "output passed the sanitize gate"
         );
         assert!(processed.word_count > 20);
+    }
+
+    #[test]
+    fn process_full_page_keeps_the_code_fence_language() {
+        // The extractor strips classes by default; the language class has
+        // to survive it to reach the sanitizer (which keeps only it).
+        let page = r#"<html><body><article>
+              <h1>Query planning</h1>
+              <p>This is the first substantial paragraph of the genuine article body,
+                 written with enough real sentences that a readability scorer prefers
+                 this region over anything else on the page around it.</p>
+              <pre class="highlight"><code class="hljs language-sql">SELECT 1;</code></pre>
+              <p>A second full paragraph continues the argument with more meaningful
+                 prose, cementing this container as the densest block of text.</p>
+            </article></body></html>"#;
+        let processed = process_full_page(page, "https://example.com/post").unwrap();
+        assert!(
+            processed
+                .html
+                .contains("<code class=\"language-sql\">SELECT 1;</code>"),
+            "{}",
+            processed.html
+        );
+        assert!(!processed.html.contains("hljs"), "{}", processed.html);
+        assert!(!processed.html.contains("highlight"), "{}", processed.html);
+    }
+
+    #[test]
+    fn process_full_page_keeps_embeds_and_lazy_images() {
+        // The extractor deletes iframes outside its video-host list and
+        // every <noscript>; the softening pass has to run before it.
+        let page = r#"<html><body><article>
+              <h1>Listen and look</h1>
+              <p>This is the first substantial paragraph of the genuine article body,
+                 written with enough real sentences that a readability scorer prefers
+                 this region over anything else on the page around it.</p>
+              <iframe src="https://open.spotify.com/embed/episode/abc" width="100%" height="232"></iframe>
+              <p>A second full paragraph continues the argument with more meaningful
+                 prose, cementing this container as the densest block of text.</p>
+              <iframe src="https://mastodon.social/@Mastodon/1093/embed" width="400"></iframe>
+              <p>A third paragraph introduces the picture below, which a lazy loader
+                 only reveals once scripts run, with a noscript fallback beside it.</p>
+              <img src="data:image/gif;base64,R0lGOD" alt="lazy" class="lazyload">
+              <noscript><img src="/uploads/real.jpg" alt="lazy"></noscript>
+              <p>A closing paragraph wraps up the article with a few more sentences.</p>
+            </article></body></html>"#;
+        let processed = process_full_page(page, "https://example.com/post").unwrap();
+        let markdown = to_markdown(&processed.html).unwrap();
+        for needle in [
+            "[▶ Embedded media (open.spotify.com) ↗](https://open.spotify.com/embed/episode/abc)",
+            "[Embedded content (mastodon.social) ↗](https://mastodon.social/@Mastodon/1093/embed)",
+            "![lazy](https://example.com/uploads/real.jpg)",
+        ] {
+            assert!(
+                markdown.contains(needle),
+                "{needle} missing from:\n{markdown}"
+            );
+        }
+        assert!(!processed.html.contains("iframe"), "{}", processed.html);
     }
 
     #[test]

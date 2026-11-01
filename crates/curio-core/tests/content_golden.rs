@@ -15,6 +15,29 @@ fn pipeline(raw_html: &str) -> String {
     to_markdown(&processed.html).unwrap()
 }
 
+/// Every attribute the sanitize gate may leave on stored HTML.
+const ALLOWED_ATTRIBUTES: &[&str] = &[
+    "href", "rel", "title", "src", "alt", "datetime", "colspan", "rowspan", "id", "dir", "lang",
+    "start", "class",
+];
+
+/// The id/fragment token shape: ASCII alphanumerics and `-_.:`.
+fn is_plain_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+}
+
+/// The stored (sanitized + extracted) HTML for a fixture.
+fn stored_html(name: &str) -> String {
+    process(
+        &html_fixture(name),
+        Some("https://example.com/posts/current"),
+    )
+    .html
+}
+
 fn html_fixture(name: &str) -> String {
     std::fs::read_to_string(
         common::manifest_dir()
@@ -71,7 +94,9 @@ fn xss_corpus_output_is_inert() {
     let markdown = to_markdown(&processed.html).unwrap();
 
     // Structural audit of the stored HTML: no forbidden elements, no
-    // event-handler or style attributes, http(s)-only URL attributes.
+    // event-handler or style attributes, http(s)-only URL attributes
+    // (plus prefixed in-page fragments), and every other surviving
+    // attribute both allowlisted and value-filtered.
     // (Substring scans would false-positive on inert anchor *text* like
     // "javascript: link", which sanitization correctly leaves behind.)
     let stored = scraper::Html::parse_fragment(&processed.html);
@@ -92,11 +117,55 @@ fn xss_corpus_output_is_inert() {
                 !attr.starts_with("on") && attr != "style" && attr != "http-equiv",
                 "forbidden attribute {attr:?} survived on <{name}>"
             );
+            assert!(
+                ALLOWED_ATTRIBUTES.contains(&attr),
+                "unexpected attribute {attr:?} survived on <{name}>"
+            );
             if matches!(attr, "href" | "src") {
+                let in_page_fragment = attr == "href"
+                    && value
+                        .strip_prefix("#user-content-")
+                        .is_some_and(is_plain_token);
                 assert!(
-                    value.starts_with("http://") || value.starts_with("https://"),
+                    value.starts_with("http://")
+                        || value.starts_with("https://")
+                        || in_page_fragment,
                     "non-http(s) {attr} survived on <{name}>: {value:?}"
                 );
+            }
+            match attr {
+                "id" => assert!(
+                    value
+                        .strip_prefix("user-content-")
+                        .is_some_and(is_plain_token),
+                    "unprefixed or unfiltered id on <{name}>: {value:?}"
+                ),
+                "dir" => assert!(
+                    matches!(value, "ltr" | "rtl" | "auto"),
+                    "unfiltered dir on <{name}>: {value:?}"
+                ),
+                "lang" => assert!(
+                    !value.is_empty()
+                        && value
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-'),
+                    "unfiltered lang on <{name}>: {value:?}"
+                ),
+                "start" => assert!(
+                    name == "ol" && value.parse::<i32>().is_ok(),
+                    "unfiltered start on <{name}>: {value:?}"
+                ),
+                "class" => assert!(
+                    matches!(name, "pre" | "code")
+                        && value.strip_prefix("language-").is_some_and(|lang| {
+                            !lang.is_empty()
+                                && lang
+                                    .bytes()
+                                    .all(|b| b.is_ascii_alphanumeric() || b"-_+#.".contains(&b))
+                        }),
+                    "unfiltered class on <{name}>: {value:?}"
+                ),
+                _ => {}
             }
         }
     }
@@ -107,6 +176,8 @@ fn xss_corpus_output_is_inert() {
     for vector in [
         "](javascript:",
         "](data:",
+        "](vbscript:",
+        "](#",
         "<script",
         "onerror=",
         "onload=",
@@ -147,6 +218,178 @@ fn article_page_extraction_drops_chrome_keeps_story() {
     assert!(!markdown.contains("Related posts"), "aside leaked");
     assert!(!markdown.contains("© 2026"), "footer leaked");
     assert!(!markdown.contains("Archive"), "nav leaked");
+}
+
+#[test]
+fn lazy_images_fixture_recovers_every_real_source_once() {
+    let markdown = pipeline(&html_fixture("lazy-images.html"));
+    for image in [
+        "![from data-src](https://example.com/uploads/data-src.jpg)",
+        "![from data-lazy-src](https://cdn.example.com/lazy-src.png)",
+        "![from srcset](https://cdn.example.com/w_1200,h_900/srcset.jpg)",
+        "![from noscript](https://cdn.example.com/noscript.webp)",
+        "![plain](https://cdn.example.com/plain.png)",
+    ] {
+        assert_eq!(
+            markdown.matches(image).count(),
+            1,
+            "expected {image:?} exactly once in:\n{markdown}"
+        );
+    }
+    assert!(
+        !markdown.contains("](data:"),
+        "placeholder leaked:\n{markdown}"
+    );
+    assert!(
+        !markdown.contains("spacer.gif"),
+        "spacer leaked:\n{markdown}"
+    );
+    assert!(
+        !markdown.contains("![placeholder]"),
+        "placeholder kept beside its fallback:\n{markdown}"
+    );
+}
+
+#[test]
+fn footnotes_fixture_round_trips_to_commonmark_footnotes() {
+    let markdown = pipeline(&html_fixture("footnotes.html"));
+    assert!(
+        markdown.contains("Pandoc-style references[^1] and a"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("kramdown-style one[^2]."), "{markdown}");
+    assert!(
+        markdown.contains("[^1]: The first note, with a [source](https://example.com/source)."),
+        "{markdown}"
+    );
+    assert!(
+        markdown
+            .contains("[^2]: The second note spans two paragraphs.\n\n    This is the second one."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("A jump to a later section keeps its words."),
+        "{markdown}"
+    );
+    assert!(markdown.contains("3.  third\n4.  fourth"), "{markdown}");
+    assert!(
+        !markdown.contains('↩'),
+        "back-reference leaked:\n{markdown}"
+    );
+    assert!(!markdown.contains("](#"), "dead in-page link:\n{markdown}");
+    assert!(
+        !markdown.contains("example.com/posts/current#"),
+        "fragment was absolutized:\n{markdown}"
+    );
+
+    // The stored HTML keeps working in-page links for the reader.
+    let html = stored_html("footnotes.html");
+    for needle in [
+        "href=\"#user-content-fn1\"",
+        "<li id=\"user-content-fn1\">",
+        "href=\"#user-content-fnref1\"",
+        "<sup id=\"user-content-fnref1\">",
+        "href=\"#user-content-fn:2\"",
+        "<li id=\"user-content-fn:2\">",
+        "<h2 id=\"user-content-later\">",
+        "href=\"#user-content-later\"",
+        "<ol start=\"3\">",
+    ] {
+        assert!(html.contains(needle), "{needle} missing from:\n{html}");
+    }
+}
+
+/// The `dir` / `lang` that apply to the first element matching `selector`
+/// in stored HTML: its own, else the nearest ancestor's.
+fn inherited_direction(html: &str, selector: &str) -> (Option<String>, Option<String>) {
+    let doc = scraper::Html::parse_fragment(html);
+    let selector = scraper::Selector::parse(selector).unwrap();
+    let element = doc.select(&selector).next().unwrap();
+    let inherited = |name: &str| {
+        std::iter::once(element)
+            .chain(element.ancestors().filter_map(scraper::ElementRef::wrap))
+            .find_map(|el| el.value().attr(name))
+            .map(ToOwned::to_owned)
+    };
+    (inherited("dir"), inherited("lang"))
+}
+
+#[test]
+fn rtl_fixture_keeps_direction_and_language() {
+    let rtl = (Some("rtl".to_owned()), Some("ar".to_owned()));
+    // Direction set only on the container must still reach everything
+    // that inherits it — the heading and the bare paragraph — both as a
+    // feed fragment and as a whole-page item the extractor runs on.
+    let fragment = stored_html("rtl.html");
+    let page = process(
+        &format!(
+            "<html><body><nav><a href=\"/\">Home</a></nav>{}</body></html>",
+            html_fixture("rtl.html")
+        ),
+        Some("https://example.com/posts/current"),
+    )
+    .html;
+    assert!(!page.contains("Home"), "not extracted:\n{page}");
+    for html in [&fragment, &page] {
+        assert_eq!(inherited_direction(html, "h1"), rtl, "heading:\n{html}");
+        assert_eq!(
+            inherited_direction(html, "p"),
+            rtl,
+            "bare paragraph:\n{html}"
+        );
+        for needle in [
+            "<p>هذه فقرة عربية ترث اتجاهها",
+            "<p dir=\"ltr\" lang=\"en\">",
+            "<bdi>إيان</bdi>",
+            "<bdo dir=\"rtl\">reversed</bdo>",
+        ] {
+            assert!(html.contains(needle), "{needle} missing from:\n{html}");
+        }
+    }
+    assert!(pipeline(&html_fixture("rtl.html")).contains("هذه فقرة عربية"));
+}
+
+#[test]
+fn code_fence_fixture_keeps_each_language() {
+    let markdown = pipeline(&html_fixture("code-fence-language.html"));
+    assert!(
+        markdown.contains("```rust\nfn main() {"),
+        "rust fence lost:\n{markdown}"
+    );
+    assert!(
+        markdown.contains("```python\nprint(\"hello\")"),
+        "python fence lost:\n{markdown}"
+    );
+    assert!(
+        markdown.contains("```\nplain text\n```"),
+        "bare fence changed:\n{markdown}"
+    );
+}
+
+#[test]
+fn embeds_fixture_turns_every_visible_embed_into_a_link() {
+    let markdown = pipeline(&html_fixture("embeds.html"));
+    for link in [
+        "[▶ Embedded media (open.spotify.com) ↗](https://open.spotify.com/embed/episode/7makk4oTQel546B0PZlDM5)",
+        "[▶ Embedded media (w.soundcloud.com) ↗](https://w.soundcloud.com/player/?url=https%3A//api.soundcloud.com/tracks/293)",
+        "[Embedded content (codepen.io) ↗](https://codepen.io/team/codepen/embed/PNaGbb?default-tab=result)",
+        "[Embedded content (mastodon.social) ↗](https://mastodon.social/@Mastodon/109349437765541430/embed)",
+        "[Embedded content (embed.bsky.app) ↗]",
+        "[Embedded content (maps.example.org) ↗](https://maps.example.org/embed?pb=!1m18)",
+    ] {
+        assert!(markdown.contains(link), "{link} missing from:\n{markdown}");
+    }
+    assert!(
+        !markdown.contains("track.example.net"),
+        "tracking frame leaked:\n{markdown}"
+    );
+    for chrome in ["outbrain.com", "platform.twitter.com", "disqus.com"] {
+        assert!(
+            !markdown.contains(chrome),
+            "{chrome} widget became a link:\n{markdown}"
+        );
+    }
+    assert!(markdown.contains("The end."));
 }
 
 /// Feed fragments are sanitized only (#128): the stored text is exactly

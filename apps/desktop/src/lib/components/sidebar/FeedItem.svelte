@@ -13,7 +13,7 @@ import { t } from '$lib/i18n';
 import {
     markAllRead,
     moveFeed,
-    refreshFeedById,
+    refreshFeed,
     renameFeed,
     reorderFeedGroup,
     setFeedPaused,
@@ -163,7 +163,7 @@ function feedMenu(): MenuItem[] {
         {
             id: 'refresh',
             labelKey: 'feed.menu.refresh',
-            onSelect: () => refreshFeedById(feed.id),
+            onSelect: () => refreshFeed(feed.id),
         },
         { id: 'rename', labelKey: 'feed.menu.rename', onSelect: startRename },
         {

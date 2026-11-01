@@ -1,3 +1,15 @@
+<script lang="ts" module>
+/** What the viewport shows right now (see `onviewport`). */
+export interface ViewportReport {
+    /** Rows `[0, first)` have fully scrolled up past the viewport top. */
+    first: number;
+    /** One past the last row intersecting the viewport (no overscan). */
+    end: number;
+    /** The viewport's scroll offset in px. */
+    scrollTop: number;
+}
+</script>
+
 <script lang="ts" generics="T">
 /**
  * The hand-rolled fixed-row-height virtualizer: renders only the rows that
@@ -10,9 +22,17 @@
  * `aria-posinset`/`aria-setsize` themselves (the snippet receives the
  * absolute index). In jsdom (no layout) the measured viewport height is 0,
  * so `fallbackViewportHeight` keeps the math real in component tests.
+ *
+ * The scroll position is the instance's own: an owner showing a different
+ * list mounts a fresh instance (`{#key}`) and hands it that list's remembered
+ * offset through `initialScrollTop`, so no list inherits another's offset.
+ * Within one instance the offset is anchored to the rows on screen: when rows
+ * are inserted or removed above them, the offset follows so the reader keeps
+ * looking at the same rows (scroll anchoring, as the CSS `overflow-anchor`
+ * does for ordinary flow — which a translated virtual window never gets).
  */
 import { eventKeyName } from '$lib/keyboard/registry';
-import type { Snippet } from 'svelte';
+import { type Snippet, untrack } from 'svelte';
 
 let {
     items,
@@ -22,11 +42,12 @@ let {
     overscan = 4,
     nearEndMargin = 10,
     fallbackViewportHeight = 600,
+    initialScrollTop = 0,
     label,
     activeDescendantId,
     focusNonce = 0,
     onnearend,
-    onscrollpast,
+    onviewport,
     onmove,
     onpanekey,
     onmenukey,
@@ -39,22 +60,27 @@ let {
     overscan?: number;
     nearEndMargin?: number;
     fallbackViewportHeight?: number;
+    /** The offset this instance opens at (read once, at mount). */
+    initialScrollTop?: number;
     label: string;
     /** The `id` of the active option — mirrored into `aria-activedescendant`
      *  so a screen reader tracks selection while focus stays on the listbox. */
     activeDescendantId?: string;
     /** Bumped by the owner to pull DOM focus onto the listbox (entering the
      *  list from the sidebar). The listbox is the single durable focus holder,
-     *  so focus lives here, never on an individual row that can be unmounted. */
+     *  so focus lives here, never on an individual row that can be unmounted.
+     *  A non-zero value at mount focuses the fresh instance too (the owner
+     *  hands focus over from the instance it replaced). */
     focusNonce?: number;
     onnearend?: () => void;
     /**
-     * The count of rows that have fully scrolled up past the viewport top —
-     * i.e. `items[0..firstVisibleIndex)` are no longer visible above. Fires
-     * whenever that count changes; the owner decides what "passed" means
-     * (mark-on-scroll uses it to mark those rows read).
+     * What the viewport shows: the rows scrolled up past the top, the rows
+     * on screen, and the raw offset. Fires at mount and whenever the scroll
+     * offset or the items change; the owner decides what to make of it
+     * (mark-on-scroll marks rows it saw scroll past; the list remembers its
+     * position per view).
      */
-    onscrollpast?: (firstVisibleIndex: number) => void;
+    onviewport?: (report: ViewportReport) => void;
     /**
      * A listbox jump key (Home / End / PageUp / PageDown) was pressed while
      * the list held focus. The owner moves selection; the listbox itself
@@ -127,7 +153,9 @@ function onKeydown(event: KeyboardEvent): void {
 
 let viewport: HTMLDivElement | undefined = $state();
 let measuredHeight = $state(0);
-let scrollTop = $state(0);
+// The opening offset is read once: later changes to the prop are ignored (a
+// different list is a different instance).
+let scrollTop = $state(untrack(() => Math.max(0, initialScrollTop)));
 
 const viewportHeight = $derived(measuredHeight > 0 ? measuredHeight : fallbackViewportHeight);
 const start = $derived(Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
@@ -155,10 +183,78 @@ $effect(() => {
     }
 });
 
-// Rows whose bottom edge has cleared the viewport top have "scrolled past".
-const firstVisibleIndex = $derived(Math.floor(scrollTop / rowHeight));
+// Rows whose bottom edge has cleared the viewport top have "scrolled past";
+// rows from there to the viewport bottom are on screen.
+const firstVisibleIndex = $derived(Math.min(items.length, Math.floor(scrollTop / rowHeight)));
+const endVisibleIndex = $derived(
+    Math.min(items.length, Math.ceil((scrollTop + viewportHeight) / rowHeight)),
+);
+
+/** A row that was on screen at the last report, and the index it sat at. */
+interface AnchorRow {
+    readonly key: string | number;
+    readonly index: number;
+}
+
+/**
+ * The rows on screen at the last report, top first — the scroll-anchor
+ * candidates. Plain bookkeeping, not state: only the items effect reads it.
+ */
+let anchorRows: AnchorRow[] = [];
+
+// Scroll anchoring: when the items change under a scrolled list, find the
+// topmost row that was on screen and is still present, and move the offset by
+// however far it moved — rows dropped above the viewport (a released read-hold)
+// or arriving above it (a refetch) must not shift what the reader is looking
+// at, nor slide unseen rows up past the top. At offset 0 the list stays at the
+// top so new rows show there. Declared before the report effect so a report
+// never sees the pre-anchoring offset.
 $effect(() => {
-    onscrollpast?.(firstVisibleIndex);
+    const current = items;
+    untrack(() => {
+        if (viewport === undefined || scrollTop <= 0) {
+            return;
+        }
+        for (const anchor of anchorRows) {
+            const at = current.findIndex((item) => key(item) === anchor.key);
+            if (at === -1) {
+                continue;
+            }
+            if (at !== anchor.index) {
+                const target = Math.max(0, scrollTop + (at - anchor.index) * rowHeight);
+                viewport.scrollTop = target;
+                scrollTop = target;
+            }
+            return;
+        }
+    });
+});
+
+$effect(() => {
+    void items; // a refetch that swaps rows in place re-reports too
+    const first = firstVisibleIndex;
+    const end = endVisibleIndex;
+    onviewport?.({ first, end, scrollTop });
+    untrack(() => {
+        anchorRows = items
+            .slice(first, end)
+            .map((item, offset) => ({ key: key(item), index: first + offset }));
+    });
+});
+
+// Open at the handed-in offset: the DOM container starts at 0, so seat it once
+// on mount (before the scroll-into-view effect below reads it). A browser that
+// clamps the offset fires a scroll event, which re-syncs `scrollTop`.
+let seated = false;
+$effect(() => {
+    if (seated || viewport === undefined) {
+        return;
+    }
+    seated = true;
+    const opening = untrack(() => scrollTop);
+    if (opening > 0) {
+        viewport.scrollTop = opening;
+    }
 });
 
 // Entering the list from elsewhere (the owner bumps `focusNonce`): pull DOM

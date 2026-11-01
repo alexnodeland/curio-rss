@@ -21,22 +21,28 @@ export const ROW_HEIGHT = ROW_HEIGHTS.comfortable;
  * the virtualizer, with keyset `before`-cursor infinite scroll (the store
  * owns the cursor; nearing the bottom of the window asks it for the next
  * page). Selection lives in `selectionStore`; the reader reacts to it.
+ *
+ * Each filter combination is its own view session: the virtualizer is keyed
+ * on the list, so switching views mounts a fresh scroll container seated at
+ * that view's remembered position (the top on a first visit) instead of
+ * inheriting the previous view's offset.
  */
 import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { paneShortcut } from '$lib/keyboard/registry';
 import { handleShortcut, markReadOnScroll } from '$lib/state/actions';
-import { articlesStore } from '$lib/state/articles.svelte';
+import { type ArticleListState, articlesStore, filterKey } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
+import { capturePosition, restoreScrollTop } from '$lib/state/list-position';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { untrack } from 'svelte';
 import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
-import VirtualList from './VirtualList.svelte';
+import VirtualList, { type ViewportReport } from './VirtualList.svelte';
 
 /** How many placeholder rows the loading skeleton sketches. */
 const SKELETON_ROWS = Array.from({ length: 8 }, (_, index) => index);
@@ -126,9 +132,9 @@ function moveSelection(to: 'first' | 'last' | 'pageDown' | 'pageUp'): void {
 }
 
 // Keep the selection store's last-present index current: whenever a real row is
-// selected (j/k, click, first/last), remember where it sits so that when
-// auto-mark-read later drops it from an unread view, j/k resume from here
-// instead of teleporting to the top.
+// selected (j/k, click, first/last), remember where it sits so that when the
+// row later leaves the window (archived out of the view; a read row is held
+// until the view changes), j/k resume from here instead of teleporting to the top.
 $effect(() => {
     const index = selectionStore.selectedIndex;
     if (index >= 0) {
@@ -137,16 +143,43 @@ $effect(() => {
 });
 
 /**
- * Mark-on-scroll high-water: the number of leading rows already marked read
- * this filter-session. It only advances (scrolling back up never re-marks),
- * and resets when the filter changes to a fresh list.
+ * Mark-on-scroll bookkeeping for one view session, by article id (never by
+ * index, so rows shifting — a refetch, rows arriving above — can't move the
+ * mark onto rows the reader never saw). `seen` holds every row that has been
+ * on screen; `marked` the rows already marked. A row is marked once, when a
+ * row that was *seen* has scrolled up past the top — so opening a view at a
+ * restored offset never marks the rows above it, which were never on screen.
  */
-let markedThrough = 0;
+interface ScrollSession {
+    readonly list: ArticleListState;
+    readonly seen: Set<number>;
+    readonly marked: Set<number>;
+}
+
+let session: ScrollSession | null = null;
+
+/** The session for `current`, starting a fresh one when the list changed. */
+function sessionFor(current: ArticleListState): ScrollSession {
+    if (session === null || session.list !== current) {
+        session = { list: current, seen: new Set(), marked: new Set() };
+    }
+    return session;
+}
+
+/** The offset the list opens at for the current view (read once per mount). */
+function openingScrollTop(): number {
+    return untrack(() =>
+        restoreScrollTop(
+            articlesStore.positions.get(filterKey(list.filters)),
+            list.items,
+            rowHeight,
+        ),
+    );
+}
 
 $effect(() => {
     // Re-key on the list identity: a new filter is a fresh reading session.
     void list;
-    markedThrough = 0;
     // If the prior selection isn't in the new window (an unread-only toggle or
     // feed switch dropped it), restart the resume anchor at the top so j/k
     // can't teleport off a now-stale index into an unrelated row.
@@ -159,6 +192,60 @@ $effect(() => {
 
 /** The final "no articles" branch (loaded, no error, no rows). */
 const showingEmpty = $derived(list.items.length === 0 && list.loaded && list.error === null);
+
+/** Whether the virtualizer branch is showing (it remounts per view). */
+const hasRows = $derived(list.items.length > 0);
+
+/** The pane's root — DOM focus inside it is the list owning the keyboard. */
+let pane = $state<HTMLElement | null>(null);
+
+/**
+ * The focus request handed to the virtualizer: bumped to pull DOM focus onto
+ * the listbox, 0 when a freshly mounted listbox must leave focus alone. Kept
+ * here, not read off `selectionStore.focus` (which is `'list'` by default and
+ * after any click, so it says nothing about where the keyboard actually is).
+ */
+let focusRequest = $state(0);
+let focusRequests = 0;
+
+/** A view switch away from a focused list whose listbox hasn't mounted yet. */
+let pendingHandoff = false;
+
+// Entering the list explicitly (`selectionStore.focusList`, e.g. Escape out of
+// the sidebar) focuses the listbox — or the next one to mount, while rows are
+// still loading.
+$effect(() => {
+    if (selectionStore.listFocusNonce > 0) {
+        untrack(() => {
+            pendingHandoff = !hasRows;
+            focusRequests += 1;
+            focusRequest = focusRequests;
+        });
+    }
+});
+
+// A view switch remounts the listbox (`{#key list}`), and the outgoing one
+// takes DOM focus down with it. Before the DOM updates, check whether focus
+// was inside this pane: if it was, the incoming listbox takes it over (held
+// across a loading skeleton until rows mount); if it was anywhere else (the
+// sidebar row or toggle that triggered the switch), it is left there.
+$effect.pre(() => {
+    void list;
+    const rows = hasRows;
+    untrack(() => {
+        const active = document.activeElement;
+        const owned = pane !== null && active !== null && pane.contains(active);
+        const orphaned = active === null || active === document.body;
+        const handoff = owned || (pendingHandoff && orphaned);
+        pendingHandoff = handoff && !rows;
+        if (handoff) {
+            focusRequests += 1;
+            focusRequest = focusRequests;
+        } else {
+            focusRequest = 0;
+        }
+    });
+});
 
 /**
  * The empty state is a focus holder: when the list empties while it owned the
@@ -177,26 +264,38 @@ $effect(() => {
 });
 
 /**
- * When the setting is on, rows that scrolled up past the top mark themselves
- * read. Only the newly passed rows (past the high-water) are touched, so a
- * fast scroll costs one mark per row, once.
+ * Each viewport report: remember this view's position, record the rows on
+ * screen as seen, and — when mark-on-scroll is on — mark the seen rows that
+ * have scrolled up past the top (each once per session). Untracked: the
+ * virtualizer's own effect drives this, the bookkeeping is not reactive.
  */
-function onScrollPast(firstVisibleIndex: number): void {
-    if (!prefsStore.markOnScroll) {
-        return;
-    }
-    const items = list.items;
-    const target = Math.min(firstVisibleIndex, items.length);
-    for (let index = markedThrough; index < target; index++) {
-        void markReadOnScroll(items[index].id);
-    }
-    if (target > markedThrough) {
-        markedThrough = target;
-    }
+function onViewport(report: ViewportReport): void {
+    untrack(() => {
+        const current = list;
+        const items = current.items;
+        articlesStore.positions.save(
+            filterKey(current.filters),
+            capturePosition(items, report.scrollTop, rowHeight),
+        );
+        const { seen, marked } = sessionFor(current);
+        for (let index = report.first; index < report.end; index++) {
+            seen.add(items[index].id);
+        }
+        if (!prefsStore.markOnScroll) {
+            return;
+        }
+        for (let index = 0; index < report.first; index++) {
+            const id = items[index].id;
+            if (seen.has(id) && !marked.has(id)) {
+                marked.add(id);
+                void markReadOnScroll(id);
+            }
+        }
+    });
 }
 </script>
 
-<div class="article-list">
+<div class="article-list" bind:this={pane}>
     {#if list.items.length > 0}
         <!-- Stale-while-revalidate: keep showing the loaded rows even if a
              refetch just errored; surface the failure as a non-destructive
@@ -204,32 +303,39 @@ function onScrollPast(firstVisibleIndex: number): void {
         {#if list.error !== null}
             <p class="list-banner" role="alert">{listError}</p>
         {/if}
-        <VirtualList
-            items={list.items}
-            {rowHeight}
-            key={(article) => article.id}
-            selectedIndex={selectionStore.selectedIndex}
-            label={t('list.label')}
-            {activeDescendantId}
-            focusNonce={selectionStore.listFocusNonce}
-            onnearend={() => void list.loadMore()}
-            onscrollpast={onScrollPast}
-            onmove={moveSelection}
-            onpanekey={onPaneKey}
-            onmenukey={openSelectedMenu}
-        >
-            {#snippet row(article, index)}
-                <ArticleRow
-                    {article}
-                    {index}
-                    {rowHeight}
-                    {compact}
-                    setsize={list.items.length}
-                    selected={article.id === selectionStore.selectedArticleId}
-                    onselect={selectArticle}
-                />
-            {/snippet}
-        </VirtualList>
+        <!-- Keyed on the list: a different view is a fresh scroll container,
+             seated at that view's remembered position. It takes DOM focus
+             only when the listbox it replaces had it (see focusRequest), so a
+             remount never pulls focus out of the control that switched views. -->
+        {#key list}
+            <VirtualList
+                items={list.items}
+                {rowHeight}
+                key={(article) => article.id}
+                selectedIndex={selectionStore.selectedIndex}
+                initialScrollTop={openingScrollTop()}
+                label={t('list.label')}
+                {activeDescendantId}
+                focusNonce={focusRequest}
+                onnearend={() => void list.loadMore()}
+                onviewport={onViewport}
+                onmove={moveSelection}
+                onpanekey={onPaneKey}
+                onmenukey={openSelectedMenu}
+            >
+                {#snippet row(article, index)}
+                    <ArticleRow
+                        {article}
+                        {index}
+                        {rowHeight}
+                        {compact}
+                        setsize={list.items.length}
+                        selected={article.id === selectionStore.selectedArticleId}
+                        onselect={selectArticle}
+                    />
+                {/snippet}
+            </VirtualList>
+        {/key}
     {:else if !list.loaded}
         <div class="list-skeleton" aria-hidden="true">
             {#each SKELETON_ROWS as index (index)}

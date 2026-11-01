@@ -26,7 +26,7 @@ import {
 } from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
 import { rebuildGlobalOrder } from './feed-dnd.svelte';
-import type { FeedFolder } from './feed-tree';
+import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import { feedsStore } from './feeds.svelte';
 import { feedInFolder } from './folder-ops';
 import { layoutStore } from './layout.svelte';
@@ -158,30 +158,32 @@ const toggleDesired = new Map<string, boolean>();
 type FlagWrite = (id: number, value: boolean) => Promise<CommandResult<boolean>>;
 
 /** Runs `step` after every earlier step on the same flag has settled. */
-async function onFlagChain(key: string, step: () => Promise<void>): Promise<void> {
+async function onFlagChain<T>(key: string, step: () => Promise<T>): Promise<T> {
     const previous = toggleChain.get(key) ?? Promise.resolve();
     const task = previous.then(step);
     toggleChain.set(key, task);
-    await task;
+    const outcome = await task;
     // Drain once this press is the tail of the chain, so the maps don't grow.
     if (toggleChain.get(key) === task) {
         toggleChain.delete(key);
         toggleDesired.delete(key);
     }
+    return outcome;
 }
 
 /**
- * Writes an absolute flag value. A failed write's Retry writes that same
- * value — never a fresh flip, which would mean the opposite once the flag
- * changed in between (the toast stays until dismissed) — and a later
- * successful write of the flag withdraws the failure (same key).
+ * Writes an absolute flag value; the value written, or `undefined` when the
+ * write failed (toasted). A failed write's Retry writes that same value —
+ * never a fresh flip, which would mean the opposite once the flag changed in
+ * between (the toast stays until dismissed) — and a later successful write
+ * of the flag withdraws the failure (same key).
  */
 async function writeFlag(
     articleId: number,
     field: ToggleField,
     write: FlagWrite,
     value: boolean,
-): Promise<void> {
+): Promise<boolean | undefined> {
     const key = `${field}:${articleId}`;
     toggleDesired.set(key, value);
     const ok = await run(() => write(articleId, value), {
@@ -192,12 +194,19 @@ async function writeFlag(
         // The write failed (toast already fired) — forget the optimistic
         // value so the next press reads the real backend flag again.
         toggleDesired.delete(key);
+        return undefined;
     }
+    return value;
 }
 
-async function toggleFlag(articleId: number, field: ToggleField, write: FlagWrite): Promise<void> {
+/** Flips a flag; the value written, or `undefined` when nothing was (toasted). */
+async function toggleFlag(
+    articleId: number,
+    field: ToggleField,
+    write: FlagWrite,
+): Promise<boolean | undefined> {
     const key = `${field}:${articleId}`;
-    await onFlagChain(key, async () => {
+    return onFlagChain(key, async (): Promise<boolean | undefined> => {
         let current: boolean;
         if (toggleDesired.has(key)) {
             current = toggleDesired.get(key) as boolean;
@@ -208,11 +217,11 @@ async function toggleFlag(articleId: number, field: ToggleField, write: FlagWrit
                 run: () => void toggleFlag(articleId, field, write),
             });
             if (state === undefined) {
-                return; // read failed (a toast fired); nothing to flip
+                return undefined; // read failed (a toast fired); nothing to flip
             }
             current = state[field];
         }
-        await writeFlag(articleId, field, write, !current);
+        return writeFlag(articleId, field, write, !current);
     });
 }
 
@@ -226,14 +235,28 @@ export async function toggleReadLater(articleId: number): Promise<void> {
     await toggleFlag(articleId, 'read_later', (id, value) => commands.setReadLater(id, value));
 }
 
-/** Marks read / unread against the current backend flag. */
+/**
+ * Marks read / unread against the current backend flag. The row is held for
+ * the view session first, so marking it read in an unread-only view keeps it
+ * in place (dimmed) instead of yanking it out from under the cursor.
+ */
 export async function toggleRead(articleId: number): Promise<void> {
+    articlesStore.holdRead(articleId);
     await toggleFlag(articleId, 'read', (id, value) => commands.markRead(id, value));
 }
 
-/** Archives / unarchives against the current backend flag. */
+/**
+ * Archives / unarchives against the current backend flag. Archiving takes the
+ * row out of the reading flow, so once the archive is written any session
+ * read-hold on it is let go; a failed write (toasted) leaves the row held.
+ */
 export async function toggleArchived(articleId: number): Promise<void> {
-    await toggleFlag(articleId, 'archived', (id, value) => commands.setArchived(id, value));
+    const archived = await toggleFlag(articleId, 'archived', (id, value) =>
+        commands.setArchived(id, value),
+    );
+    if (archived === true) {
+        articlesStore.releaseHeld(articleId);
+    }
 }
 
 /**
@@ -243,6 +266,9 @@ export async function toggleArchived(articleId: number): Promise<void> {
  * j/k scanning.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
+    // Held first: in an unread-only view the open must not drop the row (and
+    // the selection with it) — it stays until the view changes.
+    articlesStore.holdRead(articleId);
     await run(() => commands.markRead(articleId, true), {
         key: `read:${articleId}`,
         run: () => void markReadOnOpen(articleId),
@@ -256,6 +282,8 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
  * was already read, so re-scrolling the same rows costs nothing.
  */
 export async function markReadOnScroll(articleId: number): Promise<void> {
+    // Held so the scrolled-past rows don't vanish and shift the list up.
+    articlesStore.holdRead(articleId);
     try {
         await commands.markRead(articleId, true);
     } catch {
@@ -316,6 +344,9 @@ export async function markAllRead(feedId: number | null): Promise<void> {
         run: () => void markAllRead(feedId),
     });
     if (changed !== undefined) {
+        // An explicit sweep: the swept feed's held stragglers go with the rest
+        // (the whole hold for the library-wide sweep); other feeds' stay put.
+        articlesStore.releaseHolds(feedId);
         toastMarkedRead(changed);
     }
 }
@@ -331,6 +362,10 @@ export async function markFolderRead(folder: FeedFolder): Promise<void> {
         run: () => void markFolderRead(folder),
     });
     if (changed !== undefined) {
+        // Like a feed sweep: the swept feeds' held rows go, others' stay put.
+        for (const feedId of subtreeFeedIds(folder)) {
+            articlesStore.releaseHolds(feedId);
+        }
         toastMarkedRead(changed);
     }
 }
@@ -574,11 +609,13 @@ async function markViewReadCount(): Promise<number | undefined> {
  * Read later, Archived, a tag, search results) lists its own unread and
  * marks exactly those. Known gap: the bulk command ignores `archived`, so `A`
  * from All, a feed or a folder also marks that scope's hidden archived rows
- * read (#278).
+ * read (#278). Like mark-all-read, the sweep ends the view's read-hold: the
+ * rows read earlier this session go with the rest.
  */
 export async function markViewRead(): Promise<void> {
     const changed = await markViewReadCount();
     if (changed !== undefined) {
+        articlesStore.releaseHolds();
         toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
     }
 }
@@ -828,25 +865,35 @@ function focusSearch(): void {
     searchStore.requestFocus();
 }
 
+/**
+ * Refreshes one feed (the `r` shortcut, the feed's context menu). An explicit
+ * refresh ends that feed's share of the current view's read-hold: its rows
+ * show the backend window again once it reloads. Held rows of other feeds
+ * stay put — refreshing feed B never reshuffles a view of feed A.
+ */
+export function refreshFeed(feedId: number): void {
+    articlesStore.releaseHolds(feedId);
+    void run(() => feedsStore.refreshFeed(feedId), {
+        key: `refresh:${feedId}`,
+        run: () => refreshFeed(feedId),
+    });
+}
+
 /** Refreshes the selected feed, if any (the `r` shortcut). */
 function refreshSelectedFeed(): void {
     const feedId = selectionStore.selectedFeedId;
     if (feedId === null) {
         return;
     }
-    refreshFeedById(feedId);
+    refreshFeed(feedId);
 }
 
-/** Refreshes one feed (the `r` shortcut, the feed's context menu). */
-export function refreshFeedById(feedId: number): void {
-    void run(() => feedsStore.refreshFeed(feedId), {
-        key: `refresh:${feedId}`,
-        run: () => refreshFeedById(feedId),
-    });
-}
-
-/** Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar). */
+/**
+ * Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar); like a
+ * feed refresh, it ends the current view's read-hold.
+ */
 export function refreshAll(): void {
+    articlesStore.releaseHolds();
     void run(() => feedsStore.refreshAll(), { key: 'refresh:all', run: () => refreshAll() });
 }
 

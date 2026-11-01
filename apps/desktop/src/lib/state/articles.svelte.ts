@@ -5,6 +5,10 @@
  * Each filter combination is one query-cache entry holding the concatenated
  * loaded pages; invalidation (Rust-emitted events) reloads the whole loaded
  * range so the reading position survives a background refresh.
+ *
+ * On top of the backend window sits the session read-hold (`read-hold.ts`):
+ * rows read during a view session stay displayed until the view changes or
+ * an explicit refresh, so an unread-only view never yanks the row being read.
  */
 import {
     type ArticleSummaryDto,
@@ -14,7 +18,9 @@ import {
 } from '$lib/bindings';
 import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
+import { ListPositions } from './list-position';
 import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
+import { type HeldRow, captureHeld, mergeHeld } from './read-hold';
 import { searchStore } from './search.svelte';
 
 /** The UI-facing filter set — `ListArticlesDto` minus the cursor fields. */
@@ -106,6 +112,12 @@ export class ArticleListState {
 
     readonly query: Query<ArticleSummaryDto[]>;
 
+    /** The session read-hold: rows read this view session, by id. */
+    readonly #held = new SvelteMap<number, HeldRow<ArticleSummaryDto>>();
+
+    /** The displayed rows: the backend window plus any held rows it dropped. */
+    #items = $derived.by(() => mergeHeld(this.query.data ?? [], this.#held));
+
     constructor(filters: ArticleFilters, pageSize: number = DEFAULT_PAGE_SIZE) {
         this.filters = filters;
         this.pageSize = pageSize;
@@ -116,8 +128,63 @@ export class ArticleListState {
         );
     }
 
-    get items(): ArticleSummaryDto[] {
-        return this.query.data ?? [];
+    /**
+     * The rows the list displays: the backend window verbatim, plus the held
+     * rows (read this session) it no longer returns, each kept in its slot.
+     */
+    get items(): readonly ArticleSummaryDto[] {
+        return this.#items;
+    }
+
+    /** Whether `articleId` is held in this view session. */
+    isHeld(articleId: number): boolean {
+        return this.#held.has(articleId);
+    }
+
+    /**
+     * Holds a displayed row for the rest of this view session: if a refetch
+     * drops it (it was read in an unread-only view), it stays in its slot.
+     * A no-op for a row that isn't displayed or is already held.
+     */
+    hold(articleId: number): void {
+        untrack(() => {
+            if (this.#held.has(articleId)) {
+                return;
+            }
+            const slot = captureHeld(this.#items, articleId);
+            if (slot !== null) {
+                this.#held.set(articleId, slot);
+            }
+        });
+    }
+
+    /** Stops holding one row (it was archived — it should leave the list). */
+    release(articleId: number): void {
+        untrack(() => {
+            if (this.#held.has(articleId)) {
+                this.#held.delete(articleId);
+            }
+        });
+    }
+
+    /** Ends the view session's hold: the list shows the backend window again. */
+    releaseAll(): void {
+        untrack(() => {
+            if (this.#held.size > 0) {
+                this.#held.clear();
+            }
+        });
+    }
+
+    /** Stops holding every row of one feed (that feed was refreshed or swept). */
+    releaseFeed(feedId: number): void {
+        untrack(() => {
+            for (const [id, slot] of this.#held) {
+                if (slot.row.feed_id === feedId) {
+                    this.#held.delete(id);
+                }
+            }
+        });
     }
 
     get loading(): boolean {
@@ -137,7 +204,9 @@ export class ArticleListState {
         if (this.exhausted || this.appending || this.query.loading) {
             return;
         }
-        const window = this.items;
+        // The backend window, not the displayed rows: held rows are not part
+        // of the keyset and must never become the cursor.
+        const window = this.query.data ?? [];
         const cursor = window.length > 0 ? window[window.length - 1].id : null;
         this.appending = true;
         try {
@@ -149,7 +218,7 @@ export class ArticleListState {
                 this.query.error = result.error;
                 return;
             }
-            if (this.query.loading || this.items !== window) {
+            if (this.query.loading || (this.query.data ?? []) !== window) {
                 return; // a refetch replaced the window while we appended
             }
             this.query.data = [...window, ...result.data];
@@ -193,8 +262,30 @@ export class ArticleListState {
 export class ArticlesStore {
     #lists = new SvelteMap<string, ArticleListState>();
 
+    #filters: ArticleFilters = $state(ALL_ARTICLES);
+
+    /** Where each view (by `filterKey`) was left — the list restores it on return. */
+    readonly positions = new ListPositions();
+
     /** The filter set the main list currently shows. */
-    filters: ArticleFilters = $state(ALL_ARTICLES);
+    get filters(): ArticleFilters {
+        return this.#filters;
+    }
+
+    /**
+     * Switching to a different filter combination ends the outgoing view's
+     * session: its read-hold is released, so returning to it later starts
+     * fresh from the backend window.
+     */
+    set filters(next: ArticleFilters) {
+        untrack(() => {
+            const previous = filterKey(this.#filters);
+            if (filterKey(next) !== previous) {
+                this.#lists.get(previous)?.releaseAll();
+            }
+        });
+        this.#filters = next;
+    }
 
     /**
      * The list state for an arbitrary filter combination (cached). Creation
@@ -241,14 +332,48 @@ export class ArticlesStore {
      * window. Short-circuits before touching `current` during search so a
      * search-only context never kicks off a `list_articles` fetch.
      */
-    get activeItems(): ArticleSummaryDto[] {
+    get activeItems(): readonly ArticleSummaryDto[] {
         return searchStore.active ? searchStore.results : this.current.items;
     }
 
-    /** Test isolation — drops the list-state registry. */
+    /** The displayed list for the current filters, without creating one. */
+    #shown(): ArticleListState | undefined {
+        return untrack(() => this.#lists.get(filterKey(this.#filters)));
+    }
+
+    /**
+     * Holds a row of the current view for the rest of its session (it is
+     * being read: opened in the reader, scrolled past, or toggled).
+     */
+    holdRead(articleId: number): void {
+        this.#shown()?.hold(articleId);
+    }
+
+    /** Lets one held row of the current view go (archived out of it). */
+    releaseHeld(articleId: number): void {
+        this.#shown()?.release(articleId);
+    }
+
+    /**
+     * Ends the current view's read-hold after an explicit refresh or
+     * mark-all-read: for one feed, only that feed's held rows (a sweep of
+     * feed B leaves a view's feed-A rows where they are); `null` (the whole
+     * library) or no argument, all of them.
+     */
+    releaseHolds(feedId: number | null = null): void {
+        const shown = this.#shown();
+        if (feedId === null) {
+            shown?.releaseAll();
+        } else {
+            shown?.releaseFeed(feedId);
+        }
+    }
+
+    /** Test isolation — drops the list-state registry and scroll memory. */
     reset(): void {
         this.#lists.clear();
-        this.filters = ALL_ARTICLES;
+        this.positions.reset();
+        this.#filters = ALL_ARTICLES;
     }
 
     // Mutations are thin pass-throughs: Rust emits `ArticlesChanged` only

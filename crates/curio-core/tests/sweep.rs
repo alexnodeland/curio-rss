@@ -74,6 +74,13 @@ fn count(report: &SweepReport, status: FetchStatus) -> usize {
 /// Five hung hosts among 200 feeds: in flight together, they cost about
 /// one request timeout between them — not five (the sequential sweep
 /// took at least 5 × the timeout).
+///
+/// The bound is on when the hung feeds' outcomes arrive, not on the whole
+/// sweep: the other 195 feeds' ingest is bound by the writer's fsyncs,
+/// which on a slow CI disk (Windows runners, a parallel test sharing it)
+/// take longer than the timeouts this test is about. The hung feeds sit
+/// in the first concurrency window, so they all start at once; one after
+/// another, the last would land no sooner than 5 × the timeout.
 #[tokio::test]
 async fn hung_hosts_time_out_together_not_one_after_another() {
     const TIMEOUT: Duration = Duration::from_secs(6);
@@ -92,10 +99,10 @@ async fn hung_hosts_time_out_together_not_one_after_another() {
 
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path(), TIMEOUT);
-    // The hung feeds are spread through the list, as in real life.
+    // Interleaved with healthy feeds, all inside the first window of 8.
     let paths: Vec<String> = (0..200)
         .map(|i| {
-            if i % 40 == 7 {
+            if i < 10 && i % 2 == 0 {
                 format!("/hung/{i}.xml")
             } else {
                 format!("/ok/{i}.xml")
@@ -105,18 +112,23 @@ async fn hung_hosts_time_out_together_not_one_after_another() {
     let ids = subscribe_all(&core, &server, &paths);
 
     let mut progress = Vec::new();
+    let mut hung_done = Vec::new();
     let started = Instant::now();
     let report = core
         .refresh_all_with(RefreshOptions::default(), |step| {
             progress.push((step.sweep_id, step.done, step.total));
+            if step.outcome.status == FetchStatus::Error {
+                hung_done.push(started.elapsed());
+            }
         })
         .await
         .unwrap();
-    let elapsed = started.elapsed();
 
+    assert_eq!(hung_done.len(), 5);
+    let last = hung_done.iter().max().copied().unwrap();
     assert!(
-        elapsed < TIMEOUT * 3,
-        "200 feeds with 5 hung hosts took {elapsed:?} (the timeout is {TIMEOUT:?})"
+        last < TIMEOUT * 2,
+        "the 5 hung feeds took {last:?} between them (the timeout is {TIMEOUT:?}): {hung_done:?}"
     );
     assert_eq!(report.total, 200);
     assert_eq!(report.outcomes.len(), 200);

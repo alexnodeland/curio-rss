@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use curio_core::CoreHandle;
 use curio_core::feeds::{DiscoverOptions, normalize_input};
 use curio_core::model::{FeedId, FeedStatus, NewFeed};
+use curio_core::{CoreHandle, RefreshOptions};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
@@ -254,12 +254,13 @@ pub async fn refresh_feed(
     Ok(outcome)
 }
 
-/// Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
-/// (core's own `refresh_all` is sequential and silent — the head loops
-/// `refresh_feed` so the UI can watch; orchestration, not business logic).
-/// Any feed answering clears the scheduler's "Offline" verdict right away; a
-/// manual refresh resets the background scheduler's interval clock, except
-/// one made while offline that reached nothing (the overdue sweep stays due).
+/// Refreshes every `active` feed as one core sweep (bounded concurrency),
+/// emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
+/// end. Pressing refresh while a sweep runs joins it — no feed is fetched
+/// twice. Any feed answering clears the scheduler's "Offline" verdict right
+/// away; a manual refresh resets the background scheduler's interval clock,
+/// except one made while offline that reached nothing (the overdue sweep
+/// stays due).
 #[tauri::command]
 #[specta::specta]
 pub async fn refresh_all(
@@ -268,41 +269,48 @@ pub async fn refresh_all(
     scheduler: State<'_, Arc<RefreshScheduler>>,
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    let outcomes = refresh_all_and_emit(&app, &core).await?;
+    let sweep = refresh_all_and_emit(&app, &core).await?;
     scheduler
-        .record_manual_refresh(&core, &outcomes, |online| {
+        .record_manual_refresh(&core, &sweep.finished.outcomes, |online| {
             emit_or_log(&app, &ConnectivityChanged { online });
         })
         .await;
-    Ok(outcomes)
+    Ok(sweep.finished.outcomes)
+}
+
+/// Cancels the refresh sweep in flight: no further feed starts and the
+/// fetches in flight are dropped, so the sweep finishes early
+/// ([`RefreshFinished::cancelled`]). `false` when no sweep is running.
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_refresh(core: State<'_, SharedCore>) -> Result<bool, CommandError> {
+    Ok(core.cancel_refresh())
+}
+
+/// One sweep as the head reports it.
+pub(crate) struct Sweep {
+    /// This request joined a sweep already in flight, whose own request
+    /// emits the events.
+    pub joined: bool,
+    /// The finish event (also the command's result).
+    pub finished: RefreshFinished,
 }
 
 /// Refreshes every active feed and emits the progress/finished/data-changed
 /// events — the shared body of the manual `refresh_all` command and the
-/// background scheduler, so both drive the exact same UI updates.
+/// background scheduler, so both drive the exact same UI updates. A request
+/// that joined a running sweep emits nothing: that sweep's own request does.
 pub(crate) async fn refresh_all_and_emit(
     app: &AppHandle,
-    core: &Arc<CoreHandle>,
-) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
-    let outcomes = refresh_all_impl(core, |feed_id, outcome| {
-        emit_or_log(
-            app,
-            &RefreshProgress {
-                feed_id,
-                outcome: outcome.clone(),
-            },
-        );
-    })
-    .await?;
-    emit_or_log(
-        app,
-        &RefreshFinished {
-            outcomes: outcomes.clone(),
-        },
-    );
-    emit_or_log(app, &FeedsChanged);
-    emit_or_log(app, &ArticlesChanged { feed_id: None });
-    Ok(outcomes)
+    core: &CoreHandle,
+) -> Result<Sweep, CommandError> {
+    let sweep = refresh_all_impl(core, |progress| emit_or_log(app, &progress)).await?;
+    if !sweep.joined {
+        emit_or_log(app, &sweep.finished);
+        emit_or_log(app, &FeedsChanged);
+        emit_or_log(app, &ArticlesChanged { feed_id: None });
+    }
+    Ok(sweep)
 }
 
 /// The recent fetch log for one feed, newest first — the feed-health
@@ -438,28 +446,36 @@ async fn refresh_feed_impl(
     Ok(core.refresh_feed(FeedId(feed_id)).await?.into())
 }
 
+/// The sweep itself: core's bounded-concurrency `refresh_all_with`, its
+/// progress mapped to [`RefreshProgress`] events.
 pub(crate) async fn refresh_all_impl(
-    core: &Arc<CoreHandle>,
-    mut on_progress: impl FnMut(i64, &RefreshOutcomeDto),
-) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
-    let listing = Arc::clone(core);
-    let active: Vec<i64> = run_blocking(move || {
-        Ok(listing
-            .list_feeds()
-            .map_err(CommandError::from)?
-            .into_iter()
-            .filter(|feed| feed.status == FeedStatus::Active)
-            .map(|feed| feed.id.0)
-            .collect())
+    core: &CoreHandle,
+    mut on_progress: impl FnMut(RefreshProgress),
+) -> Result<Sweep, CommandError> {
+    let report = core
+        .refresh_all_with(RefreshOptions::default(), |step| {
+            on_progress(RefreshProgress {
+                sweep_id: step.sweep_id,
+                done: count(step.done),
+                total: count(step.total),
+                feed_id: step.outcome.feed_id.0,
+                outcome: step.outcome.clone().into(),
+            });
+        })
+        .await?;
+    Ok(Sweep {
+        joined: report.joined,
+        finished: RefreshFinished {
+            sweep_id: report.sweep_id,
+            cancelled: report.cancelled,
+            outcomes: report.outcomes.into_iter().map(Into::into).collect(),
+        },
     })
-    .await?;
-    let mut outcomes = Vec::with_capacity(active.len());
-    for feed_id in active {
-        let outcome = refresh_feed_impl(core, feed_id).await?;
-        on_progress(feed_id, &outcome);
-        outcomes.push(outcome);
-    }
-    Ok(outcomes)
+}
+
+/// A feed count for the wire (saturating — no profile has 4 billion feeds).
+fn count(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 fn recent_fetches_impl(
@@ -831,20 +847,74 @@ mod tests {
         set_feed_status_impl(&core, paused.id, FeedStatusDto::Paused).unwrap();
 
         let mut progressed = Vec::new();
-        let outcomes = refresh_all_impl(&core, |feed_id, outcome| {
-            progressed.push((feed_id, outcome.status));
+        let sweep = refresh_all_impl(&core, |progress| {
+            progressed.push((
+                progress.sweep_id,
+                progress.done,
+                progress.total,
+                progress.feed_id,
+                progress.outcome.status,
+            ));
         })
         .await
         .unwrap();
 
+        assert!(!sweep.joined && !sweep.finished.cancelled);
+        let outcomes = &sweep.finished.outcomes;
         assert_eq!(outcomes.len(), 1, "paused feeds are not refreshed");
         assert_eq!(outcomes[0].feed_id, active.id);
         assert_eq!(outcomes[0].status, FetchStatusDto::Ok);
         assert_eq!(outcomes[0].new_articles, 1);
-        assert_eq!(progressed, vec![(active.id, FetchStatusDto::Ok)]);
+        assert_eq!(
+            progressed,
+            vec![(sweep.finished.sweep_id, 1, 1, active.id, FetchStatusDto::Ok)]
+        );
 
         let records = recent_fetches_impl(&core, active.id, 10).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].status, FetchStatusDto::Ok);
+    }
+
+    /// A refresh pressed while a sweep runs joins it: one fetch per feed,
+    /// and only the running sweep reports progress (the joined request
+    /// emits nothing, so the UI never sees a sweep twice).
+    #[tokio::test]
+    async fn a_second_refresh_all_joins_the_running_sweep() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/a.xml"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(RSS)
+                    .set_delay(std::time::Duration::from_millis(200)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (_dir, core) = temp_core_trusting_localhost();
+        add_feed_impl(
+            &core,
+            NewFeed {
+                url: format!("{}/a.xml", server.uri()),
+                title: None,
+                tags: vec![],
+            },
+        )
+        .unwrap();
+
+        let mut joiner_progress = 0;
+        let (owner, joiner) = tokio::join!(refresh_all_impl(&core, |_| {}), async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            refresh_all_impl(&core, |_| joiner_progress += 1).await
+        });
+        let (owner, joiner) = (owner.unwrap(), joiner.unwrap());
+
+        assert!(!owner.joined);
+        assert!(joiner.joined);
+        assert_eq!(joiner_progress, 0);
+        assert_eq!(owner.finished.sweep_id, joiner.finished.sweep_id);
+        assert_eq!(owner.finished.outcomes, joiner.finished.outcomes);
+        server.verify().await;
+        assert!(!core.cancel_refresh(), "nothing left to cancel");
     }
 }

@@ -238,7 +238,14 @@ curio fetch                 # refresh every active feed
 curio fetch example.com     # or just one
 ```
 
-`fetch` reports per-feed status and new/updated article counts —
+`fetch` refreshes up to 8 feeds at once, so a few unreachable hosts
+cost about one request timeout between them. Each host gets one feed
+at a time and the hosts take turns, so a long run of one host's feeds
+(40 reddit subscriptions, politeness-delayed 6.5 s apiece) never holds
+the other hosts up. A feed that fails — or is unsubscribed by the
+desktop app mid-run — gets an error line while every other feed still
+refreshes. It reports per-feed status, in subscription
+order, and new/updated article counts —
 "updated" counts only entries that actually changed; a feed re-listing
 identical items reports `0 updated` and rewrites no articles. The
 engine does conditional GET (ETag/Last-Modified preserved on every error
@@ -330,6 +337,16 @@ app's profile directory. The keychain item is keyed by the id in
 `.curio/profile-id`, so moving a profile directory keeps its credentials.
 Upgrading from 0.4.x, the old shared item is copied into each profile the
 first time it opens; `reddit logout` removes it.
+
+When Reddit refuses a full post for auth reasons, the error says which of
+four things happened: **no credentials** (Reddit blocks anonymous full-post
+requests — `reddit login`), **credentials refused** (the token endpoint
+turned the client id or secret down — check them, or re-create the app),
+**token refused** (the credentials were accepted but Reddit refused the token
+they were traded for — the app's access was likely revoked; the token is
+dropped and the next request asks for a new one), or **token unavailable**
+(credentials are installed, but the token endpoint failed, timed out or was
+unreachable — usually a Reddit outage; nothing to fix, try again later).
 
 ## Reading
 
@@ -435,6 +452,12 @@ The manifest is a file in your folder, so Curio never trusts it alone:
   recreates such a folder. Reconnect the drive, or run `curio dest add
   <name> <path>` again (new or same path) to start the destination
   afresh; changing a destination's path in `curio.toml` does the same.
+- **A folder Curio cannot access, or a full disk, says so.** An export
+  that hits a permission refusal or a read-only volume fails with "cannot
+  access … permission denied or read-only"; one that runs out of disk
+  space (or quota) fails with "the disk holding … is full". Notes are
+  written atomically, so the previous version of the note is kept intact;
+  fix the permissions or free some space and export again.
 - **Sync-tool conflict copies** of the manifest (`manifest (conflicted
   copy).json`, iCloud's `manifest 2.json`, Syncthing's
   `manifest.sync-conflict-….json`, OneDrive's `manifest-HOSTNAME.json`)

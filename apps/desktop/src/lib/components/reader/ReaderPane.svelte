@@ -10,6 +10,12 @@
  * (`selectionStore.selectedArticle`) over a body skeleton, and the bodies of
  * the neighbouring rows are prefetched so the next step usually lands on a
  * cached article.
+ *
+ * Keyboard: the scroll body is a focusable region. Enter / → in the list
+ * (`selectionStore.focusReader`) moves focus here, ← / Esc hand it back, and
+ * Space / Shift+Space page it (the shell's global keys, via
+ * `registerReaderBody`). The empty-state hint is built from the registry, so
+ * it only ever names keys that are bound.
  */
 import {
     type ArticleDto,
@@ -18,12 +24,16 @@ import {
     type FeedDto,
     commands,
 } from '$lib/bindings';
-import { formatIntlDateTime, t } from '$lib/i18n';
+import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
+import { advertisedKeys, keyLabel, shortcutKbd } from '$lib/keyboard/labels';
+import { type ShortcutId, eventKeyName, paneShortcut } from '$lib/keyboard/registry';
 import {
+    handleShortcut,
     loadFullArticle,
     markReadOnOpen,
     openInBrowser,
     promoteSelected,
+    registerReaderBody,
     toggleArchived,
     toggleRead,
     toggleReadLater,
@@ -44,6 +54,14 @@ import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
 import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
+import { untrack } from 'svelte';
+
+/** The empty-state hint, as registry actions: each part prints its bound keys. */
+const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: MessageKey }[] = [
+    { ids: ['nav.previousArticle', 'nav.nextArticle'], label: 'reader.hint.move' },
+    { ids: ['nav.focusReader'], label: 'reader.hint.read' },
+    { ids: ['help.toggle'], label: 'reader.hint.help' },
+];
 
 /**
  * What the header needs — carried by both the full `ArticleDto` and the list
@@ -64,6 +82,83 @@ function feedHue(label: string): number {
         hash = (hash * 31 + label.charCodeAt(i)) % 360;
     }
     return hash;
+}
+
+/** The mounted scroll body (re-bound per article by the `{#key}` below). */
+let scrollBody = $state<HTMLElement | null>(null);
+
+/**
+ * The reader body owns the keyboard. Switching articles (j/k, Space at the
+ * end) remounts the body, dropping DOM focus onto `<body>`; while this holds,
+ * the new body takes it back. Any focus landing outside the body clears it,
+ * and so does the selection clearing (`g a`, a feed hop, Esc): the body
+ * unmounts with no successor and focus drops to `<body>` without a
+ * `focusin`, so the list's keys own the page again.
+ */
+let holdFocus = false;
+/** A `focusReader` request not yet honoured (the article was still loading). */
+let focusPending = false;
+let seenFocusNonce = untrack(() => selectionStore.readerFocusNonce);
+
+$effect(() => {
+    const nonce = selectionStore.readerFocusNonce;
+    const body = scrollBody;
+    if (nonce !== seenFocusNonce) {
+        seenFocusNonce = nonce;
+        focusPending = true;
+        holdFocus = true;
+    }
+    if (selectionStore.selectedArticleId === null) {
+        holdFocus = false;
+        focusPending = false;
+        return;
+    }
+    if (body === null || !holdFocus) {
+        return;
+    }
+    const active = document.activeElement;
+    // Reclaim only a request or focus that was dropped — never steal it from
+    // the search field or a dialog that took it in the meantime.
+    if (focusPending || active === null || active === document.body) {
+        focusPending = false;
+        body.focus();
+    }
+});
+
+$effect(() => {
+    const body = scrollBody;
+    return body === null ? undefined : registerReaderBody(body);
+});
+
+function onWindowFocusIn(event: FocusEvent): void {
+    const target = event.target;
+    const inside = scrollBody !== null && target instanceof Node && scrollBody.contains(target);
+    holdFocus = inside;
+    if (!inside) {
+        focusPending = false;
+    }
+}
+
+/**
+ * The reader's pane keys (← / Esc back to the list). ← only from the body
+ * itself — a focused link or media control inside keeps its own arrows; Esc
+ * from anywhere in it, and it stops there so the shell's Escape step-back
+ * doesn't also deselect the article.
+ */
+function onBodyKeydown(event: KeyboardEvent): void {
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+    }
+    if (event.key !== 'Escape' && event.target !== event.currentTarget) {
+        return;
+    }
+    const id = paneShortcut('reader', eventKeyName(event));
+    if (id === null) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    handleShortcut(id);
 }
 
 let showTypography = $state(false);
@@ -184,11 +279,27 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 }
 </script>
 
+<svelte:window onfocusin={onWindowFocusIn} />
+
 <div class="reader">
     {#if selectedId === null}
         <EmptyState icon="sparkle" title={t('reader.empty')}>
             {#snippet hint()}
-                <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>→</kbd> or <kbd>Enter</kbd> to read · <kbd>?</kbd> for shortcuts
+                {#each HINT as part, index (part.label)}
+                    {#if index > 0}
+                        <span class="hint-sep" aria-hidden="true">·</span>
+                    {/if}
+                    <span class="hint-part">
+                        <!-- Keys of different actions sit side by side (↑↓);
+                             alternatives for one action take the help
+                             overlay's `/` (Enter/→), so they never read as a
+                             sequence. -->
+                        {#each part.ids as id (id)}{#each advertisedKeys(id) as key, position (key)}{#if position > 0}<span
+                                        class="hint-alt">/</span
+                                    >{/if}<kbd>{keyLabel(key)}</kbd>{/each}{/each}
+                        {t(part.label)}
+                    </span>
+                {/each}
             {/snippet}
         </EmptyState>
     {:else}
@@ -221,7 +332,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     aria-label={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
                     use:tooltip={{
                         text: flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead'),
-                        kbd: 'M',
+                        kbd: shortcutKbd('article.toggleRead'),
                     }}
                     onclick={() => void toggleRead(selectedId)}
                 >
@@ -234,7 +345,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     aria-label={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
                     use:tooltip={{
                         text: flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star'),
-                        kbd: 'S',
+                        kbd: shortcutKbd('article.toggleStar'),
                     }}
                     onclick={() => void toggleStar(selectedId)}
                 >
@@ -247,7 +358,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     aria-label={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
                     use:tooltip={{
                         text: flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater'),
-                        kbd: 'L',
+                        kbd: shortcutKbd('article.toggleReadLater'),
                     }}
                     onclick={() => void toggleReadLater(selectedId)}
                 >
@@ -260,6 +371,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     aria-label={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
                     use:tooltip={{
                         text: flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive'),
+                        kbd: shortcutKbd('article.toggleArchived'),
                     }}
                     onclick={() => void toggleArchived(selectedId)}
                 >
@@ -269,7 +381,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                 <button
                     class="tool"
                     aria-label={t('reader.action.promote')}
-                    use:tooltip={{ text: t('reader.action.promote'), kbd: 'P' }}
+                    use:tooltip={{ text: t('reader.action.promote'), kbd: shortcutKbd('article.promote') }}
                     onclick={() => void promoteSelected()}
                 >
                     <Icon name="save" />
@@ -339,12 +451,23 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                  scroll body at the top instead of inheriting the previous scroll
                  offset; the body landing within one selection does not. -->
             {#key selectedId}
-            <!-- tabindex=-1: clicking into the article focuses the scroll body,
-                 so the platform's native key scrolling works. -->
+            <!-- A focusable region named by the article title: Tab, a click,
+                 or Enter / → from the list land here, so the platform's native
+                 key scrolling works; ← / Esc hand the keyboard back. A focusable
+                 scrollable region (tabindex 0, named) is the WAI-ARIA / axe
+                 `scrollable-region-focusable` pattern, but svelte's a11y table
+                 treats region as static — hence the two targeted ignores. -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
             <div
                 class="reader-scroll"
-                tabindex="-1"
+                role="region"
+                aria-labelledby={header !== null ? `reader-title-${selectedId}` : undefined}
+                aria-label={header === null ? t('app.loading') : undefined}
+                tabindex="0"
                 data-reading-theme={typographyStore.readingTheme}
+                bind:this={scrollBody}
+                onkeydown={onBodyKeydown}
             >
                 <article
                     class="reader-article"
@@ -371,7 +494,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                                     <span class="feed-name">{label}</span>
                                 </div>
                             {/if}
-                            <h1 class="reader-title">
+                            <h1 class="reader-title" id="reader-title-{selectedId}">
                                 <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
                                 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
                                 <a href={header.source_url} onclick={(event) => openSource(event, header)}>
@@ -459,7 +582,19 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         font-size: var(--text-xs);
     }
 
-    /* Empty state */
+    /* Empty-state hint: one unbreakable group per action. */
+    .hint-part {
+        white-space: nowrap;
+    }
+
+    .hint-sep {
+        margin: 0 var(--space-1);
+    }
+
+    .hint-alt {
+        font-size: var(--text-xs);
+    }
+
     .reader-toolbar {
         flex: 0 0 auto;
         display: flex;
@@ -570,8 +705,15 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         height: 0.6em;
     }
 
-    /* Focused for ↑/↓ scrolling (→ from the list): a soft inset frame rather
-       than a hard ring around the whole column. */
+    /* Space / Shift+Space page with a glide, unless motion is reduced. */
+    @media (prefers-reduced-motion: no-preference) {
+        .reader-scroll {
+            scroll-behavior: smooth;
+        }
+    }
+
+    /* Focused for ↑/↓ scrolling (Enter / → from the list): a soft inset frame
+       rather than a hard ring around the whole column. */
     .reader-scroll:focus-visible {
         outline: none;
         box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent), transparent 66%);

@@ -3,11 +3,14 @@
  * matcher state machine handles singles, Shift-cased keys, g-chords with a
  * timeout, and typing contexts.
  */
+import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     CHORD_TIMEOUT_MS,
     SHORTCUTS,
     type ShortcutId,
     createMatcher,
+    eventKeyName,
+    paneShortcut,
     shouldIgnoreKeyEvent,
 } from '$lib/keyboard/registry';
 import { describe, expect, it } from 'vitest';
@@ -19,11 +22,17 @@ describe('shortcut table', () => {
             'nav.nextArticle': ['j'],
             'nav.previousArticle': ['k'],
             'nav.nextUnread': ['n'],
+            'nav.focusReader': [],
+            'nav.focusList': [],
+            'reader.pageDown': ['Space'],
+            'reader.pageUp': ['Shift+Space'],
             'article.open': ['o'],
             'article.toggleStar': ['s'],
             'article.toggleReadLater': ['l'],
             'article.toggleRead': ['m'],
+            'article.toggleArchived': ['e'],
             'article.promote': ['p'],
+            'view.markAllRead': ['A'],
             'feed.refresh': ['r'],
             'app.refreshAll': ['R'],
             'search.focus': ['/'],
@@ -37,6 +46,40 @@ describe('shortcut table', () => {
             'help.toggle': ['?'],
         };
         expect(Object.fromEntries(byId)).toEqual(expected);
+    });
+
+    it('binds the ARIA pane keys: listbox arrows / Enter, reader ← / Esc', () => {
+        const pane = Object.fromEntries(
+            SHORTCUTS.filter((shortcut) => shortcut.paneKeys !== undefined).map((shortcut) => [
+                shortcut.id,
+                shortcut.paneKeys,
+            ]),
+        );
+        expect(pane).toEqual({
+            'nav.nextArticle': { scope: 'list', keys: ['ArrowDown'] },
+            'nav.previousArticle': { scope: 'list', keys: ['ArrowUp'] },
+            'nav.focusReader': { scope: 'list', keys: ['Enter', 'ArrowRight'] },
+            'nav.focusList': { scope: 'reader', keys: ['ArrowLeft', 'Escape'] },
+        });
+        expect(paneShortcut('list', 'ArrowDown')).toBe('nav.nextArticle');
+        expect(paneShortcut('list', 'ArrowUp')).toBe('nav.previousArticle');
+        expect(paneShortcut('list', 'Enter')).toBe('nav.focusReader');
+        expect(paneShortcut('list', 'ArrowRight')).toBe('nav.focusReader');
+        expect(paneShortcut('reader', 'ArrowLeft')).toBe('nav.focusList');
+        expect(paneShortcut('reader', 'Escape')).toBe('nav.focusList');
+        // Scoped: a list key means nothing in the reader, and vice versa.
+        expect(paneShortcut('reader', 'ArrowDown')).toBeNull();
+        expect(paneShortcut('list', 'ArrowLeft')).toBeNull();
+        expect(paneShortcut('list', 'j')).toBeNull();
+    });
+
+    it('every action is reachable: a global sequence, pane keys, or both', () => {
+        for (const shortcut of SHORTCUTS) {
+            const global = shortcut.keys.length;
+            const pane = shortcut.paneKeys?.keys.length ?? 0;
+            expect(global <= 2, shortcut.id).toBe(true);
+            expect(global + pane > 0, shortcut.id).toBe(true);
+        }
     });
 
     it('gives every shortcut a description key and a category', () => {
@@ -118,6 +161,50 @@ describe('matcher', () => {
     });
 });
 
+describe('eventKeyName', () => {
+    const named = (init: KeyboardEventInit) => eventKeyName(new KeyboardEvent('keydown', init));
+
+    it('spells Space out and prefixes shifted named keys', () => {
+        expect(named({ key: ' ' })).toBe('Space');
+        expect(named({ key: ' ', shiftKey: true })).toBe('Shift+Space');
+        expect(named({ key: 'ArrowDown', shiftKey: true })).toBe('Shift+ArrowDown');
+        expect(named({ key: 'Enter' })).toBe('Enter');
+    });
+
+    it('leaves printable keys as their own (already shifted) character', () => {
+        expect(named({ key: 'A', shiftKey: true })).toBe('A');
+        expect(named({ key: '?', shiftKey: true })).toBe('?');
+        expect(named({ key: 'Shift', shiftKey: true })).toBe('Shift');
+    });
+
+    it('reads a letter’s case from Shift, never Caps Lock', () => {
+        // Caps Lock on, no Shift: the key reports 'A', but it is a plain a.
+        expect(named({ key: 'A' })).toBe('a');
+        expect(named({ key: 'R' })).toBe('r');
+        // Caps Lock on + Shift may report 'a'; Shift still makes it A.
+        expect(named({ key: 'a', shiftKey: true })).toBe('A');
+        expect(named({ key: 'é', shiftKey: true })).toBe('É');
+        // Uncased characters are left alone.
+        expect(named({ key: '1', shiftKey: true })).toBe('1');
+        expect(named({ key: ',' })).toBe(',');
+    });
+});
+
+describe('shortcutKbd', () => {
+    it('prints the global key the registry binds, as the help overlay does', () => {
+        // Add feed is a plain a; A (Shift+a) is the bulk mark-view-read.
+        expect(shortcutKbd('app.addFeed')).toBe('a');
+        expect(shortcutKbd('view.markAllRead')).toBe('A');
+        expect(shortcutKbd('app.refreshAll')).toBe('R');
+        expect(shortcutKbd('article.toggleStar')).toBe('s');
+        expect(shortcutKbd('view.all')).toBe('g a');
+    });
+
+    it('is undefined for a pane-only action (no tooltip suffix)', () => {
+        expect(shortcutKbd('nav.focusReader')).toBeUndefined();
+    });
+});
+
 describe('shouldIgnoreKeyEvent', () => {
     function eventOn(target: EventTarget, init: KeyboardEventInit = {}): KeyboardEvent {
         const captured: { event: KeyboardEvent | null } = { event: null };
@@ -156,5 +243,25 @@ describe('shouldIgnoreKeyEvent', () => {
         expect(shouldIgnoreKeyEvent(eventOn(div, { shiftKey: true }))).toBe(false);
 
         div.remove();
+    });
+
+    it('leaves Space to a control Space activates, but not to a listbox row', () => {
+        const button = document.createElement('button');
+        const toggle = document.createElement('div');
+        toggle.setAttribute('role', 'switch');
+        const option = document.createElement('div');
+        option.setAttribute('role', 'option');
+        document.body.append(button, toggle, option);
+
+        expect(shouldIgnoreKeyEvent(eventOn(button, { key: ' ' }))).toBe(true);
+        expect(shouldIgnoreKeyEvent(eventOn(toggle, { key: ' ' }))).toBe(true);
+        // Space over a focused article row pages the reader.
+        expect(shouldIgnoreKeyEvent(eventOn(option, { key: ' ' }))).toBe(false);
+        // Only Space: other shortcuts still fire over a focused button.
+        expect(shouldIgnoreKeyEvent(eventOn(button, { key: 'j' }))).toBe(false);
+
+        button.remove();
+        toggle.remove();
+        option.remove();
     });
 });

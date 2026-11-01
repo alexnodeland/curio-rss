@@ -10,7 +10,7 @@ import type { FeedDto } from '$lib/bindings';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { markAllRead, runCommand, toastCommandError } from '$lib/state/actions';
+import { markAllRead, refreshFeed, runCommand, toastCommandError } from '$lib/state/actions';
 import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
 import { feedRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -164,7 +164,7 @@ function feedMenu(): MenuItem[] {
         {
             id: 'refresh',
             labelKey: 'feed.menu.refresh',
-            onSelect: () => void runCommand(() => feedsStore.refreshFeed(feed.id)),
+            onSelect: () => refreshFeed(feed.id),
         },
         { id: 'rename', labelKey: 'feed.menu.rename', onSelect: startRename },
         {

@@ -298,6 +298,8 @@ tokens:
                         error: null,
                         error_kind: null,
                     };
+                case 'cancel_refresh':
+                    return false;
                 case 'refresh_all':
                     return feeds.map((f) => ({
                         feed_id: f.id,

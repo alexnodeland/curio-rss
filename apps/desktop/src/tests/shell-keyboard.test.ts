@@ -2,7 +2,10 @@
  * The whole shell (+page.svelte) over mockIPC: the keyboard registry wired
  * to the action layer — j/k selection with scroll-into-view and load-more
  * at the window edge, o/s/l/m state flips against the backend, the `?`
- * help overlay, chord swallowing, and typing-context/modifier immunity.
+ * help overlay, chord swallowing, and typing-context/modifier immunity —
+ * plus the reading keys: Space / Shift+Space paging the reader body (Space at
+ * the end advances to the next unread), `e` archive, `A` mark-view-read, and
+ * the list's ARIA keys working from an unfocused page.
  */
 import type { ArticleSummaryDto, ListArticlesDto } from '$lib/bindings';
 import { articlesStore } from '$lib/state/articles.svelte';
@@ -67,10 +70,46 @@ function shellResponders(): Record<string, Responder> {
         mark_read: true,
         set_starred: true,
         set_read_later: true,
+        set_archived: true,
+        mark_all_read: 7,
         set_setting: null,
         record_opened: null,
         'plugin:opener|open_url': null,
     };
+}
+
+/**
+ * Answers the limit-1 unread probe behind next-unread with the article two
+ * below `before` (the one in between is read); everything else as usual.
+ */
+function withNextUnread(responders: Record<string, Responder>): Record<string, Responder> {
+    const list = responders.list_articles as (args: Record<string, unknown>) => unknown;
+    return {
+        ...responders,
+        list_articles: (args) => {
+            const params = args.params as ListArticlesDto;
+            if (params.limit === 1 && params.read === false) {
+                return params.before === null
+                    ? [articleSummary(500)]
+                    : [articleSummary(params.before - 2)];
+            }
+            return list(args);
+        },
+    };
+}
+
+/** Gives the mounted reader body a real geometry (jsdom lays nothing out). */
+function layOut(body: HTMLElement, scrollHeight: number, clientHeight: number): void {
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: scrollHeight });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: clientHeight });
+}
+
+function readerBody(container: HTMLElement): HTMLElement {
+    const body = container.querySelector('.reader-scroll');
+    if (!(body instanceof HTMLElement)) {
+        throw new Error('no reader body mounted');
+    }
+    return body;
 }
 
 async function mountShell() {
@@ -247,5 +286,170 @@ describe('shell keyboard wiring', () => {
             key: 'ui.panes.list-width',
             value: String(startWidth + 16),
         });
+    });
+
+    it('Space pages the reader body; Shift+Space pages back', async () => {
+        harness = installIpcHarness(withNextUnread(shellResponders()));
+        const { container } = await mountShell();
+        await fireEvent.keyDown(window, { key: 'j' });
+        await flushIpc();
+        const body = readerBody(container);
+        layOut(body, 3000, 800);
+
+        await fireEvent.keyDown(window, { key: ' ' });
+        expect(body.scrollTop).toBe(700); // 7/8 of the viewport
+        await fireEvent.keyDown(window, { key: ' ' });
+        expect(body.scrollTop).toBe(1400);
+        await fireEvent.keyDown(window, { key: ' ', shiftKey: true });
+        expect(body.scrollTop).toBe(700);
+        // Mid-article: the selection never moved.
+        expect(selectionStore.selectedArticleId).toBe(500);
+    });
+
+    it('Space at the reader bottom selects the next unread', async () => {
+        harness = installIpcHarness(withNextUnread(shellResponders()));
+        const { container } = await mountShell();
+        await fireEvent.keyDown(window, { key: 'j' });
+        await flushIpc();
+        const body = readerBody(container);
+        layOut(body, 1500, 800);
+        body.scrollTop = 700; // the last screenful is showing
+
+        await fireEvent.keyDown(window, { key: ' ' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(498);
+        const probe = harness
+            .callsFor('list_articles')
+            .map((call) => call.params as ListArticlesDto)
+            .find((params) => params.limit === 1);
+        expect(probe).toMatchObject({ before: 500, read: false });
+
+        // Shift+Space at the top never advances.
+        await fireEvent.keyDown(window, { key: ' ', shiftKey: true });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(498);
+    });
+
+    it('Space with nothing selected opens the first unread', async () => {
+        harness = installIpcHarness(withNextUnread(shellResponders()));
+        await mountShell();
+        await fireEvent.keyDown(window, { key: ' ' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(500);
+    });
+
+    it('Space on a focused button stays the button’s', async () => {
+        harness = installIpcHarness(withNextUnread(shellResponders()));
+        const { getByRole } = await mountShell();
+        await fireEvent.keyDown(window, { key: 'j' });
+        await flushIpc();
+        const star = getByRole('button', { name: 'Star' });
+        star.focus();
+        await fireEvent.keyDown(star, { key: ' ' });
+        await flushIpc();
+        // Not paged into the next unread: the press belonged to the button.
+        expect(selectionStore.selectedArticleId).toBe(500);
+    });
+
+    it('the reader keeps the keyboard across an article switch', async () => {
+        harness = installIpcHarness(withNextUnread(shellResponders()));
+        const { container } = await mountShell();
+        await fireEvent.keyDown(window, { key: 'j' });
+        await flushIpc();
+        const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+        await fireEvent.keyDown(listbox, { key: 'Enter' });
+        await flushIpc();
+        expect(document.activeElement).toBe(readerBody(container));
+
+        // j remounts the body for the next article; focus follows it.
+        await fireEvent.keyDown(readerBody(container), { key: 'j' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(499);
+        expect(document.activeElement).toBe(readerBody(container));
+    });
+
+    it('e archives the selection', async () => {
+        harness = installIpcHarness(shellResponders());
+        await mountShell();
+        await fireEvent.keyDown(window, { key: 'j' });
+        await flushIpc();
+        await fireEvent.keyDown(window, { key: 'e' });
+        await flushIpc();
+        expect(harness.callsFor('set_archived')).toEqual([{ articleId: 500, archived: true }]);
+    });
+
+    it('Shift+A marks the current view read (the whole library from All)', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { findByText } = await mountShell();
+        await fireEvent.keyDown(window, { key: 'A', shiftKey: true });
+        await flushIpc();
+        expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: null }]);
+        expect(await findByText('Marked 7 read')).toBeTruthy();
+        // `a` (unshifted) is still Add feed.
+        expect(layoutStore.activeModal).toBeNull();
+    });
+
+    it('with nothing focused, ↓ moves the selection and Enter opens the reader', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container } = await mountShell();
+        expect(document.activeElement).toBe(document.body);
+
+        await fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+        await fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+        expect(selectionStore.selectedArticleId).toBe(499);
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
+        await flushIpc();
+        expect(document.activeElement).toBe(readerBody(container));
+    });
+
+    it('Caps Lock a is still Add feed, never the bulk mark-view-read', async () => {
+        harness = installIpcHarness(shellResponders());
+        await mountShell();
+        // Caps Lock on, no Shift: the browser reports key 'A'.
+        await fireEvent.keyDown(window, { key: 'A' });
+        await flushIpc();
+        expect(harness.callsFor('mark_all_read')).toEqual([]);
+        expect(layoutStore.activeModal).toBe('add-feed');
+    });
+
+    it('Esc in the reader body hands focus to the list and keeps the selection', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container } = await mountShell();
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
+        await flushIpc();
+        const body = readerBody(container);
+        expect(document.activeElement).toBe(body);
+        expect(selectionStore.selectedArticleId).toBe(500);
+
+        await fireEvent.keyDown(body, { key: 'Escape' });
+        await flushIpc();
+        // The shell's own Escape step-back (deselect) must not also run.
+        expect(selectionStore.selectedArticleId).toBe(500);
+        expect(document.activeElement).toBe(container.querySelector('[role="listbox"]'));
+    });
+
+    it('after g a clears the selection from the reader, ↓ keeps moving the list', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container } = await mountShell();
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
+        await flushIpc();
+        const body = readerBody(container);
+        expect(document.activeElement).toBe(body);
+
+        await fireEvent.keyDown(body, { key: 'g' });
+        await fireEvent.keyDown(body, { key: 'a' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBeNull();
+        expect(document.activeElement).toBe(document.body);
+
+        // Each press goes where a real one would: the focused element.
+        await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'ArrowDown' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(500);
+        // The new article's body must not pull focus back into the reader.
+        expect(document.activeElement).toBe(document.body);
+        await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'ArrowDown' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(499);
     });
 });

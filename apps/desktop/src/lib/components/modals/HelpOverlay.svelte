@@ -2,12 +2,15 @@
 /**
  * The `?` overlay: renders the shortcut registry verbatim — the table is
  * data, so this component can never drift from what the keys actually do.
+ * A row shows its global sequence (chords joined by "then"), then any pane
+ * keys (the listbox arrows / Enter, the reader's ← / Esc) as alternatives.
  * It rides the shared {@link Modal} shell (focus trap, restore, labelled
  * dialog); dismissal (Escape / `?`) is handled by the shell's keydown
  * handler, and the close button covers the pointer path.
  */
 import Modal from '$components/common/Modal.svelte';
 import { type MessageKey, t } from '$lib/i18n';
+import { keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS, type ShortcutCategory } from '$lib/keyboard/registry';
 
 let { onclose }: { onclose: () => void } = $props();
@@ -38,7 +41,13 @@ function shortcutsIn(category: ShortcutCategory) {
                                 {#if position > 0}
                                     <span class="chord-sep">{t('help.chord.then')}</span>
                                 {/if}
-                                <kbd>{keyName === ' ' ? 'Space' : keyName}</kbd>
+                                <kbd>{keyLabel(keyName)}</kbd>
+                            {/each}
+                            {#each shortcut.paneKeys?.keys ?? [] as keyName, position (keyName)}
+                                {#if position > 0 || shortcut.keys.length > 0}
+                                    <span class="alt-sep">/</span>
+                                {/if}
+                                <kbd>{keyLabel(keyName)}</kbd>
                             {/each}
                         </span>
                         <span class="description">{t(shortcut.description)}</span>
@@ -91,7 +100,8 @@ function shortcutsIn(category: ShortcutCategory) {
         color: var(--fg-muted);
     }
 
-    .chord-sep {
+    .chord-sep,
+    .alt-sep {
         font-size: var(--text-xs);
         color: var(--fg-subtle);
     }

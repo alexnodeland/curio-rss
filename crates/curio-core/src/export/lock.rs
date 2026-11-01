@@ -117,10 +117,9 @@ impl DestinationLock {
                 root: root.to_path_buf(),
             });
         }
-        let key = root.canonicalize().map_err(|source| ExportError::Io {
-            path: root.to_path_buf(),
-            source,
-        })?;
+        let key = root
+            .canonicalize()
+            .map_err(|source| ExportError::io(root, source))?;
         {
             let mut set = held();
             while set.contains(&key) {
@@ -135,18 +134,10 @@ impl DestinationLock {
         match std::fs::create_dir(&marker) {
             Ok(()) => {}
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(source) => {
-                return Err(ExportError::Io {
-                    path: marker,
-                    source,
-                });
-            }
+            Err(source) => return Err(ExportError::io(marker, source)),
         }
         let lock_path = marker.join(LOCK_FILE);
-        let io_err = |source| ExportError::Io {
-            path: lock_path.clone(),
-            source,
-        };
+        let io_err = |source| ExportError::io(&lock_path, source);
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)

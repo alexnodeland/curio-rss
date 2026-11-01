@@ -230,7 +230,7 @@ fn unique_note_path(
 ///
 /// [`ExportError::NoteParse`] for a file that is not UTF-8 (stale blocks
 /// a crash left behind are no more a note than a garbled header),
-/// [`ExportError::Io`] for any other read failure.
+/// any other read failure as sorted by [`ExportError::io`].
 fn read_existing_note(path: &Path) -> Result<Option<String>, ExportError> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
@@ -241,12 +241,7 @@ fn read_existing_note(path: &Path) -> Result<Option<String>, ExportError> {
                 message: format!("the file is not UTF-8 text: {err}"),
             });
         }
-        Err(source) => {
-            return Err(ExportError::Io {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
+        Err(source) => return Err(ExportError::io(path, source)),
     };
     let blank = content.chars().all(|c| c == '\0' || c.is_whitespace());
     Ok((!blank).then_some(content))

@@ -7,6 +7,9 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
  * neighbour prefetch that lets the next step render straight from cache.
  */
 import { events } from '$lib/bindings';
+import { localeStore } from '$lib/i18n';
+import { keyLabel } from '$lib/keyboard/labels';
+import { SHORTCUTS } from '$lib/keyboard/registry';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { articlePrefetcher } from '$lib/state/prefetch';
 import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
@@ -63,6 +66,39 @@ describe('ReaderPane', () => {
         harness = installIpcHarness({});
         const { getByText } = render(ReaderPane);
         expect(getByText('Select an article to read')).toBeTruthy();
+    });
+
+    it('the empty-state hint names only keys the registry binds', () => {
+        harness = installIpcHarness({});
+        const { container } = render(ReaderPane);
+        const hint = container.querySelector('.empty-hint') as HTMLElement;
+        expect(hint.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+            '↑↓ to move· Enter/→ to read· ? for shortcuts',
+        );
+        const bound = new Set(
+            SHORTCUTS.flatMap((shortcut) => [
+                ...shortcut.keys,
+                ...(shortcut.paneKeys?.keys ?? []),
+            ]).map(keyLabel),
+        );
+        const printed = [...hint.querySelectorAll('kbd')].map((kbd) => kbd.textContent ?? '');
+        expect(printed.length).toBeGreaterThan(0);
+        for (const label of printed) {
+            expect(bound, label).toContain(label);
+        }
+    });
+
+    it('the empty-state hint is localized', async () => {
+        harness = installIpcHarness({});
+        localeStore.active = 'de';
+        try {
+            const { container } = render(ReaderPane);
+            const hint = container.querySelector('.empty-hint') as HTMLElement;
+            expect(hint.textContent).toContain('zum Bewegen');
+            expect(hint.textContent).not.toContain('to move');
+        } finally {
+            localeStore.reset();
+        }
     });
 
     it('loads the selected article, marks it read, and renders sanitized content', async () => {

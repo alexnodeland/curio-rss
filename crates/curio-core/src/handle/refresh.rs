@@ -122,7 +122,7 @@ impl CoreHandle {
                 )
             }
             Ok(response) if response.is_success() => {
-                match crate::feeds::parse_feed(&response.body, Some(&response.final_url)) {
+                match crate::feeds::parse_fetched_feed(&response) {
                     Err(err) => {
                         // A body we could not parse must not update the
                         // validators, or a broken feed 304s forever.

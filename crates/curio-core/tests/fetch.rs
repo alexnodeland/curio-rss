@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use curio_core::fetch::{
-    DEFAULT_ACCEPT, DnsLookup, FetchConfig, FetchError, FetchRequest, HostOverride, LookupFuture,
-    PolicedClient,
+    DEFAULT_ACCEPT, DnsLookup, FetchConfig, FetchError, FetchKind, FetchRequest, HostOverride,
+    IMAGE_ACCEPT, LookupFuture, PAGE_ACCEPT, PolicedClient,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -447,7 +447,7 @@ async fn honest_user_agent_rides_every_request() {
 }
 
 #[tokio::test]
-async fn default_accept_header_rides_every_request() {
+async fn default_accept_header_rides_every_feed_request() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
@@ -468,7 +468,7 @@ async fn default_accept_header_rides_every_request() {
     assert_eq!(
         accept,
         Some(DEFAULT_ACCEPT),
-        "the spec-correct Accept header must ride every request"
+        "the spec-correct Accept header must ride every feed request"
     );
 }
 
@@ -866,5 +866,182 @@ async fn every_connection_dials_the_pin_its_own_screen_set() {
         accepted.load(Ordering::SeqCst),
         3,
         "one connection per spelling"
+    );
+}
+
+#[tokio::test]
+async fn page_and_image_fetches_send_their_own_accept_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+
+    let client = PolicedClient::new(fast_config());
+    for kind in [FetchKind::Page, FetchKind::Image] {
+        let request = FetchRequest {
+            kind,
+            ..allowed(format!("{}/thing", server.uri()))
+        };
+        client.fetch(&request).await.unwrap();
+    }
+
+    let requests = server.received_requests().await.unwrap();
+    let accepts: Vec<_> = requests
+        .iter()
+        .map(|sent| sent.headers.get("accept").and_then(|v| v.to_str().ok()))
+        .collect();
+    assert_eq!(accepts, [Some(PAGE_ACCEPT), Some(IMAGE_ACCEPT)]);
+}
+
+#[tokio::test]
+async fn the_response_content_type_is_surfaced_verbatim() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw("<p>hi</p>", "text/html; charset=windows-1251"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = PolicedClient::new(fast_config());
+    let response = client
+        .fetch(&allowed(format!("{}/page", server.uri())))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.content_type.as_deref(),
+        Some("text/html; charset=windows-1251")
+    );
+    assert!(response.is_html_page());
+}
+
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn deflate(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn brotli(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    brotli::BrotliCompress(
+        &mut std::io::Cursor::new(bytes),
+        &mut out,
+        &brotli::enc::BrotliEncoderParams::default(),
+    )
+    .unwrap();
+    out
+}
+
+const FEED: &str = include_str!("../../../fixtures/feeds/rss2.xml");
+
+#[tokio::test]
+async fn compressed_responses_are_decoded_transparently() {
+    for (coding, body) in [
+        ("gzip", gzip(FEED.as_bytes())),
+        ("br", brotli(FEED.as_bytes())),
+        ("deflate", deflate(FEED.as_bytes())),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-encoding", coding)
+                    .set_body_raw(body, "application/rss+xml"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = PolicedClient::new(fast_config());
+        let response = client
+            .fetch(&allowed(format!("{}/feed.xml", server.uri())))
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(response.body).unwrap(),
+            FEED,
+            "{coding} body decoded"
+        );
+
+        // The client advertised what it can decode.
+        let requests = server.received_requests().await.unwrap();
+        let accept_encoding = requests[0]
+            .headers
+            .get("accept-encoding")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        for advertised in ["gzip", "br", "deflate"] {
+            assert!(
+                accept_encoding.contains(advertised),
+                "{advertised} missing from {accept_encoding:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_gzip_bomb_trips_the_cap_on_its_decoded_size() {
+    // 8 MiB of zeros compresses to a few KiB: far under the cap on the
+    // wire, far over it once decoded.
+    let bomb = gzip(&vec![0u8; 8 * 1024 * 1024]);
+    assert!(
+        bomb.len() < 64 * 1024,
+        "fixture precondition: a tiny wire size"
+    );
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "gzip")
+                .set_body_raw(bomb, "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = fast_config();
+    config.max_body_bytes = 1024 * 1024;
+    let client = PolicedClient::new(config);
+    let err = client
+        .fetch(&allowed(format!("{}/bomb.xml", server.uri())))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, FetchError::BodyTooLarge { limit, .. } if limit == 1024 * 1024),
+        "expected BodyTooLarge, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_brotli_bomb_trips_the_cap_too() {
+    let bomb = brotli(&vec![b'a'; 8 * 1024 * 1024]);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-encoding", "br")
+                .set_body_raw(bomb, "text/html"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut config = fast_config();
+    config.max_body_bytes = 1024 * 1024;
+    let client = PolicedClient::new(config);
+    let err = client
+        .fetch(&allowed(format!("{}/bomb.html", server.uri())))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, FetchError::BodyTooLarge { .. }),
+        "expected BodyTooLarge, got {err:?}"
     );
 }

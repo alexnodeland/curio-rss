@@ -26,7 +26,7 @@
 //! more is fetched and the feeds validated so far are the answer.
 //!
 //! **Validated** means fetched (2xx), sniffed as a feed root and parsed by
-//! [`crate::feeds::parse_feed`] — no candidate is offered that a refresh
+//! [`crate::feeds::parse_fetched_feed`] — no candidate is offered that a refresh
 //! would fail to parse. Candidates are deduped by requested and final URL.
 //!
 //! Favicon precedence: a declared `<link rel="…icon">` (resolved absolute)
@@ -43,7 +43,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 use url::Url;
 
-use crate::feeds::parse_feed;
+use crate::feeds::parse_fetched_feed;
+use crate::fetch::decode::decode_html;
 use crate::fetch::{FetchError, FetchRequest, FetchResponse, PolicedClient};
 
 /// Most declared (`<link rel="alternate">`) candidates validated per page —
@@ -298,9 +299,13 @@ pub async fn discover(
     }
     validator.seen.insert(page.clone());
     validator.seen.insert(response.final_url.clone());
-    let extracted = html::extract(&response.body, &response.final_url);
+    let extracted = html::extract(
+        &response.body,
+        response.content_type.as_deref(),
+        &response.final_url,
+    );
     if extracted.is_feed {
-        if let Ok(parsed) = parse_feed(&response.body, Some(&response.final_url)) {
+        if let Ok(parsed) = parse_fetched_feed(&response) {
             return Ok(Discovery {
                 feeds: vec![DiscoveredFeed {
                     url: subscribable_url(&page, &response),
@@ -457,12 +462,13 @@ impl Validator<'_> {
         if response.final_url != url && !self.seen.insert(response.final_url.clone()) {
             return (None, spent); // a redirect twin of a feed already found
         }
-        // Only the sniff window is decoded — never a copy of the whole body.
+        // Only the sniff window is decoded — never a copy of the whole body —
+        // by its BOM and HTTP charset, so a UTF-16 feed still sniffs.
         let head = &response.body[..response.body.len().min(sniff::SNIFF_WINDOW)];
-        if !sniff::looks_like_feed(&String::from_utf8_lossy(head)) {
+        if !sniff::looks_like_feed(&decode_html(head, response.content_type.as_deref())) {
             return (None, spent);
         }
-        let Ok(parsed) = parse_feed(&response.body, Some(&response.final_url)) else {
+        let Ok(parsed) = parse_fetched_feed(&response) else {
             return (None, spent);
         };
         let feed = DiscoveredFeed {

@@ -25,3 +25,8 @@
 # CRLF, Latin-1) are the point, so no line-ending or text normalization.
 fixtures/import/pocket-utf16le.csv binary
 fixtures/opml/latin1.opml binary
+
+# Encoding fixtures are byte-exact legacy-charset documents (windows-1251,
+# Shift_JIS, a UTF-8 BOM, leading whitespace): never let a text filter
+# touch them.
+fixtures/encoding/** -text

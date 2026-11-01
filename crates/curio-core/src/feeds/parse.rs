@@ -5,6 +5,9 @@ use curio_types::Timestamp;
 use feed_rs::model::{Entry, Feed, Link, MediaObject};
 use url::Url;
 
+use crate::fetch::FetchResponse;
+use crate::fetch::decode::feed_to_utf8;
+
 use super::dedupe_key;
 use super::image::feed_image;
 use super::keys::unique_keys;
@@ -89,10 +92,31 @@ pub struct FeedParseError(#[from] feed_rs::parser::ParseFeedError);
 /// stability across fetches), so a missing guid falls through to the
 /// `link → hash` tiers deterministically.
 ///
+/// The bytes are first brought to clean UTF-8 (see
+/// [`crate::fetch::decode::feed_to_utf8`]): a BOM or whitespace ahead of the
+/// XML declaration is dropped and a declared legacy encoding is transcoded.
+/// A fetched feed should go through [`parse_fetched_feed`] instead, so the
+/// HTTP `charset` gets its say too.
+///
 /// # Errors
 ///
 /// [`FeedParseError`] when the bytes are not a recognizable feed.
 pub fn parse_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, FeedParseError> {
+    parse_utf8_feed(&feed_to_utf8(bytes, None), base_uri)
+}
+
+/// [`parse_feed`] for a policed fetch's response: the body is decoded by
+/// BOM, then the response's HTTP `charset`, then the XML declaration, and
+/// relative URLs resolve against the response's final URL.
+///
+/// # Errors
+///
+/// [`FeedParseError`] when the body is not a recognizable feed.
+pub fn parse_fetched_feed(response: &FetchResponse) -> Result<ParsedFeed, FeedParseError> {
+    parse_utf8_feed(&response.feed_bytes(), Some(&response.final_url))
+}
+
+fn parse_utf8_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, FeedParseError> {
     let parser = feed_rs::parser::Builder::new()
         .base_uri(base_uri)
         // Keep absent ids absent: our dedupe chain owns the fallback.

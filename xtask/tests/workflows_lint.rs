@@ -238,6 +238,11 @@ fn widening_the_real_tagger_is_flagged() {
         &lint_tagger_edit(" --ref \"$TAG\"", ""),
         "no step runs `gh workflow run release.yml --ref <tag>`",
     );
+    // A dispatch on any ref but the tag would only dry-run.
+    assert_flagged(
+        &lint_tagger_edit(" --ref \"$TAG\"", " --ref main"),
+        "no step runs `gh workflow run release.yml --ref <tag>`",
+    );
     assert_flagged(
         &lint_tagger_edit(
             "      GH_TOKEN: ${{ github.token }}\n",

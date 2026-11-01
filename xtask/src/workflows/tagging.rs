@@ -220,14 +220,45 @@ fn grants_write(node: Option<&Value>) -> bool {
     }
 }
 
-/// Is this simple command `gh workflow run release.yml … --ref …`?
+/// Is this simple command `gh workflow run release.yml … --ref <tag>`, the
+/// ref being the planned tag (`$TAG`, or the plan job's `tag` output)? Any
+/// other ref — `main`, say — would run release.yml as a dry run, never the
+/// release.
 fn dispatches_release(command: &[String]) -> bool {
     let word = |i: usize| command.get(i).map(String::as_str);
     word(0) == Some("gh")
         && word(1) == Some("workflow")
         && word(2) == Some("run")
         && command.iter().any(|w| unquoted(w) == RELEASE_WORKFLOW)
-        && command.iter().any(|w| w == "--ref")
+        && ref_value(command).is_some_and(|value| TAG_REFS.contains(&value.as_str()))
+}
+
+/// The spellings of the planned tag a dispatch may name as its `--ref`: the
+/// tagging job's `TAG` variable, or the plan job's output.
+const TAG_REFS: &[&str] = &["$TAG", "${TAG}", "${{needs.plan.outputs.tag}}"];
+
+/// The value of a command's `--ref` (`--ref X`, `-r X` or `--ref=X`),
+/// unquoted and with the whitespace of a `${{ … }}` expression (which the
+/// word split broke apart) removed.
+fn ref_value(command: &[String]) -> Option<String> {
+    let (at, first) = command.iter().enumerate().find_map(|(at, w)| {
+        if w == "--ref" || w == "-r" {
+            command.get(at + 1).map(|value| (at + 1, value.as_str()))
+        } else {
+            w.strip_prefix("--ref=").map(|value| (at, value))
+        }
+    })?;
+    let mut value = first.to_owned();
+    if unquoted(first).starts_with("${{") {
+        for w in &command[at + 1..] {
+            if value.contains("}}") {
+                break;
+            }
+            value.push_str(w);
+        }
+    }
+    let compact: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+    Some(unquoted(&compact).to_owned())
 }
 
 /// Is this simple command a `gh api` call on the create-ref endpoint?
@@ -399,6 +430,31 @@ mod tests {
             "echo PATCH",
         ] {
             assert!(!moves_or_deletes_ref(&words(command)), "{command}");
+        }
+    }
+
+    #[test]
+    fn only_a_dispatch_on_the_planned_tag_counts() {
+        for command in [
+            "gh workflow run release.yml --repo \"$GITHUB_REPOSITORY\" --ref \"$TAG\"",
+            "gh workflow run release.yml --ref $TAG",
+            "gh workflow run release.yml --ref=${TAG}",
+            "gh workflow run release.yml -r \"${TAG}\"",
+            "gh workflow run release.yml --ref ${{ needs.plan.outputs.tag }} --repo o/r",
+            "gh workflow run \"release.yml\" --ref \"${{ needs.plan.outputs.tag }}\"",
+        ] {
+            assert!(dispatches_release(&words(command)), "{command}");
+        }
+        for command in [
+            "gh workflow run release.yml --ref main",
+            "gh workflow run release.yml --ref \"$TAGS\"",
+            "gh workflow run release.yml --ref ${{ github.ref }}",
+            "gh workflow run release.yml --ref",
+            "gh workflow run release.yml",
+            "gh workflow run ci.yml --ref \"$TAG\"",
+            "gh workflow view release.yml --ref \"$TAG\"",
+        ] {
+            assert!(!dispatches_release(&words(command)), "{command}");
         }
     }
 

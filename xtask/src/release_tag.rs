@@ -167,15 +167,27 @@ pub fn plan(repo: &dyn Repo) -> Result<Plan, String> {
     })?;
 
     let changelog = repo.show(&sha, CHANGELOG)?.unwrap_or_default();
-    let message = tag_message(&changelog, &version).map_err(|err| format!("{sha}: {err}"))?;
+    let message = tag_message(&changelog, &version).map_err(|err| {
+        format!(
+            "{sha}: {err}. The tag goes on the commit that introduced {version}, so a later commit that only fixes {CHANGELOG} leaves this refusal in place: either bump to a new version with its section on top, or push {tag} by hand on the commit that fixes {CHANGELOG} (docs/release/runbook.md §2, Fallback)"
+        )
+    })?;
 
     let release = repo.show(&sha, RELEASE_WORKFLOW)?.unwrap_or_default();
     if let Err(err) = crate::workflows::releases_on_tag_dispatch(&release) {
         return Err(format!(
-            "{tag} would go on {sha}, but the release.yml there would not release a dispatch on the tag: {err}. GitHub runs the workflow file at the tag, so tagging it from here would only dry-run, and the tag would then keep a hand-pushed one from triggering the real release. Push this tag by hand instead (docs/release/runbook.md §2): git tag -a {tag} {sha} -m \"{message}\" && git push origin {tag}"
+            "{tag} would go on {sha}, but the release.yml there would not release a dispatch on the tag: {err}. GitHub runs the workflow file at the tag, so tagging it from here would only dry-run, and the tag would then keep a hand-pushed one from triggering the real release. Push this tag by hand instead (docs/release/runbook.md §2): git tag -a {tag} {sha} -m {} && git push origin {tag}",
+            shell_quote(&message)
         ));
     }
     Ok(Plan::Tag { tag, sha, message })
+}
+
+/// `text` as one POSIX shell word: single-quoted, each `'` spelled `'\''`,
+/// so a printed command pastes as-is whatever the CHANGELOG heading holds
+/// (`"`, `$`, a backtick).
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 /// The `git` CLI on a checkout.
@@ -416,6 +428,21 @@ mod tests {
             ),
             "{err}"
         );
+        // A CHANGELOG-only fix keeps the version, so the tag stays on `bbb`:
+        // the error names the two ways out that work.
+        assert!(
+            err.contains("either bump to a new version with its section on top, or push v0.5.0 by hand on the commit that fixes CHANGELOG.md"),
+            "{err}"
+        );
+        let fixed_later = Fake::default()
+            .commit("ccc", "0.5.0", NOTES_050, RELEASE_BY_REF)
+            .commit("bbb", "0.5.0", NOTES_040, RELEASE_BY_REF)
+            .commit("aaa", "0.4.0", NOTES_040, RELEASE_BY_REF);
+        assert!(
+            plan(&fixed_later)
+                .unwrap_err()
+                .starts_with("bbb: CHANGELOG.md's first section is `## [0.4.0]")
+        );
         let empty = Fake::default().commit("bbb", "0.5.0", "# Changelog\n", RELEASE_BY_REF);
         assert!(
             plan(&empty)
@@ -439,7 +466,31 @@ mod tests {
         let err = plan(&repo).unwrap_err();
         assert!(err.starts_with("v0.5.0 would go on 67cc218, but the release.yml there would not release a dispatch on the tag"), "{err}");
         assert!(
-            err.contains("git tag -a v0.5.0 67cc218 -m \"Curio 0.5.0 — 2026-11-01\" && git push origin v0.5.0"),
+            err.contains(
+                "git tag -a v0.5.0 67cc218 -m 'Curio 0.5.0 — 2026-11-01' && git push origin v0.5.0"
+            ),
+            "{err}"
+        );
+    }
+
+    /// The printed fallback pastes as-is: a heading holding quotes, `$` or a
+    /// backtick stays one literal shell word.
+    #[test]
+    fn the_fallback_command_quotes_the_tag_message() {
+        assert_eq!(shell_quote("Curio 0.5.0"), "'Curio 0.5.0'");
+        assert_eq!(
+            shell_quote("Curio 0.5.0 — \"$HOME\" `id` it's"),
+            r#"'Curio 0.5.0 — "$HOME" `id` it'\''s'"#
+        );
+        let by_event = RELEASE_BY_REF.replace(
+            "startsWith(github.ref, 'refs/tags/v')",
+            "github.event_name == 'push'",
+        );
+        let notes = "# Changelog\n\n## [0.5.0] — the \"$x\" release\n";
+        let repo = Fake::default().commit("67cc218", "0.5.0", notes, &by_event);
+        let err = plan(&repo).unwrap_err();
+        assert!(
+            err.contains(r#"-m 'Curio 0.5.0 — the "$x" release' && git push origin v0.5.0"#),
             "{err}"
         );
     }

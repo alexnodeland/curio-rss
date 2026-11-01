@@ -10,8 +10,17 @@ import type { FeedDto } from '$lib/bindings';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { markAllRead, runCommand, unsubscribeWithUndo } from '$lib/state/actions';
-import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import {
+    markAllRead,
+    moveFeed,
+    refreshFeedById,
+    renameFeed,
+    reorderFeedGroup,
+    setFeedPaused,
+    ungroupFeed,
+    unsubscribeWithUndo,
+} from '$lib/state/actions';
+import { feedDnd, moveWithinGroup } from '$lib/state/feed-dnd.svelte';
 import { feedRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { allFolderPaths, folderPathsForTags } from '$lib/state/folder-ops';
@@ -86,7 +95,7 @@ function commitRename(): void {
     if (!renaming) return;
     renaming = false;
     const title = draft.trim();
-    void runCommand(() => feedsStore.setFeedTitle(feed.id, title.length > 0 ? title : null));
+    void renameFeed(feed.id, title.length > 0 ? title : null);
 }
 
 function onRenameKeydown(event: KeyboardEvent): void {
@@ -130,7 +139,7 @@ function feedMenu(): MenuItem[] {
         .map((path) => ({
             id: `move:${path}`,
             label: path,
-            onSelect: () => void runCommand(() => feedsStore.moveFeedToFolder(feed.id, path)),
+            onSelect: () => void moveFeed(feed.id, path),
         }));
     // "New folder…" — retagging the feed into a fresh top-level folder springs it
     // into existence; rename it via its own menu afterward.
@@ -138,8 +147,7 @@ function feedMenu(): MenuItem[] {
         id: 'new-folder',
         labelKey: 'feed.menu.newFolder',
         separatorBefore: moveTo.length > 0,
-        onSelect: () =>
-            void runCommand(() => feedsStore.moveFeedToFolder(feed.id, uniqueTopLevelName())),
+        onSelect: () => void moveFeed(feed.id, uniqueTopLevelName()),
     });
     // Ungroup only when the feed actually sits in a folder — otherwise it's a no-op.
     if (folderPathsForTags(feed.tags).length > 0) {
@@ -147,7 +155,7 @@ function feedMenu(): MenuItem[] {
             id: 'ungroup',
             labelKey: 'feed.menu.ungroup',
             separatorBefore: true,
-            onSelect: () => void runCommand(() => feedsStore.ungroupFeed(feed.id)),
+            onSelect: () => void ungroupFeed(feed.id),
         });
     }
     return [
@@ -155,7 +163,7 @@ function feedMenu(): MenuItem[] {
         {
             id: 'refresh',
             labelKey: 'feed.menu.refresh',
-            onSelect: () => void runCommand(() => feedsStore.refreshFeed(feed.id)),
+            onSelect: () => refreshFeedById(feed.id),
         },
         { id: 'rename', labelKey: 'feed.menu.rename', onSelect: startRename },
         {
@@ -174,10 +182,7 @@ function feedMenu(): MenuItem[] {
         {
             id: 'status',
             labelKey: paused ? 'feed.menu.resume' : 'feed.menu.pause',
-            onSelect: () =>
-                void runCommand(() =>
-                    feedsStore.setFeedStatus(feed.id, paused ? 'active' : 'paused'),
-                ),
+            onSelect: () => void setFeedPaused(feed.id, !paused),
         },
         {
             id: 'unsub',
@@ -224,12 +229,7 @@ function onDrop(event: DragEvent): void {
         return;
     }
     event.preventDefault();
-    const newGroup = moveWithinGroup(siblings, dragged, feed.id);
-    const globalOrder = rebuildGlobalOrder(
-        feedsStore.feeds.map((candidate) => candidate.id),
-        newGroup,
-    );
-    void runCommand(() => feedsStore.reorderFeeds(globalOrder));
+    void reorderFeedGroup(moveWithinGroup(siblings, dragged, feed.id));
     feedDnd.clear();
 }
 

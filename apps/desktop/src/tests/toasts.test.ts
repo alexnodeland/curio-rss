@@ -123,4 +123,21 @@ describe('Toasts', () => {
         vi.advanceTimersByTime(1000);
         expect(toastStore.toasts).toHaveLength(0);
     });
+
+    it('pressing a focused Undo resumes the other timers even with no focusout', async () => {
+        vi.useFakeTimers();
+        const { getByRole } = render(Toasts);
+        toastStore.showToast('Marked 2 read', 'success', {
+            action: { label: 'Undo', run: vi.fn() },
+        });
+        toastStore.showToast('Saved', 'info', 1000);
+        await tick();
+
+        const undo = getByRole('button', { name: 'Undo' });
+        await fireEvent.focusIn(undo);
+        // WebKit may drop the focusout of a removed node: only the click lands.
+        await fireEvent.click(undo);
+        vi.advanceTimersByTime(1000);
+        expect(toastStore.toasts).toHaveLength(0);
+    });
 });

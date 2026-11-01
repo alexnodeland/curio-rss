@@ -10,7 +10,13 @@ import Icon from '$components/common/Icon.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { markFolderRead, runCommand, selectFolder } from '$lib/state/actions';
+import {
+    deleteFolder,
+    markFolderRead,
+    moveFeed,
+    renameFolder,
+    selectFolder,
+} from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedDnd } from '$lib/state/feed-dnd.svelte';
 import { type FeedFolder, folderRowKey } from '$lib/state/feed-tree';
@@ -68,7 +74,7 @@ function commitRename(): void {
         toastStore.showToast(t('folder.renameCollision', { name }), 'error');
         return;
     }
-    void runCommand(() => feedsStore.renameFolder(folder.path, newPath));
+    void renameFolder(folder.path, newPath);
 }
 
 function onRenameKeydown(event: KeyboardEvent): void {
@@ -91,15 +97,6 @@ function uniqueChildName(): string {
     return `${base} ${n}`;
 }
 
-async function deleteFolder(): Promise<void> {
-    // Only announce success when it actually succeeded (a partial/failed retag
-    // toasts its own error via runCommand) — no more false "deleted" on failure.
-    const result = await runCommand(() => feedsStore.deleteFolder(folder.path));
-    if (result !== undefined) {
-        toastStore.showToast(t('folder.deleted', { name: folder.name }), 'info');
-    }
-}
-
 function folderMenu(): MenuItem[] {
     return [
         {
@@ -118,7 +115,8 @@ function folderMenu(): MenuItem[] {
             labelKey: 'folder.menu.delete',
             danger: true,
             separatorBefore: true,
-            onSelect: () => void deleteFolder(),
+            // Announces "deleted" only once it really is (a Retry included).
+            onSelect: () => void deleteFolder(folder.path, folder.name),
         },
     ];
 }
@@ -151,7 +149,7 @@ function onFolderDrop(event: DragEvent): void {
     clearDrop();
     if (dragged === null) return;
     event.preventDefault();
-    void runCommand(() => feedsStore.moveFeedToFolder(dragged, folder.path));
+    void moveFeed(dragged, folder.path);
     feedDnd.clear();
 }
 </script>

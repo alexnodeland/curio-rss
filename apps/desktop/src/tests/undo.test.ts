@@ -6,12 +6,13 @@
  * that re-invokes the command (only when the failure is recoverable).
  */
 import Sidebar from '$components/sidebar/Sidebar.svelte';
+import { events } from '$lib/bindings';
 import { markAllRead, markFolderRead, runCommand } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { buildFeedTree } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
-import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -230,6 +231,8 @@ describe('undo — sidebar unsubscribe', () => {
             ],
             get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
             remove_feed: null,
+            stage_feed_removal: null,
+            unstage_feed_removal: null,
             set_setting: null,
         });
     }
@@ -296,5 +299,73 @@ describe('undo — sidebar unsubscribe', () => {
         expect(harness.callsFor('remove_feed')).toHaveLength(1);
         expect(queryByLabelText('Alpha')).not.toBeNull();
         expect(toastStore.toasts.at(-1)?.action?.label).toBe('Retry');
+    });
+
+    it('stages the removal backend-side (for a quit), and Undo withdraws it', async () => {
+        harness = feedsHarness();
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+
+        unsubscribeAlpha(getByLabelText);
+        await flushIpc();
+        expect(harness.callsFor('stage_feed_removal')).toEqual([{ feedId: 1 }]);
+        toastStore.runAction(undoToastId());
+        await flushIpc();
+        expect(harness.callsFor('unstage_feed_removal')).toEqual([{ feedId: 1 }]);
+        expect(harness.callsFor('remove_feed')).toHaveLength(0);
+    });
+
+    it('Undo goes back to the unsubscribed feed when it was the one selected', async () => {
+        harness = feedsHarness();
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+        selectionStore.selectFeed(1);
+
+        unsubscribeAlpha(getByLabelText);
+        expect(selectionStore.selectedFeedId).toBeNull(); // the list left the feed
+        toastStore.runAction(undoToastId());
+        expect(selectionStore.selectedFeedId).toBe(1);
+        expect(articlesStore.filters.feedId).toBe(1);
+    });
+
+    it('Undo leaves the selection alone once the user has moved on', async () => {
+        harness = feedsHarness();
+        const { getByLabelText } = render(Sidebar);
+        await flushIpc();
+        selectionStore.selectFeed(1);
+
+        unsubscribeAlpha(getByLabelText);
+        selectionStore.selectFeed(2);
+        toastStore.runAction(undoToastId());
+        expect(selectionStore.selectedFeedId).toBe(2);
+    });
+
+    it('a removed feed stays hidden while the list from before the removal is up', async () => {
+        harness = feedsHarness();
+        const { getByLabelText, queryByLabelText } = render(Sidebar);
+        await flushIpc();
+
+        unsubscribeAlpha(getByLabelText);
+        // The list refetch after the removal fails: the stale list (still
+        // naming Alpha) stays on screen, and Alpha must not flash back.
+        harness.respond(
+            'list_feeds',
+            rejectWith(commandErrorFixture({ kind: 'internal', recoverable: true })),
+        );
+        toastStore.dismissToast(toastStore.toasts[0]?.id ?? -1);
+        await flushIpc();
+        await flushIpc();
+        expect(harness.callsFor('remove_feed')).toEqual([{ feedId: 1 }]);
+        expect(queryByLabelText('Alpha')).toBeNull();
+
+        // The next list that lands is the truth: a feed under a reused id shows.
+        harness.respond('list_feeds', [
+            feedFixture({ id: 1, title: 'Alpha', url: 'https://alpha-again.example/feed' }),
+        ]);
+        const unwire = await wireInvalidation();
+        await events.feedsChanged.emit();
+        await flushIpc();
+        unwire();
+        expect(queryByLabelText('Alpha')).not.toBeNull();
     });
 });

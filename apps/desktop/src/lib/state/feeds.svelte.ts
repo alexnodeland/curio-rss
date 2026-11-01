@@ -14,7 +14,7 @@ import {
     type RefreshOutcomeDto,
     commands,
 } from '$lib/bindings';
-import { SvelteSet } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import {
     feedInFolder,
@@ -111,12 +111,34 @@ export class FeedsStore {
      */
     #hiddenFeeds = new SvelteSet<number>();
 
+    /**
+     * Feeds whose removal landed, each with the feed list that was showing
+     * then (still listing it): hidden only while that same list is on screen.
+     */
+    #removedFeeds = new SvelteMap<number, FeedDto[] | undefined>();
+
     /** The subscriptions as the UI shows them (pending unsubscribes hidden). */
     get feeds(): FeedDto[] {
         const all = this.#feedsQuery.data ?? [];
-        return this.#hiddenFeeds.size === 0
-            ? all
-            : all.filter((feed) => !this.#hiddenFeeds.has(feed.id));
+        if (this.#hiddenFeeds.size === 0 && this.#removedFeeds.size === 0) {
+            return all;
+        }
+        const shown = this.#feedsQuery.data;
+        return all.filter(
+            (feed) =>
+                !this.#hiddenFeeds.has(feed.id) &&
+                !(this.#removedFeeds.has(feed.id) && this.#removedFeeds.get(feed.id) === shown),
+        );
+    }
+
+    /** Forgets removed feeds whose stale list has since been replaced. */
+    #pruneRemovedFeeds(): void {
+        const shown = this.#feedsQuery.data;
+        for (const [feedId, list] of this.#removedFeeds) {
+            if (list !== shown) {
+                this.#removedFeeds.delete(feedId);
+            }
+        }
     }
 
     /** Hides a feed pending its deferred unsubscribe. */
@@ -408,6 +430,7 @@ export class FeedsStore {
         this.#pendingFolders.clear();
         this.#mutedNotifyFeeds.clear();
         this.#hiddenFeeds.clear();
+        this.#removedFeeds.clear();
         this.#clearRefreshWatchdog();
         this.refreshing = false;
         this.refreshOutcomes = [];
@@ -428,10 +451,17 @@ export class FeedsStore {
         if (result.status === 'ok') {
             this.#preserveEmptiedFolders(vacatedTags, [], feedId);
             if (this.#hiddenFeeds.has(feedId)) {
-                // Drop the hide only once the list no longer has the feed, so
-                // it never flashes back (and a reused id is never hidden).
-                await this.#feedsQuery.refetch();
+                // Keep it out of view while the list on screen is the one
+                // fetched before the removal: it ends with the next list that
+                // lands, which no longer has the feed. Waiting on a refetch
+                // instead isn't enough — one a newer refetch superseded lands
+                // nothing, and a failed one leaves this stale list up — and
+                // tying the hide to the stale list means a reused id is never
+                // hidden.
+                this.#pruneRemovedFeeds();
+                this.#removedFeeds.set(feedId, this.#feedsQuery.data);
                 this.#hiddenFeeds.delete(feedId);
+                void this.#feedsQuery.refetch();
             }
         }
         return result;

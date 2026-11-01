@@ -8,7 +8,7 @@
  * the outlet — polite for everything, assertive for errors — that exist
  * before the first toast; a node that mounts already carrying a live role is
  * often not read (VoiceOver), so the toast cards themselves carry none.
- * Hovering or focusing the stack pauses every dismiss timer (WCAG 2.2.1).
+ * Hovering or focusing the stack holds every dismiss timer (WCAG 2.2.1).
  */
 import Icon from '$components/common/Icon.svelte';
 import { t } from '$lib/i18n';
@@ -46,18 +46,20 @@ const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
 </div>
 
 <!-- Pointer or focus on the stack holds every timer; leaving resumes it. A
-     labelled landmark, so a screen-reader user can jump to an Undo / Retry. -->
+     button that closes its own toast ends the focus hold in the store (the
+     removed node need not fire focusout). A labelled landmark, so a
+     screen-reader user can jump to an Undo / Retry. -->
 <div
     class="toasts"
     role="region"
     aria-label={t('toast.region')}
-    onmouseenter={() => toastStore.pause()}
-    onmouseleave={() => toastStore.resume()}
-    onfocusin={() => toastStore.pause()}
+    onmouseenter={() => toastStore.hold('pointer')}
+    onmouseleave={() => toastStore.release('pointer')}
+    onfocusin={() => toastStore.hold('focus')}
     onfocusout={(event) => {
         const next = event.relatedTarget;
         if (!(next instanceof Node && event.currentTarget.contains(next))) {
-            toastStore.resume();
+            toastStore.release('focus');
         }
     }}
 >

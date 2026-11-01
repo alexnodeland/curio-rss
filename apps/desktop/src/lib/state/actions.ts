@@ -25,6 +25,7 @@ import {
     unreadScopeDto,
 } from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
+import { rebuildGlobalOrder } from './feed-dnd.svelte';
 import type { FeedFolder } from './feed-tree';
 import { feedsStore } from './feeds.svelte';
 import { feedInFolder } from './folder-ops';
@@ -38,64 +39,107 @@ import { type ToastOptions, toastStore } from './toasts.svelte';
 export type Retry = () => void;
 
 /**
- * An error toast's Retry button. Retries are interchangeable, so a repeat of
- * the same failure merges into the showing toast (taking the newest retry).
+ * How a failed action is retried. `run` re-runs the whole user action — the
+ * caller's full flow, with the absolute target it asked for (never a
+ * relative flip, which would mean the opposite once anything changed).
+ * `key` names what the action writes (`refresh:12`, `starred:7`): a repeat
+ * failure under it replaces the showing toast instead of stacking, a
+ * different action's failure never merges into it, and a later success under
+ * it withdraws the toast, whose Retry would replay a stale request over the
+ * newer outcome.
  */
-function retryOptions(retry: Retry): ToastOptions {
-    return { action: { label: t('toast.retry'), run: retry }, dedupe: true };
+export interface RetryPlan {
+    readonly run: Retry;
+    readonly key?: string;
+}
+
+/** An error toast's options: keyed, with a Retry button when `retry` is set. */
+function errorOptions(plan: RetryPlan | undefined, retry: boolean): ToastOptions {
+    return {
+        key: plan?.key,
+        action:
+            plan !== undefined && retry ? { label: t('toast.retry'), run: plan.run } : undefined,
+    };
+}
+
+/**
+ * Whether retrying the same action can help. The backend's `recoverable`
+ * also covers input the user can fix (an invalid folder name), but a Retry
+ * replays the same input, which fails the same validation every time.
+ */
+function retryable(error: CommandError): boolean {
+    return error.recoverable && error.code !== 'INVALID_INPUT';
 }
 
 /**
  * Surfaces a command failure as an error toast (sticky until dismissed).
- * With `retry`, a failure the backend marks `recoverable` offers a Retry
- * button that re-runs the action; a non-recoverable one (bad input, a row
- * that's gone) doesn't — retrying it can't help.
+ * With `retry`, a failure retrying can fix (see {@link retryable}) offers a
+ * Retry button that runs the plan; any other (bad input, a row that's gone)
+ * doesn't.
  */
-export function toastCommandError(error: CommandError, retry?: Retry): void {
+export function toastCommandError(error: CommandError, retry?: RetryPlan): void {
     toastStore.showToast(
         commandErrorMessage(error),
         'error',
-        retry !== undefined && error.recoverable ? retryOptions(retry) : {},
+        errorOptions(retry, retryable(error)),
     );
 }
 
 /**
  * Unwraps a command result; failures (including thrown) become error toasts.
- * `retry`, when given, is what the toast's Retry button runs — the whole user
- * action, not just this invoke, so a compound flow restarts from the top.
+ * `retry`, when given, is what the toast's Retry button runs (see
+ * {@link RetryPlan}); a success under its key withdraws a showing failure.
  */
 async function run<T>(
     invoke: () => Promise<CommandResult<T>>,
-    retry?: Retry,
+    retry?: RetryPlan,
 ): Promise<T | undefined> {
     let result: CommandResult<T>;
     try {
         result = await invoke();
     } catch {
         // A thrown (non-contract) failure is internal; retrying may help.
-        toastStore.showToast(
-            t('app.error.internal'),
-            'error',
-            retry === undefined ? {} : retryOptions(retry),
-        );
+        toastStore.showToast(t('app.error.internal'), 'error', errorOptions(retry, true));
         return undefined;
     }
     if (result.status === 'error') {
         toastCommandError(result.error, retry);
         return undefined;
     }
+    if (retry?.key !== undefined) {
+        toastStore.withdraw(retry.key);
+    }
     return result.data;
+}
+
+/** {@link runCommand}'s options. */
+export interface RunCommandOptions {
+    /** What the command writes (see {@link RetryPlan.key}). */
+    readonly key?: string;
+    /**
+     * The caller's whole flow, for Retry — when it does more than the
+     * command (a follow-up toast). Default: invoke the command again.
+     */
+    readonly retry?: Retry;
 }
 
 /**
  * Public unwrap for fire-and-forget mutation call sites that would otherwise
  * `void` the `CommandResult` and swallow failures (sidebar/folder ops). A
- * failure toasts with a Retry that re-invokes the same command; success is
- * silent. Route every such mutation through this so no failure is lost and
- * none falsely reports success.
+ * failure toasts with a Retry (the caller's `retry`, or the same `invoke`
+ * again — so an invoke should compute its arguments from current state, or
+ * carry the absolute target the user asked for); success is silent. Route
+ * every such mutation through this so no failure is lost and none falsely
+ * reports success.
  */
-export function runCommand<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | undefined> {
-    return run(invoke, () => void runCommand(invoke));
+export function runCommand<T>(
+    invoke: () => Promise<CommandResult<T>>,
+    options: RunCommandOptions = {},
+): Promise<T | undefined> {
+    return run(invoke, {
+        key: options.key,
+        run: options.retry ?? (() => void runCommand(invoke, options)),
+    });
 }
 
 type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
@@ -111,35 +155,12 @@ type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
 const toggleChain = new Map<string, Promise<unknown>>();
 const toggleDesired = new Map<string, boolean>();
 
-async function toggleFlag(
-    articleId: number,
-    field: ToggleField,
-    write: (id: number, value: boolean) => Promise<CommandResult<boolean>>,
-): Promise<void> {
-    const key = `${field}:${articleId}`;
+type FlagWrite = (id: number, value: boolean) => Promise<CommandResult<boolean>>;
+
+/** Runs `step` after every earlier step on the same flag has settled. */
+async function onFlagChain(key: string, step: () => Promise<void>): Promise<void> {
     const previous = toggleChain.get(key) ?? Promise.resolve();
-    const task = previous.then(async () => {
-        let current: boolean;
-        // Retry re-runs the whole toggle (a failed write left the flag as it was).
-        const retry = (): void => void toggleFlag(articleId, field, write);
-        if (toggleDesired.has(key)) {
-            current = toggleDesired.get(key) as boolean;
-        } else {
-            const state = await run(() => commands.getArticleState(articleId), retry);
-            if (state === undefined) {
-                return; // read failed (a toast fired); nothing to flip
-            }
-            current = state[field];
-        }
-        const target = !current;
-        toggleDesired.set(key, target);
-        const ok = await run(() => write(articleId, target), retry);
-        if (ok === undefined) {
-            // The write failed (toast already fired) — forget the optimistic
-            // value so the next press reads the real backend flag again.
-            toggleDesired.delete(key);
-        }
-    });
+    const task = previous.then(step);
     toggleChain.set(key, task);
     await task;
     // Drain once this press is the tail of the chain, so the maps don't grow.
@@ -147,6 +168,52 @@ async function toggleFlag(
         toggleChain.delete(key);
         toggleDesired.delete(key);
     }
+}
+
+/**
+ * Writes an absolute flag value. A failed write's Retry writes that same
+ * value — never a fresh flip, which would mean the opposite once the flag
+ * changed in between (the toast stays until dismissed) — and a later
+ * successful write of the flag withdraws the failure (same key).
+ */
+async function writeFlag(
+    articleId: number,
+    field: ToggleField,
+    write: FlagWrite,
+    value: boolean,
+): Promise<void> {
+    const key = `${field}:${articleId}`;
+    toggleDesired.set(key, value);
+    const ok = await run(() => write(articleId, value), {
+        key,
+        run: () => void onFlagChain(key, () => writeFlag(articleId, field, write, value)),
+    });
+    if (ok === undefined) {
+        // The write failed (toast already fired) — forget the optimistic
+        // value so the next press reads the real backend flag again.
+        toggleDesired.delete(key);
+    }
+}
+
+async function toggleFlag(articleId: number, field: ToggleField, write: FlagWrite): Promise<void> {
+    const key = `${field}:${articleId}`;
+    await onFlagChain(key, async () => {
+        let current: boolean;
+        if (toggleDesired.has(key)) {
+            current = toggleDesired.get(key) as boolean;
+        } else {
+            // A failed read decided nothing, so its Retry is the whole toggle.
+            const state = await run(() => commands.getArticleState(articleId), {
+                key,
+                run: () => void toggleFlag(articleId, field, write),
+            });
+            if (state === undefined) {
+                return; // read failed (a toast fired); nothing to flip
+            }
+            current = state[field];
+        }
+        await writeFlag(articleId, field, write, !current);
+    });
 }
 
 /** Stars / unstars against the current backend flag. */
@@ -176,10 +243,10 @@ export async function toggleArchived(articleId: number): Promise<void> {
  * j/k scanning.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
-    await run(
-        () => commands.markRead(articleId, true),
-        () => void markReadOnOpen(articleId),
-    );
+    await run(() => commands.markRead(articleId, true), {
+        key: `read:${articleId}`,
+        run: () => void markReadOnOpen(articleId),
+    });
 }
 
 /**
@@ -203,10 +270,10 @@ export async function markReadOnScroll(articleId: number): Promise<void> {
  */
 export async function loadFullArticle(articleId: number): Promise<boolean> {
     return (
-        (await run(
-            () => commands.loadFullArticle(articleId),
-            () => void loadFullArticle(articleId),
-        )) !== undefined
+        (await run(() => commands.loadFullArticle(articleId), {
+            key: `fullArticle:${articleId}`,
+            run: () => void loadFullArticle(articleId),
+        })) !== undefined
     );
 }
 
@@ -216,10 +283,9 @@ export async function loadFullArticle(articleId: number): Promise<boolean> {
  * skipped), and the toast says how many came back.
  */
 export async function undoMarkRead(articleIds: readonly number[]): Promise<void> {
-    const restored = await run(
-        () => commands.markReadMany([...articleIds], false),
-        () => void undoMarkRead(articleIds),
-    );
+    const restored = await run(() => commands.markReadMany([...articleIds], false), {
+        run: () => void undoMarkRead(articleIds),
+    });
     if (restored !== undefined) {
         toastStore.showToast(t('toast.markReadUndone', { count: restored }), 'info');
     }
@@ -245,10 +311,10 @@ function toastMarkedRead(articleIds: readonly number[]): void {
  * `ArticlesChanged`.
  */
 export async function markAllRead(feedId: number | null): Promise<void> {
-    const changed = await run(
-        () => commands.markAllRead(feedId),
-        () => void markAllRead(feedId),
-    );
+    const changed = await run(() => commands.markAllRead(feedId), {
+        key: `markAllRead:${feedId ?? 'all'}`,
+        run: () => void markAllRead(feedId),
+    });
     if (changed !== undefined) {
         toastMarkedRead(changed);
     }
@@ -260,10 +326,10 @@ export async function markAllRead(feedId: number | null): Promise<void> {
  * success toasts the count with Undo.
  */
 export async function markFolderRead(folder: FeedFolder): Promise<void> {
-    const changed = await run(
-        () => feedsStore.markFolderRead(folder),
-        () => void markFolderRead(folder),
-    );
+    const changed = await run(() => feedsStore.markFolderRead(folder), {
+        key: `markFolderRead:${folder.path}`,
+        run: () => void markFolderRead(folder),
+    });
     if (changed !== undefined) {
         toastMarkedRead(changed);
     }
@@ -275,15 +341,38 @@ export async function markFolderRead(folder: FeedFolder): Promise<void> {
  * removal (which deletes the subscription row — its id, health and history
  * can't be recreated) runs only once the toast closes any other way — its
  * timer, the close button, eviction, or the window unloading — so an undo
- * never has anything to restore.
+ * never has anything to restore. The removal is also staged backend-side,
+ * which commits it if the app quits inside the window (the webview need not
+ * deliver `pagehide` on a quit).
  */
 export function unsubscribeWithUndo(feedId: number, name: string): void {
-    if (selectionStore.selectedFeedId === feedId) {
+    const wasSelected = selectionStore.selectedFeedId === feedId;
+    const previous = {
+        filters: articlesStore.filters,
+        articleId: selectionStore.selectedArticleId,
+    };
+    if (wasSelected) {
         selectView('all'); // don't leave the list showing a feed that's going away
     }
     feedsStore.hideFeed(feedId);
+    void stageRemoval(feedId, true);
+    const undo = (): void => {
+        void stageRemoval(feedId, false);
+        feedsStore.unhideFeed(feedId);
+        // Back to the feed, unless the user has moved on from the All view
+        // the unsubscribe switched to.
+        const untouched =
+            activeView(articlesStore.filters) === 'all' &&
+            selectionStore.selectedFeedId === null &&
+            !searchStore.active;
+        if (wasSelected && untouched) {
+            selectionStore.selectedFeedId = feedId;
+            selectionStore.selectedArticleId = previous.articleId;
+            articlesStore.filters = previous.filters;
+        }
+    };
     toastStore.showToast(t('feed.unsubscribed', { name }), 'info', {
-        action: { label: t('toast.undo'), run: () => feedsStore.unhideFeed(feedId) },
+        action: { label: t('toast.undo'), run: undo },
         onClose: (reason) => {
             if (reason !== 'action') {
                 void finishUnsubscribe(feedId);
@@ -292,15 +381,97 @@ export function unsubscribeWithUndo(feedId: number, name: string): void {
     });
 }
 
+/**
+ * Stages (or withdraws) an unsubscribe's exit-time commit. Best effort: if
+ * it fails, only that safety net is lost — the toast still commits on close.
+ */
+async function stageRemoval(feedId: number, staged: boolean): Promise<void> {
+    try {
+        await (staged ? commands.stageFeedRemoval(feedId) : commands.unstageFeedRemoval(feedId));
+    } catch {
+        // No IPC (the window is going away): nothing else to do.
+    }
+}
+
 /** The deferred half of {@link unsubscribeWithUndo}: the backend removal. */
 async function finishUnsubscribe(feedId: number): Promise<void> {
-    const removed = await run(
-        () => feedsStore.removeFeed(feedId),
-        () => void finishUnsubscribe(feedId),
-    );
+    const removed = await run(() => feedsStore.removeFeed(feedId), {
+        key: `unsubscribe:${feedId}`,
+        run: () => void finishUnsubscribe(feedId),
+    });
     if (removed === undefined) {
         // Still subscribed after all: show it again (the error toast has Retry).
         feedsStore.unhideFeed(feedId);
+    }
+}
+
+// ─── sidebar mutations ──────────────────────────────────────────────────────
+// Each is keyed by what it writes, so a later success withdraws a stale
+// failure's Retry, and each Retry carries the absolute target (or recomputes
+// from current state) rather than replaying a snapshot over newer changes.
+
+/** Retitles a feed (`null` = back to the feed's own title). */
+export function renameFeed(feedId: number, title: string | null): Promise<null | undefined> {
+    return runCommand(() => feedsStore.setFeedTitle(feedId, title), {
+        key: `feed:${feedId}:title`,
+    });
+}
+
+/** Moves a feed into folder `path` (the move reads the feed's current tags). */
+export function moveFeed(feedId: number, path: string): Promise<null | undefined> {
+    return runCommand(() => feedsStore.moveFeedToFolder(feedId, path), {
+        key: `feed:${feedId}:folder`,
+    });
+}
+
+/** Takes a feed out of its folders. */
+export function ungroupFeed(feedId: number): Promise<null | undefined> {
+    return runCommand(() => feedsStore.ungroupFeed(feedId), { key: `feed:${feedId}:folder` });
+}
+
+/** Pauses or resumes a feed's refreshes. */
+export function setFeedPaused(feedId: number, paused: boolean): Promise<null | undefined> {
+    return runCommand(() => feedsStore.setFeedStatus(feedId, paused ? 'paused' : 'active'), {
+        key: `feed:${feedId}:status`,
+    });
+}
+
+/**
+ * Applies a within-group reorder (`group`: the group's ids in their new
+ * order). The global order is rebuilt from the current feed list at invoke
+ * time, so a Retry applies the same group order without dropping feeds added
+ * (or resurrecting ones removed) since the failure.
+ */
+export function reorderFeedGroup(group: readonly number[]): Promise<null | undefined> {
+    return runCommand(
+        () => {
+            const all = feedsStore.feeds.map((candidate) => candidate.id);
+            const present = group.filter((id) => all.includes(id));
+            return feedsStore.reorderFeeds(rebuildGlobalOrder(all, present));
+        },
+        { key: 'feeds:order' },
+    );
+}
+
+/** Renames folder `oldPath` to `newPath` (retagging the feeds in it as they are now). */
+export function renameFolder(oldPath: string, newPath: string): Promise<null | undefined> {
+    return runCommand(() => feedsStore.renameFolder(oldPath, newPath), {
+        key: `folder:${oldPath}`,
+    });
+}
+
+/**
+ * Deletes folder `path` (its feeds move to the parent) and says so — only
+ * once it actually succeeded. A failure's Retry runs this whole flow, so a
+ * retried delete that succeeds announces itself too.
+ */
+export async function deleteFolder(path: string, name: string): Promise<void> {
+    const result = await runCommand(() => feedsStore.deleteFolder(path), {
+        key: `folder:${path}`,
+        retry: () => void deleteFolder(path, name),
+    });
+    if (result !== undefined) {
+        toastStore.showToast(t('folder.deleted', { name }), 'info');
     }
 }
 
@@ -370,7 +541,7 @@ async function markFolderFeedsRead(path: string): Promise<number | undefined> {
         if (flipped === undefined) {
             return undefined;
         }
-        changed += flipped;
+        changed += flipped.length;
     }
     return changed;
 }
@@ -386,7 +557,8 @@ async function markViewReadCount(): Promise<number | undefined> {
         return 0; // a read-only view holds nothing unread
     }
     if (hasBulkScope(filters) && filters.feedTag === null) {
-        return run(() => commands.markAllRead(filters.feedId));
+        const flipped = await run(() => commands.markAllRead(filters.feedId));
+        return flipped?.length;
     }
     if (hasBulkScope(filters) && filters.feedTag !== null && filters.feedId === null) {
         return markFolderFeedsRead(filters.feedTag);
@@ -629,10 +801,20 @@ export async function promoteSelected(): Promise<void> {
         layoutStore.openModal('destinations');
         return;
     }
-    const outcome = await run(
-        () => destinationsStore.promote(articleId, target),
-        () => void promoteSelected(),
-    );
+    await promoteArticle(articleId, target);
+}
+
+/**
+ * Promotes one article to the destination named `target` and toasts the
+ * outcome. A failure's Retry promotes that same article to that same
+ * destination — never whatever is selected (or the default) by the time the
+ * sticky toast's Retry is clicked.
+ */
+export async function promoteArticle(articleId: number, target: string): Promise<void> {
+    const outcome = await run(() => destinationsStore.promote(articleId, target), {
+        key: `promote:${articleId}:${target}`,
+        run: () => void promoteArticle(articleId, target),
+    });
     if (outcome === undefined) {
         return;
     }
@@ -655,19 +837,17 @@ function refreshSelectedFeed(): void {
     refreshFeedById(feedId);
 }
 
-function refreshFeedById(feedId: number): void {
-    void run(
-        () => feedsStore.refreshFeed(feedId),
-        () => refreshFeedById(feedId),
-    );
+/** Refreshes one feed (the `r` shortcut, the feed's context menu). */
+export function refreshFeedById(feedId: number): void {
+    void run(() => feedsStore.refreshFeed(feedId), {
+        key: `refresh:${feedId}`,
+        run: () => refreshFeedById(feedId),
+    });
 }
 
 /** Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar). */
 export function refreshAll(): void {
-    void run(
-        () => feedsStore.refreshAll(),
-        () => refreshAll(),
-    );
+    void run(() => feedsStore.refreshAll(), { key: 'refresh:all', run: () => refreshAll() });
 }
 
 function openSelected(): void {

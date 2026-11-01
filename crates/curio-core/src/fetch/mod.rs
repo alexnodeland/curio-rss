@@ -27,6 +27,7 @@
 
 mod client;
 pub mod policy;
+mod pool;
 mod resolve;
 
 pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient};

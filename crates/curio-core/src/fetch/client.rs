@@ -2,16 +2,12 @@
 //! manual redirect handling, size caps and politeness built in. rustls is the
 //! default TLS stack; a per-host override may opt into the platform-native
 //! stack (reddit.com, whose CDN fingerprint-blocks rustls).
-//!
-//! Connections are pooled: one reqwest client per (TLS backend, SSRF
-//! policy) lives for the life of the [`PolicedClient`], so keep-alive and
-//! TLS session reuse span feeds, favicons and images on the same host. The
-//! User-Agent rides each request rather than the client, so UA classes
-//! share a pool.
+//! Connections are pooled (see `pool.rs`): one reqwest client per (TLS
+//! backend, SSRF policy) for the life of the [`PolicedClient`].
 
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reqwest::header::{
@@ -20,7 +16,8 @@ use reqwest::header::{
 };
 use url::{Host, Url};
 
-use super::resolve::{self, DnsLookup, PinningResolver, SystemLookup};
+use super::pool::Pools;
+use super::resolve::{self, DnsLookup, SystemLookup};
 use super::{FetchError, FetchRequest, FetchResponse, policy};
 
 /// Default streaming response-body cap: 10 MB.
@@ -155,27 +152,8 @@ pub struct PolicedClient {
     config: FetchConfig,
     /// Per-host next-allowed-request instants (politeness reservations).
     next_allowed: Mutex<HashMap<String, Instant>>,
-    /// The DNS seam every lookup goes through.
-    lookup: Arc<dyn DnsLookup>,
-    /// The pooled reqwest clients, built on first use.
-    pools: Mutex<HashMap<PoolKey, Pool>>,
-}
-
-/// What a pooled reqwest client is keyed by. The TLS backend is fixed at
-/// build time; the SSRF policy is part of the key so a deny-private request
-/// never reuses a connection an `allow_private_network` request opened (to
-/// an address the deny-private screen would have refused).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct PoolKey {
-    native_tls: bool,
-    allow_private: bool,
-}
-
-/// One pooled reqwest client and the resolver its connections dial through.
-#[derive(Debug, Clone)]
-struct Pool {
-    http: reqwest::Client,
-    resolver: Arc<PinningResolver>,
+    /// The pooled reqwest clients and the DNS seam, built on first use.
+    pools: Pools,
 }
 
 impl Default for PolicedClient {
@@ -198,11 +176,11 @@ impl PolicedClient {
     /// identical: every address `lookup` returns is screened.
     #[must_use]
     pub fn with_lookup(config: FetchConfig, lookup: Arc<dyn DnsLookup>) -> Self {
+        let pools = Pools::new(lookup, config.connect_timeout, config.request_timeout);
         Self {
             config,
             next_allowed: Mutex::new(HashMap::new()),
-            lookup,
-            pools: Mutex::new(HashMap::new()),
+            pools,
         }
     }
 
@@ -254,7 +232,8 @@ impl PolicedClient {
                 .unwrap_or(self.config.user_agent.as_str());
             let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
             let client =
-                self.pooled_client(&url, native_tls, request.allow_private_network, screened)?;
+                self.pools
+                    .client(&url, native_tls, request.allow_private_network, screened)?;
             let mut req = client
                 .get(url.clone())
                 .header(USER_AGENT, user_agent)
@@ -354,7 +333,7 @@ impl PolicedClient {
             .and_then(|entry| entry.user_agent.as_deref())
             .unwrap_or(self.config.user_agent.as_str());
         let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
-        let client = self.pooled_client(&url, native_tls, false, screened)?;
+        let client = self.pools.client(&url, native_tls, false, screened)?;
         let mut req = client
             .post(url.clone())
             .header(USER_AGENT, user_agent)
@@ -417,7 +396,7 @@ impl PolicedClient {
             }
             Host::Domain(domain) => {
                 let addrs = resolve::bounded_lookup(
-                    self.lookup.as_ref(),
+                    self.pools.lookup(),
                     domain,
                     self.config.connect_timeout,
                 )
@@ -441,63 +420,6 @@ impl PolicedClient {
             host: url.host_str().unwrap_or_default().to_owned(),
             addr,
         })
-    }
-
-    /// The pooled reqwest client for this hop, with the hop's screened
-    /// address set pinned into its resolver. Redirects are disabled (we
-    /// follow them ourselves). A new connection dials only the pinned
-    /// addresses — every one, in resolver order, so a dead first address
-    /// falls back to the next — closing the DNS-rebinding window between
-    /// the check and the connect; a pooled connection is reused as is (its
-    /// address passed the same screen when it was opened).
-    fn pooled_client(
-        &self,
-        url: &Url,
-        native_tls: bool,
-        allow_private: bool,
-        screened: Option<Vec<IpAddr>>,
-    ) -> Result<reqwest::Client, FetchError> {
-        let key = PoolKey {
-            native_tls,
-            allow_private,
-        };
-        let pool = {
-            let mut pools = self.pools.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(pool) = pools.get(&key) {
-                pool.clone()
-            } else {
-                let pool = self.build_pool(url, native_tls)?;
-                pools.insert(key, pool.clone());
-                pool
-            }
-        };
-        if let (Some(addrs), Some(domain)) = (screened, url.domain()) {
-            pool.resolver.pin(domain, addrs);
-        }
-        Ok(pool.http)
-    }
-
-    fn build_pool(&self, url: &Url, native_tls: bool) -> Result<Pool, FetchError> {
-        // rustls is the deliberate default for every host; a per-host override
-        // (reddit.com) opts into the platform-native stack to dodge a
-        // ClientHello-fingerprint block. Both backends are compiled in.
-        let tls = if native_tls {
-            reqwest::Client::builder().use_native_tls()
-        } else {
-            reqwest::Client::builder().use_rustls_tls()
-        };
-        let resolver = Arc::new(PinningResolver::new(
-            Arc::clone(&self.lookup),
-            self.config.connect_timeout,
-        ));
-        let http = tls
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(self.config.connect_timeout)
-            .timeout(self.config.request_timeout)
-            .dns_resolver(Arc::clone(&resolver))
-            .build()
-            .map_err(|err| map_reqwest(url, &err))?;
-        Ok(Pool { http, resolver })
     }
 
     /// Streams the body, enforcing the size cap (a lying or absent
@@ -591,7 +513,7 @@ fn header_string(response: &reqwest::Response, name: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
+pub(super) fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
     if err.is_timeout() {
         FetchError::Timeout {
             url: url.to_string(),

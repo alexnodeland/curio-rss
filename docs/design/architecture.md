@@ -79,7 +79,7 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   UA/delay class is disclosed in PRIVACY.md.
 - Conditional GET with `etag`/`last_modified` **preserved on error paths** (the sketch
   clobbered them on any failure).
-- Permanent-redirect stored-URL updates; 410 dead-feed auto-pause; feed-health tracking.
+- Permanent-redirect stored-URL updates; feed-health tracking.
 - Transparent gzip/brotli/deflate decompression, with the size cap counted on the
   **decoded** body so a compression bomb fails as `BodyTooLarge`. An `Accept` header per
   request kind (feed / page / image), and the response `Content-Type` carried on
@@ -92,6 +92,19 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   valid non-ASCII UTF-8 that declares UTF-8. Full-page
   extraction ("load full article", URL clips) runs only on HTML: a PDF or image URL is
   clipped link-only.
+- **Per-feed scheduling** (`handle/schedule.rs`, `RefreshPolicy`): every settled attempt
+  writes its `fetch_log` row and the feed's schedule in one transaction —
+  `consecutive_failures`, `next_attempt_at`, `failing_since` (the failure class is the
+  latest `fetch_log.error_kind`). A
+  failure backs off exponentially (15 min doubling to 24 h, up to 10% jitter); a
+  `Retry-After` (seconds or HTTP-date) longer than that wins and holds even a manual
+  refresh; a success waits for the longest of the per-feed `refresh_interval_min` and
+  the feed's own hints (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`, capped at
+  24 h). Sweeps fetch only due feeds. A 410 marks a feed dead only when the previous
+  attempt was a 410 too; 10 failures in a row over at least 3 days auto-pause it
+  (`auto_paused_at`), and resuming clears the run. A page host's 429 during full-text
+  hydration is `RateLimited`, which drops that feed's remaining queued pages. `fetch_log`
+  keeps the newest 50 rows per feed.
 - **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
   both heads: 8 feeds in flight by default, so a few hung hosts cost about one request
   timeout between them. The slots are shared fairly between hosts: a politeness-paced

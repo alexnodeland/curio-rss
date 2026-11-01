@@ -371,10 +371,11 @@ async fn concurrent_refreshes_from_two_handles_cannot_clobber_validators() {
 }
 
 #[tokio::test]
-async fn http_410_auto_pauses_the_feed_for_good() {
+async fn a_confirmed_http_410_marks_the_feed_dead_for_good() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(410))
+        .expect(2)
         .mount(&server)
         .await;
 
@@ -382,8 +383,17 @@ async fn http_410_auto_pauses_the_feed_for_good() {
     let core = open_core(profile.path());
     let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
 
+    // One 410 could be a CDN glitch: the feed stays subscribed.
     let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.status, FetchStatus::Error);
+    assert_eq!(outcome.http_status, Some(410));
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::Gone));
+    let stored = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.status, FeedStatus::Active);
+    assert_eq!(stored.last_error_kind, Some(FetchErrorKind::Gone));
+
+    // The second 410 in a row confirms it.
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
     assert_eq!(outcome.http_status, Some(410));
     assert_eq!(outcome.error_kind, Some(FetchErrorKind::Gone));
     assert_eq!(
@@ -399,6 +409,30 @@ async fn http_410_auto_pauses_the_feed_for_good() {
     assert_eq!(
         core.refresh_all().await.unwrap(),
         [] as [curio_core::RefreshOutcome; 0]
+    );
+
+    // Reactivating it is a fresh start: the 410 logged before the switch
+    // does not confirm the next one.
+    core.set_feed_status(feed.id, FeedStatus::Active).unwrap();
+    let revived = core.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(
+        revived.last_error_kind,
+        Some(FetchErrorKind::Gone),
+        "logged"
+    );
+    assert_eq!(revived.consecutive_failures, 0);
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(410))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let first_again = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(first_again.error_kind, Some(FetchErrorKind::Gone));
+    assert_eq!(
+        core.get_feed(feed.id).unwrap().unwrap().status,
+        FeedStatus::Active,
+        "one 410 after a reactivation is unconfirmed again"
     );
 }
 

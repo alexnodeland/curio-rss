@@ -114,6 +114,9 @@ pub enum FetchErrorKindDto {
     Transport,
     /// A non-success HTTP status (see `http_status`).
     Http,
+    /// HTTP 429 (or a 503 with `Retry-After`): the host asked Curio to
+    /// wait — until the feed's `next_attempt_at`.
+    RateLimited,
     /// HTTP 410 — the feed is dead.
     Gone,
     /// The URL serves a web page, not a feed.
@@ -140,6 +143,7 @@ impl From<FetchErrorKind> for FetchErrorKindDto {
             FetchErrorKind::TooLarge => Self::TooLarge,
             FetchErrorKind::Transport => Self::Transport,
             FetchErrorKind::Http => Self::Http,
+            FetchErrorKind::RateLimited => Self::RateLimited,
             FetchErrorKind::Gone => Self::Gone,
             FetchErrorKind::NotAFeed => Self::NotAFeed,
             FetchErrorKind::Parse => Self::Parse,

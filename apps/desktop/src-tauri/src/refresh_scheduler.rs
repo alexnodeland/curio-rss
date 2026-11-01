@@ -1128,6 +1128,11 @@ mod tests {
             last_ok_at: Some(Timestamp::now()),
             tags: Vec::new(),
             fetch_full_text: false,
+            consecutive_failures: 0,
+            next_attempt_at: None,
+            refresh_interval_min: None,
+            failing_since: None,
+            auto_paused_at: None,
         }
     }
 

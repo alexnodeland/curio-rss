@@ -14,12 +14,13 @@ use std::time::{Duration, Instant};
 
 use reqwest::Method;
 use reqwest::header::{
-    ACCEPT, AUTHORIZATION, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
-    LOCATION, RETRY_AFTER, USER_AGENT,
+    ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH,
+    LAST_MODIFIED, LOCATION, RETRY_AFTER, USER_AGENT,
 };
 use url::Url;
 
 use super::errors::map_reqwest;
+use super::headers::{parse_max_age, parse_retry_after};
 use super::pool::Pools;
 use super::resolve::{DnsLookup, SystemLookup};
 use super::{FetchError, FetchKind, FetchRequest, FetchResponse};
@@ -348,31 +349,48 @@ impl PolicedClient {
                 continue;
             }
 
-            let etag = header_string(&response, ETAG.as_str());
-            let last_modified = header_string(&response, LAST_MODIFIED.as_str());
-            let content_type = header_string(&response, CONTENT_TYPE.as_str());
-            // Retry-After in its delta-seconds form (the shape rate limiters
-            // send); the rare HTTP-date form is ignored rather than parsed.
-            let retry_after = header_string(&response, RETRY_AFTER.as_str())
-                .and_then(|value| value.trim().parse::<u64>().ok())
-                .map(Duration::from_secs);
-            let body = if response.status().is_success() {
-                self.read_capped(&url, response).await?
-            } else {
-                Vec::new()
-            };
-            return Ok(FetchResponse {
-                status,
-                final_url: url.to_string(),
-                permanent_redirect: hops > 0 && all_permanent,
-                redirects: hops,
-                etag,
-                last_modified,
-                retry_after,
-                content_type,
-                body,
-            });
+            return self
+                .final_response(&url, response, hops > 0 && all_permanent, hops)
+                .await;
         }
+    }
+
+    /// Turns the response that ended a fetch's redirect chain into a
+    /// [`FetchResponse`]: its validators, content type and schedule hints
+    /// (`Retry-After`, `Cache-Control: max-age`), and the capped body of a
+    /// 2xx.
+    async fn final_response(
+        &self,
+        url: &Url,
+        response: reqwest::Response,
+        permanent_redirect: bool,
+        redirects: u32,
+    ) -> Result<FetchResponse, FetchError> {
+        let status = response.status().as_u16();
+        let etag = header_string(&response, ETAG.as_str());
+        let last_modified = header_string(&response, LAST_MODIFIED.as_str());
+        let content_type = header_string(&response, CONTENT_TYPE.as_str());
+        let retry_after = header_string(&response, RETRY_AFTER.as_str())
+            .and_then(|value| parse_retry_after(&value, chrono::Utc::now()));
+        let max_age = header_string(&response, CACHE_CONTROL.as_str())
+            .and_then(|value| parse_max_age(&value));
+        let body = if response.status().is_success() {
+            self.read_capped(url, response).await?
+        } else {
+            Vec::new()
+        };
+        Ok(FetchResponse {
+            status,
+            final_url: url.to_string(),
+            permanent_redirect,
+            redirects,
+            etag,
+            last_modified,
+            retry_after,
+            content_type,
+            max_age,
+            body,
+        })
     }
 
     /// Performs one policed form POST — the OAuth token-grant shape:
@@ -419,8 +437,7 @@ impl PolicedClient {
             });
         }
         let retry_after = header_string(&response, RETRY_AFTER.as_str())
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .map(Duration::from_secs);
+            .and_then(|value| parse_retry_after(&value, chrono::Utc::now()));
         let content_type = header_string(&response, CONTENT_TYPE.as_str());
         let body = if response.status().is_success() {
             self.read_capped(&url, response).await?
@@ -436,6 +453,7 @@ impl PolicedClient {
             last_modified: None,
             retry_after,
             content_type,
+            max_age: None,
             body,
         })
     }

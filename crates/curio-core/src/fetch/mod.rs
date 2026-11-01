@@ -39,6 +39,7 @@
 mod client;
 pub mod decode;
 mod errors;
+mod headers;
 pub mod policy;
 mod pool;
 mod resolve;
@@ -119,12 +120,16 @@ pub struct FetchResponse {
     pub etag: Option<String>,
     /// Response `Last-Modified`, for the next conditional GET.
     pub last_modified: Option<String>,
-    /// `Retry-After` (delta-seconds form only), when the server sent one —
-    /// how long a 429/503 asked us to back off.
+    /// `Retry-After` (delta-seconds or HTTP-date, as a wait from when the
+    /// response arrived), when the server sent one — how long a 429/503
+    /// asked us to back off.
     pub retry_after: Option<std::time::Duration>,
     /// Response `Content-Type`, verbatim (parameters included), when the
     /// server sent a readable one. See [`decode`] for using it.
     pub content_type: Option<String>,
+    /// `Cache-Control: max-age`, when the server granted one (and did not
+    /// also say `no-cache`/`no-store`) — a refresh-interval hint.
+    pub max_age: Option<std::time::Duration>,
     /// Response body, already decompressed. Read (and size-capped) only for 2xx responses;
     /// empty for 304 and error statuses.
     pub body: Vec<u8>,
@@ -143,10 +148,18 @@ impl FetchResponse {
         self.status == 304
     }
 
-    /// 410 — the feed is gone; callers auto-pause it for good.
+    /// 410 — the feed is gone; a refresh marks it dead once a second 410
+    /// in a row confirms it.
     #[must_use]
     pub fn is_gone(&self) -> bool {
         self.status == 410
+    }
+
+    /// The host asked us to slow down: a 429, or a 503 carrying
+    /// `Retry-After`.
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        self.status == 429 || (self.status == 503 && self.retry_after.is_some())
     }
 
     /// Whether the body is an HTML page worth extracting (see

@@ -109,6 +109,34 @@ pub struct Feed {
     /// Full-text mode: fetch + readability-extract the source page of
     /// every new article at refresh time (for content-free feeds).
     pub fetch_full_text: bool,
+    /// Failed fetch attempts in a row (reset by any success, or by a
+    /// resume). Drives the backoff and the auto-pause.
+    pub consecutive_failures: u32,
+    /// The earliest time a refresh sweep fetches this feed again — set
+    /// by a backoff, a server's `Retry-After`, the feed's own refresh
+    /// hint (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`) or
+    /// [`Self::refresh_interval_min`]. `None` ⇒ due on every sweep.
+    pub next_attempt_at: Option<Timestamp>,
+    /// The user's per-feed refresh interval in minutes: sweeps leave the
+    /// feed alone for at least this long after each attempt. `None` ⇒
+    /// the global schedule (and the feed's own hints) decide.
+    pub refresh_interval_min: Option<u32>,
+    /// When the current run of failed attempts began; `None` while the
+    /// feed is healthy.
+    pub failing_since: Option<Timestamp>,
+    /// When the engine paused this feed by itself after a run of failed
+    /// fetches; `None` for an active feed or one the user paused.
+    pub auto_paused_at: Option<Timestamp>,
+}
+
+impl Feed {
+    /// Whether a refresh sweep should fetch this feed at `now`: it is
+    /// active and not inside a backoff / `Retry-After` / refresh-hint
+    /// window.
+    #[must_use]
+    pub fn is_due(&self, now: Timestamp) -> bool {
+        self.status == FeedStatus::Active && self.next_attempt_at.is_none_or(|next| next <= now)
+    }
 }
 
 /// Input for subscribing to a feed.
@@ -365,6 +393,10 @@ pub enum FetchErrorKind {
     /// The server answered with a non-success HTTP status (the code is in
     /// the outcome's `http_status`).
     Http,
+    /// HTTP 429, or a 503 carrying `Retry-After`: the host asked Curio to
+    /// slow down. Not even a manual refresh fetches before its deadline
+    /// (the feed's `next_attempt_at`).
+    RateLimited,
     /// HTTP 410 Gone — or the feed is already marked dead for it.
     Gone,
     /// The URL serves a web page, not a feed (the message says how many
@@ -379,7 +411,7 @@ pub enum FetchErrorKind {
 
 impl FetchErrorKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::InvalidUrl,
         Self::Dns,
         Self::Blocked,
@@ -393,6 +425,7 @@ impl FetchErrorKind {
         Self::TooLarge,
         Self::Transport,
         Self::Http,
+        Self::RateLimited,
         Self::Gone,
         Self::NotAFeed,
         Self::Parse,
@@ -416,6 +449,7 @@ impl FetchErrorKind {
             Self::TooLarge => "too_large",
             Self::Transport => "transport",
             Self::Http => "http",
+            Self::RateLimited => "rate_limited",
             Self::Gone => "gone",
             Self::NotAFeed => "not_a_feed",
             Self::Parse => "parse",

@@ -1,6 +1,8 @@
 //! feed-rs wiring: RSS 0.x/1.0/2.0, Atom and JSON Feed → normalized
 //! entries with total dedupe keys.
 
+use std::time::Duration;
+
 use curio_types::Timestamp;
 use feed_rs::model::{Entry, Feed, Link, MediaObject};
 use url::Url;
@@ -21,6 +23,10 @@ pub struct ParsedFeedMeta {
     pub site_url: Option<String>,
     /// Feed self-description.
     pub description: Option<String>,
+    /// How often the feed says it changes: RSS `<ttl>` (minutes), else
+    /// the syndication module's `sy:updatePeriod` / `sy:updateFrequency`.
+    /// A hint the refresh schedule may stretch to, never a command.
+    pub refresh_hint: Option<Duration>,
 }
 
 /// One normalized feed item. `content_html` is **raw source HTML** — it
@@ -124,7 +130,11 @@ fn parse_utf8_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, F
         .build();
     let feed = parser.parse(bytes)?;
     let base = base_uri.and_then(|uri| Url::parse(uri).ok());
-    Ok(normalize(feed, base.as_ref()))
+    let mut parsed = normalize(feed, base.as_ref());
+    if parsed.meta.refresh_hint.is_none() {
+        parsed.meta.refresh_hint = syndication_period(bytes);
+    }
+    Ok(parsed)
 }
 
 fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
@@ -132,6 +142,10 @@ fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
         title: feed.title.map(|t| t.content),
         site_url: best_link(&feed.links).map(ToOwned::to_owned),
         description: feed.description.map(|t| t.content),
+        refresh_hint: feed
+            .ttl
+            .filter(|&minutes| minutes > 0)
+            .map(|minutes| Duration::from_secs(u64::from(minutes) * 60)),
     };
     let entries = feed
         .entries
@@ -237,11 +251,81 @@ fn best_link(links: &[Link]) -> Option<&str> {
         .map(|link| link.href.as_str())
 }
 
+/// The RSS 1.0 syndication module's update period (`sy:updatePeriod`,
+/// divided by `sy:updateFrequency`, default 1), which feed-rs does not
+/// surface. Read from the channel head only — before the first item.
+fn syndication_period(bytes: &[u8]) -> Option<Duration> {
+    let head = bytes
+        .windows(5)
+        .position(|window| window == b"<item" || window == b"<entr")
+        .and_then(|end| bytes.get(..end))
+        .unwrap_or(bytes);
+    let head = String::from_utf8_lossy(head);
+    let element = |name: &str| {
+        let open = format!("<sy:{name}>");
+        let start = head.find(&open)? + open.len();
+        let len = head.get(start..)?.find('<')?;
+        head.get(start..start + len).map(str::trim)
+    };
+    let period_secs: u64 = match element("updatePeriod")? {
+        "hourly" => 3_600,
+        "daily" => 86_400,
+        "weekly" => 604_800,
+        "monthly" => 2_592_000,
+        "yearly" => 31_536_000,
+        _ => return None,
+    };
+    let frequency = element("updateFrequency")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(1);
+    Some(Duration::from_secs(period_secs / frequency))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn ttl_and_the_syndication_module_are_refresh_hints() {
+        let rss = |channel_extra: &str| {
+            format!(
+                r#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:sy="http://purl.org/rss/1.0/modules/syndication/">
+<channel><title>t</title><link>https://example.com/</link>{channel_extra}
+<item><title>a</title><link>https://example.com/a</link>
+<description>&lt;sy:updatePeriod&gt;daily&lt;/sy:updatePeriod&gt;</description></item>
+</channel></rss>"#
+            )
+        };
+        let hint = |extra: &str| {
+            parse_feed(rss(extra).as_bytes(), None)
+                .unwrap()
+                .meta
+                .refresh_hint
+        };
+        assert_eq!(hint("<ttl>90</ttl>"), Some(Duration::from_secs(90 * 60)));
+        assert_eq!(
+            hint(
+                "<sy:updatePeriod>hourly</sy:updatePeriod><sy:updateFrequency>2</sy:updateFrequency>"
+            ),
+            Some(Duration::from_secs(1_800))
+        );
+        assert_eq!(
+            hint("<sy:updatePeriod> daily </sy:updatePeriod>"),
+            Some(Duration::from_secs(86_400))
+        );
+        assert_eq!(
+            hint("<ttl>60</ttl><sy:updatePeriod>weekly</sy:updatePeriod>"),
+            Some(Duration::from_secs(3_600)),
+            "<ttl> wins"
+        );
+        assert_eq!(hint("<ttl>0</ttl>"), None);
+        assert_eq!(hint("<sy:updatePeriod>sometimes</sy:updatePeriod>"), None);
+        assert_eq!(hint(""), None, "an item's text is not the channel's hint");
+    }
 
     /// The crate dir is read at run time (cargo sets it for test runs): a
     /// compile-time path goes stale when a shared target dir reuses this

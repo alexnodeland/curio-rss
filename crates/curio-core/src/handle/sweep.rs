@@ -31,7 +31,9 @@ use futures_util::future::{Either, select};
 use futures_util::stream::FuturesUnordered;
 use tokio::sync::{Notify, watch};
 
-use crate::model::{Feed, FeedId, FeedStatus, FetchStatus};
+use curio_types::Timestamp;
+
+use crate::model::{Feed, FeedId, FetchStatus};
 
 use super::hydrate::{DEFAULT_HYDRATE_CONCURRENCY, Hydrated, Hydration, HydrationQueue};
 use super::refresh::Refreshed;
@@ -107,9 +109,10 @@ pub struct SweepReport {
 }
 
 impl CoreHandle {
-    /// Refreshes every active feed at the default concurrency. Per-feed
-    /// failures land in their outcome rows. Joins a sweep already in
-    /// flight (see [`Self::refresh_many`]).
+    /// Refreshes every *due* feed at the default concurrency (see
+    /// [`Self::refresh_all_with`]). Per-feed failures land in their
+    /// outcome rows. Joins a sweep already in flight (see
+    /// [`Self::refresh_many`]).
     ///
     /// # Errors
     ///
@@ -121,10 +124,12 @@ impl CoreHandle {
             .outcomes)
     }
 
-    /// Refreshes every active feed as one sweep — see
-    /// [`Self::refresh_many`]. The feeds are listed once this request
-    /// owns the sweep slot; a request that joins a running sweep lists
-    /// nothing.
+    /// Refreshes every *due* feed as one sweep — see
+    /// [`Self::refresh_many`]. A feed is due when it is active and
+    /// outside its backoff / `Retry-After` / refresh-hint window
+    /// ([`crate::model::Feed::is_due`]); the others are not fetched and
+    /// get no outcome. The feeds are listed once this request owns the
+    /// sweep slot; a request that joins a running sweep lists nothing.
     ///
     /// # Errors
     ///
@@ -135,9 +140,10 @@ impl CoreHandle {
         on_progress: impl FnMut(SweepProgress<'_>),
     ) -> Result<SweepReport, CoreError> {
         self.sweep(options, on_progress, |feeds| {
+            let now = Timestamp::now();
             Ok(feeds?
                 .into_iter()
-                .filter(|feed| feed.status == FeedStatus::Active)
+                .filter(|feed| feed.is_due(now))
                 .map(|feed| (feed.id, Some(feed.url)))
                 .collect())
         })

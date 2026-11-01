@@ -3,7 +3,7 @@
 //! release, or widens the updater signing key's reach (issue #174) — or puts
 //! the nightly back on a retired runner, softens its gate, or stops it from
 //! running on the PRs that edit it (issue #175), or lets criterion keep the
-//! state that made the bench log unparseable (issue #185).
+//! state that made the bench log unparseable (issue #185), or lets a release tag get cut or released any way but the narrow automatic path (issue #298).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -128,7 +128,7 @@ fn code_ahead_of_the_key_in_the_real_sign_job_is_flagged() {
 /// fails the lint (issue #187).
 #[test]
 fn the_real_sign_job_must_keep_its_environment() {
-    let line = "    environment: ${{ github.event_name == 'push' && 'updater-signing' || '' }}\n";
+    let line = "    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}\n";
     assert_flagged(
         &lint_release_edit(line, ""),
         "job `sign` holds the signing key but declares no `environment:`",
@@ -142,11 +142,12 @@ fn the_real_sign_job_must_keep_its_environment() {
 }
 
 /// Pins the committed sign job's text: its environment expression names
-/// `updater-signing` only on a tag push (empty, i.e. no environment,
-/// otherwise), and the key step and the throwaway-key step split on that same
-/// condition. A pin, not a proof — the lint rule itself is exercised in
-/// `xtask/src/workflows.rs`, and that GitHub really runs the dispatch dry run
-/// with no environment is checked by the post-merge dry run (runbook §2).
+/// `updater-signing` only on a tag ref — a tag push or the tagger's dispatch
+/// on the tag (empty, i.e. no environment, otherwise) — and the key step and
+/// the throwaway-key step split on that same condition. A pin, not a proof —
+/// the lint rule itself is exercised in `xtask/src/workflows.rs`, and that
+/// GitHub really runs the dispatch dry run with no environment is checked by
+/// the post-merge dry run (runbook §2).
 #[test]
 fn the_real_dry_run_runs_outside_the_signing_environment() {
     let dir = workflows_dir();
@@ -155,7 +156,7 @@ fn the_real_dry_run_runs_outside_the_signing_environment() {
     let sign = &doc["jobs"]["sign"];
     assert_eq!(
         sign["environment"].as_str(),
-        Some("${{ github.event_name == 'push' && 'updater-signing' || '' }}")
+        Some("${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}")
     );
     let conditions: Vec<(&str, &str)> = sign["steps"]
         .as_sequence()
@@ -164,15 +165,85 @@ fn the_real_dry_run_runs_outside_the_signing_environment() {
         .filter_map(|step| Some((step["name"].as_str()?, step["if"].as_str()?)))
         .collect();
     assert!(
-        conditions.contains(&("Sign the updater archive", "github.event_name == 'push'")),
+        conditions.contains(&(
+            "Sign the updater archive",
+            "startsWith(github.ref, 'refs/tags/v')"
+        )),
         "{conditions:#?}"
     );
     assert!(
         conditions.contains(&(
             "Sign with a throwaway key (dry run)",
-            "github.event_name != 'push'"
+            "${{ !startsWith(github.ref, 'refs/tags/v') }}"
         )),
         "{conditions:#?}"
+    );
+}
+
+/// Putting the real key step back on the event name (the v0.5.0 shape) makes
+/// the tagger's dispatch on the tag a dry run — the lint fails it (#298).
+#[test]
+fn the_real_key_step_must_run_on_the_tag_ref() {
+    let violations = lint_release_edit(
+        "        if: startsWith(github.ref, 'refs/tags/v')\n        # The one step holding the key.",
+        "        if: github.event_name == 'push'\n        # The one step holding the key.",
+    );
+    assert_flagged(
+        &violations,
+        "signs with the real key on `github.event_name=='push'`, not on the tag ref",
+    );
+    assert_flagged(&violations, "reads `github.event_name`");
+}
+
+/// Lint the committed workflows with `release-tag.yml` edited.
+fn lint_tagger_edit(from: &str, to: &str) -> Vec<String> {
+    let dir = workflows_dir();
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect("read workflow");
+    let names = ["ci.yml", "release.yml", "nightly.yml", "release-tag.yml"];
+    let mut sources: Vec<String> = names.iter().map(|name| read(name)).collect();
+    assert_eq!(
+        sources[3].matches(from).count(),
+        1,
+        "`{from}` must occur exactly once in release-tag.yml"
+    );
+    sources[3] = sources[3].replace(from, to);
+    let files: Vec<xtask::workflows::WorkflowFile<'_>> = names
+        .iter()
+        .zip(&sources)
+        .map(|(name, source)| xtask::workflows::WorkflowFile { name, source })
+        .collect();
+    xtask::workflows::lint(&files)
+}
+
+/// The real tagger stays narrow (#298): main pushes only, never on a fork,
+/// no write token beside a checkout, the dispatch on the tag kept.
+#[test]
+fn widening_the_real_tagger_is_flagged() {
+    assert_flagged(
+        &lint_tagger_edit("on:\n  push:\n", "on:\n  pull_request:\n  push:\n"),
+        "must run on `push: branches: [main]` alone",
+    );
+    assert_flagged(
+        &lint_tagger_edit("    if: ${{ !github.event.repository.fork }}\n", ""),
+        "job `plan` has no `if: ${{ !github.event.repository.fork }}`",
+    );
+    assert_flagged(
+        &lint_tagger_edit(
+            "    outputs:\n",
+            "    permissions:\n      contents: write\n    outputs:\n",
+        ),
+        "job `plan` step 1 uses `actions/checkout@",
+    );
+    assert_flagged(
+        &lint_tagger_edit(" --ref \"$TAG\"", ""),
+        "no step runs `gh workflow run release.yml --ref <tag>`",
+    );
+    assert_flagged(
+        &lint_tagger_edit(
+            "      GH_TOKEN: ${{ github.token }}\n",
+            "      GH_TOKEN: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n",
+        ),
+        "reads a secret",
     );
 }
 

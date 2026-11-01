@@ -1,0 +1,113 @@
+# Release tagger — merging a version-bump PR IS the release decision
+# (issue #298). On every push to `main` this reads the workspace version
+# (`[workspace.package] version` in Cargo.toml) and, when tag `v<version>`
+# does not exist yet, creates that annotated tag on the commit that
+# introduced the version (the bump PR's squash-merge — not the tip of
+# `main`), then dispatches release.yml on the tag ref. Every other push is a
+# no-op.
+#
+# Why a dispatch: a tag created with GITHUB_TOKEN fires no `push: tags`
+# event (GitHub suppresses runs triggered by its own token), but a
+# `workflow_dispatch` is the documented exception. A dispatch on the tag ref
+# keeps `github.ref = refs/tags/v…`, so release.yml treats it as a real
+# release and its `sign` job still waits at the `updater-signing`
+# environment's tag-only rule and required reviewer; its `gate` job still
+# re-runs CI on the tagged commit. Pushing the tag by hand stays the
+# fallback (docs/release/runbook.md §2): a run here then finds the tag and
+# does nothing.
+#
+# Two jobs, so the token that can write tags never meets repository code:
+#
+#   plan (read-only: checkout + `cargo run -p xtask -- release-tag`)
+#     └─ tag (contents: write + actions: write; no checkout, `gh api` only)
+#
+# `xtask release-tag` decides: it prints nothing when the tag exists, and it
+# fails (rather than tag) when the bump commit's CHANGELOG.md does not lead
+# with the version's section or its release.yml would not release a
+# tag-ref dispatch for real. The tag is created through the API's "create a
+# reference" call, which refuses (HTTP 422) a ref that exists: an existing
+# tag is never moved or deleted. Forks never run it. `cargo run -p xtask --
+# workflows` holds this file to that shape: the only workflow that creates
+# tags, no secret but GITHUB_TOKEN, no environment, write grants only on a
+# job that checks nothing out.
+name: release-tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One tagger at a time, never cancelled half-way: a queued run re-plans from
+# the tags that exist by then.
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan the release tag
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+      message: ${{ steps.plan.outputs.message }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full first-parent history (to find the bump commit) and every
+          # tag (to see whether the version is already released).
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: Plan
+        id: plan
+        # stdout is `tag=…`, `sha=…`, `message=…` when there is something to
+        # tag, empty when the version is already tagged, and an `::error::`
+        # annotation (echoed below) when it must not be tagged from here.
+        run: |
+          set -euo pipefail
+          status=0
+          cargo run -p xtask -- release-tag > "$RUNNER_TEMP/plan" || status=$?
+          cat "$RUNNER_TEMP/plan"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          cat "$RUNNER_TEMP/plan" >> "$GITHUB_OUTPUT"
+
+  tag:
+    name: tag ${{ needs.plan.outputs.tag }} and dispatch the release
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the annotated tag
+      actions: write # dispatch release.yml on it
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Create the annotated tag
+        # A tag object, then the ref pointing at it. Creating a ref that
+        # already exists fails with HTTP 422, so a tag pushed meanwhile is
+        # left exactly where it is (and this run stops before dispatching).
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+          MESSAGE: ${{ needs.plan.outputs.message }}
+        run: |
+          set -euo pipefail
+          object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$TAG" -f message="$MESSAGE" -f object="$SHA" -f type=commit \
+            --jq .sha)"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$object" --silent
+          echo "tagged $TAG on $SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch release.yml on the tag
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "dispatched release.yml on $TAG — approve its \`sign\` job's \`updater-signing\` deployment, then publish the draft" | tee -a "$GITHUB_STEP_SUMMARY"

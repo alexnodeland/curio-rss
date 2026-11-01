@@ -338,6 +338,14 @@ app's profile directory. The keychain item is keyed by the id in
 Upgrading from 0.4.x, the old shared item is copied into each profile the
 first time it opens; `reddit logout` removes it.
 
+When Reddit refuses a full post for auth reasons, the error says which of
+three things to fix: **no credentials** (Reddit blocks anonymous full-post
+requests — `reddit login`), **credentials refused** (the token endpoint
+turned the client id or secret down — check them, or re-create the app), or
+**token refused** (the credentials were accepted but Reddit refused the token
+they were traded for — the app's access was likely revoked; the token is
+dropped and the next request asks for a new one).
+
 ## Reading
 
 ```sh

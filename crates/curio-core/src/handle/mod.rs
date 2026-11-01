@@ -145,13 +145,17 @@ pub enum CoreError {
         /// Seconds until the breaker re-tries.
         retry_after_secs: u64,
     },
-    /// Reddit refused the request for auth reasons (missing, rejected,
-    /// or revoked credentials) — actionable by the user, so the detail
-    /// is surfaced verbatim.
-    #[error("{detail}")]
+    /// Reddit refused the request for auth reasons — actionable by the
+    /// user, and `reason` says which action: add credentials, fix them,
+    /// or re-authorize the app.
+    #[error("{}", reddit_auth_message(*reason, *status))]
     RedditAuth {
-        /// The user-facing guidance.
-        detail: String,
+        /// Why reddit refused.
+        reason: RedditAuthReason,
+        /// The HTTP status of the refusal (of the token grant for
+        /// [`RedditAuthReason::CredentialsRejected`], of the post request
+        /// otherwise).
+        status: u16,
     },
     /// A blocking engine task (a refresh's parse/ingest/storage half)
     /// panicked — a bug. The panic is contained: only this operation
@@ -161,6 +165,45 @@ pub enum CoreError {
         /// The panic message.
         message: String,
     },
+}
+
+/// Why reddit refused a full-post request ([`CoreError::RedditAuth`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RedditAuthReason {
+    /// No API credentials are installed, and reddit blocks anonymous
+    /// full-post requests. Fixed by adding the user's own (free) Reddit
+    /// API credentials.
+    CredentialsMissing,
+    /// The installed credentials were refused at the token endpoint — a
+    /// wrong client id or secret, or an app that was deleted. Fixed by
+    /// correcting the credentials or re-creating the app.
+    CredentialsRejected,
+    /// The credentials were accepted, but reddit refused the access token
+    /// they were traded for — access revoked, or the app lost its
+    /// permissions. The token is dropped, so the next request re-grants;
+    /// if reddit keeps refusing, the app needs re-authorizing or
+    /// re-creating.
+    TokenRevoked,
+}
+
+/// The user-facing guidance for a [`CoreError::RedditAuth`].
+fn reddit_auth_message(reason: RedditAuthReason, status: u16) -> String {
+    match reason {
+        RedditAuthReason::CredentialsMissing => format!(
+            "reddit blocks anonymous full-post requests (HTTP {status}) — \
+             add your own free Reddit API credentials to load full posts"
+        ),
+        RedditAuthReason::CredentialsRejected => format!(
+            "reddit refused the stored API credentials (HTTP {status}) — \
+             check the client id and secret, or re-create the app"
+        ),
+        RedditAuthReason::TokenRevoked => format!(
+            "reddit refused the access token for the stored API credentials (HTTP {status}) — \
+             the app's access may have been revoked; try again, and if it keeps failing, \
+             re-create the app"
+        ),
+    }
 }
 
 /// Options for [`CoreHandle::open_with`].

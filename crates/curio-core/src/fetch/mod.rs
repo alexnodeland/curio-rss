@@ -24,16 +24,39 @@
 //!   maps to [`crate::model::FetchStatus::NotModified`] while *preserving*
 //!   the stored validators (the sketch clobbered them on error paths).
 //! - An honest User-Agent naming Curio and the repository.
+//! - **Transparent decompression** (gzip, brotli, deflate): the size cap
+//!   counts *decoded* bytes, so a compression bomb trips
+//!   [`FetchError::BodyTooLarge`] rather than filling memory.
+//! - An `Accept` header per [`FetchKind`] (feed / page / image), and the
+//!   response `Content-Type` surfaced on [`FetchResponse::content_type`] —
+//!   [`decode`] turns bodies into text by it.
 
 mod client;
+pub mod decode;
 pub mod policy;
 mod pool;
 mod resolve;
 
-pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient, screen_url};
+pub use client::{
+    DEFAULT_ACCEPT, FetchConfig, HostOverride, IMAGE_ACCEPT, PAGE_ACCEPT, PolicedClient,
+    screen_url,
+};
 pub use resolve::{DnsLookup, LookupFuture, SystemLookup};
 
 use std::net::IpAddr;
+
+/// What a fetch is for — picks the `Accept` header it sends.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FetchKind {
+    /// A feed (the default): [`FetchConfig::accept`], which prefers
+    /// RSS/Atom so content-negotiating hosts hand back XML.
+    #[default]
+    Feed,
+    /// An article page for extraction: [`PAGE_ACCEPT`] (HTML first).
+    Page,
+    /// An image for the cache: [`IMAGE_ACCEPT`].
+    Image,
+}
 
 /// Everything the client needs to know for one policed fetch.
 #[derive(Debug, Clone, Default)]
@@ -59,6 +82,8 @@ pub struct FetchRequest {
     /// loosens it: the lower of the two applies). `Some(0)` refuses every
     /// redirect.
     pub max_redirects: Option<u32>,
+    /// What the fetch is for — sets the `Accept` header.
+    pub kind: FetchKind,
 }
 
 impl FetchRequest {
@@ -93,7 +118,10 @@ pub struct FetchResponse {
     /// `Retry-After` (delta-seconds form only), when the server sent one —
     /// how long a 429/503 asked us to back off.
     pub retry_after: Option<std::time::Duration>,
-    /// Response body. Read (and size-capped) only for 2xx responses;
+    /// Response `Content-Type`, verbatim (parameters included), when the
+    /// server sent a readable one. See [`decode`] for using it.
+    pub content_type: Option<String>,
+    /// Response body, already decompressed. Read (and size-capped) only for 2xx responses;
     /// empty for 304 and error statuses.
     pub body: Vec<u8>,
 }
@@ -115,6 +143,27 @@ impl FetchResponse {
     #[must_use]
     pub fn is_gone(&self) -> bool {
         self.status == 410
+    }
+
+    /// Whether the body is an HTML page worth extracting (see
+    /// [`decode::is_html_page`]) — `false` for PDFs, images and the like.
+    #[must_use]
+    pub fn is_html_page(&self) -> bool {
+        decode::is_html_page(self.content_type.as_deref(), &self.body)
+    }
+
+    /// The body as HTML text, decoded by BOM → HTTP charset →
+    /// `<meta charset>` → UTF-8 (see [`decode::decode_html`]).
+    #[must_use]
+    pub fn html_text(&self) -> std::borrow::Cow<'_, str> {
+        decode::decode_html(&self.body, self.content_type.as_deref())
+    }
+
+    /// The body as UTF-8 feed bytes, transcoded by BOM → HTTP charset →
+    /// XML declaration (see [`decode::feed_to_utf8`]).
+    #[must_use]
+    pub fn feed_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        decode::feed_to_utf8(&self.body, self.content_type.as_deref())
     }
 }
 

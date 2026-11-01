@@ -72,6 +72,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'reader.imagesOff.enable': '開啟',
     'reader.tableScroll': '可捲動表格',
     'reader.imageViewer': '圖片檢視器',
+    'reader.openImage': '放大睇圖片',
     'reader.missing': '呢篇文章已經冇咗',
     'reader.toolbar': '文章操作',
     'reader.action.markRead': '標為已睇',

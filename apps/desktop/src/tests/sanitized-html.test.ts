@@ -15,12 +15,7 @@ import { resetImageCache } from '$lib/utils/images';
 import { LAZY_IMAGE_MARGIN } from '$lib/utils/reader-content';
 import { fireEvent, render } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-    type IpcHarness,
-    commandErrorFixture,
-    flushIpc,
-    installIpcHarness,
-} from './ipc-harness';
+import { type IpcHarness, commandErrorFixture, flushIpc, installIpcHarness } from './ipc-harness';
 
 const corpusPath = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -167,36 +162,83 @@ describe('SanitizedHtml', () => {
         expect(opens[0]?.url).toBe('https://example.com/post');
     });
 
-    it('wraps a wide table in a focusable horizontal-scroll container', () => {
-        const cells = (tag: string): string =>
-            Array.from({ length: 12 }, (_, i) => `<${tag}>col ${i + 1}</${tag}>`).join('');
-        const { container } = render(SanitizedHtml, {
-            props: {
-                html: `<p>before</p><table><thead><tr>${cells('th')}</tr></thead><tbody><tr>${cells('td')}</tr></tbody></table><p>after</p>`,
-            },
-        });
-        const root = container.querySelector('.sanitized-content');
-        const table = root?.querySelector('table');
-        expect(table?.querySelectorAll('th')).toHaveLength(12);
-        const wrapper = table?.parentElement;
-        // Contained: the table sits in the scroll wrapper, the wrapper in the
-        // reading column — never a sibling the column has to stretch around.
-        expect(wrapper?.classList.contains('table-scroll')).toBe(true);
-        expect(wrapper?.parentElement).toBe(root);
-        expect(wrapper?.getAttribute('tabindex')).toBe('0');
-        expect(wrapper?.getAttribute('role')).toBe('group');
-        expect(wrapper?.getAttribute('aria-label')).toBe('Scrollable table');
-        expect(root?.textContent).toContain('after');
+    /** Lays every table wrapper out as `scroll` wide in a `client`-wide column. */
+    function stubTableLayout(scroll: number, client: number): void {
+        const wide = (fallback: number) =>
+            function (this: Element): number {
+                return this.classList.contains('table-scroll') ? fallback : 0;
+            };
+        vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(wide(scroll));
+        vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(wide(client));
+    }
+
+    it('wraps a wide table in a focusable, named horizontal-scroll region', () => {
+        stubTableLayout(1200, 600);
+        try {
+            const cells = (tag: string): string =>
+                Array.from({ length: 12 }, (_, i) => `<${tag}>col ${i + 1}</${tag}>`).join('');
+            const { container } = render(SanitizedHtml, {
+                props: {
+                    html: `<p>before</p><table><thead><tr>${cells('th')}</tr></thead><tbody><tr>${cells('td')}</tr></tbody></table><p>after</p>`,
+                },
+            });
+            const root = container.querySelector('.sanitized-content');
+            const table = root?.querySelector('table');
+            expect(table?.querySelectorAll('th')).toHaveLength(12);
+            const wrapper = table?.parentElement;
+            // Contained: the table sits in the scroll wrapper, the wrapper in the
+            // reading column — never a sibling the column has to stretch around.
+            expect(wrapper?.classList.contains('table-scroll')).toBe(true);
+            expect(wrapper?.parentElement).toBe(root);
+            expect(wrapper?.getAttribute('tabindex')).toBe('0');
+            expect(wrapper?.getAttribute('role')).toBe('region');
+            expect(wrapper?.getAttribute('aria-label')).toBe('Scrollable table');
+            expect(root?.textContent).toContain('after');
+        } finally {
+            vi.restoreAllMocks();
+        }
+    });
+
+    it('adds no Tab stop or region to a table that fits the column', () => {
+        stubTableLayout(400, 600);
+        try {
+            const { container } = render(SanitizedHtml, {
+                props: { html: '<table><tr><td>narrow</td></tr></table>' },
+            });
+            const wrapper = container.querySelector('.table-scroll');
+            expect(wrapper).not.toBeNull();
+            expect(wrapper?.hasAttribute('tabindex')).toBe(false);
+            expect(wrapper?.hasAttribute('role')).toBe(false);
+            expect(wrapper?.hasAttribute('aria-label')).toBe(false);
+        } finally {
+            vi.restoreAllMocks();
+        }
     });
 
     it('names a captioned table scroll region by its caption', () => {
+        stubTableLayout(1200, 600);
+        try {
+            const { container } = render(SanitizedHtml, {
+                props: {
+                    html: '<table><caption>Results by year</caption><tr><td>1</td></tr></table>',
+                },
+            });
+            const wrapper = container.querySelector('.table-scroll');
+            expect(wrapper?.getAttribute('aria-label')).toBe('Results by year');
+        } finally {
+            vi.restoreAllMocks();
+        }
+    });
+
+    it('boxes only the outer table of a nested layout table', () => {
         const { container } = render(SanitizedHtml, {
             props: {
-                html: '<table><caption>Results by year</caption><tr><td>1</td></tr></table>',
+                html: '<table><tr><td><table><tr><td>inner</td></tr></table></td></tr></table>',
             },
         });
-        const wrapper = container.querySelector('.table-scroll');
-        expect(wrapper?.getAttribute('aria-label')).toBe('Results by year');
+        expect(container.querySelectorAll('table')).toHaveLength(2);
+        expect(container.querySelectorAll('.table-scroll')).toHaveLength(1);
+        expect(container.querySelector('.table-scroll > table table')).not.toBeNull();
     });
 
     it('scrolls footnote links within the reader, with no opener call', async () => {
@@ -216,9 +258,8 @@ describe('SanitizedHtml', () => {
             });
             const ref = container.querySelector('a[href="#user-content-fn1"]');
             const note = container.querySelector('li');
-            expect(ref).not.toBeNull();
             if (ref === null || note === null) {
-                return;
+                throw new Error('fixture footnote missing');
             }
             await fireEvent.click(ref);
             expect(scrolled).toEqual([note]);
@@ -228,7 +269,7 @@ describe('SanitizedHtml', () => {
             // The back-link jumps home the same way, and the highlight moves.
             const back = container.querySelector('a[href="#user-content-fnref1"]');
             if (back === null) {
-                return;
+                throw new Error('fixture back-link missing');
             }
             await fireEvent.click(back);
             expect(scrolled[1]?.id).toBe('user-content-fnref1');
@@ -348,7 +389,7 @@ describe('SanitizedHtml body media', () => {
         expect(observer?.options?.rootMargin).toBe(LAZY_IMAGE_MARGIN);
         const first = images[0];
         if (observer === undefined || first === undefined) {
-            return;
+            throw new Error('observer or fixture image missing');
         }
         observer.enter([first]);
         await flush();
@@ -395,7 +436,32 @@ describe('SanitizedHtml body media', () => {
             },
         });
         const img = container.querySelector('img');
-        expect(img?.style.aspectRatio).toBe('640 / 360');
+        // `auto` first: the reserved ratio yields to the file's own once loaded.
+        expect(img?.style.aspectRatio).toBe('auto 640 / 360');
+    });
+
+    it('announces a zoomable image as a button that opens a dialog', () => {
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html:
+                    '<p><img src="data:image/png;base64,AAAA" alt="A chart"></p>' +
+                    '<p><img src="data:image/png;base64,AAAA" alt=""></p>',
+            },
+        });
+        const [described, unnamed] = Array.from(container.querySelectorAll('img'));
+        if (described === undefined || unnamed === undefined) {
+            throw new Error('fixture images missing');
+        }
+        for (const img of [described, unnamed]) {
+            expect(img.getAttribute('role')).toBe('button');
+            expect(img.getAttribute('aria-haspopup')).toBe('dialog');
+        }
+        // The alt stays the name; the hint says what activating it does.
+        expect(described.getAttribute('alt')).toBe('A chart');
+        expect(described.getAttribute('aria-description')).toBe('Open image larger');
+        expect(described.hasAttribute('aria-label')).toBe(false);
+        // No alt: the hint is the name, so the button is never unnamed.
+        expect(unnamed.getAttribute('aria-label')).toBe('Open image larger');
     });
 
     it('opens a loaded image in a lightbox that Escape closes, restoring focus', async () => {
@@ -403,24 +469,23 @@ describe('SanitizedHtml body media', () => {
             props: { html: '<p><img src="data:image/png;base64,AAAA" alt="A chart"></p>' },
         });
         const img = container.querySelector('img');
-        expect(img?.getAttribute('tabindex')).toBe('0');
         if (img === null) {
-            return;
+            throw new Error('fixture image missing');
         }
+        expect(img.getAttribute('tabindex')).toBe('0');
         img.focus();
         await fireEvent.keyDown(img, { key: 'Enter' });
         const dialog = document.querySelector('[data-testid="reader-lightbox"] [role="dialog"]');
-        expect(dialog).not.toBeNull();
-        expect(dialog?.getAttribute('aria-label')).toBe('A chart');
+        if (dialog === null) {
+            throw new Error('lightbox did not open');
+        }
+        expect(dialog.getAttribute('aria-label')).toBe('A chart');
         expect(document.activeElement).toBe(dialog);
 
         // App shortcuts underneath never see the lightbox's keys.
         const shortcut = vi.fn();
         window.addEventListener('keydown', shortcut);
         try {
-            if (dialog === null) {
-                return;
-            }
             await fireEvent.keyDown(dialog, { key: 'j' });
             await fireEvent.keyDown(dialog, { key: 'Escape' });
         } finally {
@@ -431,20 +496,48 @@ describe('SanitizedHtml body media', () => {
         expect(document.activeElement).toBe(img);
     });
 
+    it('makes the page behind an open lightbox inert, and restores it on close', async () => {
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<p><img src="data:image/png;base64,AAAA" alt="A chart"></p>' },
+        });
+        const content = container.querySelector('.sanitized-content');
+        const img = container.querySelector('img');
+        if (content === null || img === null) {
+            throw new Error('fixture missing');
+        }
+        img.focus(); // a real click focuses the (tabindex=0) image first
+        await fireEvent.click(img);
+        const lightbox = document.querySelector('[data-testid="reader-lightbox"]');
+        if (lightbox === null) {
+            throw new Error('lightbox did not open');
+        }
+        expect(lightbox.getAttribute('inert')).toBeNull();
+        expect(lightbox.querySelector('[role="dialog"]')?.getAttribute('aria-modal')).toBe('true');
+        expect(content.hasAttribute('inert')).toBe(true);
+
+        const close = document.querySelector<HTMLButtonElement>('.lightbox-close');
+        if (close === null) {
+            throw new Error('close button missing');
+        }
+        await fireEvent.click(close);
+        expect(content.hasAttribute('inert')).toBe(false);
+        expect(document.activeElement).toBe(img);
+    });
+
     it('opens on click and closes from the close button', async () => {
         const { container } = render(SanitizedHtml, {
             props: { html: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' },
         });
         const img = container.querySelector('img');
         if (img === null) {
-            return;
+            throw new Error('fixture image missing');
         }
         await fireEvent.click(img);
         const dialog = document.querySelector('[role="dialog"]');
         expect(dialog?.getAttribute('aria-label')).toBe('Image viewer');
         const close = document.querySelector<HTMLButtonElement>('.lightbox-close');
         if (close === null) {
-            return;
+            throw new Error('close button missing');
         }
         await fireEvent.click(close);
         expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -459,9 +552,10 @@ describe('SanitizedHtml body media', () => {
         });
         const img = container.querySelector('img');
         if (img === null) {
-            return;
+            throw new Error('fixture image missing');
         }
         expect(img.hasAttribute('tabindex')).toBe(false);
+        expect(img.hasAttribute('role')).toBe(false);
         await fireEvent.click(img);
         expect(document.querySelector('[role="dialog"]')).toBeNull();
         expect(harness.callsFor('plugin:opener|open_url')).toHaveLength(1);

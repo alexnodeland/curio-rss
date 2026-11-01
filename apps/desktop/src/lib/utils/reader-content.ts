@@ -6,8 +6,10 @@
  * component so each rule is unit-testable on its own.
  *
  * Nothing here parses or trusts feed markup: every function runs on the
- * DOMPurify output, and the only attributes written are the reader's own
- * (`data-media-*`, `tabindex`, the table wrapper's `role`/`aria-label`).
+ * DOMPurify output (which drops author `data-*`), and the only attributes
+ * written are the reader's own (`data-media-*`, `data-scroll-label`, and the
+ * `tabindex`/`role`/`aria-*` that make a scrolling table or a zoomable image
+ * reachable).
  */
 import { loadCachedImage } from '$lib/utils/images';
 
@@ -22,31 +24,89 @@ export const TABLE_SCROLL_CLASS = 'table-scroll';
  */
 export const LAZY_IMAGE_MARGIN = '800px 0px';
 
+/** Where a table wrapper keeps the name it takes on while it overflows. */
+const SCROLL_LABEL_ATTR = 'data-scroll-label';
+
 /**
- * Wraps every `<table>` under `root` in a focusable horizontal-scroll
+ * Wraps every top-level `<table>` under `root` in a horizontal-scroll
  * container, so a wide table scrolls inside the reading column instead of
  * blowing it out. Runs on the sanitized *detached* tree before it is
  * rendered (the wrapper must exist before `{@html}` takes ownership of the
- * nodes). `label` names the scroll region for assistive tech; a table with
- * a caption is named by that instead. Idempotent: a table already in a
+ * nodes). A table nested in another (newsletter layout tables) rides its
+ * outer table's wrapper instead of boxing itself again. `label` is the
+ * scroll region's name for assistive tech (a caption names it instead);
+ * it is applied, with a Tab stop, only while the table actually overflows
+ * — see {@link watchTableOverflow}. Idempotent: a table already in a
  * wrapper is left alone.
  */
 export function wrapTables(root: ParentNode, label: string): void {
     for (const table of root.querySelectorAll('table')) {
+        // (A table at the top of a fragment has no parent element.)
         const parent = table.parentElement;
-        if (parent?.classList.contains(TABLE_SCROLL_CLASS)) {
+        if (
+            parent !== null &&
+            (parent.classList.contains(TABLE_SCROLL_CLASS) || parent.closest('table') !== null)
+        ) {
             continue;
         }
         const wrapper = table.ownerDocument.createElement('div');
         wrapper.className = TABLE_SCROLL_CLASS;
-        wrapper.setAttribute('role', 'group');
-        // Keyboard users scroll an overflowing region by focusing it.
-        wrapper.setAttribute('tabindex', '0');
         const caption = table.caption?.textContent?.trim() ?? '';
-        wrapper.setAttribute('aria-label', caption.length > 0 ? caption : label);
+        wrapper.setAttribute(SCROLL_LABEL_ATTR, caption.length > 0 ? caption : label);
         table.replaceWith(wrapper);
         wrapper.append(table);
     }
+}
+
+/**
+ * Makes a table wrapper a named, focusable scroll region exactly while its
+ * table is wider than the column (keyboard users scroll a region by
+ * focusing it); a table that fits is plain content with no extra Tab stop.
+ */
+export function syncTableOverflow(wrapper: Element): void {
+    if (wrapper.scrollWidth > wrapper.clientWidth) {
+        wrapper.setAttribute('role', 'region');
+        wrapper.setAttribute('tabindex', '0');
+        wrapper.setAttribute('aria-label', wrapper.getAttribute(SCROLL_LABEL_ATTR) ?? '');
+    } else {
+        wrapper.removeAttribute('role');
+        wrapper.removeAttribute('tabindex');
+        wrapper.removeAttribute('aria-label');
+    }
+}
+
+/**
+ * Keeps every table wrapper under `root` in sync with whether it overflows
+ * (see {@link syncTableOverflow}) as the column resizes — window width,
+ * reading width, font size. Checks once when the webview has no
+ * `ResizeObserver`. Returns the disconnect.
+ */
+export function watchTableOverflow(root: ParentNode): () => void {
+    const wrappers = Array.from(root.querySelectorAll(`.${TABLE_SCROLL_CLASS}`));
+    for (const wrapper of wrappers) {
+        syncTableOverflow(wrapper);
+    }
+    if (typeof ResizeObserver === 'undefined' || wrappers.length === 0) {
+        return () => undefined;
+    }
+    const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+            const wrapper = entry.target.closest(`.${TABLE_SCROLL_CLASS}`);
+            if (wrapper !== null) {
+                syncTableOverflow(wrapper);
+            }
+        }
+    });
+    for (const wrapper of wrappers) {
+        observer.observe(wrapper);
+        // The wrapper keeps its width when only the table grows (web fonts
+        // settling, images inside cells), so watch the table too.
+        const table = wrapper.firstElementChild;
+        if (table !== null) {
+            observer.observe(table);
+        }
+    }
+    return () => observer.disconnect();
 }
 
 /** The nearest scrolling ancestor of `node` — the lazy-load observer root. */
@@ -70,7 +130,38 @@ export function reserveAspectRatio(img: HTMLImageElement): void {
     const width = Number.parseInt(img.getAttribute('width') ?? '', 10);
     const height = Number.parseInt(img.getAttribute('height') ?? '', 10);
     if (width > 0 && height > 0) {
-        img.style.aspectRatio = `${width} / ${height}`;
+        // `auto` holds the box while nothing has loaded, then yields to the
+        // file's natural ratio, so declared dimensions that disagree with
+        // the real image never stretch it (what the UA's own width/height
+        // mapping does).
+        img.style.aspectRatio = `auto ${width} / ${height}`;
+    }
+}
+
+/** The attributes that make a loaded body image a lightbox trigger. */
+const ZOOM_ATTRS = ['tabindex', 'role', 'aria-haspopup', 'aria-label', 'aria-description'];
+
+/** Removes what {@link makeZoomable} added. */
+function clearZoomable(img: HTMLImageElement): void {
+    for (const name of ZOOM_ATTRS) {
+        img.removeAttribute(name);
+    }
+}
+
+/**
+ * Exposes a loaded image (outside a link) as what it is to keyboard and
+ * screen-reader users: a button that opens a dialog. The alt text stays
+ * its name and `hint` says what activating it does; an image without alt
+ * text is named by `hint` alone.
+ */
+function makeZoomable(img: HTMLImageElement, hint: string): void {
+    img.setAttribute('tabindex', '0');
+    img.setAttribute('role', 'button');
+    img.setAttribute('aria-haspopup', 'dialog');
+    if ((img.getAttribute('alt') ?? '').trim().length > 0) {
+        img.setAttribute('aria-description', hint);
+    } else {
+        img.setAttribute('aria-label', hint);
     }
 }
 
@@ -78,7 +169,7 @@ export function reserveAspectRatio(img: HTMLImageElement): void {
 export function markImageFailed(img: HTMLImageElement): void {
     img.removeAttribute('data-media-pending');
     img.removeAttribute('src');
-    img.removeAttribute('tabindex');
+    clearZoomable(img);
     img.setAttribute('data-media-failed', '');
 }
 
@@ -102,13 +193,13 @@ export interface MountedImages {
     dispose(): void;
 }
 
-function showLoaded(img: HTMLImageElement, src: string): void {
+function showLoaded(img: HTMLImageElement, src: string, zoomHint: string): void {
     img.setAttribute('src', src);
     img.removeAttribute('data-media-pending');
     // A loaded image (outside a link) opens the lightbox — reachable by
     // keyboard too.
     if (img.closest('a[href]') === null) {
-        img.setAttribute('tabindex', '0');
+        makeZoomable(img, zoomHint);
     }
 }
 
@@ -118,7 +209,7 @@ function resetImage(img: HTMLImageElement): string | null {
     img.removeAttribute('sizes');
     img.removeAttribute('data-media-failed');
     img.removeAttribute('data-media-pending');
-    img.removeAttribute('tabindex');
+    clearZoomable(img);
     reserveAspectRatio(img);
     const original = img.dataset.origSrc ?? img.getAttribute('src') ?? '';
     img.dataset.origSrc = original;
@@ -136,6 +227,7 @@ function resetImage(img: HTMLImageElement): string | null {
 function routeImages(
     root: HTMLElement,
     prefetch: boolean,
+    zoomHint: string,
 ): { pending: Map<Element, string>; offCount: number } {
     // Strip srcset on any <picture><source>: responsive candidates bypass
     // the src-only media pipeline entirely — with media on the CSP blocks
@@ -150,7 +242,7 @@ function routeImages(
         if (remote === null) {
             const local = img.getAttribute('src');
             if (local !== null) {
-                showLoaded(img, local);
+                showLoaded(img, local, zoomHint);
             }
             continue;
         }
@@ -212,11 +304,16 @@ function loadNearViewport(
  * {@link LAZY_IMAGE_MARGIN} of the reader's scroll viewport; a failed
  * resolution collapses it (`data-media-failed`) instead of leaving an empty,
  * shadowed box. Without `IntersectionObserver` (very old webviews) images
- * resolve eagerly.
+ * resolve eagerly. `zoomHint` is the localized description a loaded,
+ * zoomable image carries ("open image larger").
  */
-export function mountBodyImages(root: HTMLElement, prefetch: boolean): MountedImages {
+export function mountBodyImages(
+    root: HTMLElement,
+    prefetch: boolean,
+    zoomHint: string,
+): MountedImages {
     let disposed = false;
-    const { pending, offCount } = routeImages(root, prefetch);
+    const { pending, offCount } = routeImages(root, prefetch, zoomHint);
 
     function load(img: HTMLImageElement, url: string): void {
         void loadCachedImage(url).then((result) => {
@@ -224,7 +321,7 @@ export function mountBodyImages(root: HTMLElement, prefetch: boolean): MountedIm
                 return;
             }
             if (result.status === 'ok') {
-                showLoaded(img, result.data);
+                showLoaded(img, result.data, zoomHint);
             } else {
                 markImageFailed(img);
             }

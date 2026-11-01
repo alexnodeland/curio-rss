@@ -76,6 +76,7 @@ export const en = {
     'reader.imagesOff.enable': 'Turn on',
     'reader.tableScroll': 'Scrollable table',
     'reader.imageViewer': 'Image viewer',
+    'reader.openImage': 'Open image larger',
     'reader.missing': 'This article no longer exists',
     'reader.toolbar': 'Article actions',
     'reader.action.markRead': 'Mark read',

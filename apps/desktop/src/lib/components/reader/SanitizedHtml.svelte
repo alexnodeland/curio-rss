@@ -61,7 +61,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 
 <script lang="ts">
 import Icon from '$components/common/Icon.svelte';
-import { trapFocus } from '$lib/actions/trap-focus';
+import { modalLayer } from '$lib/actions/modal-layer';
 import { t } from '$lib/i18n';
 import { prefsStore } from '$lib/state/prefs.svelte';
 import { openExternal } from '$lib/utils/external';
@@ -69,6 +69,7 @@ import {
     isZoomable,
     mountBodyImages,
     scrollToFragment,
+    watchTableOverflow,
     wrapTables,
 } from '$lib/utils/reader-content';
 
@@ -115,11 +116,22 @@ $effect(() => {
     if (root === undefined) {
         return;
     }
-    const mounted = mountBodyImages(root, on);
+    const mounted = mountBodyImages(root, on, t('reader.openImage'));
     offImageCount = mounted.offCount;
     return () => {
         mounted.dispose();
     };
+});
+
+// A table wrapper is a focusable, named scroll region only while its table
+// overflows the column — see `watchTableOverflow`.
+$effect(() => {
+    void clean;
+    const root = contentEl;
+    if (root === undefined) {
+        return;
+    }
+    return watchTableOverflow(root);
 });
 
 // A new article closes any lightbox left open on the previous one.
@@ -244,7 +256,9 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
 
 {#if zoomed !== null}
     <!-- The backdrop click is a pointer convenience; Escape and the close
-         button are the keyboard paths, and focus is trapped in the dialog. -->
+         button are the keyboard paths. `modalLayer` traps focus in the
+         dialog and makes the app frame behind it inert (aria-modal's
+         promise). -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="lightbox" data-testid="reader-lightbox" onclick={closeLightbox}>
         <div
@@ -253,7 +267,7 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
             aria-modal="true"
             aria-label={zoomed.alt.length > 0 ? zoomed.alt : t('reader.imageViewer')}
             tabindex="-1"
-            use:trapFocus
+            use:modalLayer
             use:lightboxKeys
         >
             <img class="lightbox-image" src={zoomed.src} alt={zoomed.alt} />
@@ -269,6 +283,15 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
        line-height on .reader-article (from the typography controls); this
        governs vertical rhythm, emphasis, and the block elements. */
     .sanitized-content {
+        /* The body's own tints, mixed from the reading ink over a
+           transparent ground. The reading themes (sepia, paper) repaint
+           --ink but not the :root surface tokens, which follow the *app*
+           theme — so a fill built from --surface-* would be a dark box
+           under sepia ink on a dark app theme. These follow whichever
+           ground the reader shows. */
+        --reader-tint: color-mix(in srgb, transparent, var(--ink) 5%);
+        --reader-rule: color-mix(in srgb, transparent, var(--ink) 14%);
+
         color: var(--ink);
         overflow-wrap: break-word;
         font-kerning: normal;
@@ -388,10 +411,12 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
 
     /* Waiting for the lazy loader: a quiet placeholder in the reserved box
        (the aspect ratio comes from the image's width/height), with no
-       shadow and no alt text bleeding through an empty <img>. */
+       shadow and no alt text bleeding through an empty <img>. Inline-block
+       keeps an inline image (an icon in a sentence) in its line, so
+       nothing reflows when it loads. */
     .sanitized-content :global(img[data-media-pending]) {
-        display: block;
-        background: var(--surface-inset);
+        display: inline-block;
+        background: var(--reader-tint);
         box-shadow: none;
         color: transparent;
     }
@@ -411,25 +436,33 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
     }
 
     /* A failed image takes its whole figure with it: a caption describing
-       an image that will never appear is an artefact, not content. (Only
-       when no other image in the figure is still showing.) */
+       an image that will never appear is an artefact, not content. Only
+       when no other image in the figure is still showing, and only for a
+       figure of images and a caption — one that also holds code, a quote
+       or prose keeps that content. */
     .sanitized-content
-        :global(figure:has(img[data-media-failed]):not(:has(img:not([data-media-failed])))) {
+        :global(
+            figure:has(img[data-media-failed]):not(:has(img:not([data-media-failed]))):not(
+                    :has(> :not(img, picture, a, figcaption))
+                )
+        ) {
         display: none;
     }
 
-    /* Wide tables scroll inside the column instead of blowing it out. */
+    /* Wide tables scroll inside the column instead of blowing it out. The
+       box hugs a narrow table rather than stretching it to the column, and
+       stays transparent — hairlines and a header tint from the reading ink,
+       so it reads on every reading theme. */
     .sanitized-content :global(.table-scroll) {
-        margin: 1.6em 0;
+        width: fit-content;
         max-width: 100%;
+        margin: 1.6em 0;
         overflow-x: auto;
-        border: 1px solid var(--hairline);
+        border: 1px solid var(--reader-rule);
         border-radius: var(--radius-lg);
-        background: var(--surface-raised);
     }
 
     .sanitized-content :global(table) {
-        min-width: 100%;
         border-collapse: collapse;
         font-family: var(--font-family);
         font-size: 0.84em;
@@ -437,16 +470,22 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         font-variant-numeric: lining-nums tabular-nums;
     }
 
+    /* A table nested in a cell (newsletter layout) keeps its outer
+       table's size instead of shrinking again at every level. */
+    .sanitized-content :global(table table) {
+        font-size: 1em;
+    }
+
     .sanitized-content :global(th),
     .sanitized-content :global(td) {
         padding: 0.55em 0.85em;
-        border-bottom: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--reader-rule);
         text-align: start;
         vertical-align: top;
     }
 
     .sanitized-content :global(th) {
-        background: var(--surface-inset);
+        background: var(--reader-tint);
         color: var(--fg);
         font-weight: 600;
         white-space: nowrap;

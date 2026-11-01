@@ -6,10 +6,12 @@
 import { resetImageCache } from '$lib/utils/images';
 import {
     isZoomable,
+    markImageFailed,
     mountBodyImages,
     reserveAspectRatio,
     scrollParent,
     scrollToFragment,
+    watchTableOverflow,
     wrapTables,
 } from '$lib/utils/reader-content';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +45,93 @@ describe('reader-content helpers', () => {
         expect(root.querySelectorAll('.table-scroll .table-scroll')).toHaveLength(0);
     });
 
+    it('wraps a table at the top of a detached fragment', () => {
+        const template = document.createElement('template');
+        template.innerHTML = '<table><tr><td>a</td></tr></table>';
+        wrapTables(template.content, 'Scrollable table');
+        expect(template.content.firstElementChild?.classList.contains('table-scroll')).toBe(true);
+    });
+
+    it('re-checks overflow as the column resizes, and disconnects', () => {
+        const observers: FakeResizeObserver[] = [];
+        class FakeResizeObserver {
+            readonly observed: Element[] = [];
+            disconnected = false;
+            constructor(readonly callback: ResizeObserverCallback) {
+                observers.push(this);
+            }
+            observe(target: Element): void {
+                this.observed.push(target);
+            }
+            unobserve(): void {}
+            disconnect(): void {
+                this.disconnected = true;
+            }
+        }
+        vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+        const root = fragment('<table><tr><td>a</td></tr></table>');
+        wrapTables(root, 'Scrollable table');
+        const wrapper = root.querySelector<HTMLElement>('.table-scroll');
+        const table = root.querySelector('table');
+        if (wrapper === null || table === null) {
+            throw new Error('fixture');
+        }
+        let scrollWidth = 300;
+        Object.defineProperty(wrapper, 'scrollWidth', { get: () => scrollWidth });
+        Object.defineProperty(wrapper, 'clientWidth', { get: () => 500 });
+
+        const disconnect = watchTableOverflow(root);
+        expect(wrapper.hasAttribute('tabindex')).toBe(false);
+        const [observer] = observers;
+        if (observer === undefined) {
+            throw new Error('no ResizeObserver created');
+        }
+        expect(observer.observed).toEqual([wrapper, table]);
+
+        // The table outgrows the column: a resize on the table (not the
+        // wrapper) promotes the wrapper to a named scroll region.
+        scrollWidth = 900;
+        observer.callback(
+            [{ target: table } as unknown as ResizeObserverEntry],
+            observer as unknown as ResizeObserver,
+        );
+        expect(wrapper.getAttribute('tabindex')).toBe('0');
+        expect(wrapper.getAttribute('role')).toBe('region');
+        expect(wrapper.getAttribute('aria-label')).toBe('Scrollable table');
+
+        disconnect();
+        expect(observer.disconnected).toBe(true);
+    });
+
+    it('creates no ResizeObserver for a body without tables', () => {
+        const created = vi.fn();
+        vi.stubGlobal(
+            'ResizeObserver',
+            class {
+                constructor() {
+                    created();
+                }
+            },
+        );
+        watchTableOverflow(fragment('<p>no tables</p>'))();
+        expect(created).not.toHaveBeenCalled();
+    });
+
+    it('drops the zoom affordances from an image that fails', () => {
+        const root = fragment('<img src="data:image/png;base64,AA" alt="x">');
+        const mounted = mountBodyImages(root, true, 'Open image larger');
+        const img = root.querySelector('img');
+        if (img === null) {
+            throw new Error('fixture');
+        }
+        expect(img.getAttribute('role')).toBe('button');
+        markImageFailed(img);
+        for (const name of ['tabindex', 'role', 'aria-haspopup', 'aria-description']) {
+            expect(img.hasAttribute(name), name).toBe(false);
+        }
+        mounted.dispose();
+    });
+
     it('finds the nearest scrolling ancestor, or none', () => {
         const root = fragment('<div class="scroller"><div class="inner"><p>x</p></div></div>');
         const scroller = root.querySelector<HTMLElement>('.scroller');
@@ -64,7 +153,7 @@ describe('reader-content helpers', () => {
             throw new Error('fixture');
         }
         reserveAspectRatio(good);
-        expect(good.style.aspectRatio).toBe('4 / 3');
+        expect(good.style.aspectRatio).toBe('auto 4 / 3');
         for (const img of bad) {
             reserveAspectRatio(img);
             expect(img.style.aspectRatio).toBe('');
@@ -91,7 +180,7 @@ describe('reader-content helpers', () => {
                 }),
         });
         const root = fragment('<img src="https://x.test/slow.png" alt="slow">');
-        const mounted = mountBodyImages(root, true);
+        const mounted = mountBodyImages(root, true, 'Open image larger');
         mounted.dispose();
         release('/cache/slow.png');
         await new Promise((done) => setTimeout(done, 0));
@@ -111,7 +200,7 @@ describe('reader-content helpers', () => {
             },
         );
         const root = fragment('<img src="data:image/png;base64,AA" alt="inline">');
-        const mounted = mountBodyImages(root, true);
+        const mounted = mountBodyImages(root, true, 'Open image larger');
         expect(created).not.toHaveBeenCalled();
         expect(mounted.offCount).toBe(0);
         mounted.dispose();

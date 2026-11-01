@@ -71,6 +71,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'reader.imagesOff.enable': 'Activer',
     'reader.tableScroll': 'Tableau défilant',
     'reader.imageViewer': 'Visionneuse d’images',
+    'reader.openImage': 'Ouvrir l’image en grand',
     'reader.missing': 'Cet article n’existe plus',
     'reader.toolbar': 'Actions sur l’article',
     'reader.action.markRead': 'Marquer comme lu',

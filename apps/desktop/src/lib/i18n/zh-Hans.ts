@@ -70,6 +70,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'reader.imagesOff.enable': '开启',
     'reader.tableScroll': '可滚动表格',
     'reader.imageViewer': '图片查看器',
+    'reader.openImage': '放大查看图片',
     'reader.missing': '这篇文章已不存在',
     'reader.toolbar': '文章操作',
     'reader.action.markRead': '标为已读',

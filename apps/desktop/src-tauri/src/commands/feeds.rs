@@ -554,22 +554,34 @@ mod tests {
     }
 
     /// A homepage that resolves to a feed already subscribed is refused
-    /// with a code the UI branches on, not an internal UNIQUE failure.
+    /// with a code the UI branches on, not an internal UNIQUE failure. This
+    /// is the case the frontend's own `get_feed_by_url(typed)` pre-check
+    /// cannot see: the typed homepage is not subscribed, the feed it
+    /// declares is — so the resolved URL is what gets deduped.
     #[tokio::test]
     async fn subscribe_refuses_a_feed_already_subscribed_under_its_resolved_url() {
         let server = MockServer::start().await;
+        let page = format!(
+            r#"<link rel="alternate" type="application/rss+xml" href="{}/feed.xml">"#,
+            server.uri()
+        );
+        serve(&server, "/", page).await;
         serve(&server, "/feed.xml", RSS.to_owned()).await;
         let (_dir, core) = temp_core_trusting_localhost();
+        let homepage = format!("{}/", server.uri());
         let feed_url = format!("{}/feed.xml", server.uri());
         subscribe_impl(&core, new_feed(feed_url.clone(), false))
             .await
             .unwrap();
+        assert!(get_feed_by_url_impl(&core, &homepage).unwrap().is_none());
 
-        let error = subscribe_impl(&core, new_feed(feed_url, true))
-            .await
-            .unwrap_err();
-        assert_eq!(error.kind, ErrorKind::User);
-        assert_eq!(error.code, ErrorCode::AlreadySubscribed);
+        for typed in [homepage, feed_url] {
+            let error = subscribe_impl(&core, new_feed(typed.clone(), true))
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, ErrorKind::User, "{typed}");
+            assert_eq!(error.code, ErrorCode::AlreadySubscribed, "{typed}");
+        }
         assert_eq!(list_feeds_impl(&core).unwrap().len(), 1);
     }
 

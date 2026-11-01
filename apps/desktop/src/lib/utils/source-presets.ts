@@ -63,9 +63,11 @@ const GITHUB_RESERVED = new Set([
     'orgs',
     'pricing',
     'pulls',
+    'search',
     'settings',
     'sponsors',
     'topics',
+    'trending',
 ]);
 
 /** Hosts whose `/@handle` path is NOT a Mastodon profile (they reuse the shape). */

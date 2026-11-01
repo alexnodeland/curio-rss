@@ -103,8 +103,9 @@ pub struct DiscoverOptions {
     pub deadline: Option<Duration>,
 }
 
-/// Why discovery could not run (finding *no* feed is not an error — it is
-/// an empty [`Discovery::feeds`]).
+/// Why discovery could not run, or why [`resolve`] could not settle on a
+/// feed. Only [`discover`] treats finding *no* feed as success (an empty
+/// [`Discovery::feeds`]); [`resolve`] reports it as [`DiscoverError::NoFeed`].
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoverError {
     /// The input was blank.

@@ -115,6 +115,8 @@ describe('detectSource — GitHub', () => {
         expect(detectSource('https://github.com/')).toBeNull();
         expect(detectSource('https://github.com/rust-lang')).toBeNull();
         expect(detectSource('https://github.com/topics/rust')).toBeNull();
+        expect(detectSource('https://github.com/trending/rust')).toBeNull();
+        expect(detectSource('https://github.com/search/advanced')).toBeNull();
         expect(detectSource('https://github.com/orgs/rust-lang')).toBeNull();
         expect(detectSource('https://github.com/a/b/issues')).toBeNull();
         expect(detectSource('https://github.com/a/b/blob/main/README.md')).toBeNull();

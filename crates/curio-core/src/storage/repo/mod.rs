@@ -24,13 +24,14 @@ mod settings;
 mod state;
 mod tags;
 
+pub use fetch_log::FETCH_LOG_KEEP;
 pub(crate) use settings::SettingsTx;
 
-use curio_types::EventEnvelope;
+use curio_types::{EventEnvelope, Timestamp};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use super::StorageError;
-use crate::model::{ArticleId, FeedId};
+use crate::model::{ArticleId, FeedId, FeedStatus};
 
 /// Begins a write-intent transaction on the writer connection.
 ///
@@ -106,6 +107,29 @@ impl Default for ListArticles {
     }
 }
 
+/// The scheduling state a settled fetch leaves on its feed, written in the
+/// same transaction as the attempt's `fetch_log` row (see
+/// [`Storage::settle_fetch`](super::Storage::settle_fetch)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeedSchedule {
+    /// Failed attempts in a row after this one.
+    pub consecutive_failures: u32,
+    /// When a sweep may fetch the feed again; `None` = next sweep.
+    pub next_attempt_at: Option<Timestamp>,
+    /// When the run of failures this attempt extends began; `None` for
+    /// a success.
+    pub failing_since: Option<Timestamp>,
+    /// A lifecycle change the attempt caused: [`FeedStatus::Paused`]
+    /// (auto-pause, stamped `auto_paused_at`), [`FeedStatus::Dead`] (a
+    /// confirmed 410) or [`FeedStatus::Active`] (a success ended an
+    /// automatic pause). Any change clears an earlier `auto_paused_at`
+    /// unless it is itself an auto-pause; `None` leaves the status alone.
+    pub status: Option<FeedStatus>,
+    /// The feed's own refresh hint in seconds to keep on the row (see
+    /// [`Feed::refresh_hint_secs`](crate::model::Feed::refresh_hint_secs)).
+    pub refresh_hint_secs: Option<u32>,
+}
+
 /// A staged, not-yet-emitted event intent (write-ahead row for the JSONL
 /// append).
 #[derive(Debug, Clone, PartialEq)]
@@ -130,7 +154,9 @@ const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modif
                           AND status IN ('ok', 'not_modified') ORDER BY id DESC LIMIT 1) \
                           AS last_ok_at, \
                          (SELECT CASE WHEN status = 'error' THEN error_kind END FROM fetch_log \
-                          WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error_kind";
+                          WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error_kind, \
+                         consecutive_failures, next_attempt_at, refresh_interval_min, failing_since, \
+                         auto_paused_at, refresh_hint_secs";
 
 const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url, author, \
                             published_at, content_html, content_text, lang, word_count, \

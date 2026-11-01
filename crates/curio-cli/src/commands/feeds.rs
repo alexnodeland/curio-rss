@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use anyhow::Context as _;
 use curio_core::RefreshOutcome;
 use curio_core::feeds::{DiscoverError, DiscoverOptions, Resolution, normalize_input};
-use curio_core::model::{FetchErrorKind, NewFeed};
+use curio_core::model::{FeedStatus, FetchErrorKind, NewFeed};
 use serde::Serialize;
 
 use crate::app::App;
@@ -23,8 +23,29 @@ pub(crate) fn run(app: &mut App, command: FeedCommand) -> anyhow::Result<ExitCod
         } => add(app, &url, tags, allow_private_network, no_validate),
         FeedCommand::List => list(app),
         FeedCommand::Rm { feed } => remove(app, &feed),
+        FeedCommand::Pause { feed } => set_status(app, &feed, FeedStatus::Paused),
+        FeedCommand::Resume { feed } => set_status(app, &feed, FeedStatus::Active),
         FeedCommand::FullText { feed, mode } => full_text(app, &feed, mode.as_bool()),
     }
+}
+
+/// `curio feed pause|resume <feed>` — sets the feed's lifecycle status.
+/// Resuming (or reactivating a dead feed) also clears its failure run
+/// and backoff, so the next `curio fetch` fetches it.
+fn set_status(app: &App, reference: &str, status: FeedStatus) -> anyhow::Result<ExitCode> {
+    let feed = resolve::feed_by_ref(&app.core, reference)?;
+    app.core.set_feed_status(feed.id, status)?;
+    let feed = app.core.get_feed(feed.id)?.unwrap_or(feed);
+    if app.json {
+        emit_json(&FeedView::new(&feed))?;
+    } else {
+        let verb = match status {
+            FeedStatus::Paused => "paused",
+            FeedStatus::Active | FeedStatus::Dead => "resumed",
+        };
+        println!("{verb} {}", feed.url);
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// `curio feed full-text <feed> <on|off>` — flips per-feed full-text mode.
@@ -208,7 +229,7 @@ pub(crate) fn fetch(app: &App, reference: Option<&str>) -> anyhow::Result<ExitCo
     if app.json {
         emit_json(&views)?;
     } else if views.is_empty() {
-        println!("no active feeds to fetch");
+        println!("no feeds are due for a refresh");
     } else {
         let mut total_new = 0;
         for view in &views {

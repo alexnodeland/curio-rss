@@ -189,6 +189,30 @@ impl Storage {
         })
     }
 
+    /// Sets (or, with `None`, clears) a feed's own refresh interval in
+    /// minutes. Takes effect from the feed's next attempt.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the feed does not exist.
+    pub fn set_feed_refresh_interval(
+        &self,
+        id: FeedId,
+        minutes: Option<u32>,
+    ) -> Result<(), StorageError> {
+        self.write(move |conn| {
+            let n = conn
+                .prepare_cached(
+                    "UPDATE feeds SET refresh_interval_min = ?2, modified_at = ?3 WHERE id = ?1",
+                )?
+                .execute((id.0, minutes, Timestamp::now().to_string()))?;
+            if n == 0 {
+                return Err(StorageError::NotFound { entity: "feed" });
+            }
+            Ok(())
+        })
+    }
+
     /// Fills in feed metadata learned from a fetch, without clobbering
     /// anything already set (human edits win over parsed values).
     ///
@@ -395,14 +419,29 @@ impl Storage {
 
     /// Sets a feed's lifecycle status (pause, dead-on-410, reactivate).
     ///
+    /// Any explicit status change clears `auto_paused_at` (the user now
+    /// owns the state). Making a feed [`FeedStatus::Active`] — resume,
+    /// reactivate — also forgets its failure run and backoff, so the next
+    /// sweep fetches it.
+    ///
     /// # Errors
     ///
     /// [`StorageError::NotFound`] if the feed does not exist.
     pub fn set_feed_status(&self, id: FeedId, status: FeedStatus) -> Result<(), StorageError> {
         self.write(move |conn| {
-            let n = conn
-                .prepare_cached("UPDATE feeds SET status = ?2, modified_at = ?3 WHERE id = ?1")?
-                .execute((id.0, status.as_str(), Timestamp::now().to_string()))?;
+            let sql = if status == FeedStatus::Active {
+                "UPDATE feeds SET status = ?2, modified_at = ?3, auto_paused_at = NULL, \
+                 consecutive_failures = 0, next_attempt_at = NULL, \
+                 failing_since = NULL WHERE id = ?1"
+            } else {
+                "UPDATE feeds SET status = ?2, modified_at = ?3, auto_paused_at = NULL \
+                 WHERE id = ?1"
+            };
+            let n = conn.prepare_cached(sql)?.execute((
+                id.0,
+                status.as_str(),
+                Timestamp::now().to_string(),
+            ))?;
             if n == 0 {
                 return Err(StorageError::NotFound { entity: "feed" });
             }

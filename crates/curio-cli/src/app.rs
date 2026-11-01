@@ -77,6 +77,7 @@ impl App {
                 fetch: config.fetch_config(),
                 allow_network_fs: allow_network_fs
                     || curio_core::storage::network_fs_override_from_env(),
+                ..CoreOptions::default()
             },
         )
         .with_context(|| format!("opening profile {}", profile.display()))?;

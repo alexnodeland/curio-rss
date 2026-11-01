@@ -38,6 +38,9 @@ pub(crate) struct FeedView {
     pub(crate) allow_private_network: bool,
     pub(crate) added_at: String,
     pub(crate) last_fetched_at: Option<String>,
+    pub(crate) consecutive_failures: u32,
+    pub(crate) next_attempt_at: Option<String>,
+    pub(crate) auto_paused_at: Option<String>,
 }
 
 impl FeedView {
@@ -50,6 +53,9 @@ impl FeedView {
             allow_private_network: feed.allow_private_network,
             added_at: feed.added_at.to_string(),
             last_fetched_at: feed.last_fetched_at.map(|t| t.to_string()),
+            consecutive_failures: feed.consecutive_failures,
+            next_attempt_at: feed.next_attempt_at.map(|t| t.to_string()),
+            auto_paused_at: feed.auto_paused_at.map(|t| t.to_string()),
         }
     }
 

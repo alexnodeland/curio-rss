@@ -262,6 +262,12 @@ pub(super) struct RawFeed {
     last_error: Option<String>,
     last_ok_at: Option<String>,
     last_error_kind: Option<String>,
+    consecutive_failures: u32,
+    next_attempt_at: Option<String>,
+    refresh_interval_min: Option<u32>,
+    failing_since: Option<String>,
+    auto_paused_at: Option<String>,
+    refresh_hint_secs: Option<u32>,
 }
 
 pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
@@ -282,6 +288,12 @@ pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         last_error: row.get(13)?,
         last_ok_at: row.get(14)?,
         last_error_kind: row.get(15)?,
+        consecutive_failures: row.get(16)?,
+        next_attempt_at: row.get(17)?,
+        refresh_interval_min: row.get(18)?,
+        failing_since: row.get(19)?,
+        auto_paused_at: row.get(20)?,
+        refresh_hint_secs: row.get(21)?,
     })
 }
 
@@ -310,6 +322,12 @@ impl RawFeed {
                 message: err.to_string(),
             })?,
             fetch_full_text: self.fetch_full_text,
+            consecutive_failures: self.consecutive_failures,
+            next_attempt_at: parse_opt_ts("feeds.next_attempt_at", self.next_attempt_at)?,
+            refresh_interval_min: self.refresh_interval_min,
+            failing_since: parse_opt_ts("feeds.failing_since", self.failing_since)?,
+            auto_paused_at: parse_opt_ts("feeds.auto_paused_at", self.auto_paused_at)?,
+            refresh_hint_secs: self.refresh_hint_secs,
         })
     }
 }

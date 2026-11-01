@@ -2,9 +2,10 @@
  * The edit-feed modal: the feed URL is visible and copyable; name, site URL,
  * description and folders/tags edit through their commands; the Health
  * section keeps the old feed-health surface (status controls, recent fetches,
- * 403/429 hints, mark-all-read); and unsubscribe stays a two-step confirm.
+ * 403/429/rate-limit hints, the schedule note, mark-all-read); and unsubscribe stays a two-step confirm.
  */
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
+import { formatIntlDateTime } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -271,5 +272,101 @@ describe('EditFeedModal', () => {
         const { getByText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
         await flushIpc();
         expect(getByText(/refused the request \(403\)/)).toBeTruthy();
+    });
+
+    it('explains a 503 with Retry-After as a rate limit too', async () => {
+        harness = harnessFor('active', {
+            recent_fetches: [
+                fetchRecordFixture({
+                    status: 'error',
+                    http_status: 503,
+                    error: 'HTTP 503 — the host is rate-limiting Curio (Retry-After: 120 s)',
+                    error_kind: 'rate_limited',
+                }),
+            ],
+        });
+        const { getByText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(getByText(/The site is rate-limiting requests\./)).toBeTruthy();
+    });
+
+    it('drops the next-attempt note once that time has passed', async () => {
+        // Fake clock (still ticking, so the IPC flush resolves): the modal
+        // stays open past the deadline without the test waiting it out.
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            harness = harnessFor('active', {
+                list_feeds: [
+                    feedFixture({
+                        id: 1,
+                        title: 'Alpha',
+                        consecutive_failures: 1,
+                        next_attempt_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+                    }),
+                ],
+            });
+            const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+            await flushIpc();
+            expect(container.querySelector('.schedule')).not.toBeNull();
+            vi.advanceTimersByTime(9 * 60_000);
+            await flushIpc();
+            expect(container.querySelector('.schedule')).not.toBeNull();
+            vi.advanceTimersByTime(2 * 60_000);
+            await flushIpc();
+            expect(container.querySelector('.schedule')).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('shows when a failing feed is next attempted', async () => {
+        const nextAttempt = new Date(Date.now() + 45 * 60_000);
+        harness = harnessFor('active', {
+            list_feeds: [
+                feedFixture({
+                    id: 1,
+                    title: 'Alpha',
+                    consecutive_failures: 3,
+                    next_attempt_at: nextAttempt.toISOString(),
+                }),
+            ],
+        });
+        const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        const note = container.querySelector('.schedule');
+        expect(note?.textContent).toContain('3 failed fetches in a row — next attempt');
+        expect(note?.textContent).toContain(formatIntlDateTime(nextAttempt));
+    });
+
+    it('explains an automatic pause and resumes with one click', async () => {
+        harness = harnessFor('paused', {
+            list_feeds: [
+                feedFixture({
+                    id: 1,
+                    title: 'Alpha',
+                    status: 'paused',
+                    consecutive_failures: 10,
+                    auto_paused_at: '2026-07-05T22:10:00.000Z',
+                }),
+            ],
+        });
+        const { container, getByText } = render(EditFeedModal, {
+            feedId: 1,
+            onclose: vi.fn(),
+        });
+        await flushIpc();
+        expect(container.querySelector('.schedule')?.textContent).toBe(
+            'Curio paused this feed after 10 failed fetches in a row. Resume to try again.',
+        );
+        await fireEvent.click(getByText('Resume'));
+        await flushIpc();
+        expect(harness.callsFor('set_feed_status')).toEqual([{ feedId: 1, status: 'active' }]);
+    });
+
+    it('says nothing about the schedule of a healthy feed', async () => {
+        harness = harnessFor('active');
+        const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(container.querySelector('.schedule')).toBeNull();
     });
 });

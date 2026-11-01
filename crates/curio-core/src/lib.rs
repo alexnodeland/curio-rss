@@ -44,8 +44,8 @@ pub use curio_types as types;
 pub use handle::{
     BulkSaveOutcome, CoreError, CoreHandle, CoreOptions, DEFAULT_HYDRATE_CONCURRENCY,
     DEFAULT_REFRESH_CONCURRENCY, ImportOutcome, MAX_REJECTED_DETAILS, OpmlImportOutcome,
-    RedditAuthReason, RefreshOptions, RefreshOutcome, SaveOutcome, SavedUrl, SweepProgress,
-    SweepReport,
+    RedditAuthReason, RefreshOptions, RefreshOutcome, RefreshPolicy, SaveOutcome, SavedUrl,
+    SweepProgress, SweepReport,
 };
 pub use import::{
     ImportError, ImportKind, ImportSource, ImportedItem, ParsedImport, RejectReason, Rejected,

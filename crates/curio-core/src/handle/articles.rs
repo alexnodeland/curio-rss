@@ -42,8 +42,8 @@ impl CoreHandle {
     /// article" enrichment. Uses the SAME policed client as refresh (the SSRF
     /// guard applies; the private-network exemption is taken only from the
     /// owning feed's flag, never widened for a manual fetch). Never clobbers
-    /// good content: a non-2xx response, or an empty/shorter extract, leaves
-    /// the article unchanged. DB-local like [`Self::mark_read`] — the events
+    /// good content: any other non-2xx response, or an empty/shorter extract,
+    /// leaves the article unchanged. DB-local like [`Self::mark_read`] — the events
     /// contract has no article-content event, so nothing is staged.
     ///
     /// A **link-less** feed entry (its `source_url` is the feed's own URL)
@@ -59,8 +59,10 @@ impl CoreHandle {
     ///
     /// # Errors
     ///
-    /// [`CoreError::NotFound`] for an unknown article; fetch, content or
-    /// storage errors; [`CoreError::Panicked`] when the extraction panics.
+    /// [`CoreError::NotFound`] for an unknown article;
+    /// [`CoreError::RateLimited`] when the page host answers 429 (or 503
+    /// with `Retry-After`); fetch, content or storage errors;
+    /// [`CoreError::Panicked`] when the extraction panics.
     pub async fn hydrate_article(&self, id: ArticleId) -> Result<Article, CoreError> {
         match self.hydrate_article_until(id, None).await? {
             Some(article) => Ok(article),
@@ -134,6 +136,20 @@ impl CoreHandle {
             return Ok(None);
         };
         let response = response?;
+        if response.is_rate_limited() {
+            // A throttling page host stops the caller (a full-text batch
+            // makes no further request to it).
+            let host = url::Url::parse(&response.final_url)
+                .ok()
+                .and_then(|url| url.host_str().map(ToOwned::to_owned))
+                .unwrap_or_else(|| response.final_url.clone());
+            return Err(CoreError::RateLimited {
+                host,
+                retry_after_secs: response
+                    .retry_after
+                    .map_or(60, |wait| wait.as_secs().max(1)),
+            });
+        }
         // A PDF, image or other non-HTML body has no main content to
         // extract — readability over binary data would only make noise.
         if !response.is_success() || lands_on_feed(&response.final_url) || !response.is_html_page()

@@ -1,6 +1,8 @@
 //! feed-rs wiring: RSS 0.x/1.0/2.0, Atom and JSON Feed → normalized
 //! entries with total dedupe keys.
 
+use std::time::Duration;
+
 use curio_types::Timestamp;
 use feed_rs::model::{Entry, Feed, Link, MediaObject};
 use url::Url;
@@ -21,6 +23,10 @@ pub struct ParsedFeedMeta {
     pub site_url: Option<String>,
     /// Feed self-description.
     pub description: Option<String>,
+    /// How often the feed says it changes: RSS `<ttl>` (minutes), else
+    /// the syndication module's `sy:updatePeriod` / `sy:updateFrequency`.
+    /// A hint the refresh schedule may stretch to, never a command.
+    pub refresh_hint: Option<Duration>,
 }
 
 /// One normalized feed item. `content_html` is **raw source HTML** — it
@@ -124,7 +130,11 @@ fn parse_utf8_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, F
         .build();
     let feed = parser.parse(bytes)?;
     let base = base_uri.and_then(|uri| Url::parse(uri).ok());
-    Ok(normalize(feed, base.as_ref()))
+    let mut parsed = normalize(feed, base.as_ref());
+    if parsed.meta.refresh_hint.is_none() {
+        parsed.meta.refresh_hint = syndication_period(bytes);
+    }
+    Ok(parsed)
 }
 
 fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
@@ -132,6 +142,10 @@ fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
         title: feed.title.map(|t| t.content),
         site_url: best_link(&feed.links).map(ToOwned::to_owned),
         description: feed.description.map(|t| t.content),
+        refresh_hint: feed
+            .ttl
+            .filter(|&minutes| minutes > 0)
+            .map(|minutes| Duration::from_secs(u64::from(minutes) * 60)),
     };
     let entries = feed
         .entries
@@ -237,11 +251,143 @@ fn best_link(links: &[Link]) -> Option<&str> {
         .map(|link| link.href.as_str())
 }
 
+/// The syndication module's namespace.
+const SYNDICATION_NS: &str = "http://purl.org/rss/1.0/modules/syndication/";
+
+/// The RSS 1.0 syndication module's update period (`sy:updatePeriod`,
+/// divided by `sy:updateFrequency`, default 1), which feed-rs does not
+/// surface. Read from the channel head only — before the first item —
+/// under whatever prefix the document binds the module's namespace to
+/// (`sy` when it binds none).
+fn syndication_period(bytes: &[u8]) -> Option<Duration> {
+    let head = channel_head(bytes);
+    let head = String::from_utf8_lossy(head);
+    let prefix = namespace_prefix(&head, SYNDICATION_NS).unwrap_or("sy");
+    let element = |name: &str| {
+        let open = format!("<{prefix}:{name}>");
+        let start = head.find(&open)? + open.len();
+        let len = head.get(start..)?.find('<')?;
+        head.get(start..start + len).map(str::trim)
+    };
+    let period_secs: u64 = match element("updatePeriod")? {
+        "hourly" => 3_600,
+        "daily" => 86_400,
+        "weekly" => 604_800,
+        "monthly" => 2_592_000,
+        "yearly" => 31_536_000,
+        _ => return None,
+    };
+    let frequency = element("updateFrequency")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(1);
+    Some(Duration::from_secs(period_secs / frequency))
+}
+
+/// The document up to its first `<item>` / `<entry>` start tag — the
+/// channel's own elements. An element that merely starts with those
+/// letters (RSS 1.0's channel-level `<items>`) does not end it.
+fn channel_head(bytes: &[u8]) -> &[u8] {
+    let ends_name = |byte: Option<&u8>| {
+        byte.is_none_or(|&byte| byte == b'>' || byte == b'/' || byte.is_ascii_whitespace())
+    };
+    (0..bytes.len())
+        .find(|&at| {
+            [b"<item".as_slice(), b"<entry".as_slice()]
+                .iter()
+                .any(|tag| {
+                    bytes.get(at..).is_some_and(|rest| rest.starts_with(tag))
+                        && ends_name(bytes.get(at + tag.len()))
+                })
+        })
+        .and_then(|end| bytes.get(..end))
+        .unwrap_or(bytes)
+}
+
+/// The prefix `xml` binds to `namespace` (`xmlns:p="…"`), if any.
+fn namespace_prefix<'a>(xml: &'a str, namespace: &str) -> Option<&'a str> {
+    xml.match_indices("xmlns:").find_map(|(at, _)| {
+        let rest = xml.get(at + "xmlns:".len()..)?;
+        let (prefix, value) = rest.split_once('=')?;
+        let value = value.trim_start();
+        let quote = value.chars().next().filter(|&c| c == '"' || c == '\'')?;
+        let value = value.get(1..)?;
+        let uri = value.get(..value.find(quote)?)?;
+        (uri == namespace).then(|| prefix.trim())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn ttl_and_the_syndication_module_are_refresh_hints() {
+        let rss = |channel_extra: &str| {
+            format!(
+                r#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:sy="http://purl.org/rss/1.0/modules/syndication/">
+<channel><title>t</title><link>https://example.com/</link>{channel_extra}
+<item><title>a</title><link>https://example.com/a</link>
+<description>&lt;sy:updatePeriod&gt;daily&lt;/sy:updatePeriod&gt;</description></item>
+</channel></rss>"#
+            )
+        };
+        let hint = |extra: &str| {
+            parse_feed(rss(extra).as_bytes(), None)
+                .unwrap()
+                .meta
+                .refresh_hint
+        };
+        assert_eq!(hint("<ttl>90</ttl>"), Some(Duration::from_secs(90 * 60)));
+        assert_eq!(
+            hint(
+                "<sy:updatePeriod>hourly</sy:updatePeriod><sy:updateFrequency>2</sy:updateFrequency>"
+            ),
+            Some(Duration::from_secs(1_800))
+        );
+        assert_eq!(
+            hint("<sy:updatePeriod> daily </sy:updatePeriod>"),
+            Some(Duration::from_secs(86_400))
+        );
+        assert_eq!(
+            hint("<ttl>60</ttl><sy:updatePeriod>weekly</sy:updatePeriod>"),
+            Some(Duration::from_secs(3_600)),
+            "<ttl> wins"
+        );
+        assert_eq!(hint("<ttl>0</ttl>"), None);
+        assert_eq!(hint("<sy:updatePeriod>sometimes</sy:updatePeriod>"), None);
+        assert_eq!(hint(""), None, "an item's text is not the channel's hint");
+    }
+
+    #[test]
+    fn the_syndication_hint_follows_the_bound_prefix_past_items() {
+        // RSS 1.0: the channel's `<items>` list comes before the
+        // syndication elements, and the namespace has its own prefix.
+        let rdf = r#"<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns="http://purl.org/rss/1.0/" xmlns:syn = 'http://purl.org/rss/1.0/modules/syndication/'>
+<channel rdf:about="https://example.com/"><title>t</title><link>https://example.com/</link>
+<description>d</description>
+<items><rdf:Seq><rdf:li rdf:resource="https://example.com/a"/></rdf:Seq></items>
+<syn:updatePeriod>daily</syn:updatePeriod><syn:updateFrequency>4</syn:updateFrequency>
+</channel>
+<item rdf:about="https://example.com/a"><title>a</title><link>https://example.com/a</link></item>
+</rdf:RDF>"#;
+        assert_eq!(
+            parse_feed(rdf.as_bytes(), None).unwrap().meta.refresh_hint,
+            Some(Duration::from_secs(21_600))
+        );
+        assert_eq!(
+            namespace_prefix("<a xmlns:x=\"other\">", SYNDICATION_NS),
+            None
+        );
+        assert_eq!(channel_head(b"<a><item>"), b"<a>");
+        assert_eq!(channel_head(b"<a><entry/>"), b"<a>");
+        assert_eq!(channel_head(b"<a><itemize>"), b"<a><itemize>");
+    }
 
     /// The crate dir is read at run time (cargo sets it for test runs): a
     /// compile-time path goes stale when a shared target dir reuses this

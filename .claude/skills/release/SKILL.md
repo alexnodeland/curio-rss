@@ -44,17 +44,29 @@ release is exactly this:
    it; later pushes find the tag and do nothing. Nobody pushes the tag by
    hand. After the merge, check the `release-tag` run: green means the
    `release` run on `vX.Y.Z` is waiting at its `sign` job.
-   - **If `release-tag` fails**, it says why: the bump commit's CHANGELOG
-     doesn't lead with the version (ship a corrected bump), or the bump
-     commit's own `release.yml` would dry-run a dispatch (every version up
-     to and including 0.5.0 — GitHub runs the workflow file at the tag).
-     Then the tag is pushed by hand, with the exact commands the error
-     prints (runbook §2, *Fallback*). Agents may create **and push** that
-     tag (maintainer decision, 2026-11-01), then watch the release run to
-     its draft, where the git transport allows it: the Claude Code cloud-session git proxy accepts branch pushes but
-     refuses tag pushes (HTTP 403), so there the agent hands the maintainer
-     the exact `git tag`/`git push` commands instead of retrying or routing
-     around the refusal.
+   - **If `release-tag`'s plan refuses**, it says why, and every push to
+     `main` stays red until it is fixed:
+     - the bump commit's CHANGELOG doesn't lead with the version. The tag
+       always goes on the commit that introduced the version, so a
+       CHANGELOG-only fix PR changes nothing: either bump to a new version
+       (its section on top), or push `vX.Y.Z` by hand on the commit that
+       fixes the CHANGELOG (it still carries the version);
+     - the bump commit's own `release.yml` would dry-run a dispatch (every
+       version up to and including 0.5.0 — GitHub runs the workflow file at
+       the tag): push the tag by hand with the exact commands the error
+       prints (runbook §2, *Fallback*).
+
+     Agents may create **and push** that tag (maintainer decision,
+     2026-11-01), then watch the release run to its draft, where the git
+     transport allows it: the Claude Code cloud-session git proxy accepts
+     branch pushes but refuses tag pushes (HTTP 403), so there the agent
+     hands the maintainer the exact `git tag`/`git push` commands instead of
+     retrying or routing around the refusal.
+   - **If the `tag` job fails after creating the tag** (its `Explain the
+     recovery` step says so), don't re-run it and don't hand-push: dispatch
+     `release.yml` on the existing tag (Actions → release → Run workflow →
+     Tags → `vX.Y.Z`; runbook §2). An agent whose token can't dispatch
+     workflows hands that step to the maintainer.
    - A tag, once pushed or created, is never moved or deleted; a broken
      release ships as the next patch version.
    - Approving the `sign` job's `updater-signing` deployment and

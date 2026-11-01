@@ -92,6 +92,7 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Create the annotated tag
+        id: create
         # A tag object, then the ref pointing at it. Creating a ref that
         # already exists fails with HTTP 422, so a tag pushed meanwhile is
         # left exactly where it is (and this run stops before dispatching).
@@ -107,7 +108,26 @@ jobs:
             -f ref="refs/tags/$TAG" -f sha="$object" --silent
           echo "tagged $TAG on $SHA" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Dispatch release.yml on the tag
+        id: dispatch
         run: |
           set -euo pipefail
           gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
           echo "dispatched release.yml on $TAG — approve its \`sign\` job's \`updater-signing\` deployment, then publish the draft" | tee -a "$GITHUB_STEP_SUMMARY"
+      # Once the tag exists nothing here can recover a failure: a re-run
+      # stops at create-ref (HTTP 422), later pushes find the tag and do
+      # nothing, and the tag can no longer be pushed by hand. So say what
+      # does work: dispatching release.yml on the existing tag by hand
+      # (docs/release/runbook.md §2, "If release-tag failed").
+      - name: Explain the recovery
+        if: failure()
+        env:
+          CREATE: ${{ steps.create.outcome }}
+        run: |
+          if [ "$CREATE" = failure ]; then
+            msg="creating $TAG failed. If $TAG does not exist, re-run this job. If it exists (pushed meanwhile, or by an earlier attempt of this job), do not: check Actions, release for a run on $TAG, and if there is none, start one there with Run workflow, Use workflow from: Tags, $TAG."
+          else
+            msg="$TAG is tagged, but dispatching release.yml on it failed. Do not re-run this job (the tag exists, so it stops at create-ref) and do not push the tag by hand (it exists). Start the release from Actions, release, Run workflow, Use workflow from: Tags, $TAG."
+          fi
+          echo "::error::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          exit 1

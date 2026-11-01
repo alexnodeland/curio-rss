@@ -56,7 +56,13 @@ same `gate`, same `updater-signing` approval.
 The plan **fails instead of tagging** (an `::error::` on the `release-tag` run)
 when:
 
-- the bump commit's `CHANGELOG.md` does not lead with `## [X.Y.Z]`; or
+- the bump commit's `CHANGELOG.md` does not lead with `## [X.Y.Z]`. The tag
+  always goes on the commit that *introduced* the version, so a follow-up PR
+  that only fixes `CHANGELOG.md` changes nothing: the plan keeps refusing on
+  the original bump, on every push. Two ways out work: bump to a new version
+  (`X.Y.Z+1`, its section on top), or push `vX.Y.Z` by hand (fallback below)
+  on the commit that fixes the CHANGELOG — it still carries the version, so
+  `release.yml`'s tag-vs-workspace check passes there; or
 - the bump commit's own `release.yml` would not release a tag-ref dispatch for
   real. GitHub runs the workflow file **at the tag**, and a `release.yml` that
   decides by the event name (every version up to and including 0.5.0) treats
@@ -64,17 +70,34 @@ when:
   tag would keep a hand-pushed one from ever triggering the real release. The
   error prints the exact fallback commands.
 
+Until one of those lands, every push to `main` turns the `release-tag` run red
+(it is not a CI gate: pull requests never run it).
+
 **Fallback (manual tag push).** When the tagger refuses, or Actions is
 unavailable, push the annotated tag by hand from a machine with tag-push
 rights (Claude Code cloud sessions cannot: their git proxy refuses tag pushes).
 A tag push runs the same `release.yml`; the tagger's next run sees the tag and
-does nothing.
+does nothing. This works only while `vX.Y.Z` does not exist yet.
 
 ```sh
 git fetch origin && git checkout <bump-commit-sha>
 git tag -a vX.Y.Z -m "Curio X.Y.Z — <CHANGELOG heading date/title>"
 git push origin vX.Y.Z          # → release.yml drafts the release
 ```
+
+**If the tag was created but the release never started.** The `tag` job can
+fail *after* it created `vX.Y.Z` — the `gh workflow run release.yml` dispatch
+hit a transient API error, or the token lacked `actions: write`. Its last step
+(`Explain the recovery`) says so. Nothing automatic recovers from here:
+re-running the job stops at create-ref (HTTP 422, the ref exists), later pushes
+find the tag and do nothing, and the fallback above cannot push a tag that
+exists. Start the release on the existing tag by hand instead: **Actions →
+release → Run workflow → Use workflow from → Tags → `vX.Y.Z`** (or
+`gh workflow run release.yml --ref vX.Y.Z`). The tagger only creates tags whose
+`release.yml` releases a tag-ref dispatch for real, so that run is the real
+release — same `gate`, same `updater-signing` approval. If create-ref itself
+failed, check whether `vX.Y.Z` exists: if not, re-run the job; if it does and
+Actions → release shows no run on it, dispatch it the same way.
 
 Either way, [`release.yml`](../../.github/workflows/release.yml) then runs on
 the tag:
@@ -211,7 +234,11 @@ bump.
       `vX.Y.Z` on the bump commit (its summary names the commit), and a
       `release` run on `vX.Y.Z` started (Actions → release, event
       `workflow_dispatch`, branch `vX.Y.Z`). If `release-tag` failed, read
-      its error: fix the CHANGELOG in a new bump, or use the fallback above.
+      its error and follow §2: a refused plan (missing CHANGELOG section →
+      bump to a new version, or hand-push `vX.Y.Z` on the CHANGELOG-fix
+      commit; an old `release.yml` → the manual tag push), or a `tag` job
+      that created `vX.Y.Z` but did not start the release → dispatch
+      `release.yml` on the existing tag by hand (never re-run that job).
 - [ ] Approve the `sign` job's `updater-signing` deployment (the run waits
       there after `build`) — check that the run is for your tag first.
 - [ ] `release.yml` run for the tag is green and a **draft** `vX.Y.Z` release

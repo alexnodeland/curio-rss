@@ -27,7 +27,6 @@ pub mod paths;
 pub mod refresh_scheduler;
 pub mod startup;
 
-use curio_core::fetch::{FetchConfig, PolicedClient};
 use tauri::Manager as _;
 
 /// The tauri-specta builder naming every command and event — the single
@@ -212,9 +211,6 @@ pub fn run() {
                 }
             };
             app.manage(ipc_policy::PathRegistry::new());
-            app.manage(discovery::Discovery::new(PolicedClient::new(
-                FetchConfig::default(),
-            )));
 
             // Phase 1 (open) then phase 2 (install); a failure at either goes
             // to the recovery screen, already logged.

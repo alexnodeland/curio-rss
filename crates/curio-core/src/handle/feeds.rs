@@ -3,11 +3,30 @@
 
 use std::sync::PoisonError;
 
+use crate::feeds::{DiscoverError, DiscoverOptions, Discovery};
 use crate::model::{Feed, FeedId, FeedStatus, FetchRecord, NewFeed};
 
 use super::{CoreError, CoreHandle};
 
 impl CoreHandle {
+    /// Autodiscovers the feeds behind what a user typed — a bare domain, a
+    /// homepage, a feed URL, or a page a rewrite rule knows — through the
+    /// handle's policed client: every candidate returned is validated
+    /// (fetched and parsed). See [`crate::feeds::discover()`]. No storage
+    /// write and no event: subscribing is a separate [`Self::add_feed`].
+    ///
+    /// # Errors
+    ///
+    /// [`DiscoverError`] for input that is not a URL, or a page that could
+    /// not be fetched. Finding no feed is `Ok` with empty `feeds`.
+    pub async fn discover_feeds(
+        &self,
+        input: &str,
+        options: DiscoverOptions,
+    ) -> Result<Discovery, DiscoverError> {
+        crate::feeds::discover(&self.client, input, options).await
+    }
+
     /// Subscribes to a feed; emits `feed.added` (with tags).
     ///
     /// # Errors

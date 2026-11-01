@@ -1,4 +1,5 @@
-//! Feed understanding: RSS/Atom/JSON-Feed parsing and OPML exchange.
+//! Feed understanding: RSS/Atom/JSON-Feed parsing, autodiscovery and OPML
+//! exchange.
 //!
 //! [`parse_feed`] turns fetched bytes into normalized [`ParsedFeed`] /
 //! [`ParsedEntry`] values with a **total dedupe key** (D3):
@@ -10,17 +11,24 @@
 //! source HTML: sanitization happens in [`crate::content`] before
 //! anything reaches storage.
 //!
+//! [`discover()`] turns whatever a user typed (a bare domain, a homepage, a
+//! reddit/GitHub/YouTube/Mastodon/Substack page) into validated feed URLs.
+//!
 //! [`import_opml`] / [`export_opml`] exchange subscription lists; folder
 //! nesting maps onto tags — the enclosing folder path becomes one
 //! `/`-joined hierarchical tag on import, and tags export as the `category`
 //! attribute (which import also reads), so an import/export cycle is
 //! lossless after one normalization.
 
+pub mod discover;
 mod image;
 mod keys;
 mod opml;
 mod parse;
 
+pub use discover::{
+    DiscoverError, DiscoverOptions, DiscoveredFeed, Discovery, discover, normalize_input,
+};
 pub use opml::{OpmlError, OpmlFeed, export_opml, import_opml};
 pub use parse::{FeedParseError, ParsedEntry, ParsedFeed, ParsedFeedMeta, parse_feed};
 

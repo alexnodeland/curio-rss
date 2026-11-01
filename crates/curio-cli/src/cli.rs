@@ -159,8 +159,11 @@ pub(crate) enum Command {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum FeedCommand {
-    /// Subscribe to a feed URL.
+    /// Subscribe to a feed. Takes a feed URL, a site or page URL (the feed
+    /// is autodiscovered and validated first), or a bare domain
+    /// (`example.com` → `https://example.com/`).
     Add {
+        /// A feed URL, a page/site URL, or a bare domain.
         url: String,
         /// Tags for the subscription (repeat or comma-separate).
         #[arg(long, value_delimiter = ',')]
@@ -170,6 +173,10 @@ pub(crate) enum FeedCommand {
         /// curio.toml — an explicit config edit, never feed content.
         #[arg(long)]
         allow_private_network: bool,
+        /// Subscribe to the URL exactly as given (scheme added if missing)
+        /// without fetching it — no autodiscovery, no validation.
+        #[arg(long)]
+        no_validate: bool,
     },
     /// List every subscription.
     List,

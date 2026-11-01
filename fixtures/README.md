@@ -12,6 +12,11 @@ Current layout:
   through the Rust types (`*.noncanonical.json` = schema-valid but not
   byte-canonical, exempt from the equality assertion)
 
+- `discovery/` — pages for feed autodiscovery (`curio_core::feeds::discover`):
+  `wordpress-post.html` is a real-shaped WordPress post head declaring the
+  site feed beside comment, REST-API and oEmbed alternates — only the site
+  feed may be offered
+
 - `export/` — destination-state inputs for the exporter's integration
   tests: `manifest-conflict/` is a `.curio/` with a manifest plus two
   sync-tool conflict copies (Dropbox-style `manifest (conflicted

@@ -8,9 +8,11 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	/**
-	 *  Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
-	 *  the page once through the policed client and scans it. Head-local
-	 *  platform policy; the Google favicon fallback is the frontend's opt-in.
+	 *  Autodiscovers feeds (and a favicon) for what the user typed — a bare
+	 *  domain, a site, a page, or a feed URL. The core's discovery normalizes
+	 *  it, applies the fetch-free rewrites, scans and probes through the
+	 *  policed client and offers only validated feeds; the Google favicon
+	 *  fallback is the frontend's opt-in.
 	 */
 	discoverFeeds: (url: string) => typedError<DiscoveryDto, CommandError>(__TAURI_INVOKE("discover_feeds", { url })),
 	/**
@@ -580,28 +582,25 @@ export type DestinationDto = {
 	root: string,
 };
 
-/**  One discovered feed candidate. */
+/**  One discovered — and validated — feed candidate. */
 export type DiscoveredFeedDto = {
-	/**  Absolute feed URL (resolved against the fetched page). */
+	/**  Absolute feed URL, fetched and parsed before it was offered. */
 	url: string,
-	/**  The `title` the page gave the `<link>`, if any. */
+	/**  The feed's own title, else the title the page gave its `<link>`. */
 	title: string | null,
 };
 
 /**
- *  What one autodiscovery fetch turned up: zero or more feed candidates
+ *  What one autodiscovery turned up: zero or more validated feed candidates
  *  plus a best-guess favicon URL (same-origin only — the Google fallback
  *  is the frontend's opt-in concern).
  */
 export type DiscoveryDto = {
-	/**
-	 *  Feed candidates, in document order (the page URL itself if it *is* a
-	 *  feed).
-	 */
+	/**  Feed candidates, best first (the URL itself if it *is* a feed). */
 	feeds: DiscoveredFeedDto[],
 	/**
 	 *  A favicon URL to preview (declared icon or `/favicon.ico`), if the
-	 *  final URL was absolute enough to resolve one.
+	 *  URL was absolute enough to resolve one.
 	 */
 	favicon: string | null,
 };

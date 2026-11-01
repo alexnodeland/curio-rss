@@ -94,17 +94,21 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   clipped link-only.
 - **Per-feed scheduling** (`handle/schedule.rs`, `RefreshPolicy`): every settled attempt
   writes its `fetch_log` row and the feed's schedule in one transaction —
-  `consecutive_failures`, `next_attempt_at`, `failing_since` (the failure class is the
-  latest `fetch_log.error_kind`). A
+  `consecutive_failures`, `next_attempt_at`, `failing_since`, `refresh_hint_secs` (the
+  failure class is the latest `fetch_log.error_kind`). The schedule is computed from the
+  feed row read inside that transaction, so a pause or resume made while the fetch was in
+  flight is never overwritten. A
   failure backs off exponentially (15 min doubling to 24 h, up to 10% jitter); a
   `Retry-After` (seconds or HTTP-date) longer than that wins and holds even a manual
   refresh; a success waits for the longest of the per-feed `refresh_interval_min` and
   the feed's own hints (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`, capped at
-  24 h). Sweeps fetch only due feeds. A 410 marks a feed dead only when the previous
+  24 h; the feed's own is stored as `refresh_hint_secs`, so a 304 keeps honouring it).
+  Sweeps fetch only due feeds. A 410 marks a feed dead only when the previous
   attempt was a 410 too; 10 failures in a row over at least 3 days auto-pause it
-  (`auto_paused_at`), and resuming clears the run. A page host's 429 during full-text
-  hydration is `RateLimited`, which drops that feed's remaining queued pages. `fetch_log`
-  keeps the newest 50 rows per feed.
+  (`auto_paused_at`), and resuming (the desktop's Resume, `curio feed resume`) clears
+  the run; so does a successful manual refresh of an auto-paused feed. A page host's 429
+  during full-text hydration is `RateLimited`, which drops that feed's remaining queued
+  pages. `fetch_log` keeps the newest 50 rows per feed.
 - **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
   both heads: 8 feeds in flight by default, so a few hung hosts cost about one request
   timeout between them. The slots are shared fairly between hosts: a politeness-paced

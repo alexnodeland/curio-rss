@@ -72,11 +72,14 @@ pub(super) fn settle(
     };
     let (outcome, attempt) = match parsed {
         Ok((response, parsed)) => {
-            let hint = parsed.meta.refresh_hint.max(response.max_age);
+            let attempt = Attempt::Fetched {
+                feed_hint: parsed.meta.refresh_hint,
+                max_age: response.max_age,
+            };
             let ingested = ingest_parsed(storage, id, feed, &response, parsed, now)?;
             hydrate_pending = ingested.hydrate_pending;
             url_adopted = ingested.url_adopted;
-            (ingested.outcome, Attempt::Succeeded { hint })
+            (ingested.outcome, attempt)
         }
         Err(unsuccessful) => {
             preserve_validators(storage, id, feed, now)?;
@@ -84,6 +87,10 @@ pub(super) fn settle(
         }
     };
 
+    // The schedule builds on the feed row as it stands when the attempt
+    // settles, not on `feed` (read before the fetch): a pause or resume
+    // made while the fetch was in flight is kept.
+    let policy = *policy;
     storage.settle_fetch(
         FetchRecord {
             feed_id: id,
@@ -95,7 +102,7 @@ pub(super) fn settle(
             articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
             duration_ms,
         },
-        policy.after(feed, attempt, now),
+        move |current| policy.after(current, attempt, now),
     )?;
     Ok(Settled {
         outcome,
@@ -173,8 +180,8 @@ fn unsuccessful(
                 error: None,
                 error_kind: None,
             },
-            Attempt::Succeeded {
-                hint: response.max_age,
+            Attempt::NotModified {
+                max_age: response.max_age,
             },
         ),
         Ok(response) if response.is_gone() => {

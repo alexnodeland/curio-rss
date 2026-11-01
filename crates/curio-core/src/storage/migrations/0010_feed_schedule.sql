@@ -8,6 +8,9 @@
 -- refresh_interval_min  the user's per-feed interval; NULL = global.
 -- failing_since         when the current run of failures began.
 -- auto_paused_at        set when the engine paused the feed by itself.
+-- refresh_hint_secs     the feed's own refresh hint (<ttl> /
+--                       sy:updatePeriod) from its last parsed body, so a
+--                       304 — which carries no body — keeps honouring it.
 --
 -- The class of the latest failure is not stored here: it is the newest
 -- fetch_log row's error_kind (migration 0009).
@@ -16,6 +19,7 @@ ALTER TABLE feeds ADD COLUMN next_attempt_at TEXT;
 ALTER TABLE feeds ADD COLUMN refresh_interval_min INTEGER;
 ALTER TABLE feeds ADD COLUMN failing_since TEXT;
 ALTER TABLE feeds ADD COLUMN auto_paused_at TEXT;
+ALTER TABLE feeds ADD COLUMN refresh_hint_secs INTEGER;
 
 -- fetch_log is now kept to the newest 50 rows per feed; trim what older
 -- builds let grow without bound.

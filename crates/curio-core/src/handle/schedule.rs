@@ -5,7 +5,11 @@
 //!   longest of the user's per-feed interval and the feed's own hints
 //!   (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`, capped at
 //!   [`RefreshPolicy::max_hint`]); with none of them the feed is due on
-//!   every sweep.
+//!   every sweep. The feed's own hint is kept on the row
+//!   ([`Feed::refresh_hint_secs`]), so a `304` — which has no body to
+//!   read it from — honours it too. A success also ends an automatic
+//!   pause (a manual refresh that works proves the feed is back); a
+//!   user's pause stays.
 //! - **Failure** extends the run and backs off exponentially from
 //!   [`RefreshPolicy::backoff_base`] (doubling per failure, capped, with
 //!   up to 10% jitter so feeds that failed together don't retry in
@@ -67,9 +71,14 @@ impl Default for RefreshPolicy {
 /// How one attempt ended, as far as scheduling cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Attempt {
-    /// `ok` or `not_modified`, with the response's refresh hint (the
-    /// longer of the feed's own and `Cache-Control: max-age`).
-    Succeeded { hint: Option<Duration> },
+    /// `ok`: a parsed body, with the feed's own refresh hint (`<ttl>`,
+    /// `sy:updatePeriod`) and the response's `Cache-Control: max-age`.
+    Fetched {
+        feed_hint: Option<Duration>,
+        max_age: Option<Duration>,
+    },
+    /// `not_modified`: no body, so the feed's stored hint still applies.
+    NotModified { max_age: Option<Duration> },
     /// An errored attempt.
     Failed {
         kind: FetchErrorKind,
@@ -83,16 +92,25 @@ impl RefreshPolicy {
         let interval = feed
             .refresh_interval_min
             .map(|minutes| Duration::from_secs(u64::from(minutes) * 60));
-        match attempt {
-            Attempt::Succeeded { hint } => {
-                let wait = hint.map(|hint| hint.min(self.max_hint)).max(interval);
-                FeedSchedule {
-                    consecutive_failures: 0,
-                    next_attempt_at: wait.filter(|wait| !wait.is_zero()).map(|w| later(now, w)),
-                    failing_since: None,
-                    status: None,
-                }
+        let stored_hint = feed
+            .refresh_hint_secs
+            .map(|secs| Duration::from_secs(u64::from(secs)));
+        let succeeded = |feed_hint: Option<Duration>, max_age: Option<Duration>| {
+            let hint = feed_hint.max(max_age).map(|hint| hint.min(self.max_hint));
+            let wait = hint.max(interval);
+            // A success ends an automatic pause, never a user's own.
+            let resumed = feed.status == FeedStatus::Paused && feed.auto_paused_at.is_some();
+            FeedSchedule {
+                consecutive_failures: 0,
+                next_attempt_at: wait.filter(|wait| !wait.is_zero()).map(|w| later(now, w)),
+                failing_since: None,
+                status: resumed.then_some(FeedStatus::Active),
+                refresh_hint_secs: feed_hint.map(hint_secs),
             }
+        };
+        match attempt {
+            Attempt::Fetched { feed_hint, max_age } => succeeded(feed_hint, max_age),
+            Attempt::NotModified { max_age } => succeeded(stored_hint, max_age),
             Attempt::Failed { kind, retry_after } => {
                 let failures = feed.consecutive_failures.saturating_add(1);
                 let failing_since = feed.failing_since.unwrap_or(now);
@@ -123,6 +141,7 @@ impl RefreshPolicy {
                     next_attempt_at: Some(later(now, wait)),
                     failing_since: Some(failing_since),
                     status,
+                    refresh_hint_secs: feed.refresh_hint_secs,
                 }
             }
         }
@@ -146,6 +165,11 @@ impl RefreshPolicy {
 /// The longest wait any schedule asks for — a guard against a policy
 /// with absurd caps, so the arithmetic below always fits.
 const MAX_WAIT: Duration = Duration::from_secs(366 * 24 * 3_600);
+
+/// A refresh hint as whole seconds for the feed row (saturating).
+fn hint_secs(hint: Duration) -> u32 {
+    u32::try_from(hint.as_secs()).unwrap_or(u32::MAX)
+}
 
 /// `at + wait`, the wait clamped to [`MAX_WAIT`].
 fn later(at: Timestamp, wait: Duration) -> Timestamp {
@@ -190,6 +214,7 @@ mod tests {
             refresh_interval_min: None,
             failing_since: None,
             auto_paused_at: None,
+            refresh_hint_secs: None,
         }
     }
 
@@ -200,6 +225,10 @@ mod tests {
     fn wait(schedule: &FeedSchedule, now: Timestamp) -> Duration {
         let next = schedule.next_attempt_at.unwrap();
         Duration::from_millis(u64::try_from(next.unix_millis() - now.unix_millis()).unwrap())
+    }
+
+    fn fetched(feed_hint: Option<Duration>, max_age: Option<Duration>) -> Attempt {
+        Attempt::Fetched { feed_hint, max_age }
     }
 
     fn failed(kind: FetchErrorKind) -> Attempt {
@@ -217,10 +246,12 @@ mod tests {
         feed.next_attempt_at = schedule.next_attempt_at;
         feed.last_error_kind = match attempt {
             Attempt::Failed { kind, .. } => Some(kind),
-            Attempt::Succeeded { .. } => None,
+            Attempt::Fetched { .. } | Attempt::NotModified { .. } => None,
         };
         feed.failing_since = schedule.failing_since;
+        feed.refresh_hint_secs = schedule.refresh_hint_secs;
         if let Some(status) = schedule.status {
+            feed.auto_paused_at = (status == FeedStatus::Paused).then_some(at(0));
             feed.status = status;
         }
     }
@@ -276,7 +307,7 @@ mod tests {
             failed(FetchErrorKind::ConnectTimeout),
             policy.after(&feed(), failed(FetchErrorKind::ConnectTimeout), now),
         );
-        let healthy = policy.after(&failing, Attempt::Succeeded { hint: None }, now);
+        let healthy = policy.after(&failing, fetched(None, None), now);
         assert_eq!(
             healthy,
             FeedSchedule {
@@ -284,25 +315,18 @@ mod tests {
                 next_attempt_at: None,
                 failing_since: None,
                 status: None,
+                refresh_hint_secs: None,
             }
         );
         let hinted = policy.after(
             &feed(),
-            Attempt::Succeeded {
-                hint: Some(Duration::from_secs(3_600)),
-            },
+            fetched(None, Some(Duration::from_secs(3_600))),
             now,
         );
         assert_eq!(wait(&hinted, now), Duration::from_secs(3_600));
         let mut slow = feed();
         slow.refresh_interval_min = Some(180);
-        let hinted = policy.after(
-            &slow,
-            Attempt::Succeeded {
-                hint: Some(Duration::from_secs(3_600)),
-            },
-            now,
-        );
+        let hinted = policy.after(&slow, fetched(None, Some(Duration::from_secs(3_600))), now);
         assert_eq!(
             wait(&hinted, now),
             Duration::from_secs(180 * 60),
@@ -310,20 +334,69 @@ mod tests {
         );
         let capped = policy.after(
             &feed(),
-            Attempt::Succeeded {
-                hint: Some(Duration::from_secs(30 * 24 * 3_600)),
-            },
+            fetched(None, Some(Duration::from_secs(30 * 24 * 3_600))),
             now,
         );
         assert_eq!(wait(&capped, now), policy.max_hint);
-        let zero = policy.after(
-            &feed(),
-            Attempt::Succeeded {
-                hint: Some(Duration::ZERO),
+        let zero = policy.after(&feed(), fetched(None, Some(Duration::ZERO)), now);
+        assert_eq!(zero.next_attempt_at, None);
+    }
+
+    #[test]
+    fn a_304_keeps_honouring_the_feeds_own_hint() {
+        let policy = RefreshPolicy::default();
+        let now = at(0);
+        let two_hours = Duration::from_secs(7_200);
+        let mut feed = feed();
+        let ok = fetched(Some(two_hours), None);
+        let first = policy.after(&feed, ok, now);
+        assert_eq!(first.refresh_hint_secs, Some(7_200), "stored");
+        assert_eq!(wait(&first, now), two_hours);
+        apply(&mut feed, ok, first);
+
+        let not_modified = Attempt::NotModified { max_age: None };
+        let again = policy.after(&feed, not_modified, now);
+        assert_eq!(wait(&again, now), two_hours, "no body, same hint");
+        assert_eq!(again.refresh_hint_secs, Some(7_200));
+        let longer = policy.after(
+            &feed,
+            Attempt::NotModified {
+                max_age: Some(Duration::from_secs(3 * 3_600)),
             },
             now,
         );
-        assert_eq!(zero.next_attempt_at, None);
+        assert_eq!(wait(&longer, now), Duration::from_secs(3 * 3_600));
+
+        // A failure keeps the hint; a body that drops it clears it.
+        let failure = policy.after(&feed, failed(FetchErrorKind::Http), now);
+        assert_eq!(failure.refresh_hint_secs, Some(7_200));
+        let dropped = policy.after(&feed, fetched(None, None), now);
+        assert_eq!(dropped.refresh_hint_secs, None);
+        assert_eq!(dropped.next_attempt_at, None);
+    }
+
+    #[test]
+    fn a_success_ends_an_automatic_pause_but_not_a_users() {
+        let policy = RefreshPolicy {
+            auto_pause_after: 1,
+            auto_pause_min_failing: Duration::ZERO,
+            ..RefreshPolicy::default()
+        };
+        let mut feed = feed();
+        let broken = failed(FetchErrorKind::Http);
+        let paused = policy.after(&feed, broken, at(0));
+        assert_eq!(paused.status, Some(FeedStatus::Paused));
+        apply(&mut feed, broken, paused);
+        assert!(feed.auto_paused_at.is_some());
+
+        let resumed = policy.after(&feed, Attempt::NotModified { max_age: None }, at(10));
+        assert_eq!(resumed.status, Some(FeedStatus::Active));
+        assert_eq!(resumed.consecutive_failures, 0);
+
+        let mut user_paused = self::feed();
+        user_paused.status = FeedStatus::Paused;
+        let kept = policy.after(&user_paused, fetched(None, None), at(10));
+        assert_eq!(kept.status, None, "the user's pause stays");
     }
 
     #[test]

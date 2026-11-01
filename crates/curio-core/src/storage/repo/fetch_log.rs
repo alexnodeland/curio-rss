@@ -3,9 +3,9 @@
 
 use rusqlite::Connection;
 
-use super::rows::{parse_fetch_error_kind, parse_ts};
+use super::rows::{feed_by_id, parse_fetch_error_kind, parse_ts};
 use super::{FeedSchedule, begin_write};
-use crate::model::{FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus};
+use crate::model::{Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus};
 use crate::storage::{Storage, StorageError};
 
 /// How many `fetch_log` rows each feed keeps: every insert trims the
@@ -32,40 +32,48 @@ impl Storage {
 
     /// Settles one fetch attempt in one transaction: the `fetch_log` row
     /// (with the per-feed trim of [`Self::record_fetch`]) and the feed's
-    /// scheduling state — failure count, next attempt, failing-since and,
-    /// when the attempt caused one, the lifecycle change (an auto-pause
-    /// stamps `auto_paused_at`).
+    /// scheduling state — failure count, next attempt, failing-since, the
+    /// feed's own refresh hint and, when the attempt caused one, the
+    /// lifecycle change (an auto-pause stamps `auto_paused_at`).
+    ///
+    /// `schedule` computes that state from the feed row as it stands
+    /// **inside** the transaction (before this attempt's log row), not
+    /// from a snapshot taken before the fetch: a pause or resume that
+    /// landed while the fetch was in flight is what the attempt builds
+    /// on, so it is never overwritten by stale counters or status.
     ///
     /// # Errors
     ///
     /// [`StorageError::NotFound`] if the feed does not exist; database
     /// errors.
-    pub fn settle_fetch(
-        &self,
-        record: FetchRecord,
-        schedule: FeedSchedule,
-    ) -> Result<(), StorageError> {
+    pub fn settle_fetch<F>(&self, record: FetchRecord, schedule: F) -> Result<(), StorageError>
+    where
+        F: FnOnce(&Feed) -> FeedSchedule + Send + 'static,
+    {
         self.write(move |conn| {
             let tx = begin_write(conn)?;
+            let current = feed_by_id(&tx, record.feed_id.0)?
+                .ok_or(StorageError::NotFound { entity: "feed" })?;
+            let schedule = schedule(&current);
+            // A lifecycle change rewrites `auto_paused_at` (stamped by an
+            // auto-pause, cleared by anything else); no change keeps it.
             let auto_paused_at = (schedule.status == Some(FeedStatus::Paused))
                 .then(|| record.fetched_at.to_string());
-            let n = tx
-                .prepare_cached(
-                    "UPDATE feeds SET consecutive_failures = ?2, next_attempt_at = ?3, \
-                     failing_since = ?4, status = COALESCE(?5, status), \
-                     auto_paused_at = COALESCE(?6, auto_paused_at) WHERE id = ?1",
-                )?
-                .execute((
-                    record.feed_id.0,
-                    schedule.consecutive_failures,
-                    schedule.next_attempt_at.map(|at| at.to_string()),
-                    schedule.failing_since.map(|at| at.to_string()),
-                    schedule.status.map(FeedStatus::as_str),
-                    auto_paused_at,
-                ))?;
-            if n == 0 {
-                return Err(StorageError::NotFound { entity: "feed" });
-            }
+            tx.prepare_cached(
+                "UPDATE feeds SET consecutive_failures = ?2, next_attempt_at = ?3, \
+                 failing_since = ?4, status = COALESCE(?5, status), \
+                 auto_paused_at = CASE WHEN ?5 IS NULL THEN auto_paused_at ELSE ?6 END, \
+                 refresh_hint_secs = ?7 WHERE id = ?1",
+            )?
+            .execute((
+                record.feed_id.0,
+                schedule.consecutive_failures,
+                schedule.next_attempt_at.map(|at| at.to_string()),
+                schedule.failing_since.map(|at| at.to_string()),
+                schedule.status.map(FeedStatus::as_str),
+                auto_paused_at,
+                schedule.refresh_hint_secs,
+            ))?;
             insert_fetch(&tx, &record)?;
             tx.commit()?;
             Ok(())

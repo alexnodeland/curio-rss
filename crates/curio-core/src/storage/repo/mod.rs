@@ -120,9 +120,14 @@ pub struct FeedSchedule {
     /// a success.
     pub failing_since: Option<Timestamp>,
     /// A lifecycle change the attempt caused: [`FeedStatus::Paused`]
-    /// (auto-pause, stamped `auto_paused_at`) or [`FeedStatus::Dead`]
-    /// (a confirmed 410). `None` leaves the status alone.
+    /// (auto-pause, stamped `auto_paused_at`), [`FeedStatus::Dead`] (a
+    /// confirmed 410) or [`FeedStatus::Active`] (a success ended an
+    /// automatic pause). Any change clears an earlier `auto_paused_at`
+    /// unless it is itself an auto-pause; `None` leaves the status alone.
     pub status: Option<FeedStatus>,
+    /// The feed's own refresh hint in seconds to keep on the row (see
+    /// [`Feed::refresh_hint_secs`](crate::model::Feed::refresh_hint_secs)).
+    pub refresh_hint_secs: Option<u32>,
 }
 
 /// A staged, not-yet-emitted event intent (write-ahead row for the JSONL
@@ -151,7 +156,7 @@ const FEED_COLS: &str = "id, url, title, site_url, description, etag, last_modif
                          (SELECT CASE WHEN status = 'error' THEN error_kind END FROM fetch_log \
                           WHERE feed_id = feeds.id ORDER BY id DESC LIMIT 1) AS last_error_kind, \
                          consecutive_failures, next_attempt_at, refresh_interval_min, failing_since, \
-                         auto_paused_at";
+                         auto_paused_at, refresh_hint_secs";
 
 const ARTICLE_COLS: &str = "id, curio_id, feed_id, dedupe_key, title, source_url, author, \
                             published_at, content_html, content_text, lang, word_count, \

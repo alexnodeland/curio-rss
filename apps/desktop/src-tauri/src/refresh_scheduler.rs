@@ -1133,6 +1133,7 @@ mod tests {
             refresh_interval_min: None,
             failing_since: None,
             auto_paused_at: None,
+            refresh_hint_secs: None,
         }
     }
 

@@ -267,6 +267,7 @@ pub(super) struct RawFeed {
     refresh_interval_min: Option<u32>,
     failing_since: Option<String>,
     auto_paused_at: Option<String>,
+    refresh_hint_secs: Option<u32>,
 }
 
 pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
@@ -292,6 +293,7 @@ pub(super) fn raw_feed(row: &Row<'_>) -> rusqlite::Result<RawFeed> {
         refresh_interval_min: row.get(18)?,
         failing_since: row.get(19)?,
         auto_paused_at: row.get(20)?,
+        refresh_hint_secs: row.get(21)?,
     })
 }
 
@@ -325,6 +327,7 @@ impl RawFeed {
             refresh_interval_min: self.refresh_interval_min,
             failing_since: parse_opt_ts("feeds.failing_since", self.failing_since)?,
             auto_paused_at: parse_opt_ts("feeds.auto_paused_at", self.auto_paused_at)?,
+            refresh_hint_secs: self.refresh_hint_secs,
         })
     }
 }

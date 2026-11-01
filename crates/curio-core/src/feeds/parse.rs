@@ -251,18 +251,20 @@ fn best_link(links: &[Link]) -> Option<&str> {
         .map(|link| link.href.as_str())
 }
 
+/// The syndication module's namespace.
+const SYNDICATION_NS: &str = "http://purl.org/rss/1.0/modules/syndication/";
+
 /// The RSS 1.0 syndication module's update period (`sy:updatePeriod`,
 /// divided by `sy:updateFrequency`, default 1), which feed-rs does not
-/// surface. Read from the channel head only — before the first item.
+/// surface. Read from the channel head only — before the first item —
+/// under whatever prefix the document binds the module's namespace to
+/// (`sy` when it binds none).
 fn syndication_period(bytes: &[u8]) -> Option<Duration> {
-    let head = bytes
-        .windows(5)
-        .position(|window| window == b"<item" || window == b"<entr")
-        .and_then(|end| bytes.get(..end))
-        .unwrap_or(bytes);
+    let head = channel_head(bytes);
     let head = String::from_utf8_lossy(head);
+    let prefix = namespace_prefix(&head, SYNDICATION_NS).unwrap_or("sy");
     let element = |name: &str| {
-        let open = format!("<sy:{name}>");
+        let open = format!("<{prefix}:{name}>");
         let start = head.find(&open)? + open.len();
         let len = head.get(start..)?.find('<')?;
         head.get(start..start + len).map(str::trim)
@@ -280,6 +282,39 @@ fn syndication_period(bytes: &[u8]) -> Option<Duration> {
         .filter(|&n| n > 0)
         .unwrap_or(1);
     Some(Duration::from_secs(period_secs / frequency))
+}
+
+/// The document up to its first `<item>` / `<entry>` start tag — the
+/// channel's own elements. An element that merely starts with those
+/// letters (RSS 1.0's channel-level `<items>`) does not end it.
+fn channel_head(bytes: &[u8]) -> &[u8] {
+    let ends_name = |byte: Option<&u8>| {
+        byte.is_none_or(|&byte| byte == b'>' || byte == b'/' || byte.is_ascii_whitespace())
+    };
+    (0..bytes.len())
+        .find(|&at| {
+            [b"<item".as_slice(), b"<entry".as_slice()]
+                .iter()
+                .any(|tag| {
+                    bytes.get(at..).is_some_and(|rest| rest.starts_with(tag))
+                        && ends_name(bytes.get(at + tag.len()))
+                })
+        })
+        .and_then(|end| bytes.get(..end))
+        .unwrap_or(bytes)
+}
+
+/// The prefix `xml` binds to `namespace` (`xmlns:p="…"`), if any.
+fn namespace_prefix<'a>(xml: &'a str, namespace: &str) -> Option<&'a str> {
+    xml.match_indices("xmlns:").find_map(|(at, _)| {
+        let rest = xml.get(at + "xmlns:".len()..)?;
+        let (prefix, value) = rest.split_once('=')?;
+        let value = value.trim_start();
+        let quote = value.chars().next().filter(|&c| c == '"' || c == '\'')?;
+        let value = value.get(1..)?;
+        let uri = value.get(..value.find(quote)?)?;
+        (uri == namespace).then(|| prefix.trim())
+    })
 }
 
 #[cfg(test)]
@@ -325,6 +360,33 @@ mod tests {
         assert_eq!(hint("<ttl>0</ttl>"), None);
         assert_eq!(hint("<sy:updatePeriod>sometimes</sy:updatePeriod>"), None);
         assert_eq!(hint(""), None, "an item's text is not the channel's hint");
+    }
+
+    #[test]
+    fn the_syndication_hint_follows_the_bound_prefix_past_items() {
+        // RSS 1.0: the channel's `<items>` list comes before the
+        // syndication elements, and the namespace has its own prefix.
+        let rdf = r#"<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns="http://purl.org/rss/1.0/" xmlns:syn = 'http://purl.org/rss/1.0/modules/syndication/'>
+<channel rdf:about="https://example.com/"><title>t</title><link>https://example.com/</link>
+<description>d</description>
+<items><rdf:Seq><rdf:li rdf:resource="https://example.com/a"/></rdf:Seq></items>
+<syn:updatePeriod>daily</syn:updatePeriod><syn:updateFrequency>4</syn:updateFrequency>
+</channel>
+<item rdf:about="https://example.com/a"><title>a</title><link>https://example.com/a</link></item>
+</rdf:RDF>"#;
+        assert_eq!(
+            parse_feed(rdf.as_bytes(), None).unwrap().meta.refresh_hint,
+            Some(Duration::from_secs(21_600))
+        );
+        assert_eq!(
+            namespace_prefix("<a xmlns:x=\"other\">", SYNDICATION_NS),
+            None
+        );
+        assert_eq!(channel_head(b"<a><item>"), b"<a>");
+        assert_eq!(channel_head(b"<a><entry/>"), b"<a>");
+        assert_eq!(channel_head(b"<a><itemize>"), b"<a><itemize>");
     }
 
     /// The crate dir is read at run time (cargo sets it for test runs): a

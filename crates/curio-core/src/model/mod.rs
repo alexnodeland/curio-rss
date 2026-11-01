@@ -127,6 +127,11 @@ pub struct Feed {
     /// When the engine paused this feed by itself after a run of failed
     /// fetches; `None` for an active feed or one the user paused.
     pub auto_paused_at: Option<Timestamp>,
+    /// The feed's own refresh hint in seconds (`<ttl>`,
+    /// `sy:updatePeriod`) as its last parsed body declared it — kept so a
+    /// `304 Not Modified`, which has no body, still honours it. `None`
+    /// when the feed declares none.
+    pub refresh_hint_secs: Option<u32>,
 }
 
 impl Feed {

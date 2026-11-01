@@ -393,6 +393,93 @@ async fn a_feeds_own_ttl_spaces_its_sweeps() {
     assert_eq!(core.refresh_all().await.unwrap(), NOTHING);
 }
 
+/// The `<ttl>` a 200 declared still spaces sweeps after a 304, which has
+/// no body to read it from (and here no `Cache-Control` either).
+#[tokio::test]
+async fn a_304_keeps_the_ttl_of_the_last_parsed_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("ETag", "\"v1\"")
+                .set_body_raw(
+                    r#"<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+<link>https://example.com/</link><ttl>120</ttl>
+<item><title>a</title><link>https://example.com/a</link></item></channel></rss>"#,
+                    "application/rss+xml",
+                ),
+        )
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(304))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path(), RefreshPolicy::default());
+    let id = subscribe_all(&core, &server, &["/feed.xml".to_owned()])[0];
+    assert_eq!(core.refresh_all().await.unwrap()[0].status, FetchStatus::Ok);
+    assert_eq!(feed(&core, id).refresh_hint_secs, Some(120 * 60));
+
+    // By hand (a manual refresh ignores the window): a 304.
+    let outcome = core.refresh_feed(id).await.unwrap();
+    assert_eq!(outcome.status, FetchStatus::NotModified);
+    let state = feed(&core, id);
+    assert_eq!(scheduled_wait(&state), Duration::from_secs(120 * 60));
+    assert_eq!(state.refresh_hint_secs, Some(120 * 60));
+    assert_eq!(core.refresh_all().await.unwrap(), NOTHING, "still waiting");
+}
+
+/// A manual refresh that works ends an automatic pause; a user's own
+/// pause survives one.
+#[tokio::test]
+async fn a_working_manual_refresh_ends_an_automatic_pause() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(2)
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(304))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(
+        profile.path(),
+        RefreshPolicy {
+            backoff_base: Duration::ZERO,
+            auto_pause_after: 2,
+            auto_pause_min_failing: Duration::ZERO,
+            ..RefreshPolicy::default()
+        },
+    );
+    let id = subscribe_all(&core, &server, &["/feed.xml".to_owned()])[0];
+    core.refresh_all().await.unwrap();
+    core.refresh_all().await.unwrap();
+    assert_eq!(feed(&core, id).status, FeedStatus::Paused);
+
+    let outcome = core.refresh_feed(id).await.unwrap();
+    assert_eq!(outcome.status, FetchStatus::NotModified);
+    let state = feed(&core, id);
+    assert_eq!(state.status, FeedStatus::Active, "the feed is back");
+    assert_eq!(state.auto_paused_at, None);
+    assert_eq!(state.consecutive_failures, 0);
+
+    core.set_feed_status(id, FeedStatus::Paused).unwrap();
+    core.refresh_feed(id).await.unwrap();
+    assert_eq!(
+        feed(&core, id).status,
+        FeedStatus::Paused,
+        "the user's pause"
+    );
+}
+
 /// 1000 feeds on mixed schedules: a third with a per-feed interval, a
 /// third whose server grants `Cache-Control: max-age`, a third with
 /// neither. The second sweep fetches only that last third.

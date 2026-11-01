@@ -1301,9 +1301,10 @@ fn settling_a_fetch_stores_the_schedule_and_resuming_clears_it() {
         next_attempt_at: Some(later),
         failing_since: Some(now),
         status: None,
+        refresh_hint_secs: Some(600),
     };
     storage
-        .settle_fetch(attempt(feed.id, FetchStatus::Error), failing)
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), move |_| failing)
         .unwrap();
     let stored = storage.get_feed(feed.id).unwrap().unwrap();
     assert_eq!(stored.consecutive_failures, 3);
@@ -1323,13 +1324,10 @@ fn settling_a_fetch_stores_the_schedule_and_resuming_clears_it() {
     let record = attempt(feed.id, FetchStatus::Error);
     let paused_at = record.fetched_at;
     storage
-        .settle_fetch(
-            record,
-            FeedSchedule {
-                status: Some(FeedStatus::Paused),
-                ..failing
-            },
-        )
+        .settle_fetch(record, move |_| FeedSchedule {
+            status: Some(FeedStatus::Paused),
+            ..failing
+        })
         .unwrap();
     let stored = storage.get_feed(feed.id).unwrap().unwrap();
     assert_eq!(stored.status, FeedStatus::Paused);
@@ -1351,7 +1349,7 @@ fn settling_a_fetch_stores_the_schedule_and_resuming_clears_it() {
 
     // A user pause keeps the schedule but is never marked automatic.
     storage
-        .settle_fetch(attempt(feed.id, FetchStatus::Error), failing)
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), move |_| failing)
         .unwrap();
     storage
         .set_feed_status(feed.id, FeedStatus::Paused)
@@ -1361,9 +1359,89 @@ fn settling_a_fetch_stores_the_schedule_and_resuming_clears_it() {
     assert_eq!(stored.auto_paused_at, None);
 
     assert!(matches!(
-        storage.settle_fetch(attempt(FeedId(999), FetchStatus::Ok), failing),
+        storage.settle_fetch(attempt(FeedId(999), FetchStatus::Ok), move |_| failing),
         Err(StorageError::NotFound { entity: "feed" })
     ));
+}
+
+/// The schedule is computed from the feed row inside the settle
+/// transaction — so a status change made while the fetch was in flight
+/// is what it sees — and its lifecycle change rewrites `auto_paused_at`.
+#[test]
+fn settling_builds_on_the_current_row_and_a_status_change_rewrites_the_auto_pause() {
+    let (_dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    let now = Timestamp::now();
+    let auto_pause = FeedSchedule {
+        consecutive_failures: 10,
+        next_attempt_at: None,
+        failing_since: Some(now),
+        status: Some(FeedStatus::Paused),
+        refresh_hint_secs: Some(7_200),
+    };
+    storage
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), move |_| auto_pause)
+        .unwrap();
+    // The user resumes while the next (manual) fetch is in flight.
+    storage
+        .set_feed_status(feed.id, FeedStatus::Active)
+        .unwrap();
+    let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+    storage
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), move |current| {
+            seen_tx.send(current.clone()).unwrap();
+            FeedSchedule {
+                consecutive_failures: current.consecutive_failures + 1,
+                next_attempt_at: None,
+                failing_since: Some(now),
+                status: None,
+                refresh_hint_secs: current.refresh_hint_secs,
+            }
+        })
+        .unwrap();
+    let seen = seen_rx.recv().unwrap();
+    assert_eq!(
+        seen.status,
+        FeedStatus::Active,
+        "the resume, not the snapshot"
+    );
+    assert_eq!(seen.consecutive_failures, 0);
+    assert_eq!(seen.refresh_hint_secs, Some(7_200));
+    let stored = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.consecutive_failures, 1, "the resume's reset is kept");
+    assert_eq!(stored.auto_paused_at, None);
+
+    // An auto-pause, then a success that ends it: the stamp goes too.
+    storage
+        .settle_fetch(attempt(feed.id, FetchStatus::Error), move |_| auto_pause)
+        .unwrap();
+    assert!(
+        storage
+            .get_feed(feed.id)
+            .unwrap()
+            .unwrap()
+            .auto_paused_at
+            .is_some()
+    );
+    storage
+        .settle_fetch(attempt(feed.id, FetchStatus::Ok), move |_| FeedSchedule {
+            consecutive_failures: 0,
+            next_attempt_at: None,
+            failing_since: None,
+            status: Some(FeedStatus::Active),
+            refresh_hint_secs: None,
+        })
+        .unwrap();
+    let stored = storage.get_feed(feed.id).unwrap().unwrap();
+    assert_eq!(stored.status, FeedStatus::Active);
+    assert_eq!(stored.auto_paused_at, None);
+    assert_eq!(stored.refresh_hint_secs, None);
 }
 
 #[test]

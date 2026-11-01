@@ -125,7 +125,12 @@ allowance carries a vector in `xss-corpus.html`):
   the app never uses for its own DOM ids, so feed content cannot clobber them) and
   fragment-only `href`s are kept in the same namespace instead of being absolutized to
   the source site. Markdown export turns footnotes into `[^1]` / `[^1]: …` (dropping
-  the `↩` back-references) and drops the destination of any other in-page link.
+  the `↩` back-references) and drops the destination of any other in-page link. The
+  desktop reader scrolls such a link to its target in place (it never reaches the OS
+  opener).
+- **Image dimensions** — `img[width]` / `img[height]` survive as plain pixel integers
+  (`1..=20000`), so the reader can reserve an image's aspect ratio before it loads;
+  export ignores them.
 - **Direction and structure** — `dir`, `lang`, `ol[start]`, `<bdi>`/`<bdo>`, and the
   `language-*` class on `pre`/`code` (the exported fence language). When a
   whole-page feed item is extracted, direction set only on the winning container

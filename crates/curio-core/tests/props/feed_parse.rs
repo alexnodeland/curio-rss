@@ -104,6 +104,27 @@ fn json_feed(items: &[Item]) -> String {
     .to_string()
 }
 
+/// Up to `max` items with pairwise-distinct identities, so every one
+/// survives the parser's exact-repeat drop and the round trip can expect
+/// them all back: guids and links get an index suffix, and an item with
+/// neither (keyed by a title hash) gets one on its title.
+fn distinct_items(max: usize) -> impl Strategy<Value = Vec<Item>> {
+    prop::collection::vec(item(), 0..max).prop_map(|items| {
+        items
+            .into_iter()
+            .enumerate()
+            .map(|(index, mut item)| {
+                item.guid = item.guid.map(|guid| format!("{guid}.{index}"));
+                item.link = item.link.map(|link| format!("{link}-{index}"));
+                if item.guid.is_none() && item.link.is_none() {
+                    item.title = format!("{} n{index}", item.title);
+                }
+                item
+            })
+            .collect()
+    })
+}
+
 /// The parsed feed holds exactly `items`, in order.
 fn assert_round_trip(document: &str, items: &[Item]) -> Result<(), TestCaseError> {
     let feed = parse_feed(document.as_bytes(), Some("https://feed.example/feed"))
@@ -142,28 +163,37 @@ proptest! {
     }
 
     #[test]
-    fn generated_rss_round_trips(items in prop::collection::vec(item(), 0..12)) {
+    fn generated_rss_round_trips(items in distinct_items(12)) {
         assert_round_trip(&rss(&items), &items)?;
     }
 
     #[test]
-    fn generated_atom_round_trips(items in prop::collection::vec(item(), 0..12)) {
+    fn generated_atom_round_trips(items in distinct_items(12)) {
         assert_round_trip(&atom(&items), &items)?;
     }
 
     #[test]
-    fn generated_json_feed_round_trips(items in prop::collection::vec(item(), 0..12)) {
+    fn generated_json_feed_round_trips(items in distinct_items(12)) {
         assert_round_trip(&json_feed(&items), &items)?;
     }
 
+    /// Any item list — repeats, reused guids and shared links included —
+    /// yields keys that are unique within the fetch and identical on a
+    /// reparse.
     #[test]
-    fn dedupe_keys_are_stable_across_reparses(items in prop::collection::vec(item(), 0..12)) {
+    fn dedupe_keys_are_unique_and_stable_across_reparses(
+        items in prop::collection::vec(item(), 0..12),
+    ) {
         let document = rss(&items);
-        let keys = |doc: &str| -> Vec<String> {
-            parse_feed(doc.as_bytes(), None)
-                .map(|feed| feed.entries.into_iter().map(|entry| entry.dedupe_key).collect())
-                .unwrap_or_default()
+        let keys = |doc: &str| -> Result<Vec<String>, TestCaseError> {
+            let feed = parse_feed(doc.as_bytes(), None)
+                .map_err(|err| TestCaseError::fail(format!("{err}\n{doc}")))?;
+            Ok(feed.entries.into_iter().map(|entry| entry.dedupe_key).collect())
         };
-        prop_assert_eq!(keys(&document), keys(&document));
+        let first = keys(&document)?;
+        let unique: std::collections::HashSet<&String> = first.iter().collect();
+        prop_assert_eq!(unique.len(), first.len(), "duplicate keys in one fetch: {:?}", first);
+        prop_assert!(first.len() <= items.len());
+        prop_assert_eq!(keys(&document)?, first);
     }
 }

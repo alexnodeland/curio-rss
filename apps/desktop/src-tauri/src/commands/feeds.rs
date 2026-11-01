@@ -8,22 +8,25 @@ use curio_core::model::{FeedId, FeedStatus};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
-use crate::discovery::{Discovery, DiscoveryDto};
+use crate::discovery::DiscoveryDto;
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
 use crate::refresh_scheduler::RefreshScheduler;
 
-/// Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
-/// the page once through the policed client and scans it. Head-local
-/// platform policy; the Google favicon fallback is the frontend's opt-in.
+/// Autodiscovers feeds (and a favicon) for what the user typed — a bare
+/// domain, a site, a page, or a feed URL. The core's discovery normalizes
+/// it, applies the fetch-free rewrites, scans and probes through the
+/// policed client and offers only validated feeds; the Google favicon
+/// fallback is the frontend's opt-in.
 #[tauri::command]
 #[specta::specta]
 pub async fn discover_feeds(
-    discovery: State<'_, Discovery>,
+    core: State<'_, SharedCore>,
     url: String,
 ) -> Result<DiscoveryDto, CommandError> {
-    discovery.discover(&url).await
+    let core = Arc::clone(core.inner());
+    crate::discovery::discover(&core, &url).await
 }
 
 /// Subscribes to a feed and kicks off its first fetch in the background —

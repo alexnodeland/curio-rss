@@ -37,9 +37,6 @@ chrono = { workspace = true }
 curio-core = { workspace = true, features = ["enrich-reddit", "keychain"] }
 curio-types = { workspace = true }
 directories = { workspace = true }
-# HTML scan for feed autodiscovery + favicon (already in the workspace
-# graph via curio-core — adds no new licenses to triage).
-scraper = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -68,9 +65,6 @@ url = { workspace = true }
 # Test seeding (`commands::testutil::seed_article`) needs the raw
 # storage accessor; production builds never see it.
 curio-core = { workspace = true, features = ["test-support"] }
-# "Never panics" properties over discovery's pure extraction (arbitrary
-# bytes / multi-byte text); already a workspace dev-dependency.
-proptest = { workspace = true }
 # Builds the `SQLITE_BUSY` source of a `StorageError::Busy` for the
 # error-mapping tests, and forges too-new and backed-up databases for the
 # startup-recovery tests (already in the graph via curio-core).

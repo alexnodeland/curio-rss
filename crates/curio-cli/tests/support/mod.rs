@@ -25,12 +25,46 @@ pub fn repo_root() -> PathBuf {
         .unwrap()
 }
 
-/// Serves `fixtures/feeds/rss2.xml` on an ephemeral 127.0.0.1 port and
-/// returns the base URL. Hermetic: nothing leaves the loopback.
+/// A blog homepage declaring its feed — what `feed add <site>` discovers.
+pub const HOMEPAGE: &str = r#"<!DOCTYPE html><html><head><title>Example Blog</title>
+<link rel="alternate" type="application/rss+xml" title="Example Blog" href="/feed.xml">
+</head><body><p>Hello.</p></body></html>"#;
+
+/// A page that declares no feed.
+pub const PLAIN_PAGE: &str = "<!DOCTYPE html><html><body><p>No feed here.</p></body></html>";
+
+/// Serves `fixtures/feeds/rss2.xml` at `/feed.xml`, a homepage declaring it
+/// at `/`, and a page declaring nothing at `/plain` on an ephemeral
+/// 127.0.0.1 port, and returns the base URL. Hermetic: nothing leaves the
+/// loopback.
 pub async fn fixture_server() -> String {
+    let app = Router::new()
+        .route(
+            "/feed.xml",
+            get(|| async { ([("content-type", "application/rss+xml")], RSS) }),
+        )
+        .route(
+            "/",
+            get(|| async { ([("content-type", "text/html")], HOMEPAGE) }),
+        )
+        .route(
+            "/plain",
+            get(|| async { ([("content-type", "text/html")], PLAIN_PAGE) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+/// Serves only [`PLAIN_PAGE`] at `/` (every other path 404s — nothing to
+/// discover or probe) on an ephemeral 127.0.0.1 port; returns the base URL.
+pub async fn feedless_server() -> String {
     let app = Router::new().route(
-        "/feed.xml",
-        get(|| async { ([("content-type", "application/rss+xml")], RSS) }),
+        "/",
+        get(|| async { ([("content-type", "text/html")], PLAIN_PAGE) }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

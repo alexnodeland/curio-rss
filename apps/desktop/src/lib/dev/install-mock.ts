@@ -379,8 +379,10 @@ tokens:
                     return null;
                 case 'discover_feeds': {
                     const query = String(args.url);
-                    // Mirror discovery.rs: a YouTube @handle resolves to its
-                    // channel videos feed.
+                    // A canned stand-in for `curio_core::feeds::discover` (no
+                    // normalization, rewrites, probing or validation): a
+                    // YouTube @handle resolves to its channel videos feed,
+                    // anything else to itself.
                     if (/youtube\.com\/@/.test(query)) {
                         return {
                             feeds: [

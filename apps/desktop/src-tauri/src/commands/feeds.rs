@@ -1,7 +1,8 @@
 //! Feed commands: subscribe, remove, list, status, metadata, refresh,
 //! and the feed-health fetch log.
 
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use curio_core::feeds::{DiscoverOptions, normalize_input};
 use curio_core::model::{FeedId, FeedStatus, NewFeed};
@@ -71,18 +72,95 @@ pub async fn add_feed(
 }
 
 /// Unsubscribes. Stored articles survive (they lose their `feed_id`).
+/// Settles any staged removal of the feed either way: a success needs no
+/// exit flush, and a failure leaves the feed subscribed (the UI shows it
+/// again), so quitting must not remove it behind the user's back.
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_feed(
     app: AppHandle,
     core: State<'_, SharedCore>,
+    pending: State<'_, PendingRemovals>,
     feed_id: i64,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || remove_feed_impl(&core, feed_id)).await?;
+    let removed = run_blocking(move || remove_feed_impl(&core, feed_id)).await;
+    pending.unstage(feed_id);
+    removed?;
     emit_or_log(&app, &FeedsChanged);
     emit_or_log(&app, &ArticlesChanged { feed_id: None });
     Ok(())
+}
+
+/// Unsubscribes the UI has accepted but deferred: the feed is hidden while
+/// its undo toast is up, and `remove_feed` runs when the toast closes (#144).
+/// Staging the id here makes the removal survive the app quitting inside
+/// that window — `⌘Q`, or closing the last window, need not deliver the
+/// webview's `pagehide` — because [`flush_pending_removals`] commits
+/// whatever is still staged when the event loop exits. A crash before then
+/// loses the staged removal, which leaves the feed subscribed: the safe side.
+#[derive(Debug, Default)]
+pub struct PendingRemovals(Mutex<BTreeSet<i64>>);
+
+impl PendingRemovals {
+    fn ids(&self) -> MutexGuard<'_, BTreeSet<i64>> {
+        // A set of ids can't be left half-updated by a panicking holder.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Stages a removal (idempotent).
+    pub fn stage(&self, feed_id: i64) {
+        self.ids().insert(feed_id);
+    }
+
+    /// Drops a staged removal (undo, or it ran); whether one was staged.
+    pub fn unstage(&self, feed_id: i64) -> bool {
+        self.ids().remove(&feed_id)
+    }
+
+    /// Takes every staged id, ascending, leaving the set empty.
+    pub fn drain(&self) -> Vec<i64> {
+        std::mem::take(&mut *self.ids()).into_iter().collect()
+    }
+}
+
+/// Stages an unsubscribe that is waiting out its undo window, so it still
+/// happens if the app quits first (see [`PendingRemovals`]).
+#[tauri::command]
+#[specta::specta]
+pub async fn stage_feed_removal(
+    pending: State<'_, PendingRemovals>,
+    feed_id: i64,
+) -> Result<(), CommandError> {
+    pending.stage(feed_id);
+    Ok(())
+}
+
+/// Withdraws a staged unsubscribe — the undo toast's Undo.
+#[tauri::command]
+#[specta::specta]
+pub async fn unstage_feed_removal(
+    pending: State<'_, PendingRemovals>,
+    feed_id: i64,
+) -> Result<(), CommandError> {
+    pending.unstage(feed_id);
+    Ok(())
+}
+
+/// Commits every staged unsubscribe — run once, as the event loop exits.
+/// A feed already gone (its `remove_feed` raced the quit) or a removal that
+/// fails is logged and skipped. Returns how many were removed.
+pub fn flush_pending_removals(core: &CoreHandle, pending: &PendingRemovals) -> usize {
+    let mut removed = 0;
+    for feed_id in pending.drain() {
+        match remove_feed_impl(core, feed_id) {
+            Ok(()) => removed += 1,
+            Err(error) => {
+                tracing::warn!(feed_id, ?error, "staged unsubscribe not committed at exit");
+            }
+        }
+    }
+    removed
 }
 
 /// Every subscription.
@@ -646,6 +724,47 @@ mod tests {
         let error = remove_feed_impl(&core, 999).unwrap_err();
         assert_eq!(error.kind, ErrorKind::User);
         assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    fn subscribe(core: &CoreHandle, url: &str) -> i64 {
+        add_feed_impl(
+            core,
+            NewFeed {
+                url: url.into(),
+                title: None,
+                tags: vec![],
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn staged_removals_are_committed_by_the_exit_flush() {
+        let (_dir, core) = temp_core();
+        let kept = subscribe(&core, "https://example.test/kept.xml");
+        let undone = subscribe(&core, "https://example.test/undone.xml");
+        let staged = subscribe(&core, "https://example.test/staged.xml");
+        let raced = subscribe(&core, "https://example.test/raced.xml");
+        let pending = PendingRemovals::default();
+        pending.stage(undone);
+        pending.stage(staged);
+        pending.stage(staged); // idempotent
+        pending.stage(raced);
+        assert!(pending.unstage(undone), "Undo withdraws the staged removal");
+        assert!(!pending.unstage(kept), "never staged");
+        // The toast's own removal ran just before the quit.
+        remove_feed_impl(&core, raced).unwrap();
+
+        assert_eq!(flush_pending_removals(&core, &pending), 1);
+        let ids: Vec<i64> = list_feeds_impl(&core)
+            .unwrap()
+            .into_iter()
+            .map(|feed| feed.id)
+            .collect();
+        assert_eq!(ids, vec![kept, undone]);
+        assert!(pending.drain().is_empty(), "the flush drained the set");
+        assert_eq!(flush_pending_removals(&core, &pending), 0);
     }
 
     #[test]

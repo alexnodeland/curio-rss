@@ -439,6 +439,12 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'pane.sidebar.resize': 'Zmień rozmiar paska bocznego',
     'pane.list.resize': 'Zmień rozmiar listy artykułów',
     'toast.dismiss': 'Odrzuć',
+    'toast.region': 'Powiadomienia',
+    'toast.undo': 'Cofnij',
+    'toast.retry': 'Ponów',
+    'toast.markReadUndone':
+        '{count, plural, one {Ponownie oznaczono # jako nieprzeczytany} few {Ponownie oznaczono # jako nieprzeczytane} many {Ponownie oznaczono # jako nieprzeczytane} other {Ponownie oznaczono # jako nieprzeczytane}}',
+    'updates.openSettings': 'Otwórz Ustawienia',
     'shortcut.category.navigation': 'Nawigacja',
     'shortcut.category.actions': 'Akcje',
     'shortcut.category.views': 'Widoki',

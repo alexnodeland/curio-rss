@@ -52,7 +52,7 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 | ➕ **Add anything** | Smart-input add — paste a URL or bare domain, `r/subreddit`, `@user@instance` (Mastodon), a YouTube channel, a GitHub repo (its releases), a [newsletter inbox](docs/newsletters.md), or Hacker News; plus a Popular-sources quick-add row. Every subscribe is validated: a homepage subscribes to its feed, and a page without one is refused rather than added broken |
 | 🗂️ **Organize** | Create / rename / delete folders, drag feeds **into and out of** folders, drag- or **keyboard-reorder (`Alt`+↑/↓)**, inline rename, keyboard tree navigation, right-click menus, an edit-feed panel (URL visible + health), and a warning dot on any feed whose last refresh errored — **honest from a cold start** |
 | 📖 **Read** | Three-pane reader with **adjustable typography** (size, width, weight, line-height, letter-spacing, hyphenation) and **Sepia / Paper reading themes**, on-demand full-article readability, comfortable/compact list density, inline snippets, mark-on-open, opt-in mark-on-scroll (only rows you actually saw scroll by), read rows that stay put in the unread view until you leave it or refresh, a list that holds its place when rows come and go above you, a remembered scroll position per view, next-unread across feeds |
-| ⭐ **State** | Read · star · read-later · archive — event-sourced with negation events |
+| ⭐ **State** | Read · star · read-later · archive — event-sourced with negation events; **Undo** on mark-all-read (feed, folder or library) and on unsubscribe, **Retry** on failed actions |
 | 🔎 **Search** | Full-text search over everything (SQLite FTS5), with **match highlighting** in results |
 | ↔️ **Import / export** | OPML in/out + Pocket, Instapaper & Readwise CSV importers |
 | 📝 **Save to notes** | Named destinations → markdown notes with a byte-preserved managed region |
@@ -60,7 +60,7 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 | 🔔 **Notifications** | Optional desktop notifications on new articles — per-event toggles, quiet hours, per-feed opt-out |
 | 🔄 **Auto-updates** | Built-in "Check for updates" that installs & relaunches; auto-check / auto-install toggles; signed GitHub-release artifacts |
 | ⌨️ **Keyboard & menus** | Native macOS menu bar, ⌘-chord hotkeys, vim-style keys, tooltips, and a help overlay |
-| ♿ **Accessible** | Focus-trapped modals, listbox navigation, live-region toasts, WCAG-AA contrast (gated) |
+| ♿ **Accessible** | Focus-trapped modals, listbox navigation, toasts announced through permanent polite/assertive live regions (errors stay until dismissed; hover or focus pauses the rest), WCAG-AA contrast (gated) |
 | 🌍 **8 languages** | English · Español · Français · Deutsch · Italiano · Polski · 简体中文 · 廣東話 |
 | 🔒 **Private** | No telemetry, no accounts; a per-host fetch policy (e.g. Reddit) is disclosed in [PRIVACY.md](PRIVACY.md); remote media & favicon fallback are opt-in |
 

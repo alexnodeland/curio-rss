@@ -440,6 +440,12 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'pane.sidebar.resize': 'Redimensionner la barre latérale',
     'pane.list.resize': 'Redimensionner la liste des articles',
     'toast.dismiss': 'Ignorer',
+    'toast.region': 'Notifications',
+    'toast.undo': 'Annuler',
+    'toast.retry': 'Réessayer',
+    'toast.markReadUndone':
+        '{count, plural, one {# article remis en non lu} other {# articles remis en non lus}}',
+    'updates.openSettings': 'Ouvrir les paramètres',
     'shortcut.category.navigation': 'Navigation',
     'shortcut.category.actions': 'Actions',
     'shortcut.category.views': 'Vues',

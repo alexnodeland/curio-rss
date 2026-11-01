@@ -26,7 +26,7 @@ async function storeWithFeeds(
         get_unread_counts: unreadCountsFixture({ total: 0, by_feed: [] }),
         set_feed_tags: null,
         set_setting: null,
-        mark_all_read: null,
+        mark_all_read: [],
         ...extra,
     });
     const store = new FeedsStore();

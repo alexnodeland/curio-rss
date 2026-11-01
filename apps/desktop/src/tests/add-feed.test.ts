@@ -410,7 +410,7 @@ describe('AddFeedModal', () => {
     });
 
     it.each([
-        ['add_feed', 'Subscribe', 'HTTP_STATUS', { host: 'lan.example', status: '503' }],
+        ['add_feed', 'Subscribe', 'HOST_NOT_FOUND', { host: 'lan.example' }],
         ['discover_feeds', 'Find feeds', 'NETWORK_TIMEOUT', { host: 'lan.example' }],
     ] as const)(
         'treats a finer fetch code from %s as unreachable too (%s)',

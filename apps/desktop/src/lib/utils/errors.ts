@@ -77,6 +77,9 @@ export function commandErrorMessage(error: CommandError): string {
 /**
  * The codes a failed fetch carries — the address could not be reached or
  * read, whichever way it failed (the finer codes split the old `NETWORK`).
+ * `HTTP_STATUS` and `RATE_LIMITED` mean the host did answer; they stay here,
+ * as under the old `NETWORK`, until the add-feed modal has a line of its own
+ * for an answered-with-an-error address (#273).
  */
 const UNREACHABLE: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
     'NETWORK',

@@ -399,10 +399,17 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         display: none;
     }
 
-    /* A figure whose only child is a collapsed image would otherwise leave
-       its margin (and an orphaned caption) behind — fold the wrapper. */
-    .sanitized-content :global(figure:has(> img[data-media-off]:only-child)),
-    .sanitized-content :global(figure:has(> img[data-media-failed]:only-child)) {
+    /* A figure whose only child is a hidden image would otherwise leave its
+       margin behind — fold the wrapper. */
+    .sanitized-content :global(figure:has(> img[data-media-off]:only-child)) {
+        display: none;
+    }
+
+    /* A failed image takes its whole figure with it: a caption describing
+       an image that will never appear is an artefact, not content. (Only
+       when no other image in the figure is still showing.) */
+    .sanitized-content
+        :global(figure:has(img[data-media-failed]):not(:has(img:not([data-media-failed])))) {
         display: none;
     }
 

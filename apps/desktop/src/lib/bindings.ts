@@ -26,8 +26,20 @@ export const commands = {
 	 *  — including one a homepage resolved to — is `ALREADY_SUBSCRIBED`.
 	 */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
-	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
+	/**
+	 *  Unsubscribes. Stored articles survive (they lose their `feed_id`).
+	 *  Settles any staged removal of the feed either way: a success needs no
+	 *  exit flush, and a failure leaves the feed subscribed (the UI shows it
+	 *  again), so quitting must not remove it behind the user's back.
+	 */
 	removeFeed: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("remove_feed", { feedId })),
+	/**
+	 *  Stages an unsubscribe that is waiting out its undo window, so it still
+	 *  happens if the app quits first (see [`PendingRemovals`]).
+	 */
+	stageFeedRemoval: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("stage_feed_removal", { feedId })),
+	/**  Withdraws a staged unsubscribe — the undo toast's Undo. */
+	unstageFeedRemoval: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("unstage_feed_removal", { feedId })),
 	/**  Every subscription. */
 	listFeeds: () => typedError<FeedDto[], CommandError>(__TAURI_INVOKE("list_feeds")),
 	/**  One subscription, if it exists. */
@@ -144,14 +156,21 @@ export const commands = {
 	 */
 	refreshFeed: (feedId: number) => typedError<RefreshOutcomeDto, CommandError>(__TAURI_INVOKE("refresh_feed", { feedId })),
 	/**
-	 *  Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
-	 *  (core's own `refresh_all` is sequential and silent — the head loops
-	 *  `refresh_feed` so the UI can watch; orchestration, not business logic).
-	 *  Any feed answering clears the scheduler's "Offline" verdict right away; a
-	 *  manual refresh resets the background scheduler's interval clock, except
-	 *  one made while offline that reached nothing (the overdue sweep stays due).
+	 *  Refreshes every `active` feed as one core sweep (bounded concurrency),
+	 *  emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
+	 *  end. Pressing refresh while a sweep runs joins it — no feed is fetched
+	 *  twice. Any feed answering clears the scheduler's "Offline" verdict right
+	 *  away; a manual refresh resets the background scheduler's interval clock,
+	 *  except one made while offline that reached nothing (the overdue sweep
+	 *  stays due).
 	 */
 	refreshAll: () => typedError<RefreshOutcomeDto[], CommandError>(__TAURI_INVOKE("refresh_all")),
+	/**
+	 *  Cancels the refresh sweep in flight: no further feed starts and the
+	 *  fetches in flight are dropped, so the sweep finishes early
+	 *  ([`RefreshFinished::cancelled`]). `false` when no sweep is running.
+	 */
+	cancelRefresh: () => typedError<boolean, CommandError>(__TAURI_INVOKE("cancel_refresh")),
 	/**
 	 *  The recent fetch log for one feed, newest first — the feed-health
 	 *  surface.
@@ -235,10 +254,18 @@ export const commands = {
 	markRead: (articleId: number, read: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("mark_read", { articleId, read })),
 	/**
 	 *  Marks every unread article read — one feed (`Some`) or the whole
-	 *  library (`None`). Returns how many changed; invalidates only if something
-	 *  did (the `ArticlesChanged` refresh also updates the unread badges).
+	 *  library (`None`). Returns the ids that changed (ascending; the length is
+	 *  the count), which the UI keeps for an exact undo via [`mark_read_many`].
+	 *  Invalidates only if something changed (the `ArticlesChanged` refresh also
+	 *  updates the unread badges).
 	 */
-	markAllRead: (feedId: number | null) => typedError<number, CommandError>(__TAURI_INVOKE("mark_all_read", { feedId })),
+	markAllRead: (feedId: number | null) => typedError<number[], CommandError>(__TAURI_INVOKE("mark_all_read", { feedId })),
+	/**
+	 *  Marks many articles read/unread in one transaction — undo for a
+	 *  mark-all-read, and the batch for bulk actions. Ids that no longer exist
+	 *  are skipped. Returns how many changed; invalidates only if any did.
+	 */
+	markReadMany: (articleIds: number[], read: boolean) => typedError<number, CommandError>(__TAURI_INVOKE("mark_read_many", { articleIds, read })),
 	/**
 	 *  Records an open (emits the `article.opened` contract event with the
 	 *  optional dwell time). No invalidation — opening changes no list.
@@ -1029,9 +1056,17 @@ export type RedditApiStatusDto = {
 	client_id: string | null,
 };
 
-/**  The whole `refresh_all` sweep finished. */
+/**  The whole `refresh_all` sweep finished (or was cancelled). */
 export type RefreshFinished = {
-	/**  Every feed's outcome, in refresh order. */
+	/**  The sweep that finished. */
+	sweep_id: number,
+	/**  Whether `cancel_refresh` stopped it early. */
+	cancelled: boolean,
+	/**
+	 *  One outcome per feed the sweep refreshed, in feed-list order (a
+	 *  cancelled sweep has none for the feeds it never started or whose
+	 *  fetch it abandoned — those were not refreshed, they did not fail).
+	 */
 	outcomes: RefreshOutcomeDto[],
 };
 
@@ -1056,8 +1091,18 @@ export type RefreshOutcomeDto = {
 	error_kind: FetchErrorKindDto | null,
 };
 
-/**  One feed finished during `refresh_all` — drive the progress UI. */
+/**
+ *  One feed finished during a `refresh_all` sweep — drive the progress UI
+ *  ("12/300"). Feeds refresh concurrently, so progress arrives in
+ *  completion order.
+ */
 export type RefreshProgress = {
+	/**  The sweep this progress belongs to (counts up per app run). */
+	sweep_id: number,
+	/**  Feeds finished so far, this one included. */
+	done: number,
+	/**  Feeds the sweep set out to refresh. */
+	total: number,
 	/**  The feed that finished. */
 	feed_id: number,
 	/**  Its outcome. */

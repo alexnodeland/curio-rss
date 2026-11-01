@@ -45,6 +45,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::feeds::discover_feeds,
             commands::feeds::add_feed,
             commands::feeds::remove_feed,
+            commands::feeds::stage_feed_removal,
+            commands::feeds::unstage_feed_removal,
             commands::feeds::list_feeds,
             commands::feeds::get_feed,
             commands::feeds::get_feed_by_url,
@@ -57,6 +59,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::feeds::reorder_feeds,
             commands::feeds::refresh_feed,
             commands::feeds::refresh_all,
+            commands::feeds::cancel_refresh,
             commands::feeds::recent_fetches,
             refresh_scheduler::connectivity_online,
             // articles
@@ -73,6 +76,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             // read-state / stars / read-later
             commands::state::mark_read,
             commands::state::mark_all_read,
+            commands::state::mark_read_many,
             commands::state::record_opened,
             commands::state::set_archived,
             commands::state::set_starred,
@@ -213,6 +217,7 @@ pub fn run() {
                 }
             };
             app.manage(ipc_policy::PathRegistry::new());
+            app.manage(commands::feeds::PendingRemovals::default());
 
             // Phase 1 (open) then phase 2 (install); a failure at either goes
             // to the recovery screen, already logged.
@@ -224,13 +229,37 @@ pub fn run() {
             Ok(())
         });
 
-    if let Err(error) = tauri_builder.run(tauri::generate_context!()) {
-        // The runtime itself failed (no webview, no window): there is no
-        // surface to show a recovery screen on. Log it for the diagnostics
-        // bundle, and keep stderr for development.
-        tracing::error!("curio-desktop failed to start: {error}");
-        eprintln!("curio-desktop failed to start: {error}");
-        std::process::exit(1);
+    let app = match tauri_builder.build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(error) => {
+            // The runtime itself failed (no webview, no window): there is no
+            // surface to show a recovery screen on. Log it for the
+            // diagnostics bundle, and keep stderr for development.
+            tracing::error!("curio-desktop failed to start: {error}");
+            eprintln!("curio-desktop failed to start: {error}");
+            std::process::exit(1);
+        }
+    };
+    app.run(|handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            flush_on_exit(handle);
+        }
+    });
+}
+
+/// The last thing the app does: an unsubscribe still inside its undo
+/// window is committed rather than lost (#144). Without a core (the
+/// recovery screen) nothing can have been staged.
+fn flush_on_exit(app: &tauri::AppHandle) {
+    let (Some(core), Some(pending)) = (
+        app.try_state::<commands::SharedCore>(),
+        app.try_state::<commands::feeds::PendingRemovals>(),
+    ) else {
+        return;
+    };
+    let removed = commands::feeds::flush_pending_removals(&core, &pending);
+    if removed > 0 {
+        tracing::info!(removed, "committed staged unsubscribes at exit");
     }
 }
 

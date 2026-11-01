@@ -3,6 +3,8 @@
  * themes, and a `system` mode. The theme is persisted twice on purpose: the
  * settings table is the source of truth, and localStorage (`curio-theme`) is a
  * mirror the app.html preload script reads before first paint to kill FOUC.
+ * Under `system` the store listens to the OS appearance query, so a light/dark
+ * flip (macOS Auto appearance) repaints live instead of at the next launch.
  */
 import { type CustomTheme, buildThemeRule, validateStoredTheme } from '$lib/utils/theme-format';
 import { SETTING_KEYS, settingsStore } from './settings.svelte';
@@ -71,11 +73,57 @@ export function isThemePreference(value: string): value is ThemePreference {
     return value === 'system' || isThemeId(value) || isCustomThemeId(value);
 }
 
-function systemTheme(): ThemeId {
+/** The OS appearance query — the same one the app.html preload resolves. */
+const SYSTEM_LIGHT_QUERY = '(prefers-color-scheme: light)';
+
+/** The OS appearance media query, or null where `matchMedia` is missing. */
+function systemMediaQuery(): MediaQueryList | null {
     if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-        return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        return window.matchMedia(SYSTEM_LIGHT_QUERY);
     }
-    return 'dark';
+    return null;
+}
+
+function systemTheme(): ThemeId {
+    return systemMediaQuery()?.matches === true ? 'light' : 'dark';
+}
+
+/**
+ * The pre-`EventTarget` listener API. Older system WebKit (Safari < 14, i.e.
+ * macOS 10.14/10.15 webviews — where Dark and Auto appearance first shipped)
+ * implements only `addListener`/`removeListener` on `MediaQueryList`.
+ */
+interface LegacyMediaQueryList {
+    addListener?: (listener: () => void) => void;
+    removeListener?: (listener: () => void) => void;
+}
+
+/**
+ * Subscribes `listener` to the query's changes — `addEventListener` where the
+ * webview has it, the legacy `addListener` otherwise. False when neither
+ * exists (nothing was attached).
+ */
+function watchQuery(query: MediaQueryList, listener: () => void): boolean {
+    if (typeof query.addEventListener === 'function') {
+        query.addEventListener('change', listener);
+        return true;
+    }
+    const legacy: LegacyMediaQueryList = query;
+    if (typeof legacy.addListener === 'function') {
+        legacy.addListener(listener);
+        return true;
+    }
+    return false;
+}
+
+/** Undoes {@link watchQuery} through whichever API attached the listener. */
+function unwatchQuery(query: MediaQueryList, listener: () => void): void {
+    if (typeof query.removeEventListener === 'function') {
+        query.removeEventListener('change', listener);
+        return;
+    }
+    const legacy: LegacyMediaQueryList = query;
+    if (typeof legacy.removeListener === 'function') legacy.removeListener(listener);
 }
 
 export class ThemeStore {
@@ -84,9 +132,32 @@ export class ThemeStore {
     /** User-authored custom themes, persisted as a JSON array. */
     customThemes: CustomTheme[] = $state([]);
 
+    /**
+     * Bumped on every OS appearance change while following the system, so
+     * `resolvedTheme` (which reads `matchMedia` live) re-derives for any
+     * reactive reader.
+     */
+    #systemChanges = $state(0);
+
+    /** The OS query this store listens to while the preference is `system`. */
+    #systemQuery: MediaQueryList | null = null;
+
+    /** The OS flipped appearance (e.g. macOS Auto at sunset): repaint. */
+    readonly #onSystemChange = (): void => {
+        this.#systemChanges += 1;
+        this.#applyTheme();
+    };
+
     /** The concrete theme the preference resolves to (built-in or custom). */
     get resolvedTheme(): ThemeId | CustomThemeId {
-        return this.themePreference === 'system' ? systemTheme() : this.themePreference;
+        if (this.themePreference !== 'system') return this.themePreference;
+        void this.#systemChanges;
+        return systemTheme();
+    }
+
+    /** Whether an OS appearance listener is attached (only under `system`). */
+    get followsSystem(): boolean {
+        return this.#systemQuery !== null;
     }
 
     /**
@@ -151,6 +222,27 @@ export class ThemeStore {
         // Mirror the active custom's rule so the FOUC preload can re-inject it.
         const active = this.#activeCustom();
         writeCustomMirror(active === undefined ? null : buildThemeRule(active));
+        this.#syncSystemListener();
+    }
+
+    /**
+     * Listens for OS appearance changes exactly while the preference is
+     * `system`; an explicit theme detaches the listener.
+     */
+    #syncSystemListener(): void {
+        if (this.themePreference !== 'system') {
+            this.#stopFollowingSystem();
+            return;
+        }
+        if (this.#systemQuery !== null) return;
+        const query = systemMediaQuery();
+        if (query === null || !watchQuery(query, this.#onSystemChange)) return;
+        this.#systemQuery = query;
+    }
+
+    #stopFollowingSystem(): void {
+        if (this.#systemQuery !== null) unwatchQuery(this.#systemQuery, this.#onSystemChange);
+        this.#systemQuery = null;
     }
 
     /** (Re)injects the `<style>` element holding every custom theme's rule. */
@@ -205,6 +297,7 @@ export class ThemeStore {
 
     /** Test isolation. */
     reset(): void {
+        this.#stopFollowingSystem();
         this.themePreference = 'system';
         this.customThemes = [];
     }

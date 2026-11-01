@@ -1415,6 +1415,30 @@ fn unread_counts_are_served_by_the_facade() {
     assert_eq!(counts.values().sum::<u64>(), 1);
 }
 
+/// Mark-all-read hands back the exact ids it flipped, and the batch
+/// `mark_read_many` puts precisely those back — the desktop's undo.
+#[test]
+fn mark_all_read_round_trips_through_mark_read_many() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    assert!(core.mark_read(articles[0].id, true).unwrap());
+
+    let flipped = core.mark_all_read(None).unwrap();
+    assert_eq!(flipped, vec![articles[1].id], "only the unread one");
+    assert_eq!(core.unread_counts().unwrap().values().sum::<u64>(), 0);
+
+    assert_eq!(core.mark_read_many(&flipped, false).unwrap(), 1);
+    assert!(!core.article_state(articles[1].id).unwrap().read);
+    assert!(core.article_state(articles[0].id).unwrap().read);
+}
+
 #[tokio::test]
 async fn hydrate_article_replaces_the_excerpt_with_the_extracted_full_body() {
     let server = MockServer::start().await;
@@ -1646,7 +1670,13 @@ async fn an_anonymous_reddit_403_asks_for_credentials_without_a_fallback_fetch()
 
     let err = core.hydrate_article(stored.id).await.unwrap_err();
     assert!(
-        matches!(err, curio_core::CoreError::RedditAuth { .. }),
+        matches!(
+            err,
+            curio_core::CoreError::RedditAuth {
+                reason: curio_core::RedditAuthReason::CredentialsMissing,
+                status: 403,
+            }
+        ),
         "{err:?}"
     );
     assert!(
@@ -1654,6 +1684,170 @@ async fn an_anonymous_reddit_403_asks_for_credentials_without_a_fallback_fetch()
             .contains("add your own free Reddit API credentials"),
         "{err}"
     );
+}
+
+/// A reddit post article on `server`, stored in `core`; returns its id.
+#[cfg(feature = "enrich-reddit")]
+fn stored_reddit_post(
+    core: &CoreHandle,
+    server: &MockServer,
+    comments_id: &str,
+) -> curio_core::model::ArticleId {
+    let mut article = manual_article(comments_id, "Reddit stub");
+    article.source_url = format!("{}/r/rust/comments/{comments_id}/title/", server.uri());
+    core.storage().upsert_articles(vec![article]).unwrap();
+    core.list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0)
+        .id
+}
+
+/// Installed credentials the token endpoint refuses (a wrong secret, a
+/// deleted app) degrade to the anonymous request — and when reddit blocks
+/// that too, the user is told to fix their credentials, not to add some.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn refused_reddit_credentials_are_typed_as_rejected_not_missing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/access_token"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/badcreds/title.json"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+        client_id: "cid".to_owned(),
+        client_secret: "wrong".to_owned(),
+        token_url: format!("{}/api/v1/access_token", server.uri()),
+        api_origin: server.uri(),
+    }));
+    let id = stored_reddit_post(&core, &server, "badcreds");
+
+    let err = core.hydrate_article(id).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::CoreError::RedditAuth {
+                reason: curio_core::RedditAuthReason::CredentialsRejected,
+                status: 401,
+            }
+        ),
+        "{err:?}"
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("check the client id and secret"),
+        "{message}"
+    );
+    assert!(!message.contains("add your own"), "{message}");
+}
+
+/// Installed credentials whose grant fails for a reason other than a
+/// refusal (a reddit outage: the token endpoint answers 500) degrade to the
+/// anonymous request — and when reddit blocks that too, the user is told
+/// the token endpoint was unavailable, never to add credentials they have.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn a_failed_reddit_grant_is_typed_as_unavailable_not_missing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/access_token"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/outage/title.json"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+        client_id: "cid".to_owned(),
+        client_secret: "s3cr3t".to_owned(),
+        token_url: format!("{}/api/v1/access_token", server.uri()),
+        api_origin: server.uri(),
+    }));
+    let id = stored_reddit_post(&core, &server, "outage");
+
+    let err = core.hydrate_article(id).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            curio_core::CoreError::RedditAuth {
+                reason: curio_core::RedditAuthReason::TokenUnavailable,
+                status: 403,
+            }
+        ),
+        "{err:?}"
+    );
+    let message = err.to_string();
+    assert!(message.contains("try again later"), "{message}");
+    assert!(!message.contains("add your own"), "{message}");
+}
+
+/// Credentials that grant a token reddit then refuses on the post itself:
+/// typed as a revoked token (dropped, so the next call re-grants), not as
+/// missing or wrong credentials.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn a_refused_reddit_bearer_is_typed_as_a_revoked_token_and_re_grants() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/access_token"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"access_token":"tok-revoked","token_type":"bearer","expires_in":3600}"#,
+            "application/json",
+        ))
+        // Granted once, dropped on the 401, granted again on the retry.
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/r/rust/comments/revoked/title.json"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core_trusting_localhost(profile.path());
+    core.set_reddit_api(Some(curio_core::enrich::reddit_auth::RedditApiConfig {
+        client_id: "cid".to_owned(),
+        client_secret: "s3cr3t".to_owned(),
+        token_url: format!("{}/api/v1/access_token", server.uri()),
+        api_origin: server.uri(),
+    }));
+    let id = stored_reddit_post(&core, &server, "revoked");
+
+    for _ in 0..2 {
+        let err = core.hydrate_article(id).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                curio_core::CoreError::RedditAuth {
+                    reason: curio_core::RedditAuthReason::TokenRevoked,
+                    status: 401,
+                }
+            ),
+            "{err:?}"
+        );
+        let message = err.to_string();
+        assert!(message.contains("revoked"), "{message}");
+        assert!(message.contains("HTTP 401"), "{message}");
+    }
 }
 
 /// A reddit 429 trips the breaker at once (honoring Retry-After), makes

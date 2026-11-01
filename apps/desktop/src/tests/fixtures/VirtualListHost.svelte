@@ -1,6 +1,6 @@
 <script lang="ts">
 /** Test host for the generic VirtualList — plain numeric items, 40px rows. */
-import VirtualList from '$components/articles/VirtualList.svelte';
+import VirtualList, { type ViewportReport } from '$components/articles/VirtualList.svelte';
 
 let {
     items,
@@ -10,6 +10,8 @@ let {
     nearEndMargin = 10,
     fallbackViewportHeight = 240,
     onnearend = undefined,
+    initialScrollTop = 0,
+    onviewport = undefined,
 }: {
     items: number[];
     rowHeight?: number;
@@ -18,6 +20,8 @@ let {
     nearEndMargin?: number;
     fallbackViewportHeight?: number;
     onnearend?: () => void;
+    initialScrollTop?: number;
+    onviewport?: (report: ViewportReport) => void;
 } = $props();
 </script>
 
@@ -29,6 +33,8 @@ let {
     {nearEndMargin}
     {fallbackViewportHeight}
     {onnearend}
+    {initialScrollTop}
+    {onviewport}
     key={(item) => item}
     label="test list"
 >

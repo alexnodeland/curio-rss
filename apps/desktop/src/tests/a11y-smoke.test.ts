@@ -1,7 +1,8 @@
 /**
  * Accessibility smoke test: runs axe-core over the components most likely
  * to regress on ARIA semantics — the shared modal shell (via the help
- * dialog) and the toast outlet — and fails on any violation.
+ * dialog), the toast outlet, and the whole shell's list + reader driven by
+ * the keyboard alone — and fails on any violation.
  *
  * jsdom can't lay elements out, so `color-contrast` (which needs real
  * geometry) is disabled here; contrast is enforced separately over the
@@ -10,11 +11,25 @@
  */
 import Toasts from '$components/common/Toasts.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
+import { articlesStore } from '$lib/state/articles.svelte';
+import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import { selectionStore } from '$lib/state/selection.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
-import { render } from '@testing-library/svelte';
+import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import axe from 'axe-core';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import Page from '../routes/+page.svelte';
+import {
+    type IpcHarness,
+    articleFixture,
+    articleStateFixture,
+    articleSummaryFixture,
+    feedFixture,
+    flushIpc,
+    installIpcHarness,
+    unreadCountsFixture,
+} from './ipc-harness';
 import { resetUiStores } from './ui-stores';
 
 const AXE_OPTIONS: axe.RunOptions = {
@@ -36,8 +51,16 @@ async function auditViolations(node: Element): Promise<string[]> {
 }
 
 describe('accessibility smoke', () => {
+    let harness: IpcHarness | null = null;
+
     afterEach(() => {
+        cleanup();
+        resetQueryCache();
+        articlesStore.reset();
+        selectionStore.reset();
         resetUiStores();
+        harness?.teardown();
+        harness = null;
     });
 
     it('the help dialog has no axe violations', async () => {
@@ -46,12 +69,90 @@ describe('accessibility smoke', () => {
         expect(violations, violations.join('\n')).toEqual([]);
     });
 
+    it('the empty toast outlet (live regions only) has no axe violations', async () => {
+        const { container } = render(Toasts);
+        expect(container.querySelectorAll('[aria-live]')).toHaveLength(2);
+        const violations = await auditViolations(container);
+        expect(violations, violations.join('\n')).toEqual([]);
+    });
+
     it('the toast outlet has no axe violations', async () => {
         const { container } = render(Toasts);
         toastStore.showToast('note saved', 'success', 0);
-        toastStore.showToast('fetch failed', 'error', 0);
+        toastStore.showToast('fetch failed', 'error', {
+            durationMs: 0,
+            action: { label: 'Retry', run: vi.fn() },
+        });
+        toastStore.showToast('Marked 3 read', 'success', {
+            durationMs: 0,
+            action: { label: 'Undo', run: vi.fn() },
+        });
         await tick();
         const violations = await auditViolations(container);
         expect(violations, violations.join('\n')).toEqual([]);
+    });
+
+    it('the list and reader pass axe while driven by the keyboard alone', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Alpha' })],
+            get_unread_counts: unreadCountsFixture({ total: 3, by_feed: [[1, 3]] }),
+            list_articles: [301, 300, 299].map((id) =>
+                articleSummaryFixture({ id, feed_id: 1, title: `Article ${id}` }),
+            ),
+            get_article: (args) =>
+                articleFixture({
+                    id: args.articleId as number,
+                    title: `Article ${String(args.articleId)}`,
+                    content_html: '<p>Body text with <a href="https://example.org">a link</a>.</p>',
+                }),
+            get_article_state: articleStateFixture(),
+            mark_read: true,
+            list_tags: [],
+        });
+        const { container } = render(Page);
+        await flushIpc();
+        const audit = async (step: string): Promise<void> => {
+            await flushIpc();
+            await tick();
+            const violations = await auditViolations(container);
+            expect(violations, `${step}:\n${violations.join('\n')}`).toEqual([]);
+        };
+
+        await audit('at rest');
+
+        // Every focus move below is a key press — never a `.focus()` call
+        // (jsdom has no Tab traversal, so the walk starts from the unfocused
+        // page, where the list's keys are live). ↓ selects the first row and
+        // Enter hands the keyboard to the reader body: a named, focusable region.
+        await fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+        expect(selectionStore.selectedArticleId).toBe(301);
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
+        await flushIpc();
+        const body = container.querySelector('.reader-scroll') as HTMLElement;
+        expect(document.activeElement).toBe(body);
+        await audit('reader body focused');
+
+        // Esc hands it back to the listbox, which tracks the selection.
+        await fireEvent.keyDown(body, { key: 'Escape' });
+        const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+        expect(document.activeElement).toBe(listbox);
+        await fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+        expect(selectionStore.selectedArticleId).toBe(300);
+        await audit('list focused with a selection');
+
+        await fireEvent.keyDown(listbox, { key: 'Enter' });
+        await flushIpc();
+        expect(document.activeElement).toBe(container.querySelector('.reader-scroll'));
+
+        // Space pages (jsdom: already at the end → next unread), Esc goes back.
+        await fireEvent.keyDown(container.querySelector('.reader-scroll') as HTMLElement, {
+            key: ' ',
+        });
+        await flushIpc();
+        await fireEvent.keyDown(container.querySelector('.reader-scroll') as HTMLElement, {
+            key: 'Escape',
+        });
+        expect(document.activeElement).toBe(listbox);
+        await audit('back in the list');
     });
 });

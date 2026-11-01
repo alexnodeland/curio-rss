@@ -13,8 +13,9 @@
 //! `IO`) and a profile on network or sync-managed storage
 //! (`OpenError::NetworkFs`, code `IO`). `Sqlite` / `Duplicate` /
 //! `DiskFull` / `ReadOnly` / `DatabaseCorrupt` / `WriterGone` /
-//! `JobPanicked` / `PoolTimeout` / `IntegrityFailed` / other IO / a failed
-//! upgrade are internal-tier: a user-tier message is shown verbatim, and the
+//! `JobPanicked` / `PoolTimeout` / `IntegrityFailed` / an unwritable or full
+//! destination (`ExportError::PermissionDenied` / `DiskFull`) / other IO / a
+//! failed upgrade are internal-tier: a user-tier message is shown verbatim, and the
 //! core's typed storage messages are English — they reach the user only
 //! once each class has its own code and localized copy (as `PROFILE_BUSY`
 //! has). A subscribe that collides with an existing feed is already
@@ -207,10 +208,14 @@ impl From<CoreError> for CommandError {
             CoreError::Export(
                 ExportError::DestinationMissing { .. } | ExportError::PathsTaken { .. },
             ) => Self::user(ErrorCode::Io, error.to_string(), true),
+            // Includes the typed `ExportError::PermissionDenied` /
+            // `DiskFull`: like the typed storage classes, their message is
+            // the core's English text, shown verbatim at the user tier, so
+            // they stay internal until they have their own localized codes.
             CoreError::Io { .. } | CoreError::Export(_) | CoreError::Events(_) => {
                 Self::internal(ErrorCode::Io, error.to_string())
             }
-            CoreError::Content(_) | CoreError::Settings(_) => {
+            CoreError::Content(_) | CoreError::Settings(_) | CoreError::Panicked { .. } => {
                 Self::internal(ErrorCode::Internal, error.to_string())
             }
         }
@@ -277,6 +282,46 @@ mod tests {
             path: "x".into(),
         }));
         assert_eq!(other.kind, ErrorKind::Internal);
+    }
+
+    #[test]
+    fn typed_export_filesystem_classes_stay_internal_until_they_are_localized() {
+        use std::io::{Error, ErrorKind as IoKind};
+        for kind in [IoKind::PermissionDenied, IoKind::StorageFull] {
+            let export = ExportError::io("/vault/curio/note.md", Error::from(kind));
+            assert!(
+                matches!(
+                    export,
+                    ExportError::PermissionDenied { .. } | ExportError::DiskFull { .. }
+                ),
+                "{kind:?}: {export:?}"
+            );
+            let error = CommandError::from(CoreError::Export(export));
+            assert_eq!(
+                (error.kind, error.code),
+                (ErrorKind::Internal, ErrorCode::Io),
+                "{kind:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn reddit_auth_refusals_are_user_facing_guidance() {
+        use curio_core::RedditAuthReason;
+        for reason in [
+            RedditAuthReason::CredentialsMissing,
+            RedditAuthReason::CredentialsRejected,
+            RedditAuthReason::TokenRevoked,
+            RedditAuthReason::TokenUnavailable,
+        ] {
+            let error = CommandError::from(CoreError::RedditAuth {
+                reason,
+                status: 403,
+            });
+            assert_eq!(error.kind, ErrorKind::User, "{reason:?}");
+            assert_eq!(error.code, ErrorCode::Network, "{reason:?}");
+            assert!(error.message.contains("HTTP 403"), "{reason:?}: {error}");
+        }
     }
 
     #[test]
@@ -392,6 +437,12 @@ mod tests {
             assert_eq!(error.kind, ErrorKind::Internal);
             assert_eq!(error.code, ErrorCode::Storage);
         }
+        // A panic in a refresh's blocking half is a bug, not user input.
+        let error = CommandError::from(CoreError::Panicked {
+            message: "parser bug".into(),
+        });
+        assert_eq!(error.kind, ErrorKind::Internal);
+        assert_eq!(error.code, ErrorCode::Internal);
     }
 
     #[test]

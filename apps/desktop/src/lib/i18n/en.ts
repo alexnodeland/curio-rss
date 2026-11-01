@@ -69,6 +69,9 @@ export const en = {
     'list.row.starred': 'Starred',
 
     'reader.empty': 'Select an article to read',
+    'reader.hint.move': 'to move',
+    'reader.hint.read': 'to read',
+    'reader.hint.help': 'for shortcuts',
     'reader.imagesOff': 'Images are off in this article.',
     'reader.imagesOff.enable': 'Turn on',
     'reader.tableScroll': 'Scrollable table',
@@ -446,6 +449,12 @@ export const en = {
     'pane.list.resize': 'Resize article list',
 
     'toast.dismiss': 'Dismiss',
+    'toast.region': 'Notifications',
+    'toast.undo': 'Undo',
+    'toast.retry': 'Retry',
+    'toast.markReadUndone':
+        '{count, plural, one {Marked # unread again} other {Marked # unread again}}',
+    'updates.openSettings': 'Open Settings',
 
     'shortcut.category.navigation': 'Navigation',
     'shortcut.category.actions': 'Actions',
@@ -471,6 +480,13 @@ export const en = {
     'shortcut.help': 'Keyboard shortcut help',
     'shortcut.addFeed': 'Add a feed',
     'shortcut.settings': 'Open settings',
+    'shortcut.focusReader': 'Read the selected article (focus the reader)',
+    'shortcut.focusList': 'Back to the article list',
+    'shortcut.pageDown': 'Page down; at the end, next unread',
+    'shortcut.pageUp': 'Page up',
+    'shortcut.toggleArchived': 'Archive / unarchive article',
+    'shortcut.markAllRead': 'Mark all read in the current view',
+    'key.space': 'Space',
 
     'recovery.title.corrupt': 'Curio can’t read its database',
     'recovery.title.tooNew': 'This database is from a newer Curio',

@@ -50,7 +50,7 @@ function harnessFor(status: 'active' | 'paused' | 'dead', overrides = {}): IpcHa
         set_feed_metadata: null,
         set_feed_full_text: null,
         remove_feed: null,
-        mark_all_read: 3,
+        mark_all_read: [11, 12, 13],
         ...overrides,
     });
 }

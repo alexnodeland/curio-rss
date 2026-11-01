@@ -9,16 +9,18 @@ import Icon, { type IconName } from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import { type MessageKey, t } from '$lib/i18n';
+import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     activeView,
     importFromFile,
     refreshAll,
-    runCommand,
+    reorderFeedGroup,
     selectView,
+    ungroupFeed,
     type ViewId,
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
-import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { feedDnd, moveWithinGroup } from '$lib/state/feed-dnd.svelte';
 import { connectivityStore } from '$lib/state/connectivity.svelte';
 import { buildFeedTree, flattenVisibleTree, type VisibleRow } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -128,12 +130,7 @@ function reorderFeedRow(index: number, direction: 1 | -1): boolean {
     if (target === undefined) {
         return false;
     }
-    const newGroup = moveWithinGroup(group, row.id, target);
-    const globalOrder = rebuildGlobalOrder(
-        feedsStore.feeds.map((candidate) => candidate.id),
-        newGroup,
-    );
-    void runCommand(() => feedsStore.reorderFeeds(globalOrder));
+    void reorderFeedGroup(moveWithinGroup(group, row.id, target));
     return true;
 }
 
@@ -205,7 +202,7 @@ function onUngroupDrop(event: DragEvent): void {
         return;
     }
     event.preventDefault();
-    void runCommand(() => feedsStore.ungroupFeed(dragged));
+    void ungroupFeed(dragged);
     feedDnd.clear();
 }
 
@@ -278,14 +275,14 @@ function newFolder(): void {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.addFeed')}
-                use:tooltip={{ text: t('toolbar.addFeed'), kbd: 'A' }}
+                use:tooltip={{ text: t('toolbar.addFeed'), kbd: shortcutKbd('app.addFeed') }}
                 onclick={() => layoutStore.openModal('add-feed')}><Icon name="plus" /></button
             >
             <button
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.refreshAll')}
-                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: 'R' }}
+                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: shortcutKbd('app.refreshAll') }}
                 aria-busy={feedsStore.refreshing}
                 disabled={feedsStore.refreshing}
                 onclick={() => refreshAll()}><Icon name="refresh" /></button
@@ -294,7 +291,7 @@ function newFolder(): void {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.settings')}
-                use:tooltip={{ text: t('toolbar.settings'), kbd: ',' }}
+                use:tooltip={{ text: t('toolbar.settings'), kbd: shortcutKbd('app.settings') }}
                 onclick={() => layoutStore.openModal('settings')}><Icon name="settings" /></button
             >
         </div>

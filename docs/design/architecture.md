@@ -92,6 +92,26 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   valid non-ASCII UTF-8 that declares UTF-8. Full-page
   extraction ("load full article", URL clips) runs only on HTML: a PDF or image URL is
   clipped link-only.
+- **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
+  both heads: 8 feeds in flight by default, so a few hung hosts cost about one request
+  timeout between them. The slots are shared fairly between hosts: a politeness-paced
+  host (the 500 ms default paces every host; reddit.com's override is 6.5 s) has at most
+  one feed in flight — a second would only sleep out the delay in a slot — and hosts
+  take turns at the free slots, so 40 reddit feeds in a row no longer park all 8 slots in
+  reddit's politeness queue while every other host waits. A per-feed `Err` — the feed
+  removed mid-sweep, a storage error, a panicking parse — becomes that feed's outcome;
+  the sweep always runs to the end. One sweep runs per handle: a second request (refresh
+  pressed twice, the scheduler firing mid-sweep) joins it and gets its report, so no
+  feed is fetched twice. Progress carries `sweep_id`/`done`/`total`; `cancel_refresh`
+  stops new fetches and drops the ones in flight, full-text page fetches included. An
+  abandoned feed records nothing and gets no outcome (it was not refreshed, it did not
+  fail). Each feed's storage reads/writes and its parse → sanitize → ingest run via
+  `spawn_blocking`, inside the per-feed locks (they move into the blocking job, so a
+  dropped sweep cannot let the next refresh of a feed in while its writes still run),
+  so a large feed never stalls the async runtime (the CLI's is current-thread). The one
+  exception is full-text hydration of a refresh's new articles: `hydrate_article`'s
+  storage calls and readability extraction still run on the runtime, one page at a
+  time, so a full-text feed with many new items still holds it per page.
 
 ### `ingest/` — sanitize-at-ingest
 

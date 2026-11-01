@@ -17,8 +17,9 @@
 //! refresh calls [`RefreshScheduler::record_manual_refresh`], resetting the
 //! interval clock so a scheduled sweep never piles on right after one (unless
 //! the refresh happened offline and fetched nothing); an in-flight flag
-//! keeps two scheduled ticks from overlapping (per-feed locks make overlap
-//! safe but pointless).
+//! keeps two scheduled ticks from overlapping. Core runs one sweep at a time
+//! anyway: a tick that lands during a manual sweep joins it (no feed is fetched
+//! twice) and leaves the events and notification to that sweep.
 //!
 //! **Sleep/wake (#123).** The interval clock is wall-clock time
 //! ([`SystemTime`]), not a monotonic [`Instant`](std::time::Instant): the
@@ -53,7 +54,7 @@ use curio_core::CoreHandle;
 use curio_core::model::{Feed, FeedStatus};
 use tauri::{AppHandle, State};
 
-use crate::commands::feeds::refresh_all_and_emit;
+use crate::commands::feeds::{Sweep, refresh_all_and_emit};
 use crate::commands::{SharedCore, run_blocking};
 use crate::dto::{FetchStatusDto, RefreshOutcomeDto};
 use crate::error::CommandError;
@@ -283,8 +284,8 @@ pub(crate) trait ConnectivityProbe {
 /// The side effects of a sweep — the real app emits events and shows OS
 /// notifications; the tests count calls.
 pub(crate) trait SweepEffects {
-    /// Refreshes every active feed.
-    async fn refresh(&self) -> Result<Vec<RefreshOutcomeDto>, CommandError>;
+    /// Refreshes every active feed (or joins the sweep already running).
+    async fn refresh(&self) -> Result<Sweep, CommandError>;
     /// Hands a background sweep's outcomes to the notifier.
     fn notify(&self, outcomes: &[RefreshOutcomeDto]);
     /// Announces a connectivity change (the "Offline" badge).
@@ -383,7 +384,7 @@ struct AppEffects {
 }
 
 impl SweepEffects for AppEffects {
-    async fn refresh(&self) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
+    async fn refresh(&self) -> Result<Sweep, CommandError> {
         refresh_all_and_emit(&self.handle, &self.core).await
     }
 
@@ -538,7 +539,10 @@ pub(crate) async fn sweep<P: ConnectivityProbe, E: SweepEffects>(
         return SweepOutcome::Offline;
     }
     match effects.refresh().await {
-        Ok(outcomes) => effects.notify(&outcomes),
+        // A tick that found a manual sweep running joined it: that sweep is
+        // the user's, reported in-app — nothing to notify.
+        Ok(sweep) if sweep.joined => {}
+        Ok(sweep) => effects.notify(&sweep.finished.outcomes),
         Err(error) => tracing::warn!(%error, "scheduled refresh failed"),
     }
     scheduler.mark_refreshed(core).await;
@@ -639,8 +643,8 @@ mod tests {
     }
 
     impl SweepEffects for RecordingEffects {
-        async fn refresh(&self) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
-            refresh_all_impl(&self.core, |_, _| {}).await
+        async fn refresh(&self) -> Result<Sweep, CommandError> {
+            refresh_all_impl(&self.core, |_| {}).await
         }
 
         fn notify(&self, _outcomes: &[RefreshOutcomeDto]) {

@@ -11,6 +11,10 @@
  *   reader's typography is ours), no frames/objects/base/meta;
  * - `data:` URIs stripped everywhere except `data:image/*` (which the CSP
  *   `img-src` deliberately allows);
+ * - no author `data-*` attributes: DOMPurify skips its URI checks on them,
+ *   and the image pipeline keeps its own state in `data-*` (`origSrc`,
+ *   `data-media-off`), set only after sanitizing — an author copy must not
+ *   be able to seed it;
  * - link clicks never navigate the webview: same-document `#fragment` links
  *   (footnotes — ingest keeps their `user-content-` ids and hrefs) scroll
  *   within the reader, everything else is delegated to the URL-scoped
@@ -39,6 +43,7 @@ const SANITIZE_CONFIG: Config = {
         'textarea',
     ],
     FORBID_ATTR: ['style'],
+    ALLOW_DATA_ATTR: false,
     ALLOW_UNKNOWN_PROTOCOLS: false,
 };
 

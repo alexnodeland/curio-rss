@@ -15,7 +15,12 @@ import { resetImageCache } from '$lib/utils/images';
 import { LAZY_IMAGE_MARGIN } from '$lib/utils/reader-content';
 import { fireEvent, render } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type IpcHarness, commandErrorFixture, installIpcHarness } from './ipc-harness';
+import {
+    type IpcHarness,
+    commandErrorFixture,
+    flushIpc,
+    installIpcHarness,
+} from './ipc-harness';
 
 const corpusPath = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -64,6 +69,8 @@ describe('SanitizedHtml', () => {
     let harness: IpcHarness | null = null;
 
     afterEach(() => {
+        prefsStore.reset();
+        resetImageCache();
         harness?.teardown();
         harness = null;
     });
@@ -84,6 +91,53 @@ describe('SanitizedHtml', () => {
         expect(root.textContent).toContain('Legitimate');
         expect(root.querySelector('strong')).not.toBeNull();
         expect(root.querySelector('a[href="https://example.com/fine"]')).not.toBeNull();
+    });
+
+    it('drops author data-* attributes, whatever they hold', () => {
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html:
+                    '<p data-media-off data-foo="bar">text</p>' +
+                    '<a href="https://example.com/a" data-href="javascript:alert(1)">a</a>',
+            },
+        });
+        const root = container.querySelector('.sanitized-content');
+        for (const element of root?.querySelectorAll('*') ?? []) {
+            const names = [...element.attributes].map((attribute) => attribute.name);
+            expect(
+                names.filter((name) => name.startsWith('data-')),
+                `<${element.tagName.toLowerCase()}> kept author data-*`,
+            ).toEqual([]);
+        }
+        expect(root?.querySelector('a[href="https://example.com/a"]')).not.toBeNull();
+    });
+
+    it('routes images by their real src, never an author data-orig-src', async () => {
+        harness = installIpcHarness({ get_cached_image: '/cache/real.png' });
+        prefsStore.mediaPrefetch = true;
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html:
+                    '<img src="https://example.com/real.png" ' +
+                    'data-orig-src="https://evil.example/spoof.png" alt="spoofed">',
+            },
+        });
+        await flushIpc();
+        expect(harness.callsFor('get_cached_image')).toEqual([
+            { url: 'https://example.com/real.png' },
+        ]);
+        const image = container.querySelector('img');
+        expect(image?.dataset.origSrc).toBe('https://example.com/real.png');
+        expect(image?.getAttribute('src')).toBe('/cache/real.png');
+    });
+
+    // A non-remote (data:) image never enters the media pipeline, so nothing would
+    // reset an author-supplied data-media-off; the sanitizer has to drop it.
+    it('does not let an author data-media-off hide a non-remote image', () => {
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<img src="data:image/gif;base64,R0lGOD" data-media-off alt="inline">' },
+        });
+        expect(container.querySelector('img')?.hasAttribute('data-media-off')).toBe(false);
     });
 
     it('re-sanitizes when the html prop changes', async () => {

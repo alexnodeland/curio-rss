@@ -61,13 +61,25 @@ impl CoreHandle {
     }
 
     /// Marks every unread article read — one feed (`Some`) or the whole
-    /// library (`None`). Returns how many were changed. DB-local, no event.
+    /// library (`None`). Returns the ids that changed (ascending), so a head
+    /// can offer an exact undo via [`Self::mark_read_many`]. DB-local, no
+    /// event.
     ///
     /// # Errors
     ///
     /// Storage errors.
-    pub fn mark_all_read(&self, feed_id: Option<FeedId>) -> Result<u64, CoreError> {
+    pub fn mark_all_read(&self, feed_id: Option<FeedId>) -> Result<Vec<ArticleId>, CoreError> {
         Ok(self.storage.mark_all_read(feed_id)?)
+    }
+
+    /// Read/unread on many articles at once (one transaction). Unknown ids
+    /// are skipped; returns how many changed. DB-local, no event.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn mark_read_many(&self, ids: &[ArticleId], read: bool) -> Result<u64, CoreError> {
+        Ok(self.storage.mark_read_many(ids, read)?)
     }
 
     /// Records an open-for-reading; emits `article.opened`.

@@ -302,11 +302,13 @@ async function markViewReadCount(): Promise<number | undefined> {
  * Read later, Archived, a tag, search results) lists its own unread and
  * marks exactly those. Known gap: the bulk command ignores `archived`, so `A`
  * from All, a feed or a folder also marks that scope's hidden archived rows
- * read (#278).
+ * read (#278). Like mark-all-read, the sweep ends the view's read-hold: the
+ * rows read earlier this session go with the rest.
  */
 export async function markViewRead(): Promise<void> {
     const changed = await markViewReadCount();
     if (changed !== undefined) {
+        articlesStore.releaseHolds();
         toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
     }
 }

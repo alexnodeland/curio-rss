@@ -9,6 +9,7 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
 import { events, type ArticleSummaryDto, type ListArticlesDto } from '$lib/bindings';
 import {
     markAllRead,
+    markViewRead,
     refreshAll,
     refreshFeed,
     toggleArchived,
@@ -429,6 +430,20 @@ describe('read-hold actions', () => {
         await readInUnreadView([1079]);
         await markAllRead(FEED_A);
         expect(shownIds()).toEqual([1080, 1078, 1077, 1076]);
+    });
+
+    it('marking the whole view read (Shift+A) ends the hold', async () => {
+        await readInUnreadView([1079]);
+        await markViewRead();
+        expect(harness?.callsFor('mark_all_read').at(-1)?.feedId).toBe(FEED_A);
+        expect(shownIds()).toEqual([1080, 1078, 1077, 1076]);
+    });
+
+    it('a failed view-wide mark keeps the hold', async () => {
+        await readInUnreadView([1079]);
+        harness?.respond('mark_all_read', rejectWith(commandErrorFixture()));
+        await markViewRead();
+        expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);
     });
 
     it('a library-wide mark-all-read ends the hold', async () => {

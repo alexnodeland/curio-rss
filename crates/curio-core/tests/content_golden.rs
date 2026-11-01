@@ -266,6 +266,38 @@ fn footnotes_fixture_round_trips_to_commonmark_footnotes() {
     }
 }
 
+#[test]
+fn image_dimensions_fixture_keeps_only_plain_pixel_integers() {
+    let html = stored_html("image-dimensions.html");
+    for needle in [
+        "src=\"https://cdn.example.com/chart.png\" width=\"640\" height=\"360\"",
+        "width=\"1200\"",
+        "height=\"800\"",
+    ] {
+        assert!(html.contains(needle), "{needle} missing from:\n{html}");
+    }
+    // Everything else is dropped: only the two good images carry a pair.
+    assert_eq!(html.matches("width=").count(), 2, "{html}");
+    assert_eq!(html.matches("height=").count(), 2, "{html}");
+    assert!(html.contains("<span>plain text</span>"), "{html}");
+    inert::audit_html(&html).unwrap();
+    // Export ignores them entirely.
+    let markdown = pipeline(&html_fixture("image-dimensions.html"));
+    assert!(!markdown.contains("width"), "{markdown}");
+    assert!(markdown.contains("![a chart](https://cdn.example.com/chart.png)"));
+}
+
+#[test]
+fn xss_corpus_drops_hostile_image_dimensions() {
+    let html = stored_html("xss-corpus.html");
+    // The hostile width/height vectors leave nothing behind — not even a
+    // truncated number.
+    assert!(!html.contains("width="), "{html}");
+    assert!(!html.contains("height="), "{html}");
+    assert!(html.contains("alt=\"hostile dimensions\""), "{html}");
+    assert!(html.contains("alt=\"oversized dimensions\""), "{html}");
+}
+
 /// The `dir` / `lang` that apply to the first element matching `selector`
 /// in stored HTML: its own, else the nearest ancestor's.
 fn inherited_direction(html: &str, selector: &str) -> (Option<String>, Option<String>) {

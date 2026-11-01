@@ -91,6 +91,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.action.typography': 'Typografia',
     'reader.meta.words':
         '{count, plural, one {# słowo} few {# słowa} many {# słów} other {# słowa}}',
+    'article.date.firstSeen': 'Zauważony po raz pierwszy: {date}',
+    'article.date.firstSeenHint': 'Kanał nie podaje daty publikacji',
     'reddit.postedBy': 'Opublikowane przez u/{author}',
     'reader.youtube.play': 'Odtwórz {title}',
     'reader.youtube.hint': 'Kliknij, aby wczytać — nic się nie wczyta, dopóki tego nie zrobisz',

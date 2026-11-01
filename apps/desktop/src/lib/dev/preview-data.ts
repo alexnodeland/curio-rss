@@ -445,7 +445,36 @@ export const previewArticles: PreviewArticle[] = [
         {},
         ['layout', 'typography'],
     ),
+    linklessUndated(
+        122,
+        2,
+        'Weeknotes: margins, measures, and a new notebook',
+        '2026-07-06T07:40:00.000Z',
+        `<p>A short one this week. The new notebook has a narrower page than I am used to, and it has quietly changed how I draft — fewer words per line, more white space, slower thinking.</p>
+<p>This entry has no link and no date in the feed: Curio dates it by the day it first saw it, and offers no "open in browser".</p>`,
+    ),
 ];
+
+/**
+ * A feed entry with neither a `<link>` nor a date — how core stores it: the
+ * feed's own URL as `source_url`, `published_at` null, first-seen `saved_at`.
+ * Previews the link-less / first-seen states of the row and the reader.
+ */
+function linklessUndated(
+    id: number,
+    feedId: number,
+    title: string,
+    firstSeen: string,
+    html: string,
+): PreviewArticle {
+    const feedUrl = previewFeeds.find((feed) => feed.id === feedId)?.url ?? '';
+    const base = mk(id, feedId, title, null, firstSeen, 90, html, {}, [], feedUrl);
+    return {
+        ...base,
+        summary: { ...base.summary, published_at: null },
+        full: { ...base.full, published_at: null },
+    };
+}
 
 export const previewDestinations: DestinationDto[] = [
     { name: 'Obsidian Vault', root: '/Users/alex/Documents/vault' },

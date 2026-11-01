@@ -86,6 +86,8 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'reader.action.promote': '保存到笔记',
     'reader.action.typography': '排版',
     'reader.meta.words': '{count, plural, other {# 字}}',
+    'article.date.firstSeen': '首次发现于 {date}',
+    'article.date.firstSeenHint': '该订阅源未提供发布日期',
     'reddit.postedBy': '由 u/{author} 发布',
     'reader.youtube.play': '播放 {title}',
     'reader.youtube.hint': '点击加载 — 在你点击之前不会加载任何内容',

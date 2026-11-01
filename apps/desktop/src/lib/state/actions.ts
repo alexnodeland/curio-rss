@@ -15,6 +15,7 @@ import {
 } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
+import { isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { isOpenableUrl, openExternal } from '$lib/utils/external';
 import {
@@ -897,9 +898,14 @@ export function refreshAll(): void {
     void run(() => feedsStore.refreshAll(), { key: 'refresh:all', run: () => refreshAll() });
 }
 
+/**
+ * Opens the selected article's source (the `o` shortcut). A link-less entry
+ * has no page of its own — its source URL is the feed's — so it is a no-op
+ * rather than opening the raw feed XML.
+ */
 function openSelected(): void {
     const selected = selectionStore.selectedArticle;
-    if (selected !== null) {
+    if (selected !== null && !isLinkless(selected, feedsStore.feeds)) {
         void openInBrowser(selected.id, selected.source_url);
     }
 }

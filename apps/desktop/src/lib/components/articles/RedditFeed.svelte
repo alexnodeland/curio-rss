@@ -8,13 +8,14 @@
  * already sent; no vote or comment counts (RSS doesn't carry them).
  */
 import { type ArticleSummaryDto, commands } from '$lib/bindings';
-import { formatIntlDate, t } from '$lib/i18n';
+import { t } from '$lib/i18n';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import Icon from '$components/common/Icon.svelte';
 import { subredditOf } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
+import { listDateLabel } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 
 const list = $derived(articlesStore.current);
@@ -53,6 +54,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         <div class="feed" role="listbox" aria-label={t('list.label')}>
             {#each list.items as article (article.id)}
                 {@const sub = subredditOf(article.source_url)}
+                {@const date = listDateLabel(article)}
                 <button
                     class="card"
                     class:selected={article.id === selectionStore.selectedArticleId}
@@ -70,8 +72,9 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
                             {#if author(article) !== null}<span class="dot">·</span><span
                                     class="author">u/{author(article)}</span
                                 >{/if}
-                            {#if article.published_at !== null}<span class="dot">·</span><span
-                                    >{formatIntlDate(new Date(article.published_at))}</span
+                            {#if date !== null}<span class="dot">·</span><span
+                                    class="date"
+                                    data-first-seen={date.firstSeen || undefined}>{date.text}</span
                                 >{/if}
                         </span>
                         <span class="title">{article.title}</span>
@@ -172,7 +175,20 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         color: #ff6a33;
     }
 
+    /* On a narrow card the author gives way first, so the date (a longer
+       "First seen …" for a date-less entry) stays whole; only past that does
+       the date itself ellipsize instead of being cut off. */
+    .author,
+    .date {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .author {
+        flex-shrink: 1000;
+        min-width: 1.5em; /* never collapses to a bare dot */
         color: var(--fg-muted);
     }
 

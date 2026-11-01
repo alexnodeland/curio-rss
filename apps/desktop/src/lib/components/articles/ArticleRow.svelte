@@ -8,7 +8,9 @@ import {
     toggleReadLater,
     toggleStar,
 } from '$lib/state/actions';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import type { MenuItem } from '$lib/state/menu.svelte';
+import { isLinkless } from '$lib/utils/article';
 
 /**
  * The DOM id of the row for one article — the listbox points at it through
@@ -21,7 +23,8 @@ export function articleOptionId(articleId: number): string {
 
 /**
  * The context-menu items for one article row — star, read, read-later, archive,
- * open-in-browser, and mark-all-read-in-feed. Labels flip on the live state
+ * open-in-browser (omitted for a link-less entry, whose only "source" is the
+ * feed XML), and mark-all-read-in-feed. Labels flip on the live state
  * (from the per-article state query). Shared by the row's own right-click and
  * the list's keyboard menu key so both surfaces stay identical.
  */
@@ -53,13 +56,15 @@ export function buildArticleMenu(
             separatorBefore: true,
             onSelect: () => void toggleArchived(article.id),
         },
-        {
+    ];
+    if (!isLinkless(article, feedsStore.feeds)) {
+        items.push({
             id: 'open',
             labelKey: 'reader.action.openInBrowser',
             separatorBefore: true,
             onSelect: () => void openInBrowser(article.id, article.source_url),
-        },
-    ];
+        });
+    }
     const feedId = article.feed_id;
     if (feedId !== null) {
         items.push({
@@ -85,9 +90,9 @@ export function buildArticleMenu(
 import { commands } from '$lib/bindings';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
-import { formatIntlDate, t } from '$lib/i18n';
-import { feedsStore } from '$lib/state/feeds.svelte';
+import { t } from '$lib/i18n';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
+import { listDateLabel } from '$lib/utils/article';
 import { highlightSegments } from '$lib/utils/highlight';
 
 let {
@@ -129,10 +134,8 @@ function feedTitle(): string | null {
     return feed.title ?? feed.url;
 }
 
-function publishedLabel(): string | null {
-    const published = article.published_at;
-    return published === null ? null : formatIntlDate(new Date(published));
-}
+/** The row's date — publication, or a labelled first-seen stand-in. */
+const date = $derived(listDateLabel(article));
 
 </script>
 
@@ -180,8 +183,8 @@ function publishedLabel(): string | null {
             {#if feedTitle() !== null}
                 <span class="row-feed">{feedTitle()}</span>
             {/if}
-            {#if publishedLabel() !== null}
-                <span>{publishedLabel()}</span>
+            {#if date !== null}
+                <span data-first-seen={date.firstSeen || undefined}>{date.text}</span>
             {/if}
         </span>
     </div>

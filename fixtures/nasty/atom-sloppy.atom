@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:x="urn:unknown:extension">
+  <title type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">XHTML <b>title</b></div></title>
+  <x:whatever deep="1"><x:deeper><x:deepest/></x:deeper></x:whatever>
+  <entry>
+    <link href="https://sloppy.example.org/no-id-no-title"/>
+  </entry>
+  <entry>
+    <title>   </title>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>XHTML <a href="javascript:x()">body</a></p></div></content>
+  </entry>
+  <entry>
+    <id></id>
+    <title type="text">&lt;b&gt;escaped text title&lt;/b&gt;</title>
+    <content type="text">Text content with &lt;tags&gt; that stay text.</content>
+    <author><name></name></author>
+    <author><name>Second Author</name></author>
+  </entry>
+</feed>

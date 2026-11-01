@@ -29,6 +29,10 @@ Three distinct kinds — pick the right one before writing code:
   in-process `127.0.0.1`. No fixture over 1MB.
 - The hostile corpus must stay green: malformed input may fail gracefully,
   never panic, and `<script>`/`onerror` content must store provably clean.
+  Pin every new `fixtures/feeds/` or `fixtures/nasty/` file to its expected
+  outcome in `SEEDS` (`crates/curio-core/tests/nasty_corpus.rs`); it then
+  seeds the generated corpus and the `feed_parse` fuzz target too. A new
+  pure entry point gets a suite under `crates/curio-core/tests/props/`.
 - `curio-core` stays webview-free (`just boundary` green) and headless-
   testable (`cargo test --workspace` with no display server).
 - New event types for source-specific behavior go through the

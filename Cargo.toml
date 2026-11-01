@@ -16,6 +16,10 @@ members = [
     "crates/curio-types",
     "xtask",
 ]
+# The cargo-fuzz targets (fuzz/) need a nightly toolchain and sanitizer
+# flags: they build in their own workspace, never in the stable gate — the
+# nightly workflow's `fuzz` job runs them (`just fuzz` locally).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.5.0"

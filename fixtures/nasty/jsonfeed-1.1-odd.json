@@ -1,0 +1,25 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "JSON Feed 1.1 oddities",
+  "language": "ja",
+  "authors": [{ "name": "" }, { "name": "日本の著者" }],
+  "items": [
+    {
+      "id": "  ",
+      "url": "/relative/item",
+      "title": "空白の id",
+      "content_html": "<p onclick=\"alert(1)\">クリック <script>alert(1)</script></p>",
+      "attachments": [{ "url": "https://json11.example.net/a.png", "mime_type": "image/png" }]
+    },
+    {
+      "id": "dup",
+      "title": "Dup A",
+      "summary": "only a summary"
+    },
+    {
+      "id": "dup",
+      "title": "Dup B",
+      "extra_unknown_field": { "nested": [1, 2, 3] }
+    }
+  ]
+}

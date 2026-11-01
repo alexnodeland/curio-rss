@@ -2,7 +2,7 @@
  * The edit-feed modal: the feed URL is visible and copyable; name, site URL,
  * description and folders/tags edit through their commands; the Health
  * section keeps the old feed-health surface (status controls, recent fetches,
- * 403/429 hints, mark-all-read); and unsubscribe stays a two-step confirm.
+ * 403/429/rate-limit hints, the schedule note, mark-all-read); and unsubscribe stays a two-step confirm.
  */
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
 import { formatIntlDateTime } from '$lib/i18n';
@@ -272,6 +272,43 @@ describe('EditFeedModal', () => {
         const { getByText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
         await flushIpc();
         expect(getByText(/refused the request \(403\)/)).toBeTruthy();
+    });
+
+    it('explains a 503 with Retry-After as a rate limit too', async () => {
+        harness = harnessFor('active', {
+            recent_fetches: [
+                fetchRecordFixture({
+                    status: 'error',
+                    http_status: 503,
+                    error: 'HTTP 503 — the host is rate-limiting Curio (Retry-After: 120 s)',
+                    error_kind: 'rate_limited',
+                }),
+            ],
+        });
+        const { getByText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(getByText(/The site is rate-limiting requests\./)).toBeTruthy();
+    });
+
+    it('drops the next-attempt note once that time has passed', async () => {
+        harness = harnessFor('active', {
+            list_feeds: [
+                feedFixture({
+                    id: 1,
+                    title: 'Alpha',
+                    consecutive_failures: 1,
+                    next_attempt_at: new Date(Date.now() + 100).toISOString(),
+                }),
+            ],
+        });
+        const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(container.querySelector('.schedule')).not.toBeNull();
+        await new Promise((resolve) => {
+            setTimeout(resolve, 400);
+        });
+        await flushIpc();
+        expect(container.querySelector('.schedule')).toBeNull();
     });
 
     it('shows when a failing feed is next attempted', async () => {

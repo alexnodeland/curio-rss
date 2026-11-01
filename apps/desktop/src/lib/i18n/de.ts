@@ -441,7 +441,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'feedHealth.hint.forbidden':
         'Die Website hat die Anfrage abgelehnt (403). Manche Seiten blockieren Feed-Reader – versuche es später erneut oder prüfe die Feed-URL.',
     'feedHealth.hint.rateLimited':
-        'Die Website drosselt Anfragen (429). Curio verteilt die Wiederholungen zeitlich – versuche es in Kürze erneut.',
+        'Die Website drosselt Anfragen. Curio verteilt die Wiederholungen zeitlich – versuche es in Kürze erneut.',
     'feedHealth.schedule.backoff':
         '{count, plural, one {# fehlgeschlagener Abruf} other {# fehlgeschlagene Abrufe in Folge}} – nächster Versuch {when}',
     'feedHealth.schedule.next': 'Nächste Aktualisierung {when}',

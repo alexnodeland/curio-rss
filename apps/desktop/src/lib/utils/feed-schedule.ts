@@ -19,7 +19,9 @@ export type FeedScheduleNote =
  */
 export function feedScheduleNote(feed: FeedDto, now: Date = new Date()): FeedScheduleNote | null {
     if (feed.status === 'paused') {
-        return feed.auto_paused_at === null
+        // No failure run left (the engine ends an automatic pause on the
+        // next success, but a stale row may linger): nothing to explain.
+        return feed.auto_paused_at === null || feed.consecutive_failures === 0
             ? null
             : { kind: 'autoPaused', failures: feed.consecutive_failures };
     }

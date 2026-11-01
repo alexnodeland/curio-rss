@@ -51,6 +51,15 @@ describe('feedScheduleNote', () => {
         ).toBeNull();
     });
 
+    it('never blames zero failures for an automatic pause', () => {
+        expect(
+            feedScheduleNote(
+                feedFixture({ status: 'paused', consecutive_failures: 0, auto_paused_at: EARLIER }),
+                NOW,
+            ),
+        ).toBeNull();
+    });
+
     it('says nothing about a dead feed', () => {
         expect(
             feedScheduleNote(

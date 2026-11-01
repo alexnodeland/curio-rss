@@ -410,8 +410,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.error': '错误',
     'feedHealth.hint.forbidden':
         '该网站拒绝了请求（403）。有些网站会屏蔽订阅阅读器——请稍后重试或核对订阅源网址。',
-    'feedHealth.hint.rateLimited':
-        '该网站正在限制请求频率（429）。Curio 会拉开重试间隔——请稍后再试。',
+    'feedHealth.hint.rateLimited': '该网站正在限制请求频率。Curio 会拉开重试间隔——请稍后再试。',
     'feedHealth.schedule.backoff': '{count, plural, other {连续 # 次获取失败}}——下次尝试：{when}',
     'feedHealth.schedule.next': '下次刷新：{when}',
     'feedHealth.schedule.autoPaused':

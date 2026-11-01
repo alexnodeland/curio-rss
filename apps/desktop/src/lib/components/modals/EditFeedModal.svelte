@@ -66,8 +66,22 @@ $effect(() => {
 });
 
 // The engine-owned schedule, in words: when a failing (or self-throttled)
-// feed is next fetched, or why Curio paused it by itself.
-const scheduleNote = $derived(feed === null ? null : feedScheduleNote(feed));
+// feed is next fetched, or why Curio paused it by itself. `now` moves on
+// when the next attempt comes due, so a modal left open never keeps saying
+// "next attempt …" about a time already past.
+let now = $state(new Date());
+const scheduleNote = $derived(feed === null ? null : feedScheduleNote(feed, now));
+$effect(() => {
+    if (scheduleNote === null || scheduleNote.kind === 'autoPaused') {
+        return;
+    }
+    // setTimeout's longest delay is ~24.8 days; a later deadline re-arms.
+    const wait = Math.min(scheduleNote.nextAttempt.getTime() - Date.now(), 2 ** 31 - 1);
+    const timer = setTimeout(() => {
+        now = new Date();
+    }, Math.max(wait, 0) + 50);
+    return () => clearTimeout(timer);
+});
 const scheduleText = $derived.by((): string | null => {
     if (scheduleNote === null) {
         return null;
@@ -97,7 +111,8 @@ const fetchHint = $derived.by((): string | null => {
     if (latest.http_status === 403) {
         return t('feedHealth.hint.forbidden');
     }
-    if (latest.http_status === 429) {
+    // A 429, or a 503 with Retry-After (the engine classes both as rate_limited).
+    if (latest.http_status === 429 || latest.error_kind === 'rate_limited') {
         return t('feedHealth.hint.rateLimited');
     }
     return null;

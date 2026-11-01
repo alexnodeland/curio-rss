@@ -446,7 +446,7 @@ export const en = {
     'feedHealth.hint.forbidden':
         'The site refused the request (403). Some sites block feed readers — try again later or double-check the feed URL.',
     'feedHealth.hint.rateLimited':
-        'The site is rate-limiting requests (429). Curio spaces out its retries — try again in a little while.',
+        'The site is rate-limiting requests. Curio spaces out its retries — try again in a little while.',
     'feedHealth.schedule.backoff':
         '{count, plural, one {# failed fetch} other {# failed fetches in a row}} — next attempt {when}',
     'feedHealth.schedule.next': 'Next refresh {when}',

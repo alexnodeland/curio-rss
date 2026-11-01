@@ -409,8 +409,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'feedHealth.fetch.error': '錯誤',
     'feedHealth.hint.forbidden':
         '個網站拒絕咗個要求（403）。有啲網站會封鎖訂閱閱讀器——遲啲再試，或者檢查吓訂閱網址。',
-    'feedHealth.hint.rateLimited':
-        '個網站正在限制要求頻率（429）。Curio 會拉開重試嘅間隔——遲啲再試啦。',
+    'feedHealth.hint.rateLimited': '個網站正在限制要求頻率。Curio 會拉開重試嘅間隔——遲啲再試啦。',
     'feedHealth.schedule.backoff': '{count, plural, other {連續 # 次攞唔到}}——下次再試：{when}',
     'feedHealth.schedule.next': '下次更新：{when}',
     'feedHealth.schedule.autoPaused':

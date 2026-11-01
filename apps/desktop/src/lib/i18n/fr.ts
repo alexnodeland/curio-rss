@@ -440,7 +440,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'feedHealth.hint.forbidden':
         'Le site a refusé la requête (403). Certains sites bloquent les lecteurs de flux — réessayez plus tard ou vérifiez l’URL du flux.',
     'feedHealth.hint.rateLimited':
-        'Le site limite le débit des requêtes (429). Curio espace ses tentatives — réessayez dans un moment.',
+        'Le site limite le débit des requêtes. Curio espace ses tentatives — réessayez dans un moment.',
     'feedHealth.schedule.backoff':
         '{count, plural, one {# récupération échouée} other {# récupérations échouées d’affilée}} — prochaine tentative {when}',
     'feedHealth.schedule.next': 'Prochaine actualisation {when}',

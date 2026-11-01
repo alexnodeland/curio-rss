@@ -29,9 +29,16 @@ exactly this:
    version heading (CHANGELOG.md at root once releases begin).
 5. **Dry run**: if `release.yml` changed since the last tag, dispatch it on
    `main` (Actions → release → Run workflow) and check the
-   `release-dry-run` artifact before tagging.
-6. **Tag**: annotated tag `vX.Y.Z` on the release commit. Human pushes tags
-   — agents never push.
+   `release-dry-run` artifact before tagging. An agent whose token can't
+   dispatch workflows (HTTP 403) says so in its hand-off instead of
+   skipping silently; the tag run's own `gate` job still re-runs CI.
+6. **Tag**: annotated tag `vX.Y.Z` on the release commit (the squash-merge
+   of the bump PR, green on CI). Agents may create **and push** the tag
+   (`git push origin vX.Y.Z`; maintainer decision, 2026-11-01), then watch
+   the release run to its draft. A pushed tag is never moved or deleted;
+   a broken release ships as the next patch version. Approving the `sign`
+   job's `updater-signing` deployment and publishing the draft stay with
+   the maintainer.
    Once the tag exists, a follow-up PR adds its migration fixture:
    generate `fixtures/db/vX.Y.Z.db` from a checkout of the tag (recipe in
    `fixtures/db/generate.rs`) and add a case to

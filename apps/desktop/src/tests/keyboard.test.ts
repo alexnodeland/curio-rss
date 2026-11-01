@@ -3,6 +3,7 @@
  * matcher state machine handles singles, Shift-cased keys, g-chords with a
  * timeout, and typing contexts.
  */
+import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     CHORD_TIMEOUT_MS,
     SHORTCUTS,
@@ -174,6 +175,33 @@ describe('eventKeyName', () => {
         expect(named({ key: 'A', shiftKey: true })).toBe('A');
         expect(named({ key: '?', shiftKey: true })).toBe('?');
         expect(named({ key: 'Shift', shiftKey: true })).toBe('Shift');
+    });
+
+    it('reads a letter’s case from Shift, never Caps Lock', () => {
+        // Caps Lock on, no Shift: the key reports 'A', but it is a plain a.
+        expect(named({ key: 'A' })).toBe('a');
+        expect(named({ key: 'R' })).toBe('r');
+        // Caps Lock on + Shift may report 'a'; Shift still makes it A.
+        expect(named({ key: 'a', shiftKey: true })).toBe('A');
+        expect(named({ key: 'é', shiftKey: true })).toBe('É');
+        // Uncased characters are left alone.
+        expect(named({ key: '1', shiftKey: true })).toBe('1');
+        expect(named({ key: ',' })).toBe(',');
+    });
+});
+
+describe('shortcutKbd', () => {
+    it('prints the global key the registry binds, as the help overlay does', () => {
+        // Add feed is a plain a; A (Shift+a) is the bulk mark-view-read.
+        expect(shortcutKbd('app.addFeed')).toBe('a');
+        expect(shortcutKbd('view.markAllRead')).toBe('A');
+        expect(shortcutKbd('app.refreshAll')).toBe('R');
+        expect(shortcutKbd('article.toggleStar')).toBe('s');
+        expect(shortcutKbd('view.all')).toBe('g a');
+    });
+
+    it('is undefined for a pane-only action (no tooltip suffix)', () => {
+        expect(shortcutKbd('nav.focusReader')).toBeUndefined();
     });
 });
 

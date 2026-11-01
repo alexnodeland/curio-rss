@@ -27,6 +27,17 @@ export function keyLabel(key: string): string {
 }
 
 /**
+ * The tooltip `kbd` suffix for `id`: its global key sequence as the help
+ * overlay prints it (`'a'`, `'R'`, `'g a'`), so a control's tooltip can never
+ * name a different key than the one the registry binds. `undefined` for an
+ * id with no global keys (pane-only actions), which renders no suffix.
+ */
+export function shortcutKbd(id: ShortcutId): string | undefined {
+    const keys = SHORTCUTS.find((candidate) => candidate.id === id)?.keys ?? [];
+    return keys.length === 0 ? undefined : keys.map(keyLabel).join(' ');
+}
+
+/**
  * The keys a hint advertises for `id`: its pane keys when it has them (the
  * reader's empty-state hint shows while the list owns the keyboard, where
  * the arrows and Enter are live), else its global sequence. Always keys the

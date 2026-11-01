@@ -67,7 +67,7 @@ describe('ReaderPane', () => {
         const { container } = render(ReaderPane);
         const hint = container.querySelector('.empty-hint') as HTMLElement;
         expect(hint.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-            '↑↓ to move· Enter→ to read· ? for shortcuts',
+            '↑↓ to move· Enter/→ to read· ? for shortcuts',
         );
         const bound = new Set(
             SHORTCUTS.flatMap((shortcut) => [

@@ -106,23 +106,34 @@ describe('accessibility smoke', () => {
 
         await audit('at rest');
 
-        // ↓ from an unfocused page selects the first row; the listbox tracks it.
-        await fireEvent.keyDown(document.body, { key: 'ArrowDown' });
-        const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
-        listbox.focus();
-        await fireEvent.keyDown(listbox, { key: 'ArrowDown' });
-        expect(selectionStore.selectedArticleId).toBe(300);
-        await audit('list focused with a selection');
-
+        // Every focus move below is a key press — never a `.focus()` call
+        // (jsdom has no Tab traversal, so the walk starts from the unfocused
+        // page, where the list's keys are live). ↓ selects the first row and
         // Enter hands the keyboard to the reader body: a named, focusable region.
-        await fireEvent.keyDown(listbox, { key: 'Enter' });
+        await fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+        expect(selectionStore.selectedArticleId).toBe(301);
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
         await flushIpc();
         const body = container.querySelector('.reader-scroll') as HTMLElement;
         expect(document.activeElement).toBe(body);
         await audit('reader body focused');
 
+        // Esc hands it back to the listbox, which tracks the selection.
+        await fireEvent.keyDown(body, { key: 'Escape' });
+        const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+        expect(document.activeElement).toBe(listbox);
+        await fireEvent.keyDown(listbox, { key: 'ArrowDown' });
+        expect(selectionStore.selectedArticleId).toBe(300);
+        await audit('list focused with a selection');
+
+        await fireEvent.keyDown(listbox, { key: 'Enter' });
+        await flushIpc();
+        expect(document.activeElement).toBe(container.querySelector('.reader-scroll'));
+
         // Space pages (jsdom: already at the end → next unread), Esc goes back.
-        await fireEvent.keyDown(body, { key: ' ' });
+        await fireEvent.keyDown(container.querySelector('.reader-scroll') as HTMLElement, {
+            key: ' ',
+        });
         await flushIpc();
         await fireEvent.keyDown(container.querySelector('.reader-scroll') as HTMLElement, {
             key: 'Escape',

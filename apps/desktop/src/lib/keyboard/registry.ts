@@ -4,7 +4,8 @@
  * an if-chain. Keys are {@link eventKeyName} values: `KeyboardEvent.key`,
  * except that Space is `'Space'` and a shifted named key carries a `Shift+`
  * prefix (`'Shift+Space'`) — a shifted printable key is already its own
- * character, so `Shift+R` is just `'R'` and `?` is `'?'`. Ctrl/alt/meta
+ * character, so `Shift+R` is just `'R'` and `?` is `'?'` (a letter's case
+ * is read from Shift, so Caps Lock never turns `r` into `R`). Ctrl/alt/meta
  * chords are deliberately absent from the v1 map (they belong to the native
  * menu). Two-key g-chords (`g` then `a`) ride a pending state with a timeout.
  *
@@ -259,12 +260,26 @@ export function createMatcher(
 }
 
 /**
+ * Whether `key` is a single cased letter — the keys whose `KeyboardEvent.key`
+ * Caps Lock flips without Shift being held.
+ */
+function isCasedLetter(key: string): boolean {
+    return key.length === 1 && key.toLowerCase() !== key.toUpperCase();
+}
+
+/**
  * The registry's name for a keydown: `KeyboardEvent.key`, with Space spelled
  * `'Space'` and a `Shift+` prefix on shifted *named* keys (`'Shift+Space'`,
  * `'Shift+ArrowDown'`). Shifted printable keys are already distinct
- * characters (`'A'`, `'?'`), so they carry no prefix.
+ * characters (`'A'`, `'?'`), so they carry no prefix. A letter's case comes
+ * from Shift alone, never Caps Lock: `'A'` always means Shift+a, so a plain
+ * `a` with Caps Lock on stays Add feed instead of firing the bulk
+ * mark-view-read bound to `A`.
  */
 export function eventKeyName(event: KeyboardEvent): string {
+    if (isCasedLetter(event.key)) {
+        return event.shiftKey ? event.key.toUpperCase() : event.key.toLowerCase();
+    }
     const name = event.key === ' ' ? 'Space' : event.key;
     const named = name.length > 1 && name !== 'Shift';
     return event.shiftKey && named ? `Shift+${name}` : name;

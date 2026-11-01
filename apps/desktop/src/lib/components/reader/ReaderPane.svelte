@@ -19,7 +19,7 @@ import {
     commands,
 } from '$lib/bindings';
 import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
-import { advertisedKeys, keyLabel } from '$lib/keyboard/labels';
+import { advertisedKeys, keyLabel, shortcutKbd } from '$lib/keyboard/labels';
 import { type ShortcutId, eventKeyName, paneShortcut } from '$lib/keyboard/registry';
 import {
     handleShortcut,
@@ -69,7 +69,10 @@ let scrollBody = $state<HTMLElement | null>(null);
 /**
  * The reader body owns the keyboard. Switching articles (j/k, Space at the
  * end) remounts the body, dropping DOM focus onto `<body>`; while this holds,
- * the new body takes it back. Any focus landing outside the body clears it.
+ * the new body takes it back. Any focus landing outside the body clears it,
+ * and so does the selection clearing (`g a`, a feed hop, Esc): the body
+ * unmounts with no successor and focus drops to `<body>` without a
+ * `focusin`, so the list's keys own the page again.
  */
 let holdFocus = false;
 /** A `focusReader` request not yet honoured (the article was still loading). */
@@ -83,6 +86,11 @@ $effect(() => {
         seenFocusNonce = nonce;
         focusPending = true;
         holdFocus = true;
+    }
+    if (selectionStore.selectedArticleId === null) {
+        holdFocus = false;
+        focusPending = false;
+        return;
     }
     if (body === null || !holdFocus) {
         return;
@@ -234,7 +242,13 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         <span class="hint-sep" aria-hidden="true">·</span>
                     {/if}
                     <span class="hint-part">
-                        {#each part.ids.flatMap(advertisedKeys) as key (key)}<kbd>{keyLabel(key)}</kbd>{/each}
+                        <!-- Keys of different actions sit side by side (↑↓);
+                             alternatives for one action take the help
+                             overlay's `/` (Enter/→), so they never read as a
+                             sequence. -->
+                        {#each part.ids as id (id)}{#each advertisedKeys(id) as key, position (key)}{#if position > 0}<span
+                                        class="hint-alt">/</span
+                                    >{/if}<kbd>{keyLabel(key)}</kbd>{/each}{/each}
                         {t(part.label)}
                     </span>
                 {/each}
@@ -269,7 +283,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     aria-label={flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead')}
                     use:tooltip={{
                         text: flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead'),
-                        kbd: 'M',
+                        kbd: shortcutKbd('article.toggleRead'),
                     }}
                     onclick={() => void toggleRead(current.id)}
                 >
@@ -282,7 +296,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     aria-label={flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star')}
                     use:tooltip={{
                         text: flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star'),
-                        kbd: 'S',
+                        kbd: shortcutKbd('article.toggleStar'),
                     }}
                     onclick={() => void toggleStar(current.id)}
                 >
@@ -295,7 +309,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     aria-label={flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater')}
                     use:tooltip={{
                         text: flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater'),
-                        kbd: 'L',
+                        kbd: shortcutKbd('article.toggleReadLater'),
                     }}
                     onclick={() => void toggleReadLater(current.id)}
                 >
@@ -308,7 +322,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     aria-label={flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive')}
                     use:tooltip={{
                         text: flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive'),
-                        kbd: 'E',
+                        kbd: shortcutKbd('article.toggleArchived'),
                     }}
                     onclick={() => void toggleArchived(current.id)}
                 >
@@ -318,7 +332,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 <button
                     class="tool"
                     aria-label={t('reader.action.promote')}
-                    use:tooltip={{ text: t('reader.action.promote'), kbd: 'P' }}
+                    use:tooltip={{ text: t('reader.action.promote'), kbd: shortcutKbd('article.promote') }}
                     onclick={() => void promoteSelected()}
                 >
                     <Icon name="save" />
@@ -494,6 +508,10 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 
     .hint-sep {
         margin: 0 var(--space-1);
+    }
+
+    .hint-alt {
+        font-size: var(--text-xs);
     }
 
     .reader-toolbar {

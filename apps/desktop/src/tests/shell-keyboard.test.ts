@@ -395,4 +395,55 @@ describe('shell keyboard wiring', () => {
         await flushIpc();
         expect(document.activeElement).toBe(readerBody(container));
     });
+
+    it('Caps Lock a is still Add feed, never the bulk mark-view-read', async () => {
+        harness = installIpcHarness(shellResponders());
+        await mountShell();
+        // Caps Lock on, no Shift: the browser reports key 'A'.
+        await fireEvent.keyDown(window, { key: 'A' });
+        await flushIpc();
+        expect(harness.callsFor('mark_all_read')).toEqual([]);
+        expect(layoutStore.activeModal).toBe('add-feed');
+    });
+
+    it('Esc in the reader body hands focus to the list and keeps the selection', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container } = await mountShell();
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
+        await flushIpc();
+        const body = readerBody(container);
+        expect(document.activeElement).toBe(body);
+        expect(selectionStore.selectedArticleId).toBe(500);
+
+        await fireEvent.keyDown(body, { key: 'Escape' });
+        await flushIpc();
+        // The shell's own Escape step-back (deselect) must not also run.
+        expect(selectionStore.selectedArticleId).toBe(500);
+        expect(document.activeElement).toBe(container.querySelector('[role="listbox"]'));
+    });
+
+    it('after g a clears the selection from the reader, ↓ keeps moving the list', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container } = await mountShell();
+        await fireEvent.keyDown(document.body, { key: 'Enter' });
+        await flushIpc();
+        const body = readerBody(container);
+        expect(document.activeElement).toBe(body);
+
+        await fireEvent.keyDown(body, { key: 'g' });
+        await fireEvent.keyDown(body, { key: 'a' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBeNull();
+        expect(document.activeElement).toBe(document.body);
+
+        // Each press goes where a real one would: the focused element.
+        await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'ArrowDown' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(500);
+        // The new article's body must not pull focus back into the reader.
+        expect(document.activeElement).toBe(document.body);
+        await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'ArrowDown' });
+        await flushIpc();
+        expect(selectionStore.selectedArticleId).toBe(499);
+    });
 });

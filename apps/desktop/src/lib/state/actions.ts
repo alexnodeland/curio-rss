@@ -275,7 +275,9 @@ async function markViewReadCount(): Promise<number | undefined> {
  * many changed. A feed or the whole library rides the backend's bulk
  * command, a folder its feeds' bulk marks; every narrower view (Starred,
  * Read later, Archived, a tag, search results) lists its own unread and
- * marks those, so nothing outside the view is touched.
+ * marks exactly those. Known gap: the bulk command ignores `archived`, so `A`
+ * from All, a feed or a folder also marks that scope's hidden archived rows
+ * read (#278).
  */
 export async function markViewRead(): Promise<void> {
     const changed = await markViewReadCount();

@@ -2,21 +2,25 @@
 //! and the per-feed refresh serialization.
 
 use std::path::{Path, PathBuf};
+use std::pin::pin;
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
+use futures_util::future::{Either, select};
 use tokio::sync::Mutex as AsyncMutex;
 
 use curio_types::Timestamp;
 
 use crate::content;
 use crate::feeds::ParsedEntry;
-use crate::fetch::{FetchConfig, FetchRequest};
+use crate::fetch::{FetchConfig, FetchError, FetchRequest, FetchResponse};
 use crate::lock::{FileLock, FileLockGuard, LockError};
 use crate::model::{
     ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewArticle,
 };
+use crate::storage::Storage;
 
+use super::sweep::RefreshCancel;
 use super::{CoreError, CoreHandle, LOCKS_DIR, RefreshOutcome};
 
 impl CoreHandle {
@@ -24,6 +28,12 @@ impl CoreHandle {
     /// upsert → fetch-log row. Fetch/parse failures are *outcomes*
     /// (recorded, validators preserved), not errors; only storage-level
     /// failures surface as `Err`.
+    ///
+    /// Everything but the network I/O — the storage reads and writes, the
+    /// feed parse and the CPU-heavy sanitize/extract pipeline — runs on
+    /// the blocking pool, so a large feed never stalls the async runtime
+    /// it is awaited on (a current-thread runtime keeps its timers
+    /// ticking).
     ///
     /// Refreshes of the **same feed are serialized**, across processes
     /// too: concurrent callers in this process queue on a per-feed mutex,
@@ -44,10 +54,28 @@ impl CoreHandle {
     /// # Errors
     ///
     /// [`CoreError::NotFound`] for an unknown feed; storage errors;
-    /// [`CoreError::Io`] when the lock file cannot be created.
+    /// [`CoreError::Io`] when the lock file cannot be created;
+    /// [`CoreError::Panicked`] when the ingest pipeline panics.
     pub async fn refresh_feed(&self, id: FeedId) -> Result<RefreshOutcome, CoreError> {
+        self.refresh_feed_until(id, None).await
+    }
+
+    /// [`Self::refresh_feed`], abandoned early once `cancel` fires: a
+    /// fetch still in flight is dropped (nothing is recorded, the stored
+    /// validators stay as they were) and the outcome says the refresh was
+    /// cancelled; the full-text hydration of a finished refresh stops at
+    /// the next article.
+    pub(super) async fn refresh_feed_until(
+        &self,
+        id: FeedId,
+        cancel: Option<&RefreshCancel>,
+    ) -> Result<RefreshOutcome, CoreError> {
         // Unknown feeds fail before a lock file is minted for them.
-        if self.storage.get_feed(id)?.is_none() {
+        if self
+            .on_blocking_pool(move |storage| Ok(storage.get_feed(id)?))
+            .await?
+            .is_none()
+        {
             return Err(CoreError::NotFound { entity: "feed" });
         }
         let lock = self.refresh_lock(id);
@@ -59,8 +87,8 @@ impl CoreHandle {
             ));
         };
         let feed = self
-            .storage
-            .get_feed(id)?
+            .on_blocking_pool(move |storage| Ok(storage.get_feed(id)?))
+            .await?
             .ok_or(CoreError::NotFound { entity: "feed" })?;
         if feed.status == FeedStatus::Dead {
             return Ok(not_fetched(
@@ -78,80 +106,26 @@ impl CoreHandle {
             bearer: None,
             ..FetchRequest::default()
         };
-        let fetched = self.client.fetch(&request).await;
+        let fetched = match cancel {
+            None => self.client.fetch(&request).await,
+            Some(cancel) => {
+                match select(pin!(self.client.fetch(&request)), pin!(cancel.cancelled())).await {
+                    Either::Left((fetched, _)) => fetched,
+                    Either::Right(((), _)) => return Ok(not_fetched(id, CANCELLED)),
+                }
+            }
+        };
         let now = Timestamp::now();
         let duration_ms = u32::try_from(started.elapsed().as_millis()).ok();
 
-        let failed = |http_status: Option<u16>, error: String| RefreshOutcome {
-            feed_id: id,
-            status: FetchStatus::Error,
-            http_status,
-            new_articles: 0,
-            updated_articles: 0,
-            error: Some(error),
-        };
-
-        // Conditional-GET validators are preserved on every non-ingest
-        // path — error, 304, 410, unparseable body. Only a successfully
-        // *parsed* 2xx adopts the response's validators (the sketch
-        // clobbered them on any failure).
-        let mut hydrate_pending: Vec<ArticleId> = Vec::new();
-        let outcome = match fetched {
-            Err(err) => {
-                self.preserve_validators(id, &feed, now)?;
-                failed(None, err.to_string())
-            }
-            Ok(response) if response.is_not_modified() => {
-                self.preserve_validators(id, &feed, now)?;
-                RefreshOutcome {
-                    feed_id: id,
-                    status: FetchStatus::NotModified,
-                    http_status: Some(response.status),
-                    new_articles: 0,
-                    updated_articles: 0,
-                    error: None,
-                }
-            }
-            Ok(response) if response.is_gone() => {
-                // 410: the feed is gone for good — auto-pause forever.
-                self.storage.set_feed_status(id, FeedStatus::Dead)?;
-                self.preserve_validators(id, &feed, now)?;
-                failed(
-                    Some(response.status),
-                    "HTTP 410 Gone — feed auto-paused as dead".to_owned(),
-                )
-            }
-            Ok(response) if response.is_success() => {
-                match crate::feeds::parse_feed(&response.body, Some(&response.final_url)) {
-                    Err(err) => {
-                        // A body we could not parse must not update the
-                        // validators, or a broken feed 304s forever.
-                        self.preserve_validators(id, &feed, now)?;
-                        failed(Some(response.status), err.to_string())
-                    }
-                    Ok(parsed) => {
-                        let (outcome, pending) =
-                            self.ingest_parsed(id, &feed, &response, parsed, now)?;
-                        hydrate_pending = pending;
-                        outcome
-                    }
-                }
-            }
-            Ok(response) => {
-                self.preserve_validators(id, &feed, now)?;
-                failed(Some(response.status), format!("HTTP {}", response.status))
-            }
-        };
-
-        self.storage.record_fetch(FetchRecord {
-            feed_id: id,
-            fetched_at: now,
-            status: outcome.status,
-            http_status: outcome.http_status,
-            error: outcome.error.clone(),
-            articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
-            duration_ms,
-        })?;
+        let settled = self
+            .on_blocking_pool(move |storage| settle(storage, id, &feed, fetched, now, duration_ms))
+            .await?;
+        if settled.url_adopted {
+            // The URL is the identity key of feed.added/feed.removed;
+            // adoption staged a removed/added pair — flush it now.
+            self.emit();
+        }
         // Full-text mode's refresh hook: hydrate the articles this refresh
         // *inserted* (never the whole backlog) from their source pages,
         // outside the per-feed locks. Best-effort per article — a dead page
@@ -159,17 +133,42 @@ impl CoreHandle {
         // guard already protects feeds that ship full content.
         drop(across_processes);
         drop(serialized);
-        self.hydrate_batch(hydrate_pending).await;
-        Ok(outcome)
+        self.hydrate_batch(settled.hydrate_pending, cancel).await;
+        Ok(settled.outcome)
+    }
+
+    /// Runs a storage job on the blocking pool, off the async runtime.
+    /// A panicking job comes back as [`CoreError::Panicked`].
+    pub(super) async fn on_blocking_pool<T, F>(&self, job: F) -> Result<T, CoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Storage) -> Result<T, CoreError> + Send + 'static,
+    {
+        let storage = Arc::clone(&self.storage);
+        match tokio::task::spawn_blocking(move || job(&storage)).await {
+            Ok(result) => result,
+            Err(join) => {
+                let message = if join.is_panic() {
+                    crate::storage::panic_message(join.into_panic().as_ref())
+                } else {
+                    "the blocking task was cancelled (runtime shutting down)".to_owned()
+                };
+                tracing::error!(%message, "a blocking engine task failed");
+                Err(CoreError::Panicked { message })
+            }
+        }
     }
 
     /// Hydrates the articles a refresh just inserted (full-text mode),
     /// best-effort per article. A rate-limit error stops the whole batch
     /// — every remaining hydrate would fail the same way; the articles
     /// keep their feed excerpts and a later manual load-full picks them
-    /// up.
-    async fn hydrate_batch(&self, pending: Vec<ArticleId>) {
+    /// up. So does a cancelled sweep, at the next article.
+    async fn hydrate_batch(&self, pending: Vec<ArticleId>, cancel: Option<&RefreshCancel>) {
         for article_id in pending {
+            if cancel.is_some_and(RefreshCancel::is_cancelled) {
+                break;
+            }
             match self.hydrate_article(article_id).await {
                 Ok(_) => {}
                 Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. }) => {
@@ -187,128 +186,6 @@ impl CoreHandle {
                 }
             }
         }
-    }
-
-    /// Stamps `last_fetched_at` while keeping the stored conditional-GET
-    /// validators exactly as they were.
-    fn preserve_validators(
-        &self,
-        id: FeedId,
-        feed: &Feed,
-        now: Timestamp,
-    ) -> Result<(), CoreError> {
-        self.storage.update_feed_fetch_state(
-            id,
-            feed.etag.clone(),
-            feed.last_modified.clone(),
-            now,
-        )?;
-        Ok(())
-    }
-
-    /// The happy path of a refresh: pipeline every entry, batch-upsert,
-    /// fill in feed metadata, adopt permanent redirects and the response
-    /// validators. The second return value is the row ids the upsert
-    /// *inserted* — the full-text hydration queue (empty unless the feed
-    /// has full-text mode on).
-    fn ingest_parsed(
-        &self,
-        id: FeedId,
-        feed: &Feed,
-        response: &crate::fetch::FetchResponse,
-        mut parsed: crate::feeds::ParsedFeed,
-        now: Timestamp,
-    ) -> Result<(RefreshOutcome, Vec<ArticleId>), CoreError> {
-        // A reused guid's keys are chosen per fetch; settle them against
-        // what earlier fetches stored so no item changes key (and splits
-        // into a duplicate article) when the guid's sharing changes.
-        let stored = self
-            .storage
-            .source_urls_by_dedupe_key(Some(id), parsed.settle_lookups())?;
-        parsed.settle_keys(&feed.url, |key| stored.get(key).map(String::as_str));
-        let articles: Vec<NewArticle> = parsed
-            .entries
-            .into_iter()
-            .map(|entry| ingest_entry(id, &feed.url, entry))
-            .collect();
-        // Which entries are new, decided BEFORE the upsert (afterwards
-        // everything exists). Same-feed refreshes are serialized by the
-        // caller's per-feed lock, so this read-then-write cannot race. A
-        // link-less entry has no page of its own (its source URL is the
-        // feed's — see `ingest_entry`), so it is never queued: hydrating it
-        // would fetch the feed XML as if it were an article.
-        let fresh_keys: Vec<String> = if feed.fetch_full_text {
-            articles
-                .iter()
-                .filter(|article| !is_feed_own_url(&article.source_url, feed))
-                .filter(|article| {
-                    self.storage
-                        .article_id_by_dedupe_key(Some(id), &article.dedupe_key)
-                        .ok()
-                        .flatten()
-                        .is_none()
-                })
-                .map(|article| article.dedupe_key.clone())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let upserted = self.storage.upsert_articles(articles)?;
-        let mut hydrate_pending = Vec::with_capacity(fresh_keys.len());
-        for key in &fresh_keys {
-            if let Some(article_id) = self.storage.article_id_by_dedupe_key(Some(id), key)? {
-                hydrate_pending.push(article_id);
-            }
-        }
-        self.storage.update_feed_metadata(
-            id,
-            parsed.meta.title,
-            parsed.meta.site_url,
-            parsed.meta.description,
-        )?;
-        if response.permanent_redirect && response.final_url != feed.url {
-            // The URL is the identity key of feed.added/feed.removed;
-            // adoption stages a removed/added pair — flush it now.
-            self.storage
-                .update_feed_url(id, response.final_url.clone())?;
-            self.emit();
-        }
-        self.storage.update_feed_fetch_state(
-            id,
-            response.etag.clone(),
-            response.last_modified.clone(),
-            now,
-        )?;
-        Ok((
-            RefreshOutcome {
-                feed_id: id,
-                status: FetchStatus::Ok,
-                http_status: Some(response.status),
-                new_articles: upserted.inserted,
-                updated_articles: upserted.updated,
-                error: None,
-            },
-            hydrate_pending,
-        ))
-    }
-
-    /// Refreshes every active feed, sequentially (the policed client's
-    /// per-host politeness paces same-host feeds anyway). Per-feed
-    /// failures land in their outcome rows.
-    ///
-    /// # Errors
-    ///
-    /// Storage errors only.
-    pub async fn refresh_all(&self) -> Result<Vec<RefreshOutcome>, CoreError> {
-        let feeds = self.storage.list_feeds()?;
-        let mut outcomes = Vec::new();
-        for feed in feeds {
-            if feed.status != FeedStatus::Active {
-                continue;
-            }
-            outcomes.push(self.refresh_feed(feed.id).await?);
-        }
-        Ok(outcomes)
     }
 
     /// The feed's refresh lock, minted on first use. The registry mutex
@@ -362,6 +239,205 @@ fn not_fetched(feed_id: FeedId, why: &str) -> RefreshOutcome {
         updated_articles: 0,
         error: Some(why.to_owned()),
     }
+}
+
+/// The error of a refresh whose fetch a cancelled sweep abandoned.
+pub(super) const CANCELLED: &str = "refresh cancelled";
+
+/// What the blocking half of a refresh settled.
+struct Settled {
+    /// The outcome, already recorded in the fetch log.
+    outcome: RefreshOutcome,
+    /// The rows the upsert *inserted* — the full-text hydration queue
+    /// (empty unless the feed has full-text mode on).
+    hydrate_pending: Vec<ArticleId>,
+    /// A permanent redirect was adopted: feed events are staged.
+    url_adopted: bool,
+}
+
+/// The blocking half of a refresh: maps the fetch result onto feed state
+/// (parse → ingest on success, validators preserved on every other path)
+/// and records the fetch-log row. Runs on the blocking pool, inside the
+/// caller's per-feed locks.
+fn settle(
+    storage: &Storage,
+    id: FeedId,
+    feed: &Feed,
+    fetched: Result<FetchResponse, FetchError>,
+    now: Timestamp,
+    duration_ms: Option<u32>,
+) -> Result<Settled, CoreError> {
+    let failed = |http_status: Option<u16>, error: String| RefreshOutcome {
+        feed_id: id,
+        status: FetchStatus::Error,
+        http_status,
+        new_articles: 0,
+        updated_articles: 0,
+        error: Some(error),
+    };
+
+    // Conditional-GET validators are preserved on every non-ingest
+    // path — error, 304, 410, unparseable body. Only a successfully
+    // *parsed* 2xx adopts the response's validators (the sketch
+    // clobbered them on any failure).
+    let mut hydrate_pending: Vec<ArticleId> = Vec::new();
+    let mut url_adopted = false;
+    let outcome = match fetched {
+        Err(err) => {
+            preserve_validators(storage, id, feed, now)?;
+            failed(None, err.to_string())
+        }
+        Ok(response) if response.is_not_modified() => {
+            preserve_validators(storage, id, feed, now)?;
+            RefreshOutcome {
+                feed_id: id,
+                status: FetchStatus::NotModified,
+                http_status: Some(response.status),
+                new_articles: 0,
+                updated_articles: 0,
+                error: None,
+            }
+        }
+        Ok(response) if response.is_gone() => {
+            // 410: the feed is gone for good — auto-pause forever.
+            storage.set_feed_status(id, FeedStatus::Dead)?;
+            preserve_validators(storage, id, feed, now)?;
+            failed(
+                Some(response.status),
+                "HTTP 410 Gone — feed auto-paused as dead".to_owned(),
+            )
+        }
+        Ok(response) if response.is_success() => {
+            match crate::feeds::parse_feed(&response.body, Some(&response.final_url)) {
+                Err(err) => {
+                    // A body we could not parse must not update the
+                    // validators, or a broken feed 304s forever.
+                    preserve_validators(storage, id, feed, now)?;
+                    failed(Some(response.status), err.to_string())
+                }
+                Ok(parsed) => {
+                    let ingested = ingest_parsed(storage, id, feed, &response, parsed, now)?;
+                    hydrate_pending = ingested.hydrate_pending;
+                    url_adopted = ingested.url_adopted;
+                    ingested.outcome
+                }
+            }
+        }
+        Ok(response) => {
+            preserve_validators(storage, id, feed, now)?;
+            failed(Some(response.status), format!("HTTP {}", response.status))
+        }
+    };
+
+    storage.record_fetch(FetchRecord {
+        feed_id: id,
+        fetched_at: now,
+        status: outcome.status,
+        http_status: outcome.http_status,
+        error: outcome.error.clone(),
+        articles_new: u32::try_from(outcome.new_articles).unwrap_or(u32::MAX),
+        duration_ms,
+    })?;
+    Ok(Settled {
+        outcome,
+        hydrate_pending,
+        url_adopted,
+    })
+}
+
+/// Stamps `last_fetched_at` while keeping the stored conditional-GET
+/// validators exactly as they were.
+fn preserve_validators(
+    storage: &Storage,
+    id: FeedId,
+    feed: &Feed,
+    now: Timestamp,
+) -> Result<(), CoreError> {
+    storage.update_feed_fetch_state(id, feed.etag.clone(), feed.last_modified.clone(), now)?;
+    Ok(())
+}
+
+/// The happy path of a refresh: pipeline every entry, batch-upsert,
+/// fill in feed metadata, adopt permanent redirects and the response
+/// validators. The settled outcome is not recorded yet — [`settle`]
+/// does that.
+fn ingest_parsed(
+    storage: &Storage,
+    id: FeedId,
+    feed: &Feed,
+    response: &FetchResponse,
+    mut parsed: crate::feeds::ParsedFeed,
+    now: Timestamp,
+) -> Result<Settled, CoreError> {
+    // A reused guid's keys are chosen per fetch; settle them against
+    // what earlier fetches stored so no item changes key (and splits
+    // into a duplicate article) when the guid's sharing changes.
+    let stored = storage.source_urls_by_dedupe_key(Some(id), parsed.settle_lookups())?;
+    parsed.settle_keys(&feed.url, |key| stored.get(key).map(String::as_str));
+    let articles: Vec<NewArticle> = parsed
+        .entries
+        .into_iter()
+        .map(|entry| ingest_entry(id, &feed.url, entry))
+        .collect();
+    // Which entries are new, decided BEFORE the upsert (afterwards
+    // everything exists). Same-feed refreshes are serialized by the
+    // caller's per-feed lock, so this read-then-write cannot race. A
+    // link-less entry has no page of its own (its source URL is the
+    // feed's — see `ingest_entry`), so it is never queued: hydrating it
+    // would fetch the feed XML as if it were an article.
+    let fresh_keys: Vec<String> = if feed.fetch_full_text {
+        articles
+            .iter()
+            .filter(|article| !is_feed_own_url(&article.source_url, feed))
+            .filter(|article| {
+                storage
+                    .article_id_by_dedupe_key(Some(id), &article.dedupe_key)
+                    .ok()
+                    .flatten()
+                    .is_none()
+            })
+            .map(|article| article.dedupe_key.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let upserted = storage.upsert_articles(articles)?;
+    let mut hydrate_pending = Vec::with_capacity(fresh_keys.len());
+    for key in &fresh_keys {
+        if let Some(article_id) = storage.article_id_by_dedupe_key(Some(id), key)? {
+            hydrate_pending.push(article_id);
+        }
+    }
+    storage.update_feed_metadata(
+        id,
+        parsed.meta.title,
+        parsed.meta.site_url,
+        parsed.meta.description,
+    )?;
+    let url_adopted = response.permanent_redirect && response.final_url != feed.url;
+    if url_adopted {
+        // The URL is the identity key of feed.added/feed.removed;
+        // adoption stages a removed/added pair (the caller flushes it).
+        storage.update_feed_url(id, response.final_url.clone())?;
+    }
+    storage.update_feed_fetch_state(
+        id,
+        response.etag.clone(),
+        response.last_modified.clone(),
+        now,
+    )?;
+    Ok(Settled {
+        outcome: RefreshOutcome {
+            feed_id: id,
+            status: FetchStatus::Ok,
+            http_status: Some(response.status),
+            new_articles: upserted.inserted,
+            updated_articles: upserted.updated,
+            error: None,
+        },
+        hydrate_pending,
+        url_adopted,
+    })
 }
 
 /// The feed's cross-process refresh lock file.
@@ -435,7 +511,7 @@ fn ingest_entry(feed_id: FeedId, feed_url: &str, entry: ParsedEntry) -> NewArtic
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::panic)]
 
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -454,6 +530,23 @@ mod tests {
             host_overrides: Vec::new(),
             ..FetchConfig::default()
         }
+    }
+
+    /// A panic in a refresh's blocking half (a parser bug on a nasty
+    /// feed) comes back as an error; the handle keeps working.
+    #[tokio::test]
+    async fn a_panicking_blocking_job_is_an_error_not_a_crash() {
+        let profile = tempfile::tempdir().unwrap();
+        let core = CoreHandle::open(profile.path()).unwrap();
+        let err = core
+            .on_blocking_pool(|_| -> Result<(), CoreError> { panic!("ingest bug") })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CoreError::Panicked { message } if message == "ingest bug"),
+            "{err:?}"
+        );
+        assert_eq!(core.list_feeds().unwrap(), [] as [Feed; 0]);
     }
 
     #[test]

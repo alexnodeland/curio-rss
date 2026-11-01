@@ -191,7 +191,7 @@ impl From<CoreError> for CommandError {
             CoreError::Io { .. } | CoreError::Export(_) | CoreError::Events(_) => {
                 Self::internal(ErrorCode::Io, error.to_string())
             }
-            CoreError::Content(_) | CoreError::Settings(_) => {
+            CoreError::Content(_) | CoreError::Settings(_) | CoreError::Panicked { .. } => {
                 Self::internal(ErrorCode::Internal, error.to_string())
             }
         }

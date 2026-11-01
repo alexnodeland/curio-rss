@@ -54,6 +54,9 @@ icu_normalizer = { version = "2", default-features = false, features = ["compile
 # OS error codes only (ENOLCK & co.): telling "this filesystem has no advisory
 # locks" from a real lock failure in the export lock. Already in the tree.
 libc = "0.2"
+# `buffer_unordered` + `select` for the bounded-concurrency refresh sweep
+# (curio-core handle/sweep.rs). Already in the tree via reqwest/hyper.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # htmd's DOM node type (`htmd::Node` = `markup5ever_rcdom::Node`): footnote
 # export inspects a list's items without re-walking it. Same minor as htmd's
 # so the types unify; already in the tree via htmd.

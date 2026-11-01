@@ -18,7 +18,7 @@ use crate::paths::LegacyProfiles;
 #[specta::specta]
 pub async fn integrity_check(core: State<'_, SharedCore>) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || integrity_check_impl(&core)).await
+    run_blocking("integrity_check", move || integrity_check_impl(&core)).await
 }
 
 /// FTS index ↔ content-table consistency check.
@@ -26,7 +26,10 @@ pub async fn integrity_check(core: State<'_, SharedCore>) -> Result<(), CommandE
 #[specta::specta]
 pub async fn fts_integrity_check(core: State<'_, SharedCore>) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || fts_integrity_check_impl(&core)).await
+    run_blocking("fts_integrity_check", move || {
+        fts_integrity_check_impl(&core)
+    })
+    .await
 }
 
 /// `VACUUM` — reclaims space after bulk deletes.
@@ -34,7 +37,7 @@ pub async fn fts_integrity_check(core: State<'_, SharedCore>) -> Result<(), Comm
 #[specta::specta]
 pub async fn vacuum_db(core: State<'_, SharedCore>) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || vacuum_db_impl(&core)).await
+    run_blocking("vacuum_db", move || vacuum_db_impl(&core)).await
 }
 
 /// Article count, schema version, and database path.
@@ -42,7 +45,7 @@ pub async fn vacuum_db(core: State<'_, SharedCore>) -> Result<(), CommandError> 
 #[specta::specta]
 pub async fn db_stats(core: State<'_, SharedCore>) -> Result<DbStatsDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || db_stats_impl(&core)).await
+    run_blocking("db_stats", move || db_stats_impl(&core)).await
 }
 
 /// Deletes event-log files past the ≥90-day retention floor. Returns the
@@ -53,7 +56,10 @@ pub async fn sweep_event_retention(
     core: State<'_, SharedCore>,
 ) -> Result<Vec<String>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || sweep_event_retention_impl(&core)).await
+    run_blocking("sweep_event_retention", move || {
+        sweep_event_retention_impl(&core)
+    })
+    .await
 }
 
 /// What startup did with profiles an earlier release kept outside the

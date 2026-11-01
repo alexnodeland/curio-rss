@@ -11,8 +11,9 @@
 //! Preferences (`ui.notify.*`, mirrored in the TS `SETTING_KEYS` by convention):
 //! master `enabled` (opt-in, default off), per-event `new-articles` / `errors` /
 //! `feed-dead` (default on once enabled), and a `quiet-start`/`quiet-end`
-//! `"HH:MM"` window. The notification body is English — like the native menu, an
-//! OS surface outside the in-app i18n layer.
+//! `"HH:MM"` window. The notification body is in the user's `ui.locale`, from the
+//! host's own string table ([`crate::l10n`]) — like the native menu, an OS
+//! surface outside the webview's i18n catalogs.
 
 use std::collections::HashSet;
 
@@ -22,7 +23,8 @@ use tauri::{AppHandle, Manager as _};
 use tauri_plugin_notification::{NotificationExt as _, PermissionState};
 
 use crate::dto::{FetchStatusDto, RefreshOutcomeDto};
-use crate::error::{CommandError, ErrorCode};
+use crate::error::{CommandError, ErrorCode, logged};
+use crate::l10n::Locale;
 
 const ENABLED_KEY: &str = "ui.notify.enabled";
 const NEW_ARTICLES_KEY: &str = "ui.notify.new-articles";
@@ -47,6 +49,8 @@ struct NotifyPrefs {
     quiet: Option<(NaiveTime, NaiveTime)>,
     /// Feeds the user has opted out of notifications for (per-feed mute).
     muted: HashSet<i64>,
+    /// The language the body is written in.
+    locale: Locale,
 }
 
 impl NotifyPrefs {
@@ -61,6 +65,7 @@ impl NotifyPrefs {
             feed_dead: flag(FEED_DEAD_KEY),
             quiet: parse_quiet(get(QUIET_START_KEY), get(QUIET_END_KEY)),
             muted: parse_muted(get(MUTED_FEEDS_KEY)),
+            locale: Locale::from_settings(core),
         }
     }
 }
@@ -103,8 +108,8 @@ fn plan(outcomes: &[RefreshOutcomeDto], prefs: &NotifyPrefs, now: NaiveTime) -> 
         return None;
     }
     let mut new_total: u64 = 0;
-    let mut errored: usize = 0;
-    let mut dead: usize = 0;
+    let mut errored: u64 = 0;
+    let mut dead: u64 = 0;
     for outcome in outcomes {
         if prefs.muted.contains(&outcome.feed_id) {
             continue;
@@ -118,32 +123,22 @@ fn plan(outcomes: &[RefreshOutcomeDto], prefs: &NotifyPrefs, now: NaiveTime) -> 
             }
         }
     }
+    let locale = prefs.locale;
+    let text = locale.strings();
     let mut lines: Vec<String> = Vec::new();
     if prefs.new_articles && new_total > 0 {
-        lines.push(format!("{new_total} new {}", plural(new_total, "article")));
+        lines.push(locale.count(new_total, &text.new_articles));
     }
     if prefs.errors && errored > 0 {
-        lines.push(format!(
-            "{errored} {} failed to refresh",
-            plural(errored as u64, "feed")
-        ));
+        lines.push(locale.count(errored, &text.feeds_failed));
     }
     if prefs.feed_dead && dead > 0 {
-        lines.push(format!("{dead} {} went dead", plural(dead as u64, "feed")));
+        lines.push(locale.count(dead, &text.feeds_dead));
     }
     if lines.is_empty() {
         None
     } else {
         Some(lines.join(" · "))
-    }
-}
-
-/// `word` or `words`, for the count.
-fn plural(count: u64, word: &str) -> String {
-    if count == 1 {
-        word.to_owned()
-    } else {
-        format!("{word}s")
     }
 }
 
@@ -196,10 +191,12 @@ pub fn notify_refresh(handle: &AppHandle, core: &CoreHandle, outcomes: &[Refresh
 #[tauri::command]
 #[specta::specta]
 pub async fn request_notification_permission(app: AppHandle) -> Result<bool, CommandError> {
-    let state = app
-        .notification()
-        .request_permission()
-        .map_err(|error| CommandError::internal(ErrorCode::Internal, error.to_string()))?;
+    let state = logged(
+        "request_notification_permission",
+        app.notification()
+            .request_permission()
+            .map_err(|error| CommandError::internal(ErrorCode::Internal, error.to_string())),
+    )?;
     Ok(state == PermissionState::Granted)
 }
 
@@ -217,6 +214,7 @@ mod tests {
             feed_dead: true,
             quiet: None,
             muted: HashSet::new(),
+            locale: Locale::En,
         }
     }
 
@@ -278,6 +276,44 @@ mod tests {
         assert_eq!(
             plan(&out, &prefs(true), noon()),
             Some("2 new articles · 1 feed failed to refresh · 1 feed went dead".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_body_is_written_in_the_chosen_locale() {
+        let out = [
+            outcome(0, FetchStatusDto::Error, Some(500)),
+            outcome(0, FetchStatusDto::Error, Some(GONE)),
+            outcome(2, FetchStatusDto::Ok, Some(200)),
+        ];
+        let mut p = prefs(true);
+        p.locale = Locale::De;
+        assert_eq!(
+            plan(&out, &p, noon()),
+            Some(
+                "2 neue Artikel · 1 Feed konnte nicht aktualisiert werden · 1 Feed ist gestorben"
+                    .to_owned()
+            )
+        );
+        p.locale = Locale::Pl;
+        let five = [outcome(5, FetchStatusDto::Ok, Some(200))];
+        assert_eq!(
+            plan(&five, &p, noon()),
+            Some("5 nowych artykułów".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_locale_is_read_with_the_other_prefs() {
+        let (_dir, core) = crate::commands::testutil::temp_core();
+        core.set_setting(crate::l10n::LOCALE_KEY, "de").unwrap();
+        core.set_setting(ENABLED_KEY, "true").unwrap();
+        let prefs = NotifyPrefs::read(&core);
+        assert_eq!(prefs.locale, Locale::De);
+        let out = [outcome(1, FetchStatusDto::Ok, Some(200))];
+        assert_eq!(
+            plan(&out, &prefs, noon()),
+            Some("1 neuer Artikel".to_owned())
         );
     }
 

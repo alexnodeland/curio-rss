@@ -61,7 +61,7 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 | 🔄 **Auto-updates** | Built-in "Check for updates" that installs & relaunches; auto-check / auto-install toggles; signed GitHub-release artifacts |
 | ⌨️ **Keyboard & menus** | Native macOS menu bar, ⌘-chord hotkeys, vim-style keys, tooltips, and a help overlay |
 | ♿ **Accessible** | Focus-trapped modals, listbox navigation, toasts announced through permanent polite/assertive live regions (errors stay until dismissed; hover or focus pauses the rest), WCAG-AA contrast (gated) |
-| 🌍 **8 languages** | English · Español · Français · Deutsch · Italiano · Polski · 简体中文 · 廣東話 |
+| 🌍 **8 languages** | English · Español · Français · Deutsch · Italiano · Polski · 简体中文 · 廣東話 — the app, its error messages, the native menu bar and notifications |
 | 🔒 **Private** | No telemetry, no accounts; a per-host fetch policy (e.g. Reddit) is disclosed in [PRIVACY.md](PRIVACY.md); remote media & favicon fallback are opt-in |
 
 ## How your data flows

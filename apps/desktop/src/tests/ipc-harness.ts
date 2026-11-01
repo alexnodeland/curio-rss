@@ -119,6 +119,7 @@ export function commandErrorFixture(overrides: Partial<CommandError> = {}): Comm
     return {
         kind: 'user',
         code: 'NOT_FOUND',
+        params: {},
         message: 'no such row',
         recoverable: false,
         ...overrides,

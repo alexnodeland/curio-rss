@@ -6,15 +6,16 @@
 //! registry is owned by `add_destination`/`remove_destination`); the
 //! refusal surfaces here as an `InvalidInput` user error.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use curio_core::CoreHandle;
 use curio_core::storage::Storage;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
 use crate::dto::AppInfoDto;
 use crate::error::CommandError;
+use crate::l10n::{LOCALE_KEY, Locale};
 
 /// Reads a setting.
 #[tauri::command]
@@ -24,19 +25,57 @@ pub async fn get_setting(
     key: String,
 ) -> Result<Option<String>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_setting_impl(&core, &key)).await
+    run_blocking("get_setting", move || get_setting_impl(&core, &key)).await
 }
 
-/// Writes a setting.
+/// Writes a setting. A new `ui.locale` also rebuilds the native menu in
+/// that language (the notification body reads it fresh each time).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_setting(
+    app: AppHandle,
     core: State<'_, SharedCore>,
     key: String,
     value: String,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_setting_impl(&core, &key, &value)).await
+    run_blocking("set_setting", move || {
+        set_setting_and_menu(&core, &key, &value, |locale| {
+            crate::menu::apply_locale(&app, locale);
+        })
+    })
+    .await
+}
+
+/// Serialises locale writes with their menu rebuilds: two quick language
+/// changes must leave the menu in the language that was saved last, not in
+/// whichever rebuild happened to finish last.
+static LOCALE_TURN: Mutex<()> = Mutex::new(());
+
+/// Writes `key`; for the locale setting, then rebuilds the menu through
+/// `apply_menu` — the write and its rebuild as one turn under
+/// [`LOCALE_TURN`], so rebuilds land in the order their writes did.
+fn set_setting_and_menu(
+    core: &CoreHandle,
+    key: &str,
+    value: &str,
+    apply_menu: impl FnOnce(Locale),
+) -> Result<(), CommandError> {
+    let Some(locale) = menu_locale_change(key, value) else {
+        return set_setting_impl(core, key, value);
+    };
+    // Poisoning only means an earlier rebuild panicked; the guard protects
+    // no data, so the turn is still safe to take.
+    let _turn = LOCALE_TURN.lock().unwrap_or_else(PoisonError::into_inner);
+    set_setting_impl(core, key, value)?;
+    apply_menu(locale);
+    Ok(())
+}
+
+/// The locale to rebuild the menu in, when `key` is the locale setting. An
+/// unknown id falls back to English, as the frontend's catalogs do.
+fn menu_locale_change(key: &str, value: &str) -> Option<Locale> {
+    (key == LOCALE_KEY).then(|| Locale::parse(value).unwrap_or_default())
 }
 
 /// Version / profile / schema facts for the about box and doctor panel.
@@ -44,7 +83,7 @@ pub async fn set_setting(
 #[specta::specta]
 pub async fn get_app_info(core: State<'_, SharedCore>) -> Result<AppInfoDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_app_info_impl(&core)).await
+    run_blocking("get_app_info", move || get_app_info_impl(&core)).await
 }
 
 // ------------------------------------------------------------------ impls
@@ -109,5 +148,35 @@ mod tests {
         assert_eq!(info.version, CoreHandle::version());
         assert_eq!(info.db_schema_version, info.schema_supported);
         assert!(info.profile_dir.ends_with("profile"));
+    }
+
+    #[test]
+    fn only_the_locale_setting_rebuilds_the_menu() {
+        assert_eq!(menu_locale_change("ui.locale", "de"), Some(Locale::De));
+        assert_eq!(menu_locale_change("ui.locale", "xx"), Some(Locale::En));
+        assert_eq!(menu_locale_change("ui.theme", "de"), None);
+    }
+
+    #[test]
+    fn a_locale_write_rebuilds_the_menu_after_it_is_saved() {
+        let (_dir, core) = crate::commands::testutil::temp_core();
+        let mut applied = Vec::new();
+        set_setting_and_menu(&core, LOCALE_KEY, "fr", |locale| {
+            // The rebuild runs inside the turn, after the write landed.
+            assert!(LOCALE_TURN.try_lock().is_err());
+            assert_eq!(
+                get_setting_impl(&core, LOCALE_KEY).unwrap().as_deref(),
+                Some("fr")
+            );
+            applied.push(locale);
+        })
+        .unwrap();
+        assert_eq!(applied, vec![Locale::Fr]);
+        // Any other key is a plain write: no rebuild.
+        set_setting_and_menu(&core, "ui.theme", "dark", |_| panic!("rebuilt")).unwrap();
+        assert_eq!(
+            get_setting_impl(&core, "ui.theme").unwrap().as_deref(),
+            Some("dark")
+        );
     }
 }

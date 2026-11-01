@@ -14,6 +14,48 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'app.error.internal': 'Coś poszło nie tak. Ponowna próba może pomóc.',
     'app.error.profileBusy':
         'Inny proces Curio (np. polecenie uruchomione w terminalu) używa teraz tego profilu. Spróbuj ponownie za chwilę.',
+    'error.notFound': 'Ten element już nie istnieje.',
+    'error.invalidInput': 'Te dane są nieprawidłowe. Sprawdź je i spróbuj ponownie.',
+    'error.invalidUrl': '„{input}” nie jest adresem internetowym, który Curio może otworzyć.',
+    'error.pathTokenExpired': 'Wybór pliku wygasł. Wybierz plik lub folder ponownie.',
+    'error.unknownDestination':
+        'To miejsce docelowe nie jest już skonfigurowane. Dodaj je ponownie w Ustawieniach.',
+    'error.destinationMissing':
+        'Brakuje folderu docelowego {root}. Podłącz go ponownie lub dodaj miejsce docelowe jeszcze raz.',
+    'error.pathsTaken':
+        'Inne pliki zajmują już każdą nazwę dla tej notatki (ostatnia próba: {path}). Zmień ich nazwy lub je przenieś i spróbuj ponownie.',
+    'error.schemaTooNew':
+        'Tę bibliotekę zapisała nowsza wersja Curio. Zaktualizuj Curio, aby ją otworzyć.',
+    'error.network':
+        'Curio nie może połączyć się z serwerem. Sprawdź połączenie i spróbuj ponownie.',
+    'error.networkTimeout': '{host} zbyt długo nie odpowiadał. Spróbuj ponownie za chwilę.',
+    'error.hostNotFound': 'Curio nie może znaleźć {host}. Sprawdź adres i połączenie.',
+    'error.connectionFailed':
+        'Curio nie może połączyć się z {host}. Sprawdź połączenie i spróbuj ponownie.',
+    'error.tls': 'Curio nie może nawiązać bezpiecznego połączenia z {host}.',
+    'error.httpStatus': '{host} odpowiedział błędem (HTTP {status}).',
+    'error.blockedAddress':
+        '{host} wskazuje na prywatny adres sieciowy, którego Curio domyślnie nie pobiera.',
+    'error.tooLarge': 'Strona z {host} jest zbyt duża, aby ją wczytać.',
+    'error.rateLimited': '{host} ogranicza liczbę żądań. Spróbuj ponownie za około {minutes} min.',
+    'error.redditAuth': 'Reddit odmówił wczytania pełnego posta (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit blokuje anonimowe żądania pełnych postów. Aby je wczytywać, dodaj własne bezpłatne dane dostępowe API Reddita w Ustawienia → API Reddita.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit odrzucił Twoje dane dostępowe API. Sprawdź client id i client secret w Ustawienia → API Reddita albo utwórz aplikację ponownie.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit odmówił dostępu dla Twoich danych dostępowych API. Spróbuj ponownie; jeśli błąd się powtarza, utwórz aplikację ponownie.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit nie mógł teraz wydać tokenu dostępu — możliwe, że ma awarię. Spróbuj ponownie później.',
+    'error.parse': 'Curio nie może odczytać tego pliku lub kanału.',
+    'error.storage': 'Curio nie może zapisać tej zmiany.',
+    'error.duplicate': 'To już istnieje.',
+    'error.alreadySubscribed': 'Ten kanał jest już subskrybowany.',
+    'error.diskFull': 'Dysk jest pełny. Zwolnij miejsce i spróbuj ponownie.',
+    'error.readOnly':
+        'Curio nie może zapisywać w swojej bibliotece: folder lub dysk jest tylko do odczytu.',
+    'error.io': 'Curio nie może odczytać lub zapisać pliku.',
+
     'a11y.skipToContent': 'Przejdź do treści',
     'shell.feeds.loading': 'Ładowanie subskrypcji…',
     'shell.feeds.empty': 'Brak subskrypcji',

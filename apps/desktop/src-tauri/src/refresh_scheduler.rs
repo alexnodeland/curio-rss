@@ -55,7 +55,7 @@ use curio_core::model::{Feed, FeedStatus};
 use tauri::{AppHandle, State};
 
 use crate::commands::feeds::{Sweep, refresh_all_and_emit};
-use crate::commands::{SharedCore, run_blocking};
+use crate::commands::{SharedCore, blocking};
 use crate::dto::{FetchStatusDto, RefreshOutcomeDto};
 use crate::error::CommandError;
 use crate::events::{ConnectivityChanged, emit_or_log};
@@ -172,7 +172,7 @@ impl RefreshScheduler {
         let secs = at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let core = Arc::clone(core);
         let persisted =
-            run_blocking(move || Ok(core.set_setting(LAST_REFRESH_KEY, &secs.to_string())?)).await;
+            blocking(move || Ok(core.set_setting(LAST_REFRESH_KEY, &secs.to_string())?)).await;
         if let Err(error) = persisted {
             tracing::warn!(%error, "could not persist the last refresh time");
         }
@@ -305,7 +305,7 @@ pub(crate) struct DnsProbe {
 impl ConnectivityProbe for DnsProbe {
     async fn is_online(&self) -> bool {
         let core = Arc::clone(&self.core);
-        let targets = run_blocking(move || Ok(probe_targets(&core.list_feeds()?))).await;
+        let targets = blocking(move || Ok(probe_targets(&core.list_feeds()?))).await;
         match targets {
             Ok(targets) => any_resolves(&targets, resolves).await,
             Err(error) => {
@@ -365,7 +365,7 @@ where
 
 /// One DNS lookup on the blocking pool, bounded by [`PROBE_TIMEOUT`].
 async fn resolves(host: String, port: u16) -> bool {
-    let lookup = run_blocking(move || {
+    let lookup = blocking(move || {
         Ok((host.as_str(), port)
             .to_socket_addrs()
             .is_ok_and(|mut addrs| addrs.next().is_some()))
@@ -562,7 +562,7 @@ async fn retry_pending_events(core: &SharedCore) {
         return;
     }
     let core = Arc::clone(core);
-    if let Err(error) = run_blocking(move || Ok(flush_pending_events_impl(&core))).await {
+    if let Err(error) = blocking(move || Ok(flush_pending_events_impl(&core))).await {
         tracing::warn!(%error, "pending-events retry did not run");
     }
 }

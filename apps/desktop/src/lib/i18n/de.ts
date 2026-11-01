@@ -13,6 +13,51 @@ export const de: Partial<Record<MessageKey, string>> = {
     'app.error.internal': 'Etwas ist schiefgelaufen. Ein erneuter Versuch kann helfen.',
     'app.error.profileBusy':
         'Ein anderer Curio-Prozess (etwa ein Kommandozeilenaufruf) nutzt dieses Profil gerade. Bitte gleich erneut versuchen.',
+    'error.notFound': 'Dieses Element gibt es nicht mehr.',
+    'error.invalidInput': 'Diese Eingabe ist ungültig. Bitte prüfen und erneut versuchen.',
+    'error.invalidUrl': '„{input}“ ist keine Webadresse, die Curio öffnen kann.',
+    'error.pathTokenExpired':
+        'Diese Dateiauswahl ist abgelaufen. Bitte Datei oder Ordner erneut auswählen.',
+    'error.unknownDestination':
+        'Dieses Ziel ist nicht mehr eingerichtet. Bitte in den Einstellungen erneut hinzufügen.',
+    'error.destinationMissing':
+        'Der Zielordner {root} fehlt. Bitte erneut verbinden oder das Ziel neu hinzufügen.',
+    'error.pathsTaken':
+        'Andere Dateien belegen bereits jeden Namen für diese Notiz (zuletzt versucht: {path}). Bitte umbenennen oder verschieben und erneut versuchen.',
+    'error.schemaTooNew':
+        'Diese Bibliothek wurde von einer neueren Curio-Version gespeichert. Bitte Curio aktualisieren, um sie zu öffnen.',
+    'error.network':
+        'Curio konnte den Server nicht erreichen. Bitte Verbindung prüfen und erneut versuchen.',
+    'error.networkTimeout': '{host} hat zu lange nicht geantwortet. Bitte gleich erneut versuchen.',
+    'error.hostNotFound': 'Curio konnte {host} nicht finden. Bitte Adresse und Verbindung prüfen.',
+    'error.connectionFailed':
+        'Curio konnte keine Verbindung zu {host} herstellen. Bitte Verbindung prüfen und erneut versuchen.',
+    'error.tls': 'Curio konnte keine sichere Verbindung zu {host} aufbauen.',
+    'error.httpStatus': '{host} hat mit einem Fehler geantwortet (HTTP {status}).',
+    'error.blockedAddress':
+        '{host} verweist auf eine private Netzwerkadresse, die Curio standardmäßig nicht abruft.',
+    'error.tooLarge': 'Die Seite von {host} ist zu groß zum Laden.',
+    'error.rateLimited': '{host} begrenzt Anfragen. Bitte in etwa {minutes} Min. erneut versuchen.',
+    'error.redditAuth':
+        'Reddit hat das Laden des vollständigen Beitrags abgelehnt (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit blockiert anonyme Anfragen nach vollständigen Beiträgen. Füge unter Einstellungen → Reddit-API deine eigenen kostenlosen Reddit-API-Zugangsdaten hinzu, um sie zu laden.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit hat deine API-Zugangsdaten abgelehnt. Prüfe Client-ID und Client-Secret unter Einstellungen → Reddit-API oder erstelle die App neu.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit hat den Zugriff für deine API-Zugangsdaten verweigert. Versuche es erneut; wenn es weiter fehlschlägt, erstelle die App neu.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit konnte gerade kein Zugriffstoken ausstellen – möglicherweise gibt es eine Störung. Versuche es später erneut.',
+    'error.parse': 'Curio konnte diese Datei bzw. diesen Feed nicht lesen.',
+    'error.storage': 'Curio konnte diese Änderung nicht speichern.',
+    'error.duplicate': 'Das gibt es bereits.',
+    'error.alreadySubscribed': 'Dieser Feed ist bereits abonniert.',
+    'error.diskFull':
+        'Der Datenträger ist voll. Bitte Speicherplatz freigeben und erneut versuchen.',
+    'error.readOnly':
+        'Curio kann nicht in seine Bibliothek schreiben: Ordner oder Datenträger ist schreibgeschützt.',
+    'error.io': 'Curio konnte eine Datei nicht lesen oder schreiben.',
+
     'a11y.skipToContent': 'Zum Inhalt springen',
     'shell.feeds.loading': 'Abonnements werden geladen…',
     'shell.feeds.empty': 'Noch keine Abonnements',

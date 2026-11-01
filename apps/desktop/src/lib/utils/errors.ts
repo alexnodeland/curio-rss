@@ -1,16 +1,131 @@
 /**
  * Error presentation — the one place the three-tier `CommandError` contract
- * turns into copy: `user`-tier messages surface verbatim (they are written
- * to be actionable), `internal` failures get the generic line so raw
- * internals never leak into the UI. `PROFILE_BUSY` (another Curio process,
- * e.g. a CLI run, holds the profile) gets its own localized line: the
- * engine's message for it is English and names the lock file.
+ * turns into copy. `internal` failures get the generic line so raw internals
+ * never leak into the UI (the host logs them, with the command's name). A
+ * `user`-tier failure is shown in the active locale: its `code` picks the
+ * copy and its `params` fill the copy's `{placeholders}` (a host, an HTTP
+ * status, a folder). `message` is the engine's English description — the
+ * fallback, and the detail the broad codes keep in English (see `BROAD`).
  */
-import type { CommandError } from '$lib/bindings';
-import { t } from '$lib/i18n';
+import type { CommandError, ErrorCode } from '$lib/bindings';
+import { type MessageKey, localeStore, t } from '$lib/i18n';
+import { en } from '$lib/i18n/en';
 
-/** The display string for a command failure. */
+/**
+ * The localized copy for every code. Typed as a total record, so a code
+ * added on the Rust side without copy fails typecheck here.
+ */
+export const ERROR_COPY: Record<ErrorCode, MessageKey> = {
+    NOT_FOUND: 'error.notFound',
+    INVALID_INPUT: 'error.invalidInput',
+    INVALID_URL: 'error.invalidUrl',
+    PATH_TOKEN_EXPIRED: 'error.pathTokenExpired',
+    UNKNOWN_DESTINATION: 'error.unknownDestination',
+    DESTINATION_MISSING: 'error.destinationMissing',
+    PATHS_TAKEN: 'error.pathsTaken',
+    SCHEMA_TOO_NEW: 'error.schemaTooNew',
+    NETWORK: 'error.network',
+    NETWORK_TIMEOUT: 'error.networkTimeout',
+    HOST_NOT_FOUND: 'error.hostNotFound',
+    CONNECTION_FAILED: 'error.connectionFailed',
+    TLS: 'error.tls',
+    HTTP_STATUS: 'error.httpStatus',
+    BLOCKED_ADDRESS: 'error.blockedAddress',
+    TOO_LARGE: 'error.tooLarge',
+    RATE_LIMITED: 'error.rateLimited',
+    REDDIT_AUTH: 'error.redditAuth',
+    PARSE: 'error.parse',
+    NO_FEED: 'addFeed.noneFound',
+    ALREADY_SUBSCRIBED: 'error.alreadySubscribed',
+    STORAGE: 'error.storage',
+    DUPLICATE: 'error.duplicate',
+    DISK_FULL: 'error.diskFull',
+    READ_ONLY: 'error.readOnly',
+    PROFILE_BUSY: 'app.error.profileBusy',
+    IO: 'error.io',
+    INTERNAL: 'app.error.internal',
+};
+
+/**
+ * The broad codes: each covers many distinct engine failures ("invalid
+ * destination name: …", "export path has no file name"), so its copy can
+ * only be generic. In English the engine's own, more specific message is
+ * shown instead; every other locale gets the generic localized line.
+ */
+const BROAD: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+    'NOT_FOUND',
+    'INVALID_INPUT',
+    'NETWORK',
+    'PARSE',
+    'STORAGE',
+    'IO',
+]);
+
+/**
+ * `REDDIT_AUTH`'s copy by its `reason` param: each names the action that
+ * fixes it. An unknown reason gets the code's generic line.
+ */
+const REDDIT_AUTH_COPY: Readonly<Record<string, MessageKey>> = {
+    credentials_missing: 'error.redditAuth.credentialsMissing',
+    credentials_rejected: 'error.redditAuth.credentialsRejected',
+    token_revoked: 'error.redditAuth.tokenRevoked',
+    token_unavailable: 'error.redditAuth.tokenUnavailable',
+};
+
+/** The copy for `error`: its code's, refined by a param where one picks it. */
+function copyKey(error: CommandError): MessageKey {
+    if (error.code === 'REDDIT_AUTH') {
+        const reason = error.params.reason;
+        if (reason !== undefined && Object.hasOwn(REDDIT_AUTH_COPY, reason)) {
+            return REDDIT_AUTH_COPY[reason];
+        }
+    }
+    return ERROR_COPY[error.code];
+}
+
+/** A copy's `{placeholder}` names (every locale's copy names the same ones). */
+const PLACEHOLDER = /\{(\w+)\}/g;
+
+/** Whether `params` fills every placeholder `key`'s copy names. */
+function filledBy(key: MessageKey, params: Partial<Record<string, string>>): boolean {
+    for (const [, name] of en[key].matchAll(PLACEHOLDER)) {
+        if (params[name] === undefined) return false;
+    }
+    return true;
+}
+
+/** The display string for a command failure, in the active locale. */
 export function commandErrorMessage(error: CommandError): string {
-    if (error.code === 'PROFILE_BUSY') return t('app.error.profileBusy');
-    return error.kind === 'user' ? error.message : t('app.error.internal');
+    if (error.kind === 'internal') return t('app.error.internal');
+    const english = localeStore.active === 'en';
+    if (BROAD.has(error.code) && english) return error.message;
+    const key = copyKey(error);
+    if (filledBy(key, error.params)) return t(key, error.params);
+    // The host promised a param it did not send: never show a raw
+    // `{host}` — English has the engine's message, the rest the generic line.
+    return english ? error.message : t('app.error.internal');
+}
+
+/**
+ * The codes a failed fetch carries — the address could not be reached or
+ * read, whichever way it failed (the finer codes split the old `NETWORK`).
+ * `HTTP_STATUS` and `RATE_LIMITED` mean the host did answer; they stay here,
+ * as under the old `NETWORK`, until the add-feed modal has a line of its own
+ * for an answered-with-an-error address (#273).
+ */
+const UNREACHABLE: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+    'NETWORK',
+    'NETWORK_TIMEOUT',
+    'HOST_NOT_FOUND',
+    'CONNECTION_FAILED',
+    'TLS',
+    'HTTP_STATUS',
+    'BLOCKED_ADDRESS',
+    'TOO_LARGE',
+    'RATE_LIMITED',
+]);
+
+/** Whether `error` is a failed fetch of the address (any network code). */
+export function isUnreachable(error: CommandError): boolean {
+    return UNREACHABLE.has(error.code);
 }

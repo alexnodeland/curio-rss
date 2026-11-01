@@ -11,6 +11,7 @@ import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { destinationsStore } from '$lib/state/destinations.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
+import { commandErrorMessage } from '$lib/utils/errors';
 
 let draftName = $state('');
 let pickedToken: string | null = $state(null);
@@ -117,7 +118,7 @@ async function exportAll(name: string): Promise<void> {
 
 <div class="manager">
     {#if destinationsStore.error !== null}
-        <p class="status error" role="alert">{destinationsStore.error.message}</p>
+        <p class="status error" role="alert">{commandErrorMessage(destinationsStore.error)}</p>
     {:else if !destinationsStore.loaded}
         <p class="status">{t('destinations.loading')}</p>
     {:else if destinationsStore.destinations.length === 0}

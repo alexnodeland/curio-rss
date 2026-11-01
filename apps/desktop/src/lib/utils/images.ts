@@ -56,6 +56,7 @@ async function resolve(url: string): Promise<CommandResult<string>> {
             error: {
                 kind: 'internal',
                 code: 'INTERNAL',
+                params: {},
                 message: thrown instanceof Error ? thrown.message : String(thrown),
                 recoverable: false,
             },

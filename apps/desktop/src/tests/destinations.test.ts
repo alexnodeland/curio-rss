@@ -3,12 +3,23 @@
  * resolution (chosen default / sole / ambiguous), and add/remove refreshing
  * the list. The panel's token flow is covered in promote-flow.test.ts.
  */
+import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import type { DestinationDto } from '$lib/bindings';
+import { localeStore } from '$lib/i18n';
+import { fr } from '$lib/i18n/fr';
 import { destinationsStore } from '$lib/state/destinations.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
+import { cleanup, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type IpcHarness, destinationFixture, flushIpc, installIpcHarness } from './ipc-harness';
+import {
+    type IpcHarness,
+    commandErrorFixture,
+    destinationFixture,
+    flushIpc,
+    installIpcHarness,
+    rejectWith,
+} from './ipc-harness';
 
 function dest(name: string): DestinationDto {
     return destinationFixture({ name, root: `/roots/${name}` });
@@ -96,5 +107,52 @@ describe('destinations store', () => {
         };
         expect(call.destination).toBe('vault');
         expect(call.filter.read_later).toBeNull();
+    });
+});
+
+describe('destinations manager', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        cleanup();
+        localeStore.reset();
+        resetQueryCache();
+        destinationsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('shows a failed registry load in the active locale, never the engine text', async () => {
+        const engine = 'destination registry is unreadable: expected `=` at line 1';
+        harness = installIpcHarness({
+            list_destinations: rejectWith(
+                commandErrorFixture({ kind: 'internal', code: 'IO', message: engine }),
+            ),
+        });
+        localeStore.active = 'fr';
+        render(DestinationsManager);
+        await flushIpc();
+        const alert = document.querySelector('[role="alert"]');
+        expect(alert?.textContent).toBe(fr['app.error.internal']);
+        expect(alert?.textContent).not.toContain('registry');
+    });
+
+    it('shows a busy profile as its localized line, without the lock path', async () => {
+        harness = installIpcHarness({
+            list_destinations: rejectWith(
+                commandErrorFixture({
+                    kind: 'user',
+                    code: 'PROFILE_BUSY',
+                    recoverable: true,
+                    message: 'another Curio process holds /Users/me/.curio/events.lock',
+                }),
+            ),
+        });
+        localeStore.active = 'fr';
+        render(DestinationsManager);
+        await flushIpc();
+        const alert = document.querySelector('[role="alert"]');
+        expect(alert?.textContent).toBe(fr['app.error.profileBusy']);
+        expect(alert?.textContent).not.toContain('events.lock');
     });
 });

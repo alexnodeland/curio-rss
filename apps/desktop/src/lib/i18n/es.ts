@@ -13,6 +13,50 @@ export const es: Partial<Record<MessageKey, string>> = {
     'app.error.internal': 'Algo salió mal. Reintentar puede ayudar.',
     'app.error.profileBusy':
         'Otro proceso de Curio (por ejemplo, una orden desde la línea de comandos) está usando este perfil ahora mismo. Vuelve a intentarlo en un momento.',
+    'error.notFound': 'Ese elemento ya no existe.',
+    'error.invalidInput': 'Esa entrada no es válida. Revísala y vuelve a intentarlo.',
+    'error.invalidUrl': '«{input}» no es una dirección web que Curio pueda abrir.',
+    'error.pathTokenExpired':
+        'Esa selección de archivo ha caducado. Vuelve a elegir el archivo o la carpeta.',
+    'error.unknownDestination': 'Ese destino ya no está configurado. Vuelve a añadirlo en Ajustes.',
+    'error.destinationMissing':
+        'Falta la carpeta de destino {root}. Vuelve a conectarla o añade el destino de nuevo.',
+    'error.pathsTaken':
+        'Otros archivos ya usan todos los nombres posibles para esta nota (último intento: {path}). Renómbralos o muévelos y vuelve a intentarlo.',
+    'error.schemaTooNew':
+        'Esta biblioteca la guardó una versión más reciente de Curio. Actualiza Curio para abrirla.',
+    'error.network':
+        'Curio no pudo conectar con el servidor. Comprueba tu conexión y vuelve a intentarlo.',
+    'error.networkTimeout':
+        '{host} tardó demasiado en responder. Vuelve a intentarlo en un momento.',
+    'error.hostNotFound': 'Curio no encontró {host}. Comprueba la dirección y tu conexión.',
+    'error.connectionFailed':
+        'Curio no pudo conectarse a {host}. Comprueba tu conexión y vuelve a intentarlo.',
+    'error.tls': 'Curio no pudo abrir una conexión segura con {host}.',
+    'error.httpStatus': '{host} respondió con un error (HTTP {status}).',
+    'error.blockedAddress':
+        '{host} apunta a una dirección de red privada, que Curio no consulta por defecto.',
+    'error.tooLarge': 'La página de {host} es demasiado grande para cargarla.',
+    'error.rateLimited':
+        '{host} está limitando las solicitudes. Vuelve a intentarlo en unos {minutes} min.',
+    'error.redditAuth': 'Reddit rechazó cargar la publicación completa (HTTP {status}).',
+    'error.redditAuth.credentialsMissing':
+        'Reddit bloquea las solicitudes anónimas de publicaciones completas. Añade tus propias credenciales gratuitas de la API de Reddit en Ajustes → API de Reddit para cargarlas.',
+    'error.redditAuth.credentialsRejected':
+        'Reddit rechazó tus credenciales de la API. Revisa el client id y el client secret en Ajustes → API de Reddit, o vuelve a crear la app.',
+    'error.redditAuth.tokenRevoked':
+        'Reddit denegó el acceso a tus credenciales de la API. Vuelve a intentarlo; si sigue fallando, vuelve a crear la app.',
+    'error.redditAuth.tokenUnavailable':
+        'Reddit no pudo emitir un token de acceso ahora mismo; puede que tenga una incidencia. Vuelve a intentarlo más tarde.',
+    'error.parse': 'Curio no pudo leer ese archivo o feed.',
+    'error.storage': 'Curio no pudo guardar ese cambio.',
+    'error.duplicate': 'Eso ya existe.',
+    'error.alreadySubscribed': 'Ya estás suscrito a ese feed.',
+    'error.diskFull': 'El disco está lleno. Libera espacio y vuelve a intentarlo.',
+    'error.readOnly':
+        'Curio no puede escribir en su biblioteca: la carpeta o el disco es de solo lectura.',
+    'error.io': 'Curio no pudo leer o escribir un archivo.',
+
     'a11y.skipToContent': 'Saltar al contenido',
     'shell.feeds.loading': 'Cargando suscripciones…',
     'shell.feeds.empty': 'Aún no hay suscripciones',

@@ -24,7 +24,8 @@ pub async fn mark_read(
     read: bool,
 ) -> Result<bool, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || mark_read_impl(&core, article_id, read)).await?;
+    let changed =
+        run_blocking("mark_read", move || mark_read_impl(&core, article_id, read)).await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
@@ -44,7 +45,7 @@ pub async fn mark_all_read(
     feed_id: Option<i64>,
 ) -> Result<Vec<i64>, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || mark_all_read_impl(&core, feed_id)).await?;
+    let changed = run_blocking("mark_all_read", move || mark_all_read_impl(&core, feed_id)).await?;
     if !changed.is_empty() {
         emit_or_log(&app, &ArticlesChanged { feed_id });
     }
@@ -63,7 +64,10 @@ pub async fn mark_read_many(
     read: bool,
 ) -> Result<u64, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || mark_read_many_impl(&core, &article_ids, read)).await?;
+    let changed = run_blocking("mark_read_many", move || {
+        mark_read_many_impl(&core, &article_ids, read)
+    })
+    .await?;
     if changed > 0 {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
@@ -80,7 +84,10 @@ pub async fn record_opened(
     dwell_ms: Option<u64>,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || record_opened_impl(&core, article_id, dwell_ms)).await
+    run_blocking("record_opened", move || {
+        record_opened_impl(&core, article_id, dwell_ms)
+    })
+    .await
 }
 
 /// Archives / unarchives. Returns whether anything changed.
@@ -93,7 +100,10 @@ pub async fn set_archived(
     archived: bool,
 ) -> Result<bool, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || set_archived_impl(&core, article_id, archived)).await?;
+    let changed = run_blocking("set_archived", move || {
+        set_archived_impl(&core, article_id, archived)
+    })
+    .await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
@@ -110,7 +120,10 @@ pub async fn set_starred(
     starred: bool,
 ) -> Result<bool, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || set_starred_impl(&core, article_id, starred)).await?;
+    let changed = run_blocking("set_starred", move || {
+        set_starred_impl(&core, article_id, starred)
+    })
+    .await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
@@ -128,7 +141,10 @@ pub async fn set_read_later(
     read_later: bool,
 ) -> Result<bool, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || set_read_later_impl(&core, article_id, read_later)).await?;
+    let changed = run_blocking("set_read_later", move || {
+        set_read_later_impl(&core, article_id, read_later)
+    })
+    .await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }

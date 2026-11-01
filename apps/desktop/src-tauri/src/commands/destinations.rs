@@ -29,7 +29,10 @@ pub async fn add_destination(
 ) -> Result<(), CommandError> {
     let root = registry.redeem(&path_token, PathIntent::DestinationRoot)?;
     let core = Arc::clone(core.inner());
-    run_blocking(move || add_destination_impl(&core, &name, root)).await
+    run_blocking("add_destination", move || {
+        add_destination_impl(&core, &name, root)
+    })
+    .await
 }
 
 /// Every registered destination.
@@ -39,7 +42,7 @@ pub async fn list_destinations(
     core: State<'_, SharedCore>,
 ) -> Result<Vec<DestinationDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || list_destinations_impl(&core)).await
+    run_blocking("list_destinations", move || list_destinations_impl(&core)).await
 }
 
 /// Unregisters a destination name. Exported notes are untouched.
@@ -50,7 +53,10 @@ pub async fn remove_destination(
     name: String,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || remove_destination_impl(&core, &name)).await
+    run_blocking("remove_destination", move || {
+        remove_destination_impl(&core, &name)
+    })
+    .await
 }
 
 /// Promotes an article into a destination by NAME: writes the
@@ -64,7 +70,10 @@ pub async fn promote_article(
     destination: String,
 ) -> Result<SaveOutcomeDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || promote_article_impl(&core, article_id, &destination)).await
+    run_blocking("promote_article", move || {
+        promote_article_impl(&core, article_id, &destination)
+    })
+    .await
 }
 
 /// Bulk-promotes every article matching `filter` into a destination —
@@ -78,7 +87,10 @@ pub async fn promote_all(
     filter: ListArticlesDto,
 ) -> Result<BulkSaveOutcomeDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || promote_all_impl(&core, &destination, filter)).await
+    run_blocking("promote_all", move || {
+        promote_all_impl(&core, &destination, filter)
+    })
+    .await
 }
 
 // ------------------------------------------------------------------ impls

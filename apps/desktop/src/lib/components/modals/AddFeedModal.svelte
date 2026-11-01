@@ -22,6 +22,7 @@ import { toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
+import { isUnreachable } from '$lib/utils/errors';
 import { openExternal } from '$lib/utils/external';
 import {
     HN_PRESETS,
@@ -141,7 +142,7 @@ async function find(): Promise<void> {
         }
         if (result.status === 'error') {
             toastCommandError(result.error);
-            if (result.error.code === 'NETWORK') {
+            if (isUnreachable(result.error)) {
                 unverified = 'unreachable';
             }
             return;
@@ -233,13 +234,10 @@ function subscribeFailed(error: CommandError, stale: boolean): void {
                 unverified = 'noFeed';
             }
             return;
-        case 'NETWORK':
-            if (!stale) {
+        default:
+            if (isUnreachable(error) && !stale) {
                 unverified = 'unreachable';
             }
-            toastCommandError(error);
-            return;
-        default:
             toastCommandError(error);
     }
 }

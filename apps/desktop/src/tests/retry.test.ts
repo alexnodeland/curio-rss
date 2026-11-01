@@ -8,6 +8,7 @@
 import { events } from '$lib/bindings';
 import {
     deleteFolder,
+    loadFullArticle,
     promoteSelected,
     renameFeed,
     reorderFeedGroup,
@@ -159,20 +160,47 @@ describe('retry plans', () => {
         expect(toastStore.toasts).toHaveLength(1);
     });
 
-    it('invalid input gets no Retry even when the backend marks it recoverable', async () => {
-        harness = installIpcHarness({
-            set_feed_title: rejectWith(
+    it.each(['INVALID_INPUT', 'INVALID_URL', 'PATH_TOKEN_EXPIRED'] as const)(
+        '%s input gets no Retry even when the backend marks it recoverable',
+        async (code) => {
+            harness = installIpcHarness({
+                set_feed_title: rejectWith(
+                    commandErrorFixture({
+                        kind: 'user',
+                        code,
+                        message: 'bad title',
+                        recoverable: true,
+                    }),
+                ),
+            });
+            await renameFeed(1, '   ');
+            expect(toastStore.toasts).toHaveLength(1);
+            expect(toastStore.toasts[0]?.action).toBeUndefined();
+        },
+    );
+
+    it('a Reddit auth refusal offers Retry only when a retry can get a token', async () => {
+        const refusal = (reason: string, recoverable: boolean) =>
+            rejectWith(
                 commandErrorFixture({
                     kind: 'user',
-                    code: 'INVALID_INPUT',
-                    message: 'bad title',
-                    recoverable: true,
+                    code: 'REDDIT_AUTH',
+                    params: { reason, status: '403' },
+                    message: 'reddit refused',
+                    recoverable,
                 }),
-            ),
-        });
-        await renameFeed(1, '   ');
+            );
+        harness = installIpcHarness({ load_full_article: refusal('credentials_missing', false) });
+        expect(await loadFullArticle(7)).toBe(false);
         expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.message).toContain('Settings → Reddit API');
         expect(toastStore.toasts[0]?.action).toBeUndefined();
+        harness.teardown();
+        resetUiStores();
+
+        harness = installIpcHarness({ load_full_article: refusal('token_unavailable', true) });
+        expect(await loadFullArticle(7)).toBe(false);
+        expect(retryToast().message).toContain('access token');
     });
 
     it("a folder delete's Retry runs the whole flow, announcing the delete", async () => {

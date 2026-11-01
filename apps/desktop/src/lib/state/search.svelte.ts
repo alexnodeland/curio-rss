@@ -21,6 +21,7 @@ function internalError(thrown: unknown): CommandResult<never> {
         error: {
             kind: 'internal',
             code: 'INTERNAL',
+            params: {},
             message: thrown instanceof Error ? thrown.message : String(thrown),
             recoverable: false,
         },

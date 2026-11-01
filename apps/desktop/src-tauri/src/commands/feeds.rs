@@ -9,7 +9,7 @@ use curio_core::model::{FeedId, FeedStatus, NewFeed};
 use curio_core::{CoreHandle, RefreshOptions};
 use tauri::{AppHandle, State};
 
-use super::{SharedCore, run_blocking};
+use super::{SharedCore, blocking, logged, run_blocking};
 use crate::discovery::DiscoveryDto;
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::{CommandError, ErrorCode};
@@ -31,7 +31,10 @@ pub async fn discover_feeds(
     url: String,
 ) -> Result<DiscoveryDto, CommandError> {
     let core = Arc::clone(core.inner());
-    crate::discovery::discover(&core, &url).await
+    logged(
+        "discover_feeds",
+        crate::discovery::discover(&core, &url).await,
+    )
 }
 
 /// Subscribes to a feed and kicks off its first fetch in the background —
@@ -52,7 +55,7 @@ pub async fn add_feed(
     new_feed: NewFeedDto,
 ) -> Result<FeedDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let feed = subscribe_impl(&core, new_feed).await?;
+    let feed = logged("add_feed", subscribe_impl(&core, new_feed).await)?;
     emit_or_log(&app, &FeedsChanged);
     // Fire-and-forget so the add returns as soon as the row exists; a failed
     // first fetch surfaces through feed health, like any scheduled refresh.
@@ -84,7 +87,7 @@ pub async fn remove_feed(
     feed_id: i64,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    let removed = run_blocking(move || remove_feed_impl(&core, feed_id)).await;
+    let removed = run_blocking("remove_feed", move || remove_feed_impl(&core, feed_id)).await;
     pending.unstage(feed_id);
     removed?;
     emit_or_log(&app, &FeedsChanged);
@@ -168,7 +171,7 @@ pub fn flush_pending_removals(core: &CoreHandle, pending: &PendingRemovals) -> u
 #[specta::specta]
 pub async fn list_feeds(core: State<'_, SharedCore>) -> Result<Vec<FeedDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || list_feeds_impl(&core)).await
+    run_blocking("list_feeds", move || list_feeds_impl(&core)).await
 }
 
 /// One subscription, if it exists.
@@ -179,7 +182,7 @@ pub async fn get_feed(
     feed_id: i64,
 ) -> Result<Option<FeedDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_feed_impl(&core, feed_id)).await
+    run_blocking("get_feed", move || get_feed_impl(&core, feed_id)).await
 }
 
 /// Lookup by subscription URL — the add-feed dedupe check.
@@ -190,7 +193,7 @@ pub async fn get_feed_by_url(
     url: String,
 ) -> Result<Option<FeedDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_feed_by_url_impl(&core, &url)).await
+    run_blocking("get_feed_by_url", move || get_feed_by_url_impl(&core, &url)).await
 }
 
 /// Pause / resume / un-dead a feed.
@@ -203,7 +206,10 @@ pub async fn set_feed_status(
     status: FeedStatusDto,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_feed_status_impl(&core, feed_id, status)).await?;
+    run_blocking("set_feed_status", move || {
+        set_feed_status_impl(&core, feed_id, status)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -221,8 +227,10 @@ pub async fn update_feed_metadata(
     description: Option<String>,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || update_feed_metadata_impl(&core, feed_id, title, site_url, description))
-        .await?;
+    run_blocking("update_feed_metadata", move || {
+        update_feed_metadata_impl(&core, feed_id, title, site_url, description)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -239,7 +247,10 @@ pub async fn set_feed_tags(
     tags: Vec<String>,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_feed_tags_impl(&core, feed_id, tags)).await?;
+    run_blocking("set_feed_tags", move || {
+        set_feed_tags_impl(&core, feed_id, tags)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -255,7 +266,10 @@ pub async fn set_feed_title(
     title: Option<String>,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_feed_title_impl(&core, feed_id, title)).await?;
+    run_blocking("set_feed_title", move || {
+        set_feed_title_impl(&core, feed_id, title)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -274,7 +288,10 @@ pub async fn set_feed_metadata(
     description: Option<String>,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_feed_metadata_impl(&core, feed_id, site_url, description)).await?;
+    run_blocking("set_feed_metadata", move || {
+        set_feed_metadata_impl(&core, feed_id, site_url, description)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -291,7 +308,10 @@ pub async fn set_feed_full_text(
     enabled: bool,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_feed_full_text_impl(&core, feed_id, enabled)).await?;
+    run_blocking("set_feed_full_text", move || {
+        set_feed_full_text_impl(&core, feed_id, enabled)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -306,7 +326,10 @@ pub async fn reorder_feeds(
     feed_ids: Vec<i64>,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || reorder_feeds_impl(&core, &feed_ids)).await?;
+    run_blocking("reorder_feeds", move || {
+        reorder_feeds_impl(&core, &feed_ids)
+    })
+    .await?;
     emit_or_log(&app, &FeedsChanged);
     Ok(())
 }
@@ -321,7 +344,7 @@ pub async fn refresh_feed(
     feed_id: i64,
 ) -> Result<RefreshOutcomeDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let outcome = refresh_feed_impl(&core, feed_id).await?;
+    let outcome = logged("refresh_feed", refresh_feed_impl(&core, feed_id).await)?;
     emit_or_log(&app, &FeedsChanged);
     emit_or_log(
         &app,
@@ -347,7 +370,7 @@ pub async fn refresh_all(
     scheduler: State<'_, Arc<RefreshScheduler>>,
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    let sweep = refresh_all_and_emit(&app, &core).await?;
+    let sweep = logged("refresh_all", refresh_all_and_emit(&app, &core).await)?;
     scheduler
         .record_manual_refresh(&core, &sweep.finished.outcomes, |online| {
             emit_or_log(&app, &ConnectivityChanged { online });
@@ -401,7 +424,10 @@ pub async fn recent_fetches(
     limit: u32,
 ) -> Result<Vec<FetchRecordDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || recent_fetches_impl(&core, feed_id, limit)).await
+    run_blocking("recent_fetches", move || {
+        recent_fetches_impl(&core, feed_id, limit)
+    })
+    .await
 }
 
 // ------------------------------------------------------------------ impls
@@ -418,7 +444,7 @@ async fn subscribe_impl(core: &Arc<CoreHandle>, new: NewFeedDto) -> Result<FeedD
         normalize_input(&new.url)?.into()
     };
     let core = Arc::clone(core);
-    run_blocking(move || {
+    blocking(move || {
         add_feed_impl(
             &core,
             NewFeed {
@@ -656,7 +682,11 @@ mod tests {
         let error = subscribe_impl(&core, new_feed("ftp://example.test/".into(), false))
             .await
             .unwrap_err();
-        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert_eq!(error.code, ErrorCode::InvalidUrl);
+        assert_eq!(
+            error.params.get("input").map(String::as_str),
+            Some("ftp://example.test/")
+        );
     }
 
     /// A homepage that resolves to a feed already subscribed is refused

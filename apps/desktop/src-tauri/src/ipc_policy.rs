@@ -91,9 +91,10 @@ impl PathRegistry {
     /// [`CommandError`] (user tier) for an unknown/already-used token or
     /// an intent mismatch.
     pub fn redeem(&self, token: &str, intent: PathIntent) -> Result<PathBuf, CommandError> {
-        let entry = self.lock().remove(token).ok_or_else(|| {
-            CommandError::invalid_input("unknown or already-used path token — pick the path again")
-        })?;
+        let entry = self
+            .lock()
+            .remove(token)
+            .ok_or_else(CommandError::path_token_expired)?;
         if entry.intent != intent {
             return Err(CommandError::invalid_input(
                 "path token was minted for a different purpose — pick the path again",

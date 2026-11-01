@@ -6,7 +6,12 @@
  * `import.meta.env.DEV` + a no-real-Tauri check and dynamic-imported, so it is
  * absent from the production bundle and never runs inside the packaged app.
  */
-import type { ArticleStateDto, StartupFailureClass, StartupFailureDto } from '$lib/bindings';
+import type {
+    ArticleStateDto,
+    CommandError,
+    StartupFailureClass,
+    StartupFailureDto,
+} from '$lib/bindings';
 
 let installed = false;
 
@@ -228,8 +233,39 @@ tokens:
                     return articles.length;
                 case 'list_tags':
                     return [...new Set(articles.flatMap((a) => a.tags))].sort();
-                case 'list_destinations':
+                case 'list_destinations': {
+                    // `?destinations=broken` previews a registry the host
+                    // cannot read: an internal failure, shown generically.
+                    if (
+                        new URLSearchParams(window.location.search).get('destinations') === 'broken'
+                    ) {
+                        const failure: CommandError = {
+                            kind: 'internal',
+                            code: 'IO',
+                            params: {},
+                            message: 'destination registry is unreadable: expected value at line 1',
+                            recoverable: false,
+                        };
+                        return Promise.reject(failure);
+                    }
                     return structuredClone(destinations);
+                }
+                case 'load_full_article': {
+                    // `?reddit=<reason>` previews Reddit refusing a full post
+                    // (`credentials_missing`, `token_unavailable`, …).
+                    const reason = new URLSearchParams(window.location.search).get('reddit');
+                    if (reason !== null) {
+                        const failure: CommandError = {
+                            kind: 'user',
+                            code: 'REDDIT_AUTH',
+                            params: { reason, status: '403' },
+                            message: `reddit refused the full post (HTTP 403): ${reason}`,
+                            recoverable: reason.startsWith('token_'),
+                        };
+                        return Promise.reject(failure);
+                    }
+                    return null;
+                }
                 case 'list_articles': {
                     const p = (args.params ?? {}) as Record<string, unknown>;
                     let rows = articles
@@ -480,6 +516,20 @@ tokens:
                     // anything else to itself.
                     if (/nofeed/i.test(query)) {
                         return { feeds: [], favicon: null };
+                    }
+                    // A host under the reserved `.invalid` TLD never resolves:
+                    // previews the host's typed fetch failure, which the UI
+                    // localizes from its code + params.
+                    const host = /^[a-z]+:\/\/([^/:?#]+)/i.exec(query)?.[1] ?? '';
+                    if (host.endsWith('.invalid')) {
+                        const failure: CommandError = {
+                            kind: 'user',
+                            code: 'HOST_NOT_FOUND',
+                            params: { host },
+                            message: `could not reach ${query}: dns resolution failed for "${host}": no such host`,
+                            recoverable: true,
+                        };
+                        return Promise.reject(failure);
                     }
                     if (/youtube\.com\/@/.test(query)) {
                         return {

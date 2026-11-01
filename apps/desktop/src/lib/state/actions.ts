@@ -10,6 +10,7 @@ import {
     events,
     type ArticleSummaryDto,
     type CommandError,
+    type ErrorCode,
     type ImportSourceDto,
     commands,
 } from '$lib/bindings';
@@ -64,12 +65,20 @@ function errorOptions(plan: RetryPlan | undefined, retry: boolean): ToastOptions
 }
 
 /**
- * Whether retrying the same action can help. The backend's `recoverable`
- * also covers input the user can fix (an invalid folder name), but a Retry
- * replays the same input, which fails the same validation every time.
+ * The input-class codes: the backend marks them `recoverable` because the
+ * user can fix the input (an invalid folder name, a non-http address, a
+ * file choice to make again), but a Retry replays the same input, which
+ * fails the same way every time.
  */
+const INPUT_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+    'INVALID_INPUT',
+    'INVALID_URL',
+    'PATH_TOKEN_EXPIRED',
+]);
+
+/** Whether retrying the same action can help (see {@link INPUT_CODES}). */
 function retryable(error: CommandError): boolean {
-    return error.recoverable && error.code !== 'INVALID_INPUT';
+    return error.recoverable && !INPUT_CODES.has(error.code);
 }
 
 /**

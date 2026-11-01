@@ -7,7 +7,7 @@ use curio_core::CoreHandle;
 use curio_core::model::ArticleId;
 use tauri::{AppHandle, State};
 
-use super::{SharedCore, run_blocking};
+use super::{SharedCore, logged, run_blocking};
 use crate::dto::{
     ArticleDto, ArticleStateDto, ArticleSummaryDto, ListArticlesDto, SavedUrlDto, UnreadCountsDto,
 };
@@ -23,7 +23,7 @@ pub async fn list_articles(
     params: ListArticlesDto,
 ) -> Result<Vec<ArticleSummaryDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || list_articles_impl(&core, params)).await
+    run_blocking("list_articles", move || list_articles_impl(&core, params)).await
 }
 
 /// One full article (sanitized HTML included), if it exists.
@@ -34,7 +34,7 @@ pub async fn get_article(
     article_id: i64,
 ) -> Result<Option<ArticleDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_article_impl(&core, article_id)).await
+    run_blocking("get_article", move || get_article_impl(&core, article_id)).await
 }
 
 /// Fetches the article's source page and replaces its stored content with the
@@ -48,7 +48,10 @@ pub async fn load_full_article(
     article_id: i64,
 ) -> Result<ArticleDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let article = load_full_article_impl(&core, article_id).await?;
+    let article = logged(
+        "load_full_article",
+        load_full_article_impl(&core, article_id).await,
+    )?;
     emit_or_log(&app, &ArticlesChanged { feed_id: None });
     Ok(article)
 }
@@ -65,7 +68,7 @@ pub async fn save_url(
     tags: Vec<String>,
 ) -> Result<SavedUrlDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let saved = save_url_impl(&core, &url, tags).await?;
+    let saved = logged("save_url", save_url_impl(&core, &url, tags).await)?;
     emit_or_log(&app, &ArticlesChanged { feed_id: None });
     Ok(saved)
 }
@@ -78,7 +81,10 @@ pub async fn get_article_state(
     article_id: i64,
 ) -> Result<ArticleStateDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_article_state_impl(&core, article_id)).await
+    run_blocking("get_article_state", move || {
+        get_article_state_impl(&core, article_id)
+    })
+    .await
 }
 
 /// The article's tags, sorted.
@@ -89,7 +95,10 @@ pub async fn get_article_tags(
     article_id: i64,
 ) -> Result<Vec<String>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_article_tags_impl(&core, article_id)).await
+    run_blocking("get_article_tags", move || {
+        get_article_tags_impl(&core, article_id)
+    })
+    .await
 }
 
 /// Backend-owned unread counts (total + per feed).
@@ -99,7 +108,7 @@ pub async fn get_unread_counts(
     core: State<'_, SharedCore>,
 ) -> Result<UnreadCountsDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_unread_counts_impl(&core)).await
+    run_blocking("get_unread_counts", move || get_unread_counts_impl(&core)).await
 }
 
 /// Total stored articles.
@@ -107,7 +116,7 @@ pub async fn get_unread_counts(
 #[specta::specta]
 pub async fn count_articles(core: State<'_, SharedCore>) -> Result<u64, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || count_articles_impl(&core)).await
+    run_blocking("count_articles", move || count_articles_impl(&core)).await
 }
 
 /// Deletes an article (cascades state/tags/FTS).
@@ -119,7 +128,10 @@ pub async fn delete_article(
     article_id: i64,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || delete_article_impl(&core, article_id)).await?;
+    run_blocking("delete_article", move || {
+        delete_article_impl(&core, article_id)
+    })
+    .await?;
     emit_or_log(&app, &ArticlesChanged { feed_id: None });
     Ok(())
 }
@@ -134,7 +146,10 @@ pub async fn search_articles(
     limit: u32,
 ) -> Result<Vec<ArticleSummaryDto>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || search_articles_impl(&core, &query, limit)).await
+    run_blocking("search_articles", move || {
+        search_articles_impl(&core, &query, limit)
+    })
+    .await
 }
 
 // ------------------------------------------------------------------ impls

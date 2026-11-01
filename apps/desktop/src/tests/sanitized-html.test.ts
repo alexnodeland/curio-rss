@@ -125,13 +125,12 @@ describe('SanitizedHtml', () => {
         expect(image?.getAttribute('src')).toBe('/cache/real.png');
     });
 
-    it('does not let an author data-media-off hide an image with media on', async () => {
-        harness = installIpcHarness({ get_cached_image: '/cache/shown.png' });
-        prefsStore.mediaPrefetch = true;
+    // A non-remote (data:) image never enters the media pipeline, so nothing would
+    // reset an author-supplied data-media-off; the sanitizer has to drop it.
+    it('does not let an author data-media-off hide a non-remote image', () => {
         const { container } = render(SanitizedHtml, {
             props: { html: '<img src="data:image/gif;base64,R0lGOD" data-media-off alt="inline">' },
         });
-        await flushIpc();
         expect(container.querySelector('img')?.hasAttribute('data-media-off')).toBe(false);
     });
 

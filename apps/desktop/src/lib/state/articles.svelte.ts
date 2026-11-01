@@ -171,6 +171,17 @@ export class ArticleListState {
         });
     }
 
+    /** Stops holding every row of one feed (that feed was refreshed or swept). */
+    releaseFeed(feedId: number): void {
+        untrack(() => {
+            for (const [id, slot] of this.#held) {
+                if (slot.row.feed_id === feedId) {
+                    this.#held.delete(id);
+                }
+            }
+        });
+    }
+
     get loading(): boolean {
         return this.query.loading;
     }
@@ -338,9 +349,19 @@ export class ArticlesStore {
         this.#shown()?.release(articleId);
     }
 
-    /** Ends the current view's read-hold (an explicit refresh or mark-all-read). */
-    releaseHolds(): void {
-        this.#shown()?.releaseAll();
+    /**
+     * Ends the current view's read-hold after an explicit refresh or
+     * mark-all-read: for one feed, only that feed's held rows (a sweep of
+     * feed B leaves a view's feed-A rows where they are); `null` (the whole
+     * library) or no argument, all of them.
+     */
+    releaseHolds(feedId: number | null = null): void {
+        const shown = this.#shown();
+        if (feedId === null) {
+            shown?.releaseAll();
+        } else {
+            shown?.releaseFeed(feedId);
+        }
     }
 
     /** Test isolation — drops the list-state registry and scroll memory. */

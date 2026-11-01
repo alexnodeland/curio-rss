@@ -179,6 +179,60 @@ $effect(() => {
 /** The final "no articles" branch (loaded, no error, no rows). */
 const showingEmpty = $derived(list.items.length === 0 && list.loaded && list.error === null);
 
+/** Whether the virtualizer branch is showing (it remounts per view). */
+const hasRows = $derived(list.items.length > 0);
+
+/** The pane's root — DOM focus inside it is the list owning the keyboard. */
+let pane = $state<HTMLElement | null>(null);
+
+/**
+ * The focus request handed to the virtualizer: bumped to pull DOM focus onto
+ * the listbox, 0 when a freshly mounted listbox must leave focus alone. Kept
+ * here, not read off `selectionStore.focus` (which is `'list'` by default and
+ * after any click, so it says nothing about where the keyboard actually is).
+ */
+let focusRequest = $state(0);
+let focusRequests = 0;
+
+/** A view switch away from a focused list whose listbox hasn't mounted yet. */
+let pendingHandoff = false;
+
+// Entering the list explicitly (`selectionStore.focusList`, e.g. Escape out of
+// the sidebar) focuses the listbox — or the next one to mount, while rows are
+// still loading.
+$effect(() => {
+    if (selectionStore.listFocusNonce > 0) {
+        untrack(() => {
+            pendingHandoff = !hasRows;
+            focusRequests += 1;
+            focusRequest = focusRequests;
+        });
+    }
+});
+
+// A view switch remounts the listbox (`{#key list}`), and the outgoing one
+// takes DOM focus down with it. Before the DOM updates, check whether focus
+// was inside this pane: if it was, the incoming listbox takes it over (held
+// across a loading skeleton until rows mount); if it was anywhere else (the
+// sidebar row or toggle that triggered the switch), it is left there.
+$effect.pre(() => {
+    void list;
+    const rows = hasRows;
+    untrack(() => {
+        const active = document.activeElement;
+        const owned = pane !== null && active !== null && pane.contains(active);
+        const orphaned = active === null || active === document.body;
+        const handoff = owned || (pendingHandoff && orphaned);
+        pendingHandoff = handoff && !rows;
+        if (handoff) {
+            focusRequests += 1;
+            focusRequest = focusRequests;
+        } else {
+            focusRequest = 0;
+        }
+    });
+});
+
 /**
  * The empty state is a focus holder: when the list empties while it owned the
  * keyboard (mark-all-read in an unread view, or `g f` → open an empty feed),
@@ -227,7 +281,7 @@ function onViewport(report: ViewportReport): void {
 }
 </script>
 
-<div class="article-list">
+<div class="article-list" bind:this={pane}>
     {#if list.items.length > 0}
         <!-- Stale-while-revalidate: keep showing the loaded rows even if a
              refetch just errored; surface the failure as a non-destructive
@@ -236,9 +290,9 @@ function onViewport(report: ViewportReport): void {
             <p class="list-banner" role="alert">{listError}</p>
         {/if}
         <!-- Keyed on the list: a different view is a fresh scroll container,
-             seated at that view's remembered position. The focus request is
-             withheld while the sidebar owns the keyboard, so the remount on a
-             view switch never pulls focus out of the tree. -->
+             seated at that view's remembered position. It takes DOM focus
+             only when the listbox it replaces had it (see focusRequest), so a
+             remount never pulls focus out of the control that switched views. -->
         {#key list}
             <VirtualList
                 items={list.items}
@@ -248,7 +302,7 @@ function onViewport(report: ViewportReport): void {
                 initialScrollTop={openingScrollTop()}
                 label={t('list.label')}
                 {activeDescendantId}
-                focusNonce={selectionStore.focus === 'list' ? selectionStore.listFocusNonce : 0}
+                focusNonce={focusRequest}
                 onnearend={() => void list.loadMore()}
                 onviewport={onViewport}
                 onmove={moveSelection}

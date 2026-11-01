@@ -26,6 +26,10 @@ export interface ViewportReport {
  * The scroll position is the instance's own: an owner showing a different
  * list mounts a fresh instance (`{#key}`) and hands it that list's remembered
  * offset through `initialScrollTop`, so no list inherits another's offset.
+ * Within one instance the offset is anchored to the rows on screen: when rows
+ * are inserted or removed above them, the offset follows so the reader keeps
+ * looking at the same rows (scroll anchoring, as the CSS `overflow-anchor`
+ * does for ordinary flow — which a translated virtual window never gets).
  */
 import { type Snippet, untrack } from 'svelte';
 
@@ -62,7 +66,9 @@ let {
     activeDescendantId?: string;
     /** Bumped by the owner to pull DOM focus onto the listbox (entering the
      *  list from the sidebar). The listbox is the single durable focus holder,
-     *  so focus lives here, never on an individual row that can be unmounted. */
+     *  so focus lives here, never on an individual row that can be unmounted.
+     *  A non-zero value at mount focuses the fresh instance too (the owner
+     *  hands focus over from the instance it replaced). */
     focusNonce?: number;
     onnearend?: () => void;
     /**
@@ -167,9 +173,57 @@ const firstVisibleIndex = $derived(Math.min(items.length, Math.floor(scrollTop /
 const endVisibleIndex = $derived(
     Math.min(items.length, Math.ceil((scrollTop + viewportHeight) / rowHeight)),
 );
+
+/** A row that was on screen at the last report, and the index it sat at. */
+interface AnchorRow {
+    readonly key: string | number;
+    readonly index: number;
+}
+
+/**
+ * The rows on screen at the last report, top first — the scroll-anchor
+ * candidates. Plain bookkeeping, not state: only the items effect reads it.
+ */
+let anchorRows: AnchorRow[] = [];
+
+// Scroll anchoring: when the items change under a scrolled list, find the
+// topmost row that was on screen and is still present, and move the offset by
+// however far it moved — rows dropped above the viewport (a released read-hold)
+// or arriving above it (a refetch) must not shift what the reader is looking
+// at, nor slide unseen rows up past the top. At offset 0 the list stays at the
+// top so new rows show there. Declared before the report effect so a report
+// never sees the pre-anchoring offset.
+$effect(() => {
+    const current = items;
+    untrack(() => {
+        if (viewport === undefined || scrollTop <= 0) {
+            return;
+        }
+        for (const anchor of anchorRows) {
+            const at = current.findIndex((item) => key(item) === anchor.key);
+            if (at === -1) {
+                continue;
+            }
+            if (at !== anchor.index) {
+                const target = Math.max(0, scrollTop + (at - anchor.index) * rowHeight);
+                viewport.scrollTop = target;
+                scrollTop = target;
+            }
+            return;
+        }
+    });
+});
+
 $effect(() => {
     void items; // a refetch that swaps rows in place re-reports too
-    onviewport?.({ first: firstVisibleIndex, end: endVisibleIndex, scrollTop });
+    const first = firstVisibleIndex;
+    const end = endVisibleIndex;
+    onviewport?.({ first, end, scrollTop });
+    untrack(() => {
+        anchorRows = items
+            .slice(first, end)
+            .map((item, offset) => ({ key: key(item), index: first + offset }));
+    });
 });
 
 // Open at the handed-in offset: the DOM container starts at 0, so seat it once

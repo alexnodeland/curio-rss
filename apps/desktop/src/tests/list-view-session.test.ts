@@ -7,7 +7,13 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
  * unread-only view stays put — still selected — until the view changes.
  */
 import { events, type ArticleSummaryDto, type ListArticlesDto } from '$lib/bindings';
-import { markAllRead, refreshAll, toggleArchived, toggleRead } from '$lib/state/actions';
+import {
+    markAllRead,
+    refreshAll,
+    refreshFeed,
+    toggleArchived,
+    toggleRead,
+} from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
 import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
@@ -20,9 +26,11 @@ import {
     articleFixture,
     articleStateFixture,
     articleSummaryFixture,
+    commandErrorFixture,
     flushIpc,
     installIpcHarness,
     refreshOutcomeFixture,
+    rejectWith,
 } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
 
@@ -64,6 +72,7 @@ function harnessFor(read: Set<number>): IpcHarness {
         set_archived: true,
         mark_all_read: 0,
         refresh_all: [refreshOutcomeFixture()],
+        refresh_feed: refreshOutcomeFixture(),
     });
 }
 
@@ -166,6 +175,53 @@ describe('list view sessions', () => {
         tree.remove();
     });
 
+    it('a view switch hands focus to the new listbox when the old one had it', async () => {
+        harness = harnessFor(new Set());
+        const { container } = render(ArticleList);
+        await openFeed(FEED_B);
+        await openFeed(FEED_A);
+
+        // Focus reached the listbox directly (a click, Tab) — no explicit
+        // focusList, so the focus nonce is still 0.
+        expect(selectionStore.listFocusNonce).toBe(0);
+        viewport(container).focus();
+
+        // `n` / `g s` / the unread toggle: a cached view remounts the listbox
+        // and the fresh one takes focus over, so Home/End/Page keys keep working.
+        await openFeed(FEED_B);
+        expect(document.activeElement).toBe(viewport(container));
+
+        // An uncached view shows a skeleton first; focus is handed over once
+        // its rows mount.
+        articlesStore.toggleUnreadOnly();
+        await settle();
+        expect(document.activeElement).toBe(viewport(container));
+    });
+
+    it('a view switch leaves focus on the control that switched views', async () => {
+        harness = harnessFor(new Set());
+        const { container } = render(ArticleList);
+        await openFeed(FEED_B);
+        await openFeed(FEED_A);
+
+        // The list was entered explicitly once (the nonce is non-zero, and the
+        // focus zone stays 'list' from here on) ...
+        selectionStore.focusList();
+        await settle();
+        expect(document.activeElement).toBe(viewport(container));
+
+        // ... then the reader clicks the unread toggle / a sidebar row.
+        const control = document.createElement('button');
+        document.body.append(control);
+        control.focus();
+        articlesStore.toggleUnreadOnly();
+        await settle();
+        expect(document.activeElement).toBe(control);
+        await openFeed(FEED_B);
+        expect(document.activeElement).toBe(control);
+        control.remove();
+    });
+
     it('a restored position follows its anchor row when rows arrive above it', async () => {
         harness = harnessFor(new Set());
         const { container } = render(ArticleList);
@@ -221,12 +277,10 @@ describe('list view sessions', () => {
         await openFeed(FEED_A);
 
         // A jump far down (scrollbar drag): only the rows that had been on
-        // screen at the top are marked — not the 30 rows skipped over.
+        // screen at the top are marked — not the 32 rows skipped over. The
+        // opening screenful is rows 0..7 (600px over 84px rows).
         await scrollTo(container, ROW_HEIGHT * 40);
-        const marked = markedIds(harness);
-        expect(marked.length).toBeLessThan(10);
-        expect(marked).not.toContain(1030);
-        expect(marked.every((id) => id > 1070)).toBe(true);
+        expect(markedIds(harness)).toEqual([1080, 1079, 1078, 1077, 1076, 1075, 1074, 1073]);
     });
 
     it('unread view: opening an article keeps its row, still selected, until the view changes', async () => {
@@ -286,6 +340,41 @@ describe('list view sessions', () => {
         expect(markedIds(harness)).toEqual([1080, 1079, 1078, 1077]);
         unwire();
     });
+
+    it('releasing the hold keeps the viewport on the same rows and marks nothing unseen', async () => {
+        const read = new Set<number>();
+        harness = harnessFor(read);
+        prefsStore.markOnScroll = true;
+        const unwire = await wireInvalidation();
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: FEED_A, read: false };
+        const { container } = render(ArticleList);
+        await settle();
+
+        // Scroll twenty rows, one at a time: 1080..1061 are read and held.
+        for (let row = 1; row <= 20; row++) {
+            await scrollTo(container, ROW_HEIGHT * row + 10);
+        }
+        const scrolled = Array.from({ length: 20 }, (_, index) => 1080 - index);
+        expect(markedIds(harness)).toEqual(scrolled);
+        await events.articlesChanged.emit({ feed_id: null });
+        await settle();
+        expect(articlesStore.current.items[20]?.id).toBe(1060);
+
+        // An explicit refresh lets the twenty held rows go. The row the reader
+        // was looking at (1060, 10px in) stays at the viewport top, so nothing
+        // on screen counts as scrolled past and nothing unseen slides above.
+        refreshAll();
+        await settle();
+        expect(articlesStore.current.items[0]?.id).toBe(1060);
+        expect(viewport(container).scrollTop).toBe(10);
+        expect(renderedIds(container)[0]).toBe('article-option-1060');
+        expect(markedIds(harness)).toEqual(scrolled);
+
+        // Scrolling on marks the next row, exactly as before the release.
+        await scrollTo(container, ROW_HEIGHT + 10);
+        expect(markedIds(harness)).toEqual([...scrolled, 1060]);
+        unwire();
+    });
 });
 
 describe('read-hold actions', () => {
@@ -340,5 +429,47 @@ describe('read-hold actions', () => {
         await readInUnreadView([1079]);
         await markAllRead(FEED_A);
         expect(shownIds()).toEqual([1080, 1078, 1077, 1076]);
+    });
+
+    it('a library-wide mark-all-read ends the hold', async () => {
+        await readInUnreadView([1079]);
+        await markAllRead(null);
+        expect(shownIds()).toEqual([1080, 1078, 1077, 1076]);
+    });
+
+    it('refreshing or sweeping another feed keeps this view held', async () => {
+        await readInUnreadView([1079]);
+        refreshFeed(FEED_B);
+        await flushIpc();
+        expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);
+        await markAllRead(FEED_B);
+        expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);
+
+        // Refreshing the view's own feed does end it.
+        refreshFeed(FEED_A);
+        await flushIpc();
+        expect(shownIds()).toEqual([1080, 1078, 1077, 1076]);
+    });
+
+    it('a failed mark-all-read keeps the hold', async () => {
+        await readInUnreadView([1079]);
+        harness?.respond('mark_all_read', rejectWith(commandErrorFixture()));
+        await markAllRead(FEED_A);
+        expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);
+    });
+
+    it('a failed archive keeps the held row in place', async () => {
+        await readInUnreadView([1079]);
+        harness?.respond('set_archived', rejectWith(commandErrorFixture()));
+        await toggleArchived(1079);
+        expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);
+    });
+
+    it('unarchiving leaves a held row held', async () => {
+        await readInUnreadView([1079]);
+        harness?.respond('get_article_state', articleStateFixture({ read: true, archived: true }));
+        await toggleArchived(1079);
+        expect(harness?.callsFor('set_archived').at(-1)?.archived).toBe(false);
+        expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);
     });
 });

@@ -116,4 +116,43 @@ describe('VirtualList', () => {
         await fireEvent.scroll(listbox);
         expect(reports[reports.length - 1]).toEqual({ first: 10, end: 17, scrollTop: 420 });
     });
+    it('anchors the offset to the rows on screen when rows leave or arrive above them', async () => {
+        const reports: { first: number; end: number; scrollTop: number }[] = [];
+        const { getByRole, container, rerender } = render(VirtualListHost, {
+            props: { items: manyItems(200), onviewport: (report) => reports.push(report) },
+        });
+        const listbox = getByRole('listbox');
+        listbox.scrollTop = 40 * 50 + 15; // row 50 at the top, 15px in
+        await fireEvent.scroll(listbox);
+
+        // Twenty rows above the viewport go away: row 50 stays at the top.
+        await rerender({ items: manyItems(200).slice(20) });
+        await tick();
+        expect(listbox.scrollTop).toBe(40 * 30 + 15);
+        expect(reports[reports.length - 1]).toEqual({ first: 30, end: 37, scrollTop: 1215 });
+        const rows = [...container.querySelectorAll('.test-row')];
+        expect(rows[0]?.textContent).toContain('item-46'); // row 50 minus overscan
+
+        // The top row itself goes too: the next row that was on screen anchors.
+        await rerender({ items: manyItems(200).filter((item) => item >= 20 && item !== 50) });
+        await tick();
+        expect(listbox.scrollTop).toBe(40 * 29 + 15);
+
+        // Rows arriving above push the offset down by as much.
+        await rerender({
+            items: [-3, -2, -1, ...manyItems(200).filter((item) => item >= 20 && item !== 50)],
+        });
+        await tick();
+        expect(listbox.scrollTop).toBe(40 * 32 + 15);
+    });
+
+    it('stays at the top when rows arrive above an unscrolled list', async () => {
+        const { getByRole, container, rerender } = render(VirtualListHost, {
+            props: { items: manyItems(50) },
+        });
+        await rerender({ items: [-2, -1, ...manyItems(50)] });
+        await tick();
+        expect(getByRole('listbox').scrollTop).toBe(0);
+        expect(container.querySelector('.test-row')?.textContent).toContain('item--2');
+    });
 });

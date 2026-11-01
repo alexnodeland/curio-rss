@@ -74,17 +74,17 @@ async function toggleFlag(
     articleId: number,
     field: ToggleField,
     write: (id: number, value: boolean) => Promise<CommandResult<boolean>>,
-): Promise<void> {
+): Promise<boolean | undefined> {
     const key = `${field}:${articleId}`;
     const previous = toggleChain.get(key) ?? Promise.resolve();
-    const task = previous.then(async () => {
+    const task = previous.then(async (): Promise<boolean | undefined> => {
         let current: boolean;
         if (toggleDesired.has(key)) {
             current = toggleDesired.get(key) as boolean;
         } else {
             const state = await run(() => commands.getArticleState(articleId));
             if (state === undefined) {
-                return; // read failed (a toast fired); nothing to flip
+                return undefined; // read failed (a toast fired); nothing to flip
             }
             current = state[field];
         }
@@ -95,15 +95,18 @@ async function toggleFlag(
             // The write failed (toast already fired) — forget the optimistic
             // value so the next press reads the real backend flag again.
             toggleDesired.delete(key);
+            return undefined;
         }
+        return target;
     });
     toggleChain.set(key, task);
-    await task;
+    const written = await task;
     // Drain once this press is the tail of the chain, so the maps don't grow.
     if (toggleChain.get(key) === task) {
         toggleChain.delete(key);
         toggleDesired.delete(key);
     }
+    return written;
 }
 
 /** Stars / unstars against the current backend flag. */
@@ -128,11 +131,16 @@ export async function toggleRead(articleId: number): Promise<void> {
 
 /**
  * Archives / unarchives against the current backend flag. Archiving takes the
- * row out of the reading flow, so any session read-hold on it is let go.
+ * row out of the reading flow, so once the archive is written any session
+ * read-hold on it is let go; a failed write (toasted) leaves the row held.
  */
 export async function toggleArchived(articleId: number): Promise<void> {
-    articlesStore.releaseHeld(articleId);
-    await toggleFlag(articleId, 'archived', (id, value) => commands.setArchived(id, value));
+    const archived = await toggleFlag(articleId, 'archived', (id, value) =>
+        commands.setArchived(id, value),
+    );
+    if (archived === true) {
+        articlesStore.releaseHeld(articleId);
+    }
 }
 
 /**
@@ -179,12 +187,13 @@ export async function loadFullArticle(articleId: number): Promise<boolean> {
  * list refresh off the Rust-emitted `ArticlesChanged`.
  */
 export async function markAllRead(feedId: number | null): Promise<void> {
-    // An explicit sweep: the held stragglers go with the rest.
-    articlesStore.releaseHolds();
     const changed = await run(() => commands.markAllRead(feedId));
     if (changed === undefined) {
         return;
     }
+    // An explicit sweep: the swept feed's held stragglers go with the rest
+    // (the whole hold for the library-wide sweep); other feeds' stay put.
+    articlesStore.releaseHolds(feedId);
     toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
 }
 
@@ -371,11 +380,12 @@ function focusSearch(): void {
 
 /**
  * Refreshes one feed (the `r` shortcut, the feed's context menu). An explicit
- * refresh ends the current view's read-hold: the list shows the backend
- * window again once it reloads.
+ * refresh ends that feed's share of the current view's read-hold: its rows
+ * show the backend window again once it reloads. Held rows of other feeds
+ * stay put — refreshing feed B never reshuffles a view of feed A.
  */
 export function refreshFeed(feedId: number): void {
-    articlesStore.releaseHolds();
+    articlesStore.releaseHolds(feedId);
     void run(() => feedsStore.refreshFeed(feedId));
 }
 

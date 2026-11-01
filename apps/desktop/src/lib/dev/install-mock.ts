@@ -234,7 +234,16 @@ tokens:
                     return structuredClone(feeds.find((f) => f.url === args.url) ?? null);
                 case 'set_feed_status': {
                     const f = feeds.find((x) => x.id === args.feedId);
-                    if (f) f.status = args.status as typeof f.status;
+                    if (f) {
+                        // Mirrors core: any explicit change ends an
+                        // automatic pause; going active forgets the backoff.
+                        f.status = args.status as typeof f.status;
+                        f.auto_paused_at = null;
+                        if (f.status === 'active') {
+                            f.consecutive_failures = 0;
+                            f.next_attempt_at = null;
+                        }
+                    }
                     return null;
                 }
                 case 'set_feed_title': {

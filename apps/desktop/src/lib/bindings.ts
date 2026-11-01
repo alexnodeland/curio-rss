@@ -58,6 +58,20 @@ export const commands = {
 	 *  at refresh time.
 	 */
 	fetch_full_text: boolean,
+	/**  Failed fetches in a row (0 ⇒ healthy). */
+	consecutive_failures: number,
+	/**
+	 *  The earliest time a background or refresh-all sweep fetches the
+	 *  feed again (RFC 3339 UTC) — a failure backoff, the host's
+	 *  `Retry-After` or the feed's own refresh hint. `null` ⇒ due on the
+	 *  next sweep.
+	 */
+	next_attempt_at: string | null,
+	/**
+	 *  When the engine paused the feed by itself after a long run of
+	 *  failures (RFC 3339 UTC); `null` for a feed the user paused.
+	 */
+	auto_paused_at: string | null,
 } | null, CommandError>(__TAURI_INVOKE("get_feed", { feedId })),
 	/**  Lookup by subscription URL — the add-feed dedupe check. */
 	getFeedByUrl: (url: string) => typedError<{
@@ -92,6 +106,20 @@ export const commands = {
 	 *  at refresh time.
 	 */
 	fetch_full_text: boolean,
+	/**  Failed fetches in a row (0 ⇒ healthy). */
+	consecutive_failures: number,
+	/**
+	 *  The earliest time a background or refresh-all sweep fetches the
+	 *  feed again (RFC 3339 UTC) — a failure backoff, the host's
+	 *  `Retry-After` or the feed's own refresh hint. `null` ⇒ due on the
+	 *  next sweep.
+	 */
+	next_attempt_at: string | null,
+	/**
+	 *  When the engine paused the feed by itself after a long run of
+	 *  failures (RFC 3339 UTC); `null` for a feed the user paused.
+	 */
+	auto_paused_at: string | null,
 } | null, CommandError>(__TAURI_INVOKE("get_feed_by_url", { url })),
 	/**  Pause / resume / un-dead a feed. */
 	setFeedStatus: (feedId: number, status: FeedStatusDto) => typedError<null, CommandError>(__TAURI_INVOKE("set_feed_status", { feedId, status })),
@@ -693,6 +721,20 @@ export type FeedDto = {
 	 *  at refresh time.
 	 */
 	fetch_full_text: boolean,
+	/**  Failed fetches in a row (0 ⇒ healthy). */
+	consecutive_failures: number,
+	/**
+	 *  The earliest time a background or refresh-all sweep fetches the
+	 *  feed again (RFC 3339 UTC) — a failure backoff, the host's
+	 *  `Retry-After` or the feed's own refresh hint. `null` ⇒ due on the
+	 *  next sweep.
+	 */
+	next_attempt_at: string | null,
+	/**
+	 *  When the engine paused the feed by itself after a long run of
+	 *  failures (RFC 3339 UTC); `null` for a feed the user paused.
+	 */
+	auto_paused_at: string | null,
 };
 
 /**  Mirror of [`FeedStatus`]. */

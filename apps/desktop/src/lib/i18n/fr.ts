@@ -383,6 +383,11 @@ export const fr: Partial<Record<MessageKey, string>> = {
         'Le site a refusé la requête (403). Certains sites bloquent les lecteurs de flux — réessayez plus tard ou vérifiez l’URL du flux.',
     'feedHealth.hint.rateLimited':
         'Le site limite le débit des requêtes (429). Curio espace ses tentatives — réessayez dans un moment.',
+    'feedHealth.schedule.backoff':
+        '{count, plural, one {# récupération échouée} other {# récupérations échouées d’affilée}} — prochaine tentative {when}',
+    'feedHealth.schedule.next': 'Prochaine actualisation {when}',
+    'feedHealth.schedule.autoPaused':
+        '{count, plural, one {Curio a suspendu ce flux après # récupération échouée.} other {Curio a suspendu ce flux après # récupérations échouées d’affilée.}} Reprenez-le pour réessayer.',
     'feedHealth.unsubscribe': 'Se désabonner',
     'feedHealth.unsubscribe.confirm':
         'Supprimer cet abonnement ? Les articles enregistrés sont conservés.',

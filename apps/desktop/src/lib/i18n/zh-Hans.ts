@@ -361,6 +361,10 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
         '该网站拒绝了请求（403）。有些网站会屏蔽订阅阅读器——请稍后重试或核对订阅源网址。',
     'feedHealth.hint.rateLimited':
         '该网站正在限制请求频率（429）。Curio 会拉开重试间隔——请稍后再试。',
+    'feedHealth.schedule.backoff': '{count, plural, other {连续 # 次获取失败}}——下次尝试：{when}',
+    'feedHealth.schedule.next': '下次刷新：{when}',
+    'feedHealth.schedule.autoPaused':
+        '{count, plural, other {连续 # 次获取失败后，Curio 已自动暂停此订阅源。}}恢复即可重试。',
     'feedHealth.unsubscribe': '取消订阅',
     'feedHealth.unsubscribe.confirm': '移除此订阅？已保存的文章将保留。',
     'feedHealth.unsubscribe.remove': '移除',

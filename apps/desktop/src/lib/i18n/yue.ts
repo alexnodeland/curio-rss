@@ -361,6 +361,10 @@ export const yue: Partial<Record<MessageKey, string>> = {
         '個網站拒絕咗個要求（403）。有啲網站會封鎖訂閱閱讀器——遲啲再試，或者檢查吓訂閱網址。',
     'feedHealth.hint.rateLimited':
         '個網站正在限制要求頻率（429）。Curio 會拉開重試嘅間隔——遲啲再試啦。',
+    'feedHealth.schedule.backoff': '{count, plural, other {連續 # 次攞唔到}}——下次再試：{when}',
+    'feedHealth.schedule.next': '下次更新：{when}',
+    'feedHealth.schedule.autoPaused':
+        '{count, plural, other {連續 # 次攞唔到之後，Curio 自動暫停咗呢個訂閱源。}}恢復就可以再試。',
     'feedHealth.unsubscribe': '取消訂閱',
     'feedHealth.unsubscribe.confirm': '移除呢個訂閱？收藏嘅文章會保留。',
     'feedHealth.unsubscribe.remove': '移除',

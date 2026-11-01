@@ -381,6 +381,11 @@ export const de: Partial<Record<MessageKey, string>> = {
         'Die Website hat die Anfrage abgelehnt (403). Manche Seiten blockieren Feed-Reader – versuche es später erneut oder prüfe die Feed-URL.',
     'feedHealth.hint.rateLimited':
         'Die Website drosselt Anfragen (429). Curio verteilt die Wiederholungen zeitlich – versuche es in Kürze erneut.',
+    'feedHealth.schedule.backoff':
+        '{count, plural, one {# fehlgeschlagener Abruf} other {# fehlgeschlagene Abrufe in Folge}} – nächster Versuch {when}',
+    'feedHealth.schedule.next': 'Nächste Aktualisierung {when}',
+    'feedHealth.schedule.autoPaused':
+        '{count, plural, one {Curio hat diesen Feed nach # fehlgeschlagenen Abruf pausiert.} other {Curio hat diesen Feed nach # fehlgeschlagenen Abrufen in Folge pausiert.}} Setze ihn fort, um es erneut zu versuchen.',
     'feedHealth.unsubscribe': 'Abbestellen',
     'feedHealth.unsubscribe.confirm':
         'Dieses Abonnement entfernen? Gespeicherte Artikel bleiben erhalten.',

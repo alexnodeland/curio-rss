@@ -48,7 +48,7 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 
 | | |
 |---|---|
-| 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh, **background refresh on launch + a configurable interval**, health tracking + backoff |
+| 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh, **background refresh on launch + a configurable interval**, health tracking + per-feed backoff that honours `Retry-After` and a feed's own `<ttl>`, with an auto-pause (and one-click resume) for feeds that keep failing |
 | ➕ **Add anything** | Smart-input add — paste a URL, `r/subreddit`, `@user@instance` (Mastodon), a YouTube channel, or Hacker News; plus a Popular-sources quick-add row |
 | 🗂️ **Organize** | Create / rename / delete folders, drag feeds **into and out of** folders, drag- or **keyboard-reorder (`Alt`+↑/↓)**, inline rename, keyboard tree navigation, right-click menus, an edit-feed panel (URL visible + health), and a warning dot on any feed whose last refresh errored — **honest from a cold start** |
 | 📖 **Read** | Three-pane reader with **adjustable typography** (size, width, weight, line-height, letter-spacing, hyphenation) and **Sepia / Paper reading themes**, on-demand full-article readability, comfortable/compact list density, inline snippets, mark-on-open, opt-in mark-on-scroll, next-unread across feeds |

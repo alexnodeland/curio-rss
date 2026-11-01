@@ -5,6 +5,7 @@
  * 403/429 hints, mark-all-read); and unsubscribe stays a two-step confirm.
  */
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
+import { formatIntlDateTime } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -271,5 +272,56 @@ describe('EditFeedModal', () => {
         const { getByText } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
         await flushIpc();
         expect(getByText(/refused the request \(403\)/)).toBeTruthy();
+    });
+
+    it('shows when a failing feed is next attempted', async () => {
+        const nextAttempt = new Date(Date.now() + 45 * 60_000);
+        harness = harnessFor('active', {
+            list_feeds: [
+                feedFixture({
+                    id: 1,
+                    title: 'Alpha',
+                    consecutive_failures: 3,
+                    next_attempt_at: nextAttempt.toISOString(),
+                }),
+            ],
+        });
+        const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        const note = container.querySelector('.schedule');
+        expect(note?.textContent).toContain('3 failed fetches in a row — next attempt');
+        expect(note?.textContent).toContain(formatIntlDateTime(nextAttempt));
+    });
+
+    it('explains an automatic pause and resumes with one click', async () => {
+        harness = harnessFor('paused', {
+            list_feeds: [
+                feedFixture({
+                    id: 1,
+                    title: 'Alpha',
+                    status: 'paused',
+                    consecutive_failures: 10,
+                    auto_paused_at: '2026-07-05T22:10:00.000Z',
+                }),
+            ],
+        });
+        const { container, getByText } = render(EditFeedModal, {
+            feedId: 1,
+            onclose: vi.fn(),
+        });
+        await flushIpc();
+        expect(container.querySelector('.schedule')?.textContent).toBe(
+            'Curio paused this feed after 10 failed fetches in a row. Resume to try again.',
+        );
+        await fireEvent.click(getByText('Resume'));
+        await flushIpc();
+        expect(harness.callsFor('set_feed_status')).toEqual([{ feedId: 1, status: 'active' }]);
+    });
+
+    it('says nothing about the schedule of a healthy feed', async () => {
+        harness = harnessFor('active');
+        const { container } = render(EditFeedModal, { feedId: 1, onclose: vi.fn() });
+        await flushIpc();
+        expect(container.querySelector('.schedule')).toBeNull();
     });
 });

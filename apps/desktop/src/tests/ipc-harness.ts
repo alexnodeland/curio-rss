@@ -139,6 +139,9 @@ export function feedFixture(overrides: Partial<FeedDto> = {}): FeedDto {
         last_ok_at: null,
         tags: [],
         fetch_full_text: false,
+        consecutive_failures: 0,
+        next_attempt_at: null,
+        auto_paused_at: null,
         ...overrides,
     };
 }

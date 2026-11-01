@@ -404,6 +404,11 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         '更新完成：{feeds, plural, other {# 個訂閱源}}共 {count, plural, other {# 篇新文章}}',
     'refresh.inProgress': '更新緊… {total} 個之中嘅 {done} 個',
+    'refresh.announce.cancelled':
+        '更新已停止：{feeds, plural, other {# 個訂閱源}}共 {count, plural, other {# 篇新文章}}',
+    'refresh.cancel': '停止',
+    'refresh.cancel.label': '停止更新',
+    'refresh.cancelling': '停緊…',
     'connectivity.offline': '離線',
     'connectivity.offline.hint': '冇網絡，背景更新暫停咗',
     'pane.sidebar.resize': '調整側邊欄大小',

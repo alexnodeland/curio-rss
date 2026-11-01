@@ -89,6 +89,84 @@ describe('feeds store', () => {
         unwire();
     });
 
+    it('tracks the sweep count and starts afresh on a new sweep', async () => {
+        harness = installIpcHarness({});
+        const store = new FeedsStore();
+        const unwire = await store.wireRefreshEvents();
+        // The last sweep's outcomes, still shown in its summary.
+        store.refreshOutcomes = [refreshOutcomeFixture({ feed_id: 9 })];
+
+        const first = refreshOutcomeFixture({ feed_id: 1 });
+        await events.refreshProgress.emit({
+            sweep_id: 4,
+            done: 12,
+            total: 300,
+            feed_id: 1,
+            outcome: first,
+        });
+        expect(store.refreshProgress).toEqual({ sweepId: 4, done: 12, total: 300 });
+        // A sweep the scheduler started never adds to the last one's.
+        expect(store.refreshOutcomes).toEqual([first]);
+
+        await events.refreshFinished.emit({ sweep_id: 4, cancelled: false, outcomes: [first] });
+        expect(store.refreshProgress).toBeNull();
+        expect(store.refreshCancelled).toBe(false);
+        unwire();
+    });
+
+    it('cancels the sweep in flight and settles on its cancelled finish', async () => {
+        harness = installIpcHarness({ cancel_refresh: true });
+        const store = new FeedsStore();
+        const unwire = await store.wireRefreshEvents();
+        const outcome = refreshOutcomeFixture({ feed_id: 1 });
+        await events.refreshProgress.emit({
+            sweep_id: 1,
+            done: 1,
+            total: 3,
+            feed_id: 1,
+            outcome,
+        });
+
+        const result = await store.cancelRefresh();
+        expect(result).toEqual({ status: 'ok', data: true });
+        expect(harness.callsFor('cancel_refresh')).toHaveLength(1);
+        expect(store.cancellingRefresh).toBe(true);
+        expect(store.refreshing).toBe(true);
+
+        await events.refreshFinished.emit({ sweep_id: 1, cancelled: true, outcomes: [outcome] });
+        expect(store.refreshing).toBe(false);
+        expect(store.cancellingRefresh).toBe(false);
+        expect(store.refreshCancelled).toBe(true);
+        expect(store.refreshOutcomes).toEqual([outcome]);
+        unwire();
+    });
+
+    it('drops the stopping state when no sweep was running to cancel', async () => {
+        harness = installIpcHarness({ cancel_refresh: false });
+        const store = new FeedsStore();
+        await store.cancelRefresh();
+        expect(store.cancellingRefresh).toBe(false);
+    });
+
+    it('a refresh request during a sweep joins it without wiping its progress', async () => {
+        harness = installIpcHarness({ refresh_all: [] });
+        const store = new FeedsStore();
+        const unwire = await store.wireRefreshEvents();
+        const outcome = refreshOutcomeFixture({ feed_id: 1 });
+        await events.refreshProgress.emit({
+            sweep_id: 2,
+            done: 1,
+            total: 5,
+            feed_id: 1,
+            outcome,
+        });
+
+        await store.refreshAll();
+        expect(store.refreshOutcomes).toEqual([outcome]);
+        expect(store.refreshProgress).toEqual({ sweepId: 2, done: 1, total: 5 });
+        unwire();
+    });
+
     it('lastErrored flags only feeds whose last refresh errored', () => {
         harness = installIpcHarness({});
         const store = new FeedsStore();

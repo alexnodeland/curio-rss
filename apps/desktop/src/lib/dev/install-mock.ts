@@ -135,6 +135,58 @@ tokens:
         return { total, by_feed: [...by.entries()] };
     };
 
+    // A simulated refresh sweep: one feed every `SWEEP_STEP_MS`, emitting
+    // `RefreshProgress` per feed and `RefreshFinished` at the end, so the
+    // progress pill and its Stop button can be reviewed. `?sweep=<n>` pads
+    // the sweep to n feeds (e.g. 300) to preview a large library's count.
+    const { events } = await import('$lib/bindings');
+    const SWEEP_STEP_MS = 350;
+    let sweep: { cancelled: boolean } | null = null;
+    let sweepId = 0;
+    function sweepFeedIds(): number[] {
+        const padTo = Number(new URLSearchParams(window.location.search).get('sweep') ?? 0);
+        const ids = feeds.map((f) => f.id);
+        while (ids.length < padTo) {
+            ids.push(ids[ids.length % feeds.length]);
+        }
+        return ids;
+    }
+    async function runSweep(): Promise<unknown[]> {
+        const ids = sweepFeedIds();
+        const current = { cancelled: false };
+        sweep = current;
+        sweepId += 1;
+        const outcomes = [];
+        for (const [index, feedId] of ids.entries()) {
+            await new Promise((resolve) => setTimeout(resolve, SWEEP_STEP_MS));
+            if (current.cancelled) break;
+            const outcome = {
+                feed_id: feedId,
+                status: 'ok' as const,
+                http_status: 200,
+                new_articles: index % 3 === 0 ? 1 : 0,
+                updated_articles: 0,
+                error: null,
+                error_kind: null,
+            };
+            outcomes.push(outcome);
+            await events.refreshProgress.emit({
+                sweep_id: sweepId,
+                done: index + 1,
+                total: ids.length,
+                feed_id: feedId,
+                outcome,
+            });
+        }
+        sweep = null;
+        await events.refreshFinished.emit({
+            sweep_id: sweepId,
+            cancelled: current.cancelled,
+            outcomes,
+        });
+        return outcomes;
+    }
+
     mockIPC(
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a flat 1:1 IPC dispatch table for the dev mock; splitting it would obscure the mapping
         (cmd, raw) => {
@@ -299,17 +351,11 @@ tokens:
                         error_kind: null,
                     };
                 case 'cancel_refresh':
-                    return false;
+                    if (sweep === null) return false;
+                    sweep.cancelled = true;
+                    return true;
                 case 'refresh_all':
-                    return feeds.map((f) => ({
-                        feed_id: f.id,
-                        status: 'ok',
-                        http_status: 200,
-                        new_articles: 0,
-                        updated_articles: 0,
-                        error: null,
-                        error_kind: null,
-                    }));
+                    return runSweep();
                 // `?offline=1` previews the sidebar's "Offline" badge.
                 case 'connectivity_online':
                     return new URLSearchParams(window.location.search).get('offline') !== '1';

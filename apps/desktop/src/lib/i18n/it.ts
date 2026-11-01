@@ -424,6 +424,11 @@ export const it: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         'Aggiornamento completato: {count, plural, one {# nuovo articolo} other {# nuovi articoli}} in {feeds, plural, one {# feed} other {# feed}}',
     'refresh.inProgress': 'Aggiornamento… {done} di {total}',
+    'refresh.announce.cancelled':
+        'Aggiornamento interrotto: {count, plural, one {# nuovo articolo} other {# nuovi articoli}} da {feeds, plural, one {# feed} other {# feed}}',
+    'refresh.cancel': 'Interrompi',
+    'refresh.cancel.label': 'Interrompi l’aggiornamento',
+    'refresh.cancelling': 'Interruzione…',
     'connectivity.offline': 'Offline',
     'connectivity.offline.hint': 'Nessuna rete — aggiornamento automatico in pausa',
     'pane.sidebar.resize': 'Ridimensiona barra laterale',

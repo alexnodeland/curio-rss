@@ -17,7 +17,7 @@
 use std::io;
 use std::path::Path;
 
-use serde_yaml::Value;
+use crate::yaml::{self, Value};
 
 /// The fuzz crate's manifest, relative to the repo root.
 pub const FUZZ_MANIFEST: &str = "fuzz/Cargo.toml";
@@ -27,7 +27,7 @@ const NIGHTLY: &str = ".github/workflows/nightly.yml";
 
 /// The `[[bin]]` target names declared in a cargo-fuzz manifest, in order.
 ///
-/// A line scan, not a TOML parse (xtask keeps serde-yaml as its only
+/// A line scan, not a TOML parse (xtask keeps saphyr-parser as its only
 /// runtime dependency): each `name = "…"` that follows a `[[bin]]` header,
 /// before the next table header.
 #[must_use]
@@ -63,7 +63,7 @@ pub fn lint(nightly: &str, manifest: &str) -> Vec<String> {
     if targets.is_empty() {
         return vec![format!("{FUZZ_MANIFEST}: declares no [[bin]] fuzz targets")];
     }
-    let doc = match serde_yaml::from_str::<Value>(nightly) {
+    let doc = match yaml::from_str(nightly) {
         Ok(doc) => doc,
         Err(err) => return vec![format!("nightly.yml: not valid YAML: {err}")],
     };

@@ -63,6 +63,11 @@ impl Mapping {
     pub fn keys(&self) -> impl Iterator<Item = &Value> {
         self.0.iter().map(|(k, _)| k)
     }
+
+    /// The values, in document order.
+    pub fn values(&self) -> impl Iterator<Item = &Value> {
+        self.0.iter().map(|(_, v)| v)
+    }
 }
 
 impl<'a> IntoIterator for &'a Mapping {

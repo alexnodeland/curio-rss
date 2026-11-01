@@ -1,0 +1,12 @@
+<!-- Regression seed for the first content_pipeline fuzz find (issue #133):
+     URLs behind C0 controls, tabs and case. A browser (WHATWG URL parsing,
+     which ammonia also applies through the url crate) strips leading C0
+     controls and spaces and drops tabs and newlines before reading the
+     scheme, so the https ones stay and the javascript:/data: ones go. -->
+<p>Images behind control characters:</p>
+<img src=https://example.com/cat.jpg" alt="the fuzz find: unquoted, C0-led, a stray quote">
+<img src="https://example.com/dog.jpg" alt="quoted, C0-led">
+<p><a href="HTTPS://example.com/upper">an upper-case scheme</a>,
+<a href="javascript:alert(1)">a C0-led script link</a>,
+<a href="java	script:alert(2)">a tab-split script link</a> and
+<a href=" data:text/html,x">a C0-led inline-document link</a>.</p>

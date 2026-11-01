@@ -7,11 +7,23 @@ use proptest::prelude::*;
 use crate::generators::hostile_html;
 use crate::inert;
 
+/// Article bases, as the ingest path passes them: an entry `<link>` the
+/// feed author controls. A *parseable* non-http(s) base is the dangerous
+/// one — ammonia scheme-checks absolute URLs only, so a relative URL
+/// resolved onto `foo://h/` must be re-checked after resolution (the
+/// `feed_parse` fuzz target found exactly this; see
+/// `sanitize::tests::a_non_http_base_resolves_nothing`).
 const BASES: &[Option<&str>] = &[
     None,
     Some("https://example.com/posts/current"),
     Some("http://plain.example/dir/"),
     Some("not a url at all"),
+    Some("foo://h/dir/"),
+    Some("httpsupdated://xss.example.com/one"),
+    Some("ftp://files.example/pub/"),
+    Some("file:///etc/"),
+    Some("javascript://x/%0aalert(1)"),
+    Some("data:text/html,x"),
 ];
 
 proptest! {

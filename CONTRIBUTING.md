@@ -82,7 +82,12 @@ and as lefthook hooks scoped to `apps/desktop/` changes.
   (`crates/curio-core/tests/props/`), and the cargo-fuzz targets in
   `fuzz/` (nightly toolchain, run for 10 minutes each by the nightly
   workflow; locally `just fuzz <target> [seconds]`). A crash any of them
-  finds becomes a pinned regression input or seed.
+  finds is triaged before anything merges: a real bug is fixed (or filed)
+  and a false positive is fixed in the oracle, and either way the input is
+  pinned. A fuzz find becomes a committed seed (`fixtures/nasty/` for
+  `feed_parse`, `fixtures/html/` for `content_pipeline`, which
+  `nasty_corpus.rs` and `content_golden.rs` replay in `just ci`) plus a
+  unit test that names it.
 - **Engine files stay small.** No `.rs` file under `crates/curio-core/src`
   may exceed 700 lines (tests included) — the xtask `core_file_size` test
   fails the suite on one that does. Grow a module by splitting it along its

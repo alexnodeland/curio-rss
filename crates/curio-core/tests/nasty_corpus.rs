@@ -61,11 +61,12 @@ const SEEDS: &[(&str, Expect)] = &[
     ("feeds/youtube-atom.xml", Expect::Parses(2)),
     ("nasty/atom-sloppy.atom", Expect::Parses(3)),
     ("nasty/billion-laughs.xml", Expect::Parses(1)),
-    ("nasty/duplicate-guids.xml", Expect::Parses(4)),
+    ("nasty/custom-scheme-links.xml", Expect::Parses(3)),
+    ("nasty/duplicate-guids.xml", Expect::Parses(3)),
     ("nasty/empty-channel.xml", Expect::Parses(0)),
     ("nasty/html-served-as-feed.html", Expect::Rejects),
     ("nasty/jsonfeed-1.0.json", Expect::Parses(2)),
-    ("nasty/jsonfeed-1.1-odd.json", Expect::Parses(3)),
+    ("nasty/jsonfeed-1.1-odd.json", Expect::Parses(2)),
     ("nasty/malformed-unclosed.xml", Expect::Rejects),
     ("nasty/media-itunes.xml", Expect::Parses(3)),
     ("nasty/odd-dates.xml", Expect::Parses(13)),
@@ -107,6 +108,12 @@ fn ingest(bytes: &[u8]) -> Result<Outcome, String> {
     Ok(Outcome::Parsed(feed.entries.len()))
 }
 
+/// Audits what one parsed feed would store. `entry.link` and
+/// `feed.meta.site_url` carry no policy yet. Both are stored unscreened
+/// (`javascript:` and custom schemes included; see `xss-feed.xml` and
+/// `custom-scheme-links.xml`), and #262 tracks screening them and asserting
+/// the result here. What this audit does cover is the dangerous half of the
+/// entry link: its use as the content base.
 fn audit_feed(feed: &ParsedFeed) -> Result<(), String> {
     for entry in &feed.entries {
         if entry.dedupe_key.is_empty() {
@@ -216,9 +223,17 @@ const HOSTILE_TOKENS: &[&[u8]] = &[
     b"</channel>",
     b"<guid></guid>",
     b"<link>javascript:alert(1)</link>",
+    // Parseable non-http(s) links: the entry link is the content base, so
+    // these reach the base-resolution path (cannot-be-a-base links like
+    // `javascript:` never do).
+    b"<link>foo://x/</link>",
+    b"<link>httpsupdated://xss.example.com/one</link>",
+    b"<link href=\"foo://x/dir/\"/>",
+    b"\"url\": \"foo://x/\",",
     b"<pubDate>not a date</pubDate>",
     b" xmlns:a=\"urn:x\"",
     b" xml:base=\"javascript:alert(1)//\"",
+    b" xml:base=\"foo://x/dir/\"",
     b"<!DOCTYPE x [<!ENTITY a \"b\">]>",
     b"<?xml version=\"1.0\" encoding=\"UTF-16\"?>",
     b"{",
@@ -249,6 +264,12 @@ const TEXT_TOKENS: &[&str] = &[
     "\u{202e}reversed",
     "🎌👍🏽 日本語",
     "javascript:alert(1)",
+    // Spliced at the start of a `<link>`, these turn it into a parseable
+    // custom-scheme base; the relative URLs give that base work to do.
+    "foo://x/",
+    "httpsupdated:",
+    "&lt;img src=\"rel.png\"&gt;&lt;a href=\"rel/ok\"&gt;r&lt;/a&gt;&lt;a href=\"//cdn.example/p\"&gt;p&lt;/a&gt;",
+    "<![CDATA[<img src=\"x\"><a href=\"relative/ok\">r</a>]]>",
     "averyveryveryveryveryveryveryveryveryveryveryveryveryverylongword",
 ];
 
@@ -687,18 +708,27 @@ fn json_feed_1_0_and_1_1_both_parse() {
         processed.text.contains("クリック"),
         "the text around the attack survives"
     );
+    let titles: Vec<&str> = v11.entries.iter().map(|e| e.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        ["空白の id", "Dup A"],
+        "a repeated id with the same (absent) link is an exact repeat: the first copy wins"
+    );
 }
 
 #[test]
-fn duplicate_guids_collapse_to_one_dedupe_key() {
+fn duplicate_guids_get_unique_keys_and_exact_repeats_drop() {
     let feed = parse("nasty/duplicate-guids.xml");
     let keys: Vec<&str> = feed.entries.iter().map(|e| e.dedupe_key.as_str()).collect();
-    assert_eq!(keys[0], "guid:same-guid");
-    assert_eq!(keys[0], keys[1], "the guid is trimmed before keying");
-    assert_eq!(keys[2], "link:https://dup.example.com/a");
     assert_eq!(
-        keys[2], keys[3],
-        "guid-less items keyed by a shared link collide"
+        keys,
+        [
+            "guid+link:same-guid\u{1f}https://dup.example.com/a",
+            "guid+link:same-guid\u{1f}https://dup.example.com/b",
+            "link:https://dup.example.com/a",
+        ],
+        "a guid reused across links (trimmed first) re-keys to guid+link; \
+         the second guid-less item on the same link is an exact repeat and drops"
     );
 }
 
@@ -773,13 +803,34 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "<a href=\"javascript:alert(1)\">x</a>",
         "<p style=\"color:red\">x</p>",
         "<svg></svg>",
+        // Disguises a browser still reads as the scheme they hide.
+        "<a href=\"\u{1}javascript:alert(1)\">x</a>",
+        "<a href=\"java\tscript:alert(1)\">x</a>",
+        "<img src=\" DATA:image/png,x\">",
+        // Stored URLs are absolute: a relative one resolves against the
+        // reader, not the source.
+        "<a href=\"relative/ok\">r</a>",
+        "<a href=\"#not-prefixed\">f</a>",
     ] {
         assert!(
             inert::audit_html(live).is_err(),
             "html audit passed {live:?}"
         );
     }
-    assert!(inert::audit_html("<p><a href=\"https://x.example/\">ok</a></p>").is_ok());
+    for stored in [
+        "<p><a href=\"https://x.example/\">ok</a></p>",
+        // The `content_pipeline` fuzz find: WHATWG parsing strips the C0
+        // control, so this is an https image to the webview (and to
+        // ammonia, which let it through).
+        "<img src=\"\u{2}https://example.com/cat.jpg&quot;\">",
+        "<a href=\"HTTPS://x.example/\">upper</a>",
+        "<a href=\"#user-content-fn1\">1</a>",
+    ] {
+        assert!(
+            inert::audit_html(stored).is_ok(),
+            "html audit flagged {stored:?}"
+        );
+    }
 
     for live in [
         "[x](javascript:alert(1))",
@@ -788,6 +839,18 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "<img src=x onerror=alert(1)>",
         "<a href=\"javascript:alert(1)\">x</a>",
         "a lone ` backtick hides nothing <script>",
+        "[x]( java\tscript:alert(1))",
+        "[x](\u{1}javascript:alert(1))",
+        // An escaped backtick opens no span, so the tag between it and the
+        // next backtick is live.
+        "\\`<script>alert(1)</script>`",
+        // A run closes only on a run of the same length.
+        "a ``` <script>alert(1)</script> `",
+        // Four spaces is an indented code line, not a fence: the lines
+        // after it are prose.
+        "    ```\n<script>alert(1)</script>",
+        // A fence closes only on the same marker.
+        "~~~\nx\n```\n~~~\n<script>alert(1)</script>",
     ] {
         assert!(
             inert::audit_markdown(live).is_err(),
@@ -800,6 +863,10 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "```html\n<script>alert(1)</script>\n```",
         "a < b and <3",
         "[ok](https://x.example/)",
+        "``a ` <script>alert(1)</script> ``",
+        "``a`<script>alert(1)</script>`",
+        "   ```\n<script>alert(1)</script>\n```",
+        "~~~~\n<script>alert(1)</script>\n~~~\n~~~~",
     ] {
         assert!(
             inert::audit_markdown(inert_text).is_ok(),
@@ -832,6 +899,47 @@ fn the_xss_feed_stores_inert_content_and_keeps_the_story() {
     );
     assert!(first.html.contains("<strong>content</strong>"));
     assert!(first.html.contains("https://xss.example.com/relative/ok"));
+}
+
+/// The first `feed_parse` fuzz find, pinned: an entry link with a
+/// parseable custom scheme is the content base, and nothing relative may
+/// resolve onto it.
+#[test]
+fn a_custom_scheme_entry_link_plants_no_link_in_stored_content() {
+    let feed = parse("nasty/custom-scheme-links.xml");
+    for entry in &feed.entries {
+        let base = entry.link.as_deref().unwrap_or(BASE);
+        let processed = process(&entry.content_html, Some(base));
+        inert::audit_html(&processed.html).unwrap();
+        let scheme = base.split(':').next().unwrap();
+        for leaked in [format!("{scheme}:"), "cdn.example".to_owned()] {
+            assert!(
+                !processed.html.contains(&leaked),
+                "{base}: {leaked:?} reached stored content:\n{}",
+                processed.html
+            );
+        }
+        assert!(
+            !processed.html.contains("src="),
+            "{base}: a relative src survived without an http(s) base:\n{}",
+            processed.html
+        );
+    }
+    let first = process(
+        &feed.entries[0].content_html,
+        feed.entries[0].link.as_deref(),
+    );
+    assert!(
+        first.html.contains("<strong>content</strong>"),
+        "{}",
+        first.html
+    );
+    assert!(
+        first.html.contains("href=\"https://ok.example/absolute\""),
+        "absolute http(s) links are unaffected:\n{}",
+        first.html
+    );
+    assert!(!first.html.contains("relative/ok"), "{}", first.html);
 }
 
 #[test]

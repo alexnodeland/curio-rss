@@ -19,7 +19,19 @@ const FORBIDDEN_ELEMENTS: &[&str] = &[
 const SCRIPTABLE_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:"];
 
 /// Structural audit of stored (sanitized) HTML: no forbidden elements, no
-/// event-handler or style attributes, http(s)-only URL attributes.
+/// event-handler or style attributes, every other attribute allowlisted and
+/// value-filtered, and URL attributes that a browser resolves to http(s)
+/// (or a prefixed in-page fragment).
+///
+/// "Resolves to" is judged with WHATWG URL parsing, which is what the
+/// desktop webview applies to stored HTML — and what ammonia's own scheme
+/// filter applies, through the `url` crate: leading and trailing C0
+/// controls and spaces are stripped, tabs and newlines removed, and the
+/// scheme is case-insensitive. So `"\u{2}https://x/"` is an https URL to
+/// both and passes, while `"\u{1}javascript:…"` is `javascript:` to both
+/// and fails. A literal-prefix check would flag the first (a false
+/// positive the `content_pipeline` fuzz target found) and say nothing
+/// sound about the second.
 ///
 /// Structural on purpose — a substring scan would false-positive on inert
 /// anchor *text* like "javascript: link", which sanitization correctly
@@ -50,11 +62,13 @@ pub fn audit_html(html: &str) -> Result<(), String> {
                 ));
             }
             if matches!(attr, "href" | "src") {
-                let in_page_fragment = attr == "href"
-                    && value
-                        .strip_prefix("#user-content-")
-                        .is_some_and(is_plain_token);
-                if !(value.starts_with("http://") || value.starts_with("https://"))
+                // A prefixed in-page fragment names the reader's own
+                // document: inert. (The sanitizer keeps one on `img[src]`
+                // too, which loads nothing useful but nothing foreign.)
+                let in_page_fragment = value
+                    .strip_prefix("#user-content-")
+                    .is_some_and(is_plain_token);
+                if !matches!(browser_scheme(value).as_deref(), Some("http" | "https"))
                     && !in_page_fragment
                 {
                     return Err(format!(
@@ -63,13 +77,26 @@ pub fn audit_html(html: &str) -> Result<(), String> {
                 }
             }
             if !value_is_filtered(name, attr, value) {
-                return Err(format!(
-                    "unfiltered {attr} on <{name}>: {value:?}\n{html}"
-                ));
+                return Err(format!("unfiltered {attr} on <{name}>: {value:?}\n{html}"));
             }
         }
     }
     Ok(())
+}
+
+/// The scheme a WHATWG URL parser reads from `value`, lowercased; `None`
+/// for a relative reference (no valid scheme before the first `:`).
+fn browser_scheme(value: &str) -> Option<String> {
+    let cleaned: String = value
+        .trim_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let (scheme, _) = cleaned.split_once(':')?;
+    let mut chars = scheme.chars();
+    let valid = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    valid.then(|| scheme.to_ascii_lowercase())
 }
 
 /// Every attribute the sanitize gate may leave on stored HTML.
@@ -128,11 +155,15 @@ fn value_is_filtered(element: &str, attr: &str, value: &str) -> bool {
 pub fn audit_markdown(markdown: &str) -> Result<(), String> {
     let prose = strip_code(markdown).to_lowercase();
     for (at, _) in prose.match_indices("](") {
-        let destination = prose[at + 2..].trim_start_matches([' ', '<']);
-        if let Some(scheme) = SCRIPTABLE_SCHEMES
-            .iter()
-            .find(|scheme| destination.starts_with(**scheme))
-        {
+        // The destination, read like the scheme of an `href` (see
+        // `browser_scheme`), so `]( java\tscript:…)` cannot slip past.
+        let rest = prose[at + 2..].trim_start_matches(|c: char| c <= ' ' || c == '<');
+        let end = rest.find([')', '>', '\n']).unwrap_or(rest.len());
+        if let Some(scheme) = browser_scheme(&rest[..end]).and_then(|scheme| {
+            SCRIPTABLE_SCHEMES
+                .iter()
+                .find(|listed| listed.strip_suffix(':') == Some(scheme.as_str()))
+        }) {
             return Err(format!(
                 "markdown links to a {scheme} destination:\n{markdown}"
             ));
@@ -175,36 +206,98 @@ pub fn audit_markdown(markdown: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `markdown` with fenced code blocks and inline code spans blanked out.
+/// `markdown` with fenced code blocks and inline code spans blanked out —
+/// exactly what a `CommonMark` renderer reads as code, and nothing more, so
+/// live HTML can never hide behind something that only *looks* like code:
+///
+/// - a fence opens only at 0–3 spaces of indentation (four or more is an
+///   indented code *line*, audited here, never a fence that would hide
+///   every line after it), with three or more of one marker, and closes on
+///   the same marker at least as long, followed by nothing but spaces;
+/// - an inline span opens on a backtick run and closes on the next run of
+///   the *same length*; an unmatched run is literal text, and a
+///   backslash-escaped backtick opens nothing.
+///
+/// Spans are matched within a line, never across lines: a span a renderer
+/// would continue onto the next line is audited as prose instead — a false
+/// positive at worst, never a hiding place.
 fn strip_code(markdown: &str) -> String {
     let mut out = String::with_capacity(markdown.len());
-    let mut fence: Option<&str> = None;
+    let mut fence: Option<(char, usize)> = None;
     for line in markdown.lines() {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"]
-            .into_iter()
-            .find(|marker| trimmed.starts_with(marker));
-        match (fence, marker) {
-            (None, Some(open)) => fence = Some(open),
-            (Some(open), Some(close)) if open == close => fence = None,
-            (None, None) => {
-                // Inline spans: drop everything between paired backticks.
-                // An unpaired backtick opens no span, so that line is
-                // audited whole (never a hiding place).
-                let mut in_span = false;
-                let mut kept = String::with_capacity(line.len());
-                for ch in line.chars() {
-                    if ch == '`' {
-                        in_span = !in_span;
-                    } else if !in_span {
-                        kept.push(ch);
-                    }
+        match fence {
+            Some((marker, len)) => {
+                if fence_run(line).is_some_and(|(close, run, rest)| {
+                    close == marker && run >= len && rest.trim_matches(' ').is_empty()
+                }) {
+                    fence = None;
                 }
-                out.push_str(if in_span { line } else { &kept });
             }
-            _ => {}
+            None => match fence_run(line) {
+                // A backtick fence's info string may not hold a backtick
+                // (such a line is inline spans instead).
+                Some((marker, run, info)) if marker == '~' || !info.contains('`') => {
+                    fence = Some((marker, run));
+                }
+                _ => out.push_str(&strip_spans(line)),
+            },
         }
         out.push('\n');
     }
     out
+}
+
+/// A fence run opening `line`: its marker, its length (three or more) and
+/// the rest of the line. `None` past three spaces of indentation.
+fn fence_run(line: &str) -> Option<(char, usize, &str)> {
+    let body = line.trim_start_matches(' ');
+    if line.len() - body.len() > 3 {
+        return None;
+    }
+    let marker = body.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let run = body.len() - body.trim_start_matches(marker).len();
+    (run >= 3).then(|| (marker, run, &body[run..]))
+}
+
+/// One line with its inline code spans removed (see [`strip_code`]).
+fn strip_spans(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let run_at = |from: usize| bytes[from..].iter().take_while(|&&b| b == b'`').count();
+    let mut kept = String::with_capacity(line.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if byte == b'\\' && bytes.get(at + 1).is_some_and(u8::is_ascii_punctuation) {
+            // An escaped punctuation character is literal — an escaped
+            // backtick opens no span. The escape is kept so the tag check
+            // still reads `\<` as a literal bracket.
+            kept.push_str(&line[at..at + 2]);
+            at += 2;
+        } else if byte == b'`' {
+            let run = run_at(at);
+            let mut from = at + run;
+            let mut close = None;
+            while let Some(offset) = bytes[from..].iter().position(|&b| b == b'`') {
+                let start = from + offset;
+                let len = run_at(start);
+                if len == run {
+                    close = Some(start);
+                    break;
+                }
+                from = start + len;
+            }
+            if let Some(start) = close {
+                at = start + run; // the span, delimiters included, is code
+            } else {
+                kept.push_str(&line[at..at + run]); // unmatched: literal
+                at += run;
+            }
+        } else {
+            let Some(ch) = line[at..].chars().next() else {
+                break;
+            };
+            kept.push(ch);
+            at += ch.len_utf8();
+        }
+    }
+    kept
 }

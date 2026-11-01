@@ -351,6 +351,58 @@ mod tests {
         assert!(out.contains("https://example.com/posts/other"));
     }
 
+    /// Regression for the `feed_parse` fuzz find (#133): ammonia
+    /// scheme-checks absolute URLs only, so a relative URL resolved onto an
+    /// attacker-controlled non-http(s) base (an entry `<link>` of
+    /// `foo://h/`) must be re-checked after resolution — `resolve_http`
+    /// does — or `src="x"` is stored as `foo://h/x`.
+    #[test]
+    fn a_non_http_base_resolves_nothing() {
+        for base in [
+            "httpsupdated://xss.example.com/one",
+            "foo://h/dir/",
+            "ftp://h/dir/",
+            "file:///etc/",
+            "javascript://x/%0aalert(1)",
+        ] {
+            let out = sanitize(
+                "<img src=\"x\" alt=\"kept\"><a href=\"relative/ok\">r</a>\
+                 <a href=\"//cdn.example/p\">p</a><a href=\"https://ok.example/\">a</a>\
+                 <iframe src=\"/embed/xyz\"></iframe><video src=\"v.mp4\"></video>",
+                Some(base),
+            );
+            let scheme = base.split(':').next().unwrap_or(base);
+            assert!(!out.contains(&format!("{scheme}:")), "{base}: {out}");
+            assert!(!out.contains("src="), "{base}: {out}");
+            assert!(!out.contains("relative/ok"), "{base}: {out}");
+            assert!(!out.contains("cdn.example"), "{base}: {out}");
+            assert!(!out.contains("Embedded media"), "{base}: {out}");
+            assert!(
+                out.contains("href=\"https://ok.example/\""),
+                "{base}: {out}"
+            );
+            assert!(out.contains("alt=\"kept\""), "{base}: {out}");
+        }
+    }
+
+    /// The `content_pipeline` fuzz find (#133): a C0 control before the
+    /// scheme. ammonia judges the URL as a browser does (WHATWG parsing
+    /// strips leading C0 controls and spaces, so this *is* https) and
+    /// stores the attribute as written; a C0-disguised `javascript:` is
+    /// still dropped. The inertness audit models the same rule.
+    #[test]
+    fn a_leading_c0_control_is_judged_like_a_browser_would() {
+        let out = sanitize(
+            "<img src=\u{2}https://example.com/cat.jpg\" alt=\"c\">\
+             <a href=\"\u{1}javascript:alert(1)\">j</a>\
+             <a href=\"\u{1f} data:text/html,x\">d</a>",
+            Some("https://example.com/"),
+        );
+        assert!(out.contains("example.com/cat.jpg"), "{out}");
+        assert!(!out.contains("javascript"), "{out}");
+        assert!(!out.contains("data:"), "{out}");
+    }
+
     #[test]
     fn relative_urls_without_a_base_are_dropped() {
         let out = sanitize("<img src=\"/images/x.png\" alt=\"kept\">", None);

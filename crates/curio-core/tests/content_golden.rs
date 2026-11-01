@@ -10,7 +10,7 @@ mod common;
 #[path = "common/inert.rs"]
 mod inert;
 
-use curio_core::content::{plain_text, process, sanitize, to_markdown};
+use curio_core::content::{plain_text, process, process_page, sanitize, to_markdown};
 
 fn pipeline(raw_html: &str) -> String {
     let processed = process(raw_html, Some("https://example.com/posts/current"));
@@ -111,6 +111,53 @@ fn xss_corpus_output_is_inert() {
     // The legitimate content around the attacks survives.
     assert!(markdown.contains("**content**"));
     assert!(markdown.contains("https://example.com/fine"));
+}
+
+/// The `content_pipeline` fuzz target's checks, replayed over every
+/// committed fixture (they are its seed corpus): both pipelines — feed
+/// fragment and full page — store HTML that passes the inertness audit, and
+/// both convert. A fuzz find pinned here as a fixture stays fixed.
+#[test]
+fn every_fixture_passes_the_content_pipeline_fuzz_checks() {
+    const BASE: &str = "https://fuzz.example/posts/current";
+    let dir = common::manifest_dir().join("../../fixtures/html");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let html = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
+        let name = path.display();
+        let fragment = process(&html, Some(BASE));
+        inert::audit_html(&fragment.html).unwrap_or_else(|v| panic!("{name}: fragment: {v}"));
+        let _ = plain_text(&fragment.html);
+        to_markdown(&fragment.html).unwrap();
+        if let Ok(page) = process_page(&html, BASE) {
+            inert::audit_html(&page.content.html)
+                .unwrap_or_else(|v| panic!("{name}: full page: {v}"));
+            to_markdown(&page.content.html).unwrap();
+        }
+    }
+}
+
+/// The first `content_pipeline` fuzz find, pinned: URLs behind C0
+/// controls, tabs and case are judged by the scheme a browser reads.
+#[test]
+fn c0_led_urls_keep_https_and_drop_scriptable_schemes() {
+    let stored = stored_html("c0-control-urls.html");
+    inert::audit_html(&stored).unwrap();
+    for kept in [
+        "example.com/cat.jpg",
+        "example.com/dog.jpg",
+        "HTTPS://example.com/upper",
+    ] {
+        assert!(stored.contains(kept), "lost {kept:?}:\n{stored}");
+    }
+    let lower = stored.to_lowercase();
+    for gone in ["javascript", "java\tscript", "data:"] {
+        assert!(!lower.contains(gone), "{gone:?} survived:\n{stored}");
+    }
+    assert!(
+        stored.contains("a C0-led script link"),
+        "the link text stays: {stored}"
+    );
 }
 
 #[test]

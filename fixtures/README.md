@@ -49,7 +49,9 @@ Current layout:
   1.0/1.1 oddities, `xml:base`, duplicate guids, every kind of bad date,
   media/iTunes namespaces, HTML served as a feed, malformed and truncated
   XML, an entity bomb, stored-XSS payloads (`<script>`, `onerror=`,
-  `javascript:`), and a hostile Reddit listing.
+  `javascript:`), entry links with parseable custom schemes (the content
+  base a feed author controls — `custom-scheme-links.xml`, the first
+  `feed_parse` fuzz find), and a hostile Reddit listing.
   `crates/curio-core/tests/nasty_corpus.rs` pins each file (with
   `feeds/`) to its expected outcome — parses with N entries, or rejected —
   and **a new file here must be added to its `SEEDS` table**
@@ -61,10 +63,14 @@ Current layout:
   seeded mutants. That is why nothing large is committed. Every input must
   end in a classified outcome with no panic, and everything it stores must
   pass the inertness audit (`tests/common/inert.rs`). The same files seed
-  the `fuzz/` targets (`just fuzz`, nightly).
+  the `fuzz/` targets (`just fuzz`, nightly), and a crash a fuzz target
+  finds is pinned back here as a new seed.
 
 - `html/` — article HTML → sanitize → extract → CommonMark cases, pinned to
-  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate
+  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate.
+  They also seed the `content_pipeline` fuzz target, whose checks
+  `content_golden.rs` replays over every file here, so a find pinned as a
+  fixture (`c0-control-urls.html`, the first one) stays fixed
 
 - `import/`, `opml/` — refugee-importer exports and OPML subscription lists
   (`opml/` also seeds the `opml` fuzz target)

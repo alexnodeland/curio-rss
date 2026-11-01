@@ -117,6 +117,15 @@ const URLS: &[&str] = &[
     "data:image/svg+xml,<svg onload=alert(1)>",
     "file:///etc/passwd",
     "mailto:a@b.example",
+    "foo://custom.example/x",
+    // WHATWG strips leading C0 controls and spaces and drops tabs and
+    // newlines before reading the scheme (the `content_pipeline` fuzz find).
+    "\u{2}https://ok.example/c0",
+    "\u{1}javascript:alert(1)",
+    "\u{1f} data:text/html,x",
+    "HTTPS://ok.example/upper",
+    "https:no-slashes.example",
+    "ht\ntps://ok.example/split",
     "",
 ];
 

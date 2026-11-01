@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Regression seed for the first `feed_parse` fuzz find (issue #133): an entry
+  <link> with a parseable, non-http(s) scheme. The link is the base the
+  entry's relative URLs resolve against, and ammonia scheme-checks absolute
+  URLs only — so before the sanitizer re-checked every resolved URL, the
+  relative `src="x"` below was stored as `httpsupdated://xss.example.com/x`,
+  a link to whatever OS protocol handler claims that scheme.
+-->
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Custom-scheme links</title>
+    <link>foo://channel.example/</link>
+    <description>Entry links a feed author controls, used as content bases.</description>
+    <item>
+      <title>The fuzz find</title>
+      <link>httpsupdated://xss.example.com/one</link>
+      <guid>scheme-1</guid>
+      <content:encoded><![CDATA[
+        <p>Fine <strong>content</strong>.</p>
+        <img src="x" alt="relative image">
+        <a href="relative/ok">relative ok</a>
+        <a href="//cdn.example/protocol-relative">protocol-relative</a>
+        <a href="https://ok.example/absolute">absolute ok</a>
+      ]]></content:encoded>
+    </item>
+    <item>
+      <title>Other parseable schemes</title>
+      <link>ftp://files.example/pub/two</link>
+      <guid>scheme-2</guid>
+      <description>&lt;img src="/root.png"&gt;&lt;a href="../up"&gt;up&lt;/a&gt;&lt;iframe src="/embed/xyz"&gt;&lt;/iframe&gt;</description>
+    </item>
+    <item>
+      <title>A scheme with an authority but no handler</title>
+      <link>foo://h/dir/three</link>
+      <guid>scheme-3</guid>
+      <description>&lt;video src="v.mp4"&gt;&lt;/video&gt;&lt;a href="?q=1"&gt;query&lt;/a&gt;&lt;a href="#fn1"&gt;1&lt;/a&gt;</description>
+    </item>
+  </channel>
+</rss>

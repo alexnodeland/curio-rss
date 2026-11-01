@@ -437,6 +437,8 @@ export const en = {
     'refresh.announce.done':
         'Refresh complete: {count, plural, one {# new article} other {# new articles}} across {feeds, plural, one {# feed} other {# feeds}}',
     'refresh.inProgress': 'Refreshing… {done} of {total}',
+    'connectivity.offline': 'Offline',
+    'connectivity.offline.hint': 'No network — background refresh is paused',
 
     'pane.sidebar.resize': 'Resize sidebar',
     'pane.list.resize': 'Resize article list',

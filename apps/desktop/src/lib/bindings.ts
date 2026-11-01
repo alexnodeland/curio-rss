@@ -147,8 +147,10 @@ export const commands = {
 	 *  Refreshes every `active` feed as one core sweep (bounded concurrency),
 	 *  emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
 	 *  end. Pressing refresh while a sweep runs joins it — no feed is fetched
-	 *  twice. A manual refresh resets the background scheduler's interval
-	 *  clock.
+	 *  twice. Any feed answering clears the scheduler's "Offline" verdict right
+	 *  away; a manual refresh resets the background scheduler's interval clock,
+	 *  except one made while offline that reached nothing (the overdue sweep
+	 *  stays due).
 	 */
 	refreshAll: () => typedError<RefreshOutcomeDto[], CommandError>(__TAURI_INVOKE("refresh_all")),
 	/**
@@ -162,6 +164,16 @@ export const commands = {
 	 *  surface.
 	 */
 	recentFetches: (feedId: number, limit: number) => typedError<FetchRecordDto[], CommandError>(__TAURI_INVOKE("recent_fetches", { feedId, limit })),
+	/**
+	 *  Whether the network is up, as far as the frontend's "Offline" badge goes:
+	 *  the scheduler's last connectivity verdict. Online until a probe fails.
+	 * 
+	 *  # Errors
+	 * 
+	 *  Never in practice — the `Result` keeps the generated wrapper on the same
+	 *  typed `{ status, data | error }` shape as every other command.
+	 */
+	connectivityOnline: () => typedError<boolean, CommandError>(__TAURI_INVOKE("connectivity_online")),
 	/**
 	 *  Lists article summaries. Filters and order are backend-owned — the
 	 *  frontend passes them through and never re-filters or re-sorts.
@@ -447,6 +459,7 @@ export const commands = {
 /** Events */
 export const events = {
 	articlesChanged: makeEvent<ArticlesChanged>("articles-changed"),
+	connectivityChanged: makeEvent<ConnectivityChanged>("connectivity-changed"),
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
@@ -578,6 +591,17 @@ export type CommandError = {
 	message: string,
 	/**  Whether retrying the same action can plausibly succeed. */
 	recoverable: boolean,
+};
+
+/**
+ *  The background scheduler's connectivity verdict changed (#123): a probe
+ *  before a scheduled sweep found the network gone — the sweep was skipped,
+ *  so no feed errors were recorded — or back. Drives the "Offline" badge;
+ *  fires on change only, and `connectivity_online` answers the current state.
+ */
+export type ConnectivityChanged = {
+	/**  Whether the network is reachable. */
+	online: boolean,
 };
 
 /**  Doctor-panel database stats. */

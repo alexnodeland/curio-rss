@@ -12,7 +12,10 @@ use super::{SharedCore, run_blocking};
 use crate::discovery::DiscoveryDto;
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
 use crate::error::{CommandError, ErrorCode};
-use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
+use crate::events::{
+    ArticlesChanged, ConnectivityChanged, FeedsChanged, RefreshFinished, RefreshProgress,
+    emit_or_log,
+};
 use crate::refresh_scheduler::RefreshScheduler;
 
 /// Autodiscovers feeds (and a favicon) for what the user typed — a bare
@@ -254,8 +257,10 @@ pub async fn refresh_feed(
 /// Refreshes every `active` feed as one core sweep (bounded concurrency),
 /// emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
 /// end. Pressing refresh while a sweep runs joins it — no feed is fetched
-/// twice. A manual refresh resets the background scheduler's interval
-/// clock.
+/// twice. Any feed answering clears the scheduler's "Offline" verdict right
+/// away; a manual refresh resets the background scheduler's interval clock,
+/// except one made while offline that reached nothing (the overdue sweep
+/// stays due).
 #[tauri::command]
 #[specta::specta]
 pub async fn refresh_all(
@@ -265,7 +270,11 @@ pub async fn refresh_all(
 ) -> Result<Vec<RefreshOutcomeDto>, CommandError> {
     let core = Arc::clone(core.inner());
     let sweep = refresh_all_and_emit(&app, &core).await?;
-    scheduler.mark_refreshed();
+    scheduler
+        .record_manual_refresh(&core, &sweep.finished.outcomes, |online| {
+            emit_or_log(&app, &ConnectivityChanged { online });
+        })
+        .await;
     Ok(sweep.finished.outcomes)
 }
 
@@ -439,7 +448,7 @@ async fn refresh_feed_impl(
 
 /// The sweep itself: core's bounded-concurrency `refresh_all_with`, its
 /// progress mapped to [`RefreshProgress`] events.
-async fn refresh_all_impl(
+pub(crate) async fn refresh_all_impl(
     core: &CoreHandle,
     mut on_progress: impl FnMut(RefreshProgress),
 ) -> Result<Sweep, CommandError> {

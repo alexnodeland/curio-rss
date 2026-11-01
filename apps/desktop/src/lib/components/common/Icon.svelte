@@ -35,7 +35,8 @@ export type IconName =
     | 'circle-dot'
     | 'chevron'
     | 'article'
-    | 'alert';
+    | 'alert'
+    | 'wifi-off';
 </script>
 
 <script lang="ts">
@@ -177,5 +178,11 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
         <path
             d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
         /><path d="M12 9v4" /><path d="M12 17h.01" />
+    {:else if name === 'wifi-off'}
+        <path d="M12 20h.01" /><path d="M8.5 16.43a5 5 0 0 1 7 0" /><path
+            d="M5 12.86a10 10 0 0 1 5.17-2.69"
+        /><path d="M19 12.86a10 10 0 0 0-2-1.52" /><path
+            d="M2 8.82a15 15 0 0 1 4.18-2.64"
+        /><path d="M22 8.82a15 15 0 0 0-11.29-3.76" /><path d="m2 2 20 20" />
     {/if}
 </svg>

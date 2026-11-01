@@ -70,6 +70,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     refreshAll: { args: [], response: [refreshOutcomeFixture()] },
     cancelRefresh: { args: [], response: true },
     recentFetches: { args: [1, 10], response: [fetchRecordFixture()] },
+    connectivityOnline: { args: [], response: true },
     listArticles: {
         args: [
             {

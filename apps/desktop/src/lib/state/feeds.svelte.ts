@@ -48,11 +48,29 @@ function readStringArray(raw: string | undefined): string[] {
 
 /**
  * How long the refresh flag may stay set with no progress before the watchdog
- * force-clears it. Re-armed on every progress event, so it only trips after a
- * genuine stall — the `RefreshFinished` event failing to arrive must never
- * wedge the refresh button disabled forever.
+ * force-clears it. Re-armed on every progress event — a full-text page that
+ * finishes reports one too, so a sweep loading pages past its last feed stays
+ * alive — so it only trips after a genuine stall: the `RefreshFinished` event
+ * failing to arrive must never wedge the refresh button disabled forever.
  */
 const REFRESH_WATCHDOG_MS = 120_000;
+
+/** The DOM id of the sidebar's refresh control — where focus goes back to. */
+export const REFRESH_CONTROL_ID = 'refresh-all';
+
+/** A refresh sweep's running count — "12 of 300", then its full-text pages. */
+export interface RefreshSweepProgress {
+    /** The sweep the count belongs to (counts up per app run). */
+    sweepId: number;
+    /** Feeds finished so far. */
+    done: number;
+    /** Feeds the sweep set out to refresh. */
+    total: number;
+    /** Full-text pages finished so far. */
+    pagesDone: number;
+    /** Full-text pages queued so far — final once `done` reaches `total`. */
+    pagesTotal: number;
+}
 
 export class FeedsStore {
     /** True while a `refresh_all` sweep is in flight. */
@@ -61,8 +79,27 @@ export class FeedsStore {
     /** Per-feed outcomes of the current/last sweep, in refresh order. */
     refreshOutcomes: RefreshOutcomeDto[] = $state([]);
 
+    /**
+     * The sweep in flight's running count, from its latest `RefreshProgress`
+     * — `null` until its first feed finishes, and once it is over.
+     */
+    refreshProgress: RefreshSweepProgress | null = $state(null);
+
+    /** Whether the last sweep was stopped early by `cancelRefresh`. */
+    refreshCancelled: boolean = $state(false);
+
+    /** True between asking to stop the sweep and its `RefreshFinished`. */
+    cancellingRefresh: boolean = $state(false);
+
     /** Backstop timer that clears `refreshing` if no finish/progress arrives. */
     #refreshWatchdog: ReturnType<typeof setTimeout> | undefined;
+
+    /**
+     * The sweep the outcomes belong to. Kept past a settle, so a late event
+     * of the same sweep (after the watchdog gave up on it) adds to its
+     * outcomes rather than wiping them as a new sweep would.
+     */
+    #outcomesSweepId: number | null = null;
 
     /**
      * Folder paths the user has collapsed in the sidebar tree. In-memory and
@@ -432,8 +469,12 @@ export class FeedsStore {
         this.#hiddenFeeds.clear();
         this.#removedFeeds.clear();
         this.#clearRefreshWatchdog();
+        this.#outcomesSweepId = null;
         this.refreshing = false;
         this.refreshOutcomes = [];
+        this.refreshProgress = null;
+        this.refreshCancelled = false;
+        this.cancellingRefresh = false;
     }
 
     /** Subscribes to a feed. Invalidation rides the Rust-emitted event. */
@@ -524,8 +565,8 @@ export class FeedsStore {
     #armRefreshWatchdog(): void {
         this.#clearRefreshWatchdog();
         this.#refreshWatchdog = setTimeout(() => {
-            this.refreshing = false;
             this.#refreshWatchdog = undefined;
+            this.#settleRefresh();
         }, REFRESH_WATCHDOG_MS);
     }
 
@@ -538,17 +579,48 @@ export class FeedsStore {
 
     /** Kicks off the full sweep; progress arrives via events. */
     async refreshAll(): Promise<CommandResult<RefreshOutcomeDto[]>> {
-        this.refreshing = true;
-        this.refreshOutcomes = [];
+        // A request while a sweep runs joins it (the core runs one at a
+        // time) — keep that sweep's progress rather than wiping it.
+        if (!this.refreshing) {
+            this.refreshing = true;
+            this.refreshOutcomes = [];
+            this.refreshProgress = null;
+            this.refreshCancelled = false;
+            this.cancellingRefresh = false;
+        }
         this.#armRefreshWatchdog();
         const result = await commands.refreshAll();
         // `RefreshFinished` normally clears the flag; this covers the
         // command erroring before any event fires.
         if (result.status === 'error') {
-            this.refreshing = false;
-            this.#clearRefreshWatchdog();
+            this.#settleRefresh();
         }
         return result;
+    }
+
+    /**
+     * Asks the core to stop the sweep in flight: no further feed starts and
+     * the fetches in flight are dropped; `RefreshFinished` (marked cancelled)
+     * then settles the progress fields. `cancellingRefresh` shows the stop is
+     * under way until it lands.
+     */
+    async cancelRefresh(): Promise<CommandResult<boolean>> {
+        this.cancellingRefresh = true;
+        const result = await commands.cancelRefresh();
+        // Nothing was running (the sweep just ended) or the call failed:
+        // no finish event is coming for this stop.
+        if (result.status === 'error' || !result.data) {
+            this.cancellingRefresh = false;
+        }
+        return result;
+    }
+
+    /** Clears the in-flight refresh fields (the outcomes stay for the summary). */
+    #settleRefresh(): void {
+        this.refreshing = false;
+        this.refreshProgress = null;
+        this.cancellingRefresh = false;
+        this.#clearRefreshWatchdog();
     }
 
     /**
@@ -558,14 +630,33 @@ export class FeedsStore {
     async wireRefreshEvents(): Promise<() => void> {
         const unlisteners = await Promise.all([
             events.refreshProgress.listen((event) => {
+                const { sweep_id, done, total, pages_done, pages_total, outcome } = event.payload;
+                // A new sweep's progress (the background scheduler starts
+                // sweeps too) never adds to the last sweep's outcomes.
+                if (this.#outcomesSweepId !== sweep_id) {
+                    this.#outcomesSweepId = sweep_id;
+                    this.refreshOutcomes = [];
+                    this.refreshCancelled = false;
+                }
                 this.refreshing = true;
-                this.refreshOutcomes = [...this.refreshOutcomes, event.payload.outcome];
+                this.refreshProgress = {
+                    sweepId: sweep_id,
+                    done,
+                    total,
+                    pagesDone: pages_done,
+                    pagesTotal: pages_total,
+                };
+                // A full-text page's progress carries no feed outcome.
+                if (outcome !== null) {
+                    this.refreshOutcomes = [...this.refreshOutcomes, outcome];
+                }
                 this.#armRefreshWatchdog(); // still alive — push the deadline out
             }),
             events.refreshFinished.listen((event) => {
-                this.refreshing = false;
+                this.#outcomesSweepId = event.payload.sweep_id;
                 this.refreshOutcomes = event.payload.outcomes;
-                this.#clearRefreshWatchdog();
+                this.refreshCancelled = event.payload.cancelled;
+                this.#settleRefresh();
             }),
         ]);
         return () => {

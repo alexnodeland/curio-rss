@@ -108,10 +108,21 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   fail). Each feed's storage reads/writes and its parse → sanitize → ingest run via
   `spawn_blocking`, inside the per-feed locks (they move into the blocking job, so a
   dropped sweep cannot let the next refresh of a feed in while its writes still run),
-  so a large feed never stalls the async runtime (the CLI's is current-thread). The one
-  exception is full-text hydration of a refresh's new articles: `hydrate_article`'s
-  storage calls and readability extraction still run on the runtime, one page at a
-  time, so a full-text feed with many new items still holds it per page.
+  so a large feed never stalls the async runtime (the CLI's is current-thread).
+  Full-text hydration of a refresh's new articles is a separate bounded queue
+  (`handle/hydrate.rs`): a refreshed full-text feed hands its new articles to the
+  sweep's hydration queue and its slot moves on to the next feed, while the pages load
+  `hydrate_concurrency` (default 4) at a time, shared across page hosts the same way
+  (one in flight per paced host). A rate limit or rejected reddit credentials drop the
+  feed's remaining queued pages. `hydrate_article` fetches on the runtime but runs its
+  storage calls, page decode and readability extraction on the blocking pool. The sweep
+  — and `RefreshFinished` — ends once its queued pages are stored; a single-feed
+  `refresh_feed` hydrates through the same queue before it returns. Each finished page
+  reports progress too (`RefreshProgress` with no feed, and a running page count), so a
+  sweep that runs on past its last feed keeps the progress pill ("Loading full text…
+  3 of 12") and its watchdog alive. A cancel races only the page fetches: a page whose
+  fetch is in is extracted and stored before the sweep returns, and a cancel that stops
+  pages after the last feed still marks the sweep cancelled.
 
 ### `ingest/` — sanitize-at-ingest
 

@@ -1,12 +1,19 @@
 <script lang="ts">
 /**
  * Refresh progress + screen-reader announcements. A polite live region
- * announces the start of a sweep and its completion summary (new articles
- * across N feeds); a small visible indicator mirrors it for sighted users.
- * Reads the feeds store's event-driven refresh fields — no polling.
+ * announces the start of a sweep, a stop request, and its completion summary
+ * (new articles across N feeds, or how far a stopped sweep got). A small
+ * visible pill mirrors it for sighted users with the sweep's running count
+ * ("Refreshing… 12 of 300"), a thin progress bar, and a Stop button that
+ * cancels the sweep. Full-text pages load after their feeds, so once every
+ * feed is in and pages are still loading the pill counts those instead
+ * ("Loading full text… 3 of 12"). Reads the feeds store's event-driven
+ * refresh fields — no polling.
  */
+import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { feedsStore } from '$lib/state/feeds.svelte';
+import { REFRESH_CONTROL_ID, feedsStore } from '$lib/state/feeds.svelte';
+import { tick } from 'svelte';
 
 /** How long the completion summary lingers before the pill self-dismisses. */
 const REFRESH_DISMISS_MS = 5000;
@@ -15,6 +22,7 @@ const completed = $derived(feedsStore.refreshOutcomes.length);
 const newArticles = $derived(
     feedsStore.refreshOutcomes.reduce((sum, outcome) => sum + outcome.new_articles, 0),
 );
+const progress = $derived(feedsStore.refreshing ? feedsStore.refreshProgress : null);
 
 // The completion summary used to linger forever (refreshOutcomes persists).
 // A fresh sweep revives the pill; its summary then auto-dismisses.
@@ -24,7 +32,7 @@ $effect(() => {
         dismissed = false;
         return;
     }
-    if (completed === 0 || dismissed) {
+    if ((completed === 0 && !feedsStore.refreshCancelled) || dismissed) {
         return;
     }
     const timer = setTimeout(() => {
@@ -33,21 +41,106 @@ $effect(() => {
     return () => clearTimeout(timer);
 });
 
-const message = $derived(
-    feedsStore.refreshing
-        ? t('refresh.announce.start')
-        : completed > 0 && !dismissed
-          ? t('refresh.announce.done', { count: newArticles, feeds: completed })
-          : '',
+/** The summary of a finished sweep, while it lingers. */
+const summary = $derived(
+    feedsStore.refreshing || dismissed || (completed === 0 && !feedsStore.refreshCancelled)
+        ? ''
+        : t(feedsStore.refreshCancelled ? 'refresh.announce.cancelled' : 'refresh.announce.done', {
+              count: newArticles,
+              feeds: completed,
+          }),
 );
+
+/** What the live region announces: the start, a stop, the summary — never each feed. */
+const announcement = $derived(
+    feedsStore.refreshing
+        ? feedsStore.cancellingRefresh
+            ? t('refresh.cancelling')
+            : t('refresh.announce.start')
+        : summary,
+);
+
+/** Every feed is in and full-text pages are still loading. */
+const loadingPages = $derived(
+    progress !== null &&
+        progress.done >= progress.total &&
+        progress.pagesDone < progress.pagesTotal,
+);
+
+/** The pill's text: the running count once the first feed is in. */
+const label = $derived(
+    !feedsStore.refreshing
+        ? summary
+        : feedsStore.cancellingRefresh
+          ? t('refresh.cancelling')
+          : progress === null
+            ? t('refresh.announce.start')
+            : loadingPages
+              ? t('refresh.loadingFullText', {
+                    done: progress.pagesDone,
+                    total: progress.pagesTotal,
+                })
+              : t('refresh.inProgress', { done: progress.done, total: progress.total }),
+);
+
+const fraction = $derived(
+    progress === null
+        ? 0
+        : loadingPages
+          ? progress.pagesDone / progress.pagesTotal
+          : progress.total > 0
+            ? Math.min(progress.done / progress.total, 1)
+            : 0,
+);
+
+let stopButton: HTMLButtonElement | undefined = $state();
+
+// The Stop button goes once the sweep settles; if it held focus, hand focus
+// to the refresh control rather than dropping it on the page body. Runs
+// before the DOM update, while the button is still there to ask.
+$effect.pre(() => {
+    if (feedsStore.refreshing || stopButton === undefined) {
+        return;
+    }
+    if (document.activeElement === stopButton) {
+        void tick().then(() => document.getElementById(REFRESH_CONTROL_ID)?.focus());
+    }
+});
+
+function stop(): void {
+    // `aria-disabled` keeps the button focusable while the stop lands.
+    if (feedsStore.cancellingRefresh) {
+        return;
+    }
+    void feedsStore.cancelRefresh();
+}
 </script>
 
-<div class="refresh-status" role="status" aria-live="polite">
-    {#if message !== ''}
+<div class="refresh-status">
+    <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
+    {#if label !== ''}
         {#if feedsStore.refreshing}
             <span class="spinner" aria-hidden="true"></span>
         {/if}
-        <span class="message">{message}</span>
+        <div class="pill" class:running={feedsStore.refreshing}>
+            <span class="message">{label}</span>
+            {#if feedsStore.refreshing}
+                <button
+                    class="stop"
+                    type="button"
+                    aria-label={t('refresh.cancel.label')}
+                    use:tooltip={t('refresh.cancel.label')}
+                    aria-disabled={feedsStore.cancellingRefresh}
+                    bind:this={stopButton}
+                    onclick={stop}>{t('refresh.cancel')}</button
+                >
+                <span
+                    class="bar"
+                    aria-hidden="true"
+                    style:transform={`scaleX(${fraction})`}
+                ></span>
+            {/if}
+        </div>
     {/if}
 </div>
 
@@ -63,14 +156,71 @@ const message = $derived(
         pointer-events: none;
     }
 
-    .message {
+    .pill {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
         padding: var(--space-1) var(--space-3);
         border-radius: var(--radius-pill);
         background: var(--surface-overlay);
         border: 1px solid var(--hairline);
+        box-shadow: var(--shadow-md);
+        overflow: hidden;
+    }
+
+    .pill.running {
+        padding-right: var(--space-1);
+    }
+
+    .message {
         color: var(--fg-muted);
         font-size: var(--text-xs);
-        box-shadow: var(--shadow-md);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    .stop {
+        pointer-events: auto;
+        padding: 0 var(--space-2);
+        border: none;
+        border-left: 1px solid var(--hairline);
+        border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+        background: transparent;
+        color: var(--fg-muted);
+        font: inherit;
+        font-size: var(--text-xs);
+        line-height: inherit;
+        cursor: pointer;
+    }
+
+    .stop:hover:not([aria-disabled='true']) {
+        color: var(--fg);
+    }
+
+    .stop:focus-visible {
+        outline: 2px solid var(--accent);
+        /* Inside the button: the pill clips anything past its edge, and the
+           ring stays on through "Stopping…". */
+        outline-offset: -2px;
+    }
+
+    .stop[aria-disabled='true'] {
+        cursor: default;
+        opacity: 0.5;
+    }
+
+    .bar {
+        /* Inset to the pill's straight run, clear of its rounded ends. */
+        position: absolute;
+        left: var(--space-3);
+        right: var(--space-3);
+        bottom: 0;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--accent);
+        transform-origin: left center;
+        transition: transform 0.2s ease-out;
     }
 
     .spinner {
@@ -85,6 +235,10 @@ const message = $derived(
     @media (prefers-reduced-motion: reduce) {
         .spinner {
             animation: none;
+        }
+
+        .bar {
+            transition: none;
         }
     }
 

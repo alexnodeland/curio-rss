@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use curio_core::fetch::FetchConfig;
 use curio_core::model::{FeedId, FetchStatus};
+use curio_core::storage::ListArticles;
 use curio_core::{CoreHandle, CoreOptions, RefreshOptions, SweepReport};
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -61,6 +62,15 @@ fn subscribe_all(core: &CoreHandle, server: &MockServer, paths: &[String]) -> Ve
 
 fn rss() -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_raw(RSS, "application/rss+xml")
+}
+
+/// Sweep options with `feeds` refreshing at once (hydration at its
+/// default).
+fn feeds_at_once(feeds: usize) -> RefreshOptions {
+    RefreshOptions {
+        concurrency: feeds,
+        ..RefreshOptions::default()
+    }
 }
 
 fn count(report: &SweepReport, status: FetchStatus) -> usize {
@@ -117,7 +127,7 @@ async fn hung_hosts_time_out_together_not_one_after_another() {
     let report = core
         .refresh_all_with(RefreshOptions::default(), |step| {
             progress.push((step.sweep_id, step.done, step.total));
-            if step.outcome.status == FetchStatus::Error {
+            if step.outcome.unwrap().status == FetchStatus::Error {
                 hung_done.push(started.elapsed());
             }
         })
@@ -168,7 +178,7 @@ async fn a_feed_removed_mid_sweep_does_not_abort_the_sweep() {
 
     // One at a time, so the removal lands before feed 2 starts.
     let report = core
-        .refresh_many(ids.clone(), RefreshOptions { concurrency: 1 }, |step| {
+        .refresh_many(ids.clone(), feeds_at_once(1), |step| {
             if step.done == 1 {
                 core.remove_feed(ids[2]).unwrap();
             }
@@ -267,7 +277,7 @@ async fn cancel_stops_new_fetches_and_drops_the_ones_in_flight() {
     let started = Instant::now();
     let mut progressed = 0;
     let report = core
-        .refresh_many(ids.clone(), RefreshOptions { concurrency: 2 }, |step| {
+        .refresh_many(ids.clone(), feeds_at_once(2), |step| {
             progressed = step.done;
             // The fast feed is done; the second is stuck on a slow host.
             if step.done == 1 {
@@ -417,27 +427,24 @@ async fn a_joined_request_takes_over_when_the_running_sweep_is_dropped() {
 
 /// A cancel that lands while a refreshed feed's full-text pages are being
 /// fetched drops the page fetch in flight too — the sweep does not wait
-/// out a slow article host. The feed itself was refreshed, so it keeps
-/// its outcome; the feed after it never starts.
+/// out a slow article host — and the feed refreshing alongside it (the
+/// hydration does not hold the feed's slot). The full-text feed itself was
+/// refreshed, so it keeps its outcome; the slow feed was abandoned, and
+/// the feed after it never starts.
 #[tokio::test]
 async fn cancel_drops_a_full_text_page_fetch_in_flight() {
     let server = MockServer::start().await;
-    let mut items = String::new();
-    for i in 0..3 {
-        write!(
-            items,
-            "<item><title>Post {i}</title><link>{}/page/{i}</link>\
-             <guid>urn:p:{i}</guid><description>excerpt {i}</description></item>",
-            server.uri()
-        )
-        .unwrap();
-    }
-    let feed = format!(
-        r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Full</title>{items}</channel></rss>"#
-    );
+    Mock::given(method("GET"))
+        .and(path("/f/1.xml"))
+        .respond_with(rss().set_delay(Duration::from_secs(20)))
+        .mount(&server)
+        .await;
     Mock::given(method("GET"))
         .and(path_regex("^/f/"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(feed, "application/rss+xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(full_text_feed(&server, 3), "application/rss+xml"),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -451,25 +458,26 @@ async fn cancel_drops_a_full_text_page_fetch_in_flight() {
         .await;
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path(), Duration::from_secs(30));
-    let paths: Vec<String> = (0..2).map(|i| format!("/f/{i}.xml")).collect();
+    let paths: Vec<String> = (0..3).map(|i| format!("/f/{i}.xml")).collect();
     let ids = subscribe_all(&core, &server, &paths);
     core.set_feed_full_text(ids[0], true).unwrap();
 
     let started = Instant::now();
-    let (report, ()) = tokio::join!(
-        core.refresh_many(ids.clone(), RefreshOptions { concurrency: 1 }, |_| {}),
-        async {
-            // Cancel once the first article page is being fetched.
-            loop {
-                let requests = server.received_requests().await.unwrap();
-                if requests.iter().any(|r| r.url.path().starts_with("/page/")) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    let options = RefreshOptions {
+        concurrency: 1,
+        hydrate_concurrency: 1,
+    };
+    let (report, ()) = tokio::join!(core.refresh_many(ids.clone(), options, |_| {}), async {
+        // Cancel once the first article page is being fetched.
+        loop {
+            let requests = server.received_requests().await.unwrap();
+            if requests.iter().any(|r| r.url.path().starts_with("/page/")) {
+                break;
             }
-            assert!(core.cancel_refresh());
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    );
+        assert!(core.cancel_refresh());
+    });
 
     assert!(
         started.elapsed() < Duration::from_secs(10),
@@ -488,9 +496,103 @@ async fn cancel_drops_a_full_text_page_fetch_in_flight() {
         .count();
     assert_eq!(pages, 1, "hydration stopped at the cancel");
     assert!(
-        requests.iter().all(|r| r.url.path() != "/f/1.xml"),
-        "the second feed never started"
+        core.recent_fetches(ids[1], 10).unwrap().is_empty(),
+        "the slow feed was abandoned"
     );
+    assert!(
+        requests.iter().all(|r| r.url.path() != "/f/2.xml"),
+        "the third feed never started"
+    );
+}
+
+/// Hydration is a queue of its own: a full-text feed's slow pages never
+/// hold its feed slot — with one feed at a time, the next feeds are
+/// refreshed while they load — and they load at the hydration budget,
+/// not one by one and not all at once. The sweep returns once they are
+/// stored.
+#[tokio::test]
+async fn full_text_pages_hydrate_in_their_own_bounded_queue() {
+    const PAGE_DELAY: Duration = Duration::from_millis(1000);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/full.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(full_text_feed(&server, 6), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/plain/"))
+        .respond_with(rss())
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/page/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(article_page(20), "text/html")
+                .set_delay(PAGE_DELAY),
+        )
+        .expect(6)
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path(), Duration::from_secs(30));
+    let paths = vec![
+        "/full.xml".to_owned(),
+        "/plain/0.xml".to_owned(),
+        "/plain/1.xml".to_owned(),
+    ];
+    let ids = subscribe_all(&core, &server, &paths);
+    core.set_feed_full_text(ids[0], true).unwrap();
+
+    let started = Instant::now();
+    let mut finished_at = Vec::new();
+    let mut page_steps = Vec::new();
+    let options = RefreshOptions {
+        concurrency: 1,
+        hydrate_concurrency: 3,
+    };
+    let report = core
+        .refresh_many(ids.clone(), options, |step| {
+            if step.outcome.is_some() {
+                finished_at.push(started.elapsed());
+            } else {
+                page_steps.push((step.done, step.total, step.pages_done, step.pages_total));
+            }
+        })
+        .await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(count(&report, FetchStatus::Ok), 3, "{report:#?}");
+    assert!(!report.cancelled);
+    // Every feed was refreshed before the first page came back.
+    assert_eq!(finished_at.len(), 3);
+    // Each page reports as it finishes, after the last feed did, so a
+    // sweep running on for its pages still shows signs of life.
+    assert_eq!(
+        page_steps,
+        (1..=6).map(|page| (3, 3, page, 6)).collect::<Vec<_>>()
+    );
+    assert!(
+        finished_at.iter().all(|at| *at < PAGE_DELAY),
+        "the pages held the feed slot: {finished_at:?}"
+    );
+    // Six pages, three at a time: two rounds of the page delay.
+    assert!(
+        elapsed >= PAGE_DELAY * 2,
+        "more than three pages loaded at once: {elapsed:?}"
+    );
+    assert!(
+        elapsed < PAGE_DELAY * 5,
+        "the pages loaded one by one: {elapsed:?}"
+    );
+    let hydrated = all_articles(&core)
+        .into_iter()
+        .filter(|article| article.content.text.contains("genuine article body"))
+        .count();
+    assert_eq!(hydrated, 6, "the sweep returned once its pages were stored");
 }
 
 /// A cancel that lands after every feed finished stopped nothing: the
@@ -516,4 +618,241 @@ async fn a_cancel_after_the_last_feed_stops_nothing() {
         .await;
     assert_eq!(count(&report, FetchStatus::Ok), 3);
     assert!(!report.cancelled, "{report:#?}");
+}
+
+/// A full-text feed whose `count` items link to `/page/{i}` on `server`.
+fn full_text_feed(server: &MockServer, count: usize) -> String {
+    let links: Vec<String> = (0..count).map(|i| format!("/page/{i}")).collect();
+    feed_linking(server, &links)
+}
+
+/// A feed whose items link to `links` on `server`, in that order.
+fn feed_linking(server: &MockServer, links: &[String]) -> String {
+    let mut items = String::new();
+    for (i, link) in links.iter().enumerate() {
+        write!(
+            items,
+            "<item><title>Post {i}</title><link>{}{link}</link>\
+             <guid>urn:p:{i}</guid><description>excerpt {i}</description></item>",
+            server.uri()
+        )
+        .unwrap();
+    }
+    format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Full</title>{items}</channel></rss>"#
+    )
+}
+
+/// An article page whose main content readability picks out.
+fn article_page(paragraphs: usize) -> String {
+    let body = "<p>A substantial paragraph of the genuine article body, written with \
+                enough <strong>real</strong> sentences and <a href=\"/more\">a link</a> \
+                that a readability scorer prefers this region over the chrome.</p>"
+        .repeat(paragraphs);
+    format!(
+        "<html><head><title>Post</title></head><body><nav>Home · About</nav>\
+         <article><h1>Headline</h1>{body}</article><footer>© footer</footer></body></html>"
+    )
+}
+
+/// Every stored article, newest first.
+fn all_articles(core: &CoreHandle) -> Vec<curio_core::model::Article> {
+    core.list_articles(ListArticles {
+        limit: 1000,
+        ..ListArticles::default()
+    })
+    .unwrap()
+}
+
+/// Full-text hydration's page extraction and storage writes run off the
+/// async runtime: on a current-thread runtime (the CLI's) a timer keeps
+/// ticking while a full-text feed's large pages are extracted.
+#[tokio::test(flavor = "current_thread")]
+async fn full_text_hydration_keeps_a_current_thread_runtime_responsive() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/full.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(full_text_feed(&server, 4), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/page/"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(article_page(1500), "text/html"))
+        .expect(4)
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path(), Duration::from_secs(30));
+    let ids = subscribe_all(&core, &server, &["/full.xml".to_owned()]);
+    core.set_feed_full_text(ids[0], true).unwrap();
+
+    let longest_gap = Arc::new(Mutex::new(Duration::ZERO));
+    let ticker = {
+        let longest_gap = Arc::clone(&longest_gap);
+        tokio::spawn(async move {
+            loop {
+                let before = Instant::now();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                let gap = before.elapsed();
+                let mut longest = longest_gap.lock().unwrap();
+                *longest = (*longest).max(gap);
+            }
+        })
+    };
+    let started = Instant::now();
+    let outcome = core.refresh_feed(ids[0]).await.unwrap();
+    let took = started.elapsed();
+    // Let the ticker take the tick that was due during the refresh.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    ticker.abort();
+
+    assert_eq!(outcome.new_articles, 4, "{outcome:?}");
+    let articles = all_articles(&core);
+    assert_eq!(articles.len(), 4);
+    assert!(
+        articles
+            .iter()
+            .all(|article| article.content.text.contains("genuine article body")),
+        "every article was hydrated before the refresh returned"
+    );
+    let longest = *longest_gap.lock().unwrap();
+    assert!(
+        longest < Duration::from_millis(250),
+        "the timer stalled for {longest:?} during a {took:?} full-text refresh"
+    );
+}
+
+/// A cancel that lands after the last feed, while its full-text pages are
+/// still loading, stops them — and the report says it was cancelled, even
+/// though every feed has its outcome.
+#[tokio::test]
+async fn a_cancel_while_pages_load_marks_the_sweep_cancelled() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/full.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(full_text_feed(&server, 3), "application/rss+xml"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/page/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(article_page(20), "text/html")
+                .set_delay(Duration::from_secs(20)),
+        )
+        .mount(&server)
+        .await;
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path(), Duration::from_secs(30));
+    let ids = subscribe_all(&core, &server, &["/full.xml".to_owned()]);
+    core.set_feed_full_text(ids[0], true).unwrap();
+
+    let started = Instant::now();
+    let options = RefreshOptions {
+        concurrency: 1,
+        hydrate_concurrency: 1,
+    };
+    let mut steps = Vec::new();
+    let sweep = core.refresh_many(ids.clone(), options, |step| {
+        steps.push((
+            step.outcome.is_some(),
+            step.done,
+            step.total,
+            step.pages_done,
+            step.pages_total,
+        ));
+    });
+    let (report, ()) = tokio::join!(sweep, async {
+        // Cancel once the feed is in and its first page is being fetched.
+        loop {
+            let requests = server.received_requests().await.unwrap();
+            if requests.iter().any(|r| r.url.path().starts_with("/page/")) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(core.cancel_refresh());
+    });
+
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(count(&report, FetchStatus::Ok), 1, "{report:#?}");
+    assert!(report.cancelled, "the pages were stopped: {report:#?}");
+    // The feed, then its page in flight, dropped; the other two never
+    // started.
+    assert_eq!(steps, [(true, 1, 1, 0, 3), (false, 1, 1, 1, 3)]);
+    let requests = server.received_requests().await.unwrap();
+    let pages = requests
+        .iter()
+        .filter(|r| r.url.path().starts_with("/page/"))
+        .count();
+    assert_eq!(pages, 1, "hydration stopped at the cancel");
+}
+
+/// A full-text feed blocked upstream — a reddit rate limit, or reddit
+/// refusing the request outright — drops its other queued pages: the
+/// first post's answer stands for them all, so none of them is fetched.
+#[cfg(feature = "enrich-reddit")]
+#[tokio::test]
+async fn a_feed_blocked_upstream_drops_its_queued_pages() {
+    for status in [429, 403] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/full.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                feed_linking(
+                    &server,
+                    &[
+                        "/r/rust/comments/blocked1/title/".to_owned(),
+                        "/page/0".to_owned(),
+                        "/page/1".to_owned(),
+                    ],
+                ),
+                "application/rss+xml",
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/r/rust/comments/blocked1/title.json"))
+            .respond_with(ResponseTemplate::new(status).insert_header("retry-after", "120"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // Neither the post's HTML nor the feed's other pages are fetched.
+        Mock::given(method("GET"))
+            .and(path_regex("^/(page/|r/rust/comments/blocked1/title/$)"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(article_page(20), "text/html"))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let profile = tempfile::tempdir().unwrap();
+        let core = open_core(profile.path(), Duration::from_secs(30));
+        let ids = subscribe_all(&core, &server, &["/full.xml".to_owned()]);
+        core.set_feed_full_text(ids[0], true).unwrap();
+
+        // One page at a time, so the reddit post's answer is in before
+        // the feed's other pages could start.
+        let options = RefreshOptions {
+            concurrency: 1,
+            hydrate_concurrency: 1,
+        };
+        let mut last = None;
+        let report = core
+            .refresh_many(ids, options, |step| {
+                last = Some((step.pages_done, step.pages_total));
+            })
+            .await;
+
+        assert_eq!(count(&report, FetchStatus::Ok), 1, "{report:#?}");
+        assert_eq!(report.outcomes[0].new_articles, 3);
+        assert!(!report.cancelled);
+        // The dropped pages count as finished.
+        assert_eq!(last, Some((3, 3)), "HTTP {status}");
+        server.verify().await;
+    }
 }

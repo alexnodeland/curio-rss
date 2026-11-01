@@ -429,6 +429,12 @@ export const es: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         'Actualización completa: {count, plural, one {# artículo nuevo} other {# artículos nuevos}} en {feeds, plural, one {# feed} other {# feeds}}',
     'refresh.inProgress': 'Actualizando… {done} de {total}',
+    'refresh.loadingFullText': 'Cargando texto completo… {done} de {total}',
+    'refresh.announce.cancelled':
+        'Actualización detenida: {count, plural, one {# artículo nuevo} other {# artículos nuevos}} de {feeds, plural, one {# feed} other {# feeds}}',
+    'refresh.cancel': 'Detener',
+    'refresh.cancel.label': 'Detener la actualización',
+    'refresh.cancelling': 'Deteniendo…',
     'connectivity.offline': 'Sin conexión',
     'connectivity.offline.hint': 'Sin red: actualización automática en pausa',
     'pane.sidebar.resize': 'Redimensionar barra lateral',

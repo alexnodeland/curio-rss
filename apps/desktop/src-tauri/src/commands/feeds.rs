@@ -536,8 +536,10 @@ pub(crate) async fn refresh_all_impl(
                 sweep_id: step.sweep_id,
                 done: count(step.done),
                 total: count(step.total),
-                feed_id: step.outcome.feed_id.0,
-                outcome: step.outcome.clone().into(),
+                pages_done: count(step.pages_done),
+                pages_total: count(step.pages_total),
+                feed_id: step.outcome.map(|outcome| outcome.feed_id.0),
+                outcome: step.outcome.cloned().map(Into::into),
             });
         })
         .await?;
@@ -551,7 +553,8 @@ pub(crate) async fn refresh_all_impl(
     })
 }
 
-/// A feed count for the wire (saturating — no profile has 4 billion feeds).
+/// A feed or page count for the wire (saturating — no profile has 4
+/// billion feeds).
 fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
@@ -972,7 +975,7 @@ mod tests {
                 progress.done,
                 progress.total,
                 progress.feed_id,
-                progress.outcome.status,
+                progress.outcome.map(|outcome| outcome.status),
             ));
         })
         .await
@@ -986,12 +989,72 @@ mod tests {
         assert_eq!(outcomes[0].new_articles, 1);
         assert_eq!(
             progressed,
-            vec![(sweep.finished.sweep_id, 1, 1, active.id, FetchStatusDto::Ok)]
+            vec![(
+                sweep.finished.sweep_id,
+                1,
+                1,
+                Some(active.id),
+                Some(FetchStatusDto::Ok)
+            )]
         );
 
         let records = recent_fetches_impl(&core, active.id, 10).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].status, FetchStatusDto::Ok);
+    }
+
+    /// A full-text feed's pages report progress of their own after the
+    /// feed's: no feed, no outcome, the page count moving on.
+    #[tokio::test]
+    async fn refresh_all_reports_full_text_pages_after_their_feed() {
+        let server = MockServer::start().await;
+        let feed = format!(
+            r#"<?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+<item><guid>g1</guid><title>One</title><link>{}/page/1</link><description>first</description></item>
+</channel></rss>"#,
+            server.uri()
+        );
+        serve(&server, "/full.xml", feed).await;
+        Mock::given(method("GET"))
+            .and(path("/page/1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw("<html><body><p>page</p></body></html>", "text/html"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let (_dir, core) = temp_core_trusting_localhost();
+        let full = add_feed_impl(
+            &core,
+            NewFeed {
+                url: format!("{}/full.xml", server.uri()),
+                title: None,
+                tags: vec![],
+            },
+        )
+        .unwrap();
+        set_feed_full_text_impl(&core, full.id, true).unwrap();
+
+        let mut progressed = Vec::new();
+        refresh_all_impl(&core, |progress| {
+            progressed.push((
+                progress.done,
+                progress.total,
+                progress.pages_done,
+                progress.pages_total,
+                progress.feed_id,
+                progress.outcome.is_some(),
+            ));
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            progressed,
+            vec![(1, 1, 0, 1, Some(full.id), true), (1, 1, 1, 1, None, false)]
+        );
+        server.verify().await;
     }
 
     /// A refresh pressed while a sweep runs joins it: one fetch per feed,

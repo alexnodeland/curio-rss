@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- URLs as real exporters write them: the feed: pseudo-scheme (both
+     spellings), whitespace padding, and near-duplicate spellings of one
+     feed that must collapse to a single subscription. -->
+<opml version="2.0">
+  <head><title>feed-scheme</title></head>
+  <body>
+    <outline type="rss" text="Feed scheme" xmlUrl="feed://scheme.example/rss.xml"/>
+    <outline type="rss" text="Feed wrapped" xmlUrl="FEED:https://wrapped.example/atom"/>
+    <outline type="rss" text="Padded" xmlUrl="
+        https://padded.example/feed.xml   "/>
+    <outline type="rss" text="Plain" xmlUrl="https://same.example"/>
+    <outline type="rss" text="Same, shouted" xmlUrl="HTTPS://SAME.example:443/"/>
+    <outline type="rss" text="Same, padded" xmlUrl="  https://same.example/  "/>
+    <outline type="rss" text="Not http" xmlUrl="ftp://files.example/feed.xml"/>
+    <outline type="rss" text="Not a URL" xmlUrl="just some words"/>
+  </body>
+</opml>

@@ -304,6 +304,8 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'import.running': '正在导入…',
     'import.done':
         '已导入 {feeds, plural, other {# 个订阅源}}和 {articles, plural, other {# 篇文章}}，跳过 {skipped, plural, other {#}} 个',
+    'import.doneWithInvalid':
+        '已导入 {feeds, plural, other {# 个订阅源}}和 {articles, plural, other {# 篇文章}}，跳过 {skipped, plural, other {#}} 个，忽略 {invalid, plural, other {# 个无效条目}}',
     'import.hint':
         'OPML 导入订阅源；Pocket、Instapaper 和 Readwise 的 CSV 会将保存的文章连同标签一起作为稍后阅读项导入。',
     'doctor.title': '数据库诊断',

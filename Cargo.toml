@@ -41,6 +41,9 @@ clap = { version = "4", features = ["derive", "env"] }
 csv = "1.3"
 directories = "6"
 dom_smoothie = "0.18"
+# Import-file decoding (Latin-1 OPML, UTF-16 CSV). Already in the graph via
+# quick-xml and reqwest.
+encoding_rs = "0.8"
 ego-tree = "0.11"
 feed-rs = "2"
 # Advisory cross-process file locks (flock / LockFileEx): the per-destination

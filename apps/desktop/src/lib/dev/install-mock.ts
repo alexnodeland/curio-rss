@@ -344,13 +344,36 @@ tokens:
                 case 'export_text_file':
                     return null;
                 case 'import_opml':
-                    return { added: 4, skipped: 1 };
+                    return { added: 4, skipped: 1, invalid: 0 };
                 case 'import_file':
+                    // A CSV source plays the messy-export path (rows with
+                    // unusable URLs are counted, not fatal); OPML stays clean.
+                    if (args.source !== 'opml') {
+                        return {
+                            feeds_added: 0,
+                            feeds_skipped: 0,
+                            feeds_invalid: 0,
+                            articles_added: 12,
+                            articles_skipped: 3,
+                            articles_invalid: 2,
+                            rejected: [
+                                {
+                                    kind: 'article',
+                                    reason: 'unsupported_scheme',
+                                    detail: 'javascript:void(0)',
+                                },
+                                { kind: 'article', reason: 'invalid_url', detail: 'n/a' },
+                            ],
+                        };
+                    }
                     return {
                         feeds_added: 4,
                         feeds_skipped: 1,
+                        feeds_invalid: 0,
                         articles_added: 12,
                         articles_skipped: 0,
+                        articles_invalid: 0,
+                        rejected: [],
                     };
                 case 'export_opml':
                     return null;

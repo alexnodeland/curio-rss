@@ -321,6 +321,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'import.running': 'Wird importiert…',
     'import.done':
         '{feeds, plural, one {# Feed} other {# Feeds}} und {articles, plural, one {# Artikel} other {# Artikel}} importiert, {skipped, plural, other {#}} übersprungen',
+    'import.doneWithInvalid':
+        '{feeds, plural, one {# Feed} other {# Feeds}} und {articles, plural, one {# Artikel} other {# Artikel}} importiert, {skipped, plural, other {#}} übersprungen; {invalid, plural, one {# ungültiger Eintrag} other {# ungültige Einträge}} ignoriert',
     'import.hint':
         'OPML bringt Feed-Abonnements ein; Pocket-, Instapaper- und Readwise-CSVs bringen gespeicherte Artikel als „Später lesen“-Einträge mit ihren Tags ein.',
     'doctor.title': 'Datenbank-Doctor',

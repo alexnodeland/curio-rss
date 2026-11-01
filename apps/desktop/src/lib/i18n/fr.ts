@@ -323,6 +323,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'import.running': 'Importation…',
     'import.done':
         '{feeds, plural, one {# flux} other {# flux}} et {articles, plural, one {# article} other {# articles}} importés, {skipped, plural, one {# ignoré} other {# ignorés}}',
+    'import.doneWithInvalid':
+        '{feeds, plural, one {# flux} other {# flux}} et {articles, plural, one {# article} other {# articles}} importés, {skipped, plural, one {# ignoré} other {# ignorés}} ; {invalid, plural, one {# entrée invalide écartée} other {# entrées invalides écartées}}',
     'import.hint':
         'Les fichiers OPML importent les abonnements aux flux ; les CSV de Pocket, Instapaper et Readwise importent les articles enregistrés comme éléments à lire plus tard, avec leurs étiquettes.',
     'doctor.title': 'Diagnostic de la base de données',

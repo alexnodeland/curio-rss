@@ -48,6 +48,7 @@ mod write;
 
 pub use manifest::{load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
+pub use write::write_file_atomic;
 
 use std::path::{Path, PathBuf};
 

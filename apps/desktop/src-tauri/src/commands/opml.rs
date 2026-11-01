@@ -1,11 +1,15 @@
 //! OPML + refugee (Pocket / Instapaper / Readwise) import, and OPML
 //! export. Rust does the file IO; every path arrives as a
 //! [`crate::ipc_policy`] token from a Rust-side dialog pick — never a raw
-//! string.
+//! string. Import files are read through the core's size-capped,
+//! encoding-detecting reader (Latin-1 OPML, UTF-16 CSV); the export lands
+//! atomically, so a failed write never truncates the user's previous file.
 
 use std::path::Path;
 use std::sync::Arc;
 
+use curio_core::export::write_file_atomic;
+use curio_core::import::read_import_file;
 use curio_core::{CoreHandle, ImportSource};
 use tauri::{AppHandle, State};
 
@@ -75,7 +79,7 @@ pub async fn export_opml(
 // ------------------------------------------------------------------ impls
 
 fn import_opml_impl(core: &CoreHandle, path: &Path) -> Result<OpmlImportOutcomeDto, CommandError> {
-    let xml = std::fs::read_to_string(path).map_err(|error| {
+    let xml = read_import_file(path).map_err(|error| {
         CommandError::user(
             ErrorCode::Io,
             format!("could not read the OPML file: {error}"),
@@ -90,7 +94,7 @@ fn import_file_impl(
     path: &Path,
     source: ImportSource,
 ) -> Result<ImportOutcomeDto, CommandError> {
-    let content = std::fs::read_to_string(path).map_err(|error| {
+    let content = read_import_file(path).map_err(|error| {
         CommandError::user(
             ErrorCode::Io,
             format!("could not read the import file: {error}"),
@@ -102,7 +106,7 @@ fn import_file_impl(
 
 fn export_opml_impl(core: &CoreHandle, path: &Path) -> Result<(), CommandError> {
     let xml = core.export_opml()?;
-    std::fs::write(path, xml).map_err(|error| {
+    write_file_atomic(path, xml.as_bytes()).map_err(|error| {
         CommandError::user(
             ErrorCode::Io,
             format!("could not write the OPML file: {error}"),
@@ -117,6 +121,7 @@ mod tests {
 
     use super::*;
     use crate::commands::testutil::temp_core;
+    use crate::dto::{ImportKindDto, ImportRejectReasonDto};
     use crate::error::ErrorKind;
 
     const OPML: &str = r#"<?xml version="1.0"?>
@@ -165,6 +170,83 @@ mod tests {
         let copy = dir2.path().join("copy.opml");
         std::fs::write(&copy, &written).unwrap();
         assert_eq!(import_opml_impl(&core2, &copy).unwrap().added, 2);
+    }
+
+    #[test]
+    fn export_over_an_existing_file_replaces_it_whole() {
+        let (dir, core) = temp_core();
+        let source = dir.path().join("in.opml");
+        std::fs::write(&source, OPML).unwrap();
+        import_opml_impl(&core, &source).unwrap();
+
+        // A previous, longer export is replaced whole, and the head's
+        // temp-file-then-rename leaves no stray behind. (That a *failed*
+        // write keeps the previous file is proven in curio-core, through
+        // the `write_file_atomic_with` seam — a plain truncating write
+        // would pass this test too.)
+        let out = dir.path().join("out.opml");
+        std::fs::write(&out, "x".repeat(64 * 1024)).unwrap();
+        export_opml_impl(&core, &out).unwrap();
+        let written = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(written, core.export_opml().unwrap());
+        let strays = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".curio-tmp-")
+            })
+            .count();
+        assert_eq!(strays, 0, "no temp file left behind");
+    }
+
+    #[test]
+    fn a_failed_export_is_a_user_error_and_writes_nothing() {
+        let (dir, core) = temp_core();
+        let out = dir.path().join("no-such-folder").join("out.opml");
+        let error = export_opml_impl(&core, &out).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::User);
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn latin1_opml_and_utf16_csv_files_import() {
+        let (dir, core) = temp_core();
+        let latin1 = dir.path().join("latin1.opml");
+        std::fs::write(
+            &latin1,
+            b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><opml><body>\
+              <outline text=\"Caf\xE9\" xmlUrl=\"feed://cafe.test/rss\"/>\
+              <outline text=\"Cal\" xmlUrl=\"webcal://cal.test/x.ics\"/></body></opml>",
+        )
+        .unwrap();
+        let outcome = import_opml_impl(&core, &latin1).unwrap();
+        assert_eq!((outcome.added, outcome.invalid), (1, 1));
+        let feeds = core.list_feeds().unwrap();
+        assert_eq!(feeds[0].url, "https://cafe.test/rss");
+        assert_eq!(feeds[0].title.as_deref(), Some("Café"));
+
+        let csv = dir.path().join("excel.csv");
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend(
+            "url,title\nhttps://a.test/x,Été\njavascript:void(0),Bad\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        );
+        std::fs::write(&csv, bytes).unwrap();
+        let outcome = import_file_impl(&core, &csv, ImportSource::PocketCsv).unwrap();
+        assert_eq!(outcome.articles_added, 1);
+        assert_eq!(outcome.articles_invalid, 1);
+        assert_eq!(outcome.rejected.len(), 1);
+        assert_eq!(
+            outcome.rejected[0].reason,
+            ImportRejectReasonDto::UnsupportedScheme
+        );
+        assert_eq!(outcome.rejected[0].kind, ImportKindDto::Article);
+        assert_eq!(outcome.rejected[0].detail, "javascript:void(0)");
     }
 
     #[test]

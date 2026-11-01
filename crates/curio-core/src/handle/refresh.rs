@@ -14,11 +14,11 @@ use crate::feeds::ParsedEntry;
 use crate::fetch::{FetchConfig, FetchError, FetchRequest, FetchResponse};
 use crate::lock::{FileLock, FileLockGuard, LockError};
 use crate::model::{
-    ArticleContent, ArticleId, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus,
-    NewArticle,
+    ArticleContent, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus, NewArticle,
 };
 use crate::storage::Storage;
 
+use super::hydrate::{DEFAULT_HYDRATE_CONCURRENCY, Hydration};
 use super::sweep::{RefreshCancel, until_cancelled};
 use super::{CoreError, CoreHandle, LOCKS_DIR, RefreshOutcome};
 
@@ -28,15 +28,14 @@ impl CoreHandle {
     /// (recorded, validators preserved), not errors; only storage-level
     /// failures surface as `Err`.
     ///
-    /// The refresh itself keeps off the async runtime it is awaited on:
-    /// its storage reads and writes, the feed parse and the CPU-heavy
-    /// sanitize pipeline run on the blocking pool, so a large feed never
-    /// stalls that runtime (a current-thread runtime keeps its timers
-    /// ticking). One part still runs on the runtime: with full-text mode
-    /// on, the articles the refresh inserted are then hydrated one by one
-    /// through [`Self::hydrate_article`], whose storage calls and
-    /// readability extraction are synchronous — a full-text feed with
-    /// many new items still holds the runtime for each page it extracts.
+    /// The refresh keeps off the async runtime it is awaited on: its
+    /// storage reads and writes, the feed parse and the CPU-heavy sanitize
+    /// pipeline run on the blocking pool, so a large feed never stalls
+    /// that runtime (a current-thread runtime keeps its timers ticking).
+    /// With full-text mode on, the articles the refresh inserted are then
+    /// hydrated from their pages, [`DEFAULT_HYDRATE_CONCURRENCY`] at a
+    /// time (fairly across their hosts), before the call returns — their
+    /// readability extraction and writes run on the blocking pool too.
     ///
     /// Refreshes of the **same feed are serialized**, across processes
     /// too: concurrent callers in this process queue on a per-feed mutex,
@@ -60,30 +59,35 @@ impl CoreHandle {
     /// [`CoreError::Io`] when the lock file cannot be created;
     /// [`CoreError::Panicked`] when the ingest pipeline panics.
     pub async fn refresh_feed(&self, id: FeedId) -> Result<RefreshOutcome, CoreError> {
-        let outcome = self.refresh_feed_until(id, None).await?;
         // Only a cancel signal abandons a refresh, and none was given.
-        Ok(outcome.unwrap_or_else(|| RefreshOutcome {
-            feed_id: id,
-            status: FetchStatus::Error,
-            http_status: None,
-            new_articles: 0,
-            updated_articles: 0,
-            error: Some("refresh cancelled".to_owned()),
-            error_kind: None,
-        }))
+        let Some(refreshed) = self.refresh_feed_until(id, None).await? else {
+            return Ok(RefreshOutcome {
+                feed_id: id,
+                status: FetchStatus::Error,
+                http_status: None,
+                new_articles: 0,
+                updated_articles: 0,
+                error: Some("refresh cancelled".to_owned()),
+                error_kind: None,
+            });
+        };
+        self.hydrate_all(refreshed.hydrate, DEFAULT_HYDRATE_CONCURRENCY)
+            .await;
+        Ok(refreshed.outcome)
     }
 
-    /// [`Self::refresh_feed`], abandoned early once `cancel` fires: a
-    /// fetch still in flight is dropped — nothing is recorded, the stored
-    /// validators stay as they were, and the result is `None` (an
-    /// abandoned refresh has no outcome). Once the fetch is in, the
-    /// refresh settles as usual; its full-text hydration stops at once,
-    /// an in-flight page fetch included.
+    /// The fetch-and-settle half of [`Self::refresh_feed`], abandoned
+    /// early once `cancel` fires: a fetch still in flight is dropped —
+    /// nothing is recorded, the stored validators stay as they were, and
+    /// the result is `None` (an abandoned refresh has no outcome). Once
+    /// the fetch is in, the refresh settles as usual. The full-text
+    /// hydrations it queues are the caller's to run (a sweep runs them in
+    /// its own bounded queue, so they never hold a feed's slot).
     pub(super) async fn refresh_feed_until(
         &self,
         id: FeedId,
         cancel: Option<&RefreshCancel>,
-    ) -> Result<Option<RefreshOutcome>, CoreError> {
+    ) -> Result<Option<Refreshed>, CoreError> {
         // Unknown feeds fail before a lock file is minted for them.
         if self
             .on_blocking_pool(move |storage| Ok(storage.get_feed(id)?))
@@ -97,22 +101,22 @@ impl CoreHandle {
         // this future is dropped (a sweep given up on) while they run.
         let serialized = self.refresh_lock(id).lock_owned().await;
         let Some(across_processes) = self.refresh_file_lock(id).await? else {
-            return Ok(Some(not_fetched(
+            return Ok(Some(Refreshed::alone(not_fetched(
                 id,
                 FetchErrorKind::Busy,
                 "another Curio process is still refreshing this feed — skipped",
-            )));
+            ))));
         };
         let feed = self
             .on_blocking_pool(move |storage| Ok(storage.get_feed(id)?))
             .await?
             .ok_or(CoreError::NotFound { entity: "feed" })?;
         if feed.status == FeedStatus::Dead {
-            return Ok(Some(not_fetched(
+            return Ok(Some(Refreshed::alone(not_fetched(
                 id,
                 FetchErrorKind::Gone,
                 "feed is dead (HTTP 410) — refusing to fetch",
-            )));
+            ))));
         }
 
         let started = Instant::now();
@@ -144,14 +148,14 @@ impl CoreHandle {
             // adoption staged a removed/added pair — flush it now.
             self.emit();
         }
-        // Full-text mode's refresh hook: hydrate the articles this refresh
-        // *inserted* (never the whole backlog) from their source pages,
-        // outside the per-feed locks (the blocking job released them).
-        // Best-effort per article — a dead page keeps its feed excerpt, and
-        // hydrate_article's never-clobber guard already protects feeds that
-        // ship full content.
-        self.hydrate_batch(settled.hydrate_pending, cancel).await;
-        Ok(Some(settled.outcome))
+        // Full-text mode's refresh hook: the articles this refresh
+        // *inserted* (never the whole backlog) are queued for hydration
+        // from their source pages, outside the per-feed locks (the
+        // blocking job released them).
+        Ok(Some(Refreshed {
+            outcome: settled.outcome,
+            hydrate: settled.hydrate_pending,
+        }))
     }
 
     /// Runs a storage job on the blocking pool, off the async runtime.
@@ -172,37 +176,6 @@ impl CoreHandle {
                 };
                 tracing::error!(%message, "a blocking engine task failed");
                 Err(CoreError::Panicked { message })
-            }
-        }
-    }
-
-    /// Hydrates the articles a refresh just inserted (full-text mode),
-    /// best-effort per article. A rate-limit error stops the whole batch
-    /// — every remaining hydrate would fail the same way; the articles
-    /// keep their feed excerpts and a later manual load-full picks them
-    /// up. So does a cancelled sweep, at once: the page fetch in flight is
-    /// dropped (a hydrate writes nothing before its fetch is in).
-    async fn hydrate_batch(&self, pending: Vec<ArticleId>, cancel: Option<&RefreshCancel>) {
-        for article_id in pending {
-            let Some(hydrated) = until_cancelled(cancel, self.hydrate_article(article_id)).await
-            else {
-                break;
-            };
-            match hydrated {
-                Ok(_) => {}
-                Err(CoreError::RateLimited { .. } | CoreError::RedditAuth { .. }) => {
-                    // Deterministic for every remaining article in the
-                    // batch — stop now rather than grind through it.
-                    tracing::warn!("full-text hydrate blocked upstream; stopping the batch");
-                    break;
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        article = %article_id,
-                        %err,
-                        "full-text hydrate failed; keeping the feed excerpt"
-                    );
-                }
             }
         }
     }
@@ -244,6 +217,27 @@ impl CoreHandle {
                 Ok(None)
             }
             Err(LockError::Io(source)) => Err(io(source)),
+        }
+    }
+}
+
+/// A settled feed refresh: its outcome plus the full-text hydrations it
+/// queued.
+#[derive(Debug)]
+pub(super) struct Refreshed {
+    /// The outcome, already recorded in the fetch log.
+    pub(super) outcome: RefreshOutcome,
+    /// The articles the refresh inserted, to hydrate from their pages
+    /// (empty unless the feed has full-text mode on).
+    pub(super) hydrate: Vec<Hydration>,
+}
+
+impl Refreshed {
+    /// An outcome with nothing to hydrate.
+    fn alone(outcome: RefreshOutcome) -> Self {
+        Self {
+            outcome,
+            hydrate: Vec::new(),
         }
     }
 }
@@ -295,7 +289,7 @@ struct Settled {
     outcome: RefreshOutcome,
     /// The rows the upsert *inserted* — the full-text hydration queue
     /// (empty unless the feed has full-text mode on).
-    hydrate_pending: Vec<ArticleId>,
+    hydrate_pending: Vec<Hydration>,
     /// A permanent redirect was adopted: feed events are staged.
     url_adopted: bool,
 }
@@ -326,7 +320,7 @@ fn settle(
     // path — error, 304, 410, unparseable body. Only a successfully
     // *parsed* 2xx adopts the response's validators (the sketch
     // clobbered them on any failure).
-    let mut hydrate_pending: Vec<ArticleId> = Vec::new();
+    let mut hydrate_pending: Vec<Hydration> = Vec::new();
     let mut url_adopted = false;
     let outcome = match fetched {
         Err(err) => {
@@ -439,7 +433,7 @@ fn ingest_parsed(
     // link-less entry has no page of its own (its source URL is the
     // feed's — see `ingest_entry`), so it is never queued: hydrating it
     // would fetch the feed XML as if it were an article.
-    let fresh_keys: Vec<String> = if feed.fetch_full_text {
+    let fresh: Vec<(String, String)> = if feed.fetch_full_text {
         articles
             .iter()
             .filter(|article| !is_feed_own_url(&article.source_url, feed))
@@ -450,16 +444,20 @@ fn ingest_parsed(
                     .flatten()
                     .is_none()
             })
-            .map(|article| article.dedupe_key.clone())
+            .map(|article| (article.dedupe_key.clone(), article.source_url.clone()))
             .collect()
     } else {
         Vec::new()
     };
     let upserted = storage.upsert_articles(articles)?;
-    let mut hydrate_pending = Vec::with_capacity(fresh_keys.len());
-    for key in &fresh_keys {
-        if let Some(article_id) = storage.article_id_by_dedupe_key(Some(id), key)? {
-            hydrate_pending.push(article_id);
+    let mut hydrate_pending = Vec::with_capacity(fresh.len());
+    for (key, url) in fresh {
+        if let Some(article_id) = storage.article_id_by_dedupe_key(Some(id), &key)? {
+            hydrate_pending.push(Hydration {
+                feed_id: id,
+                article_id,
+                url,
+            });
         }
     }
     storage.update_feed_metadata(

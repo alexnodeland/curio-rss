@@ -5,6 +5,12 @@
  * body. Reads ride the query cache (invalidated by the Rust-emitted
  * events); displaying an article marks it read, idempotently, core-side.
  *
+ * The toolbar and header stay mounted across j/k: while a body is still
+ * loading, the header renders from the list row already in hand
+ * (`selectionStore.selectedArticle`) over a body skeleton, and the bodies of
+ * the neighbouring rows are prefetched so the next step usually lands on a
+ * cached article.
+ *
  * Keyboard: the scroll body is a focusable region. Enter / → in the list
  * (`selectionStore.focusReader`) moves focus here, ← / Esc hand it back, and
  * Space / Shift+Space page it (the shell's global keys, via
@@ -33,13 +39,16 @@ import {
     toggleReadLater,
     toggleStar,
 } from '$lib/state/actions';
+import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
 import Icon from '$components/common/Icon.svelte';
+import Skeleton from '$components/common/Skeleton.svelte';
 import { dismissable } from '$lib/actions/dismissable';
 import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
@@ -53,6 +62,18 @@ const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: Mess
     { ids: ['nav.focusReader'], label: 'reader.hint.read' },
     { ids: ['help.toggle'], label: 'reader.hint.help' },
 ];
+
+/**
+ * What the header needs — carried by both the full `ArticleDto` and the list
+ * row's `ArticleSummaryDto`, so the header can render before the body lands.
+ */
+type ReaderHead = Pick<
+    ArticleDto,
+    'id' | 'feed_id' | 'title' | 'source_url' | 'author' | 'published_at' | 'word_count'
+>;
+
+/** Body placeholder line widths: a few paragraphs of ragged prose. */
+const BODY_SKELETON = ['100%', '96%', '98%', '72%', '', '100%', '94%', '88%', '97%', '54%'];
 
 /** A stable per-feed hue for the monogram chip, derived from the title. */
 function feedHue(label: string): number {
@@ -162,11 +183,21 @@ async function hydrate(articleId: number): Promise<void> {
  * on the initial null and show "missing"). The helpers below only *read* the
  * already-created query, so every template reaction tracks its fields.
  */
+const selectedId = $derived(selectionStore.selectedArticleId);
+
 const articleQuery = $derived.by(() => {
-    const articleId = selectionStore.selectedArticleId;
+    const articleId = selectedId;
     return articleId === null
         ? null
         : ensureQuery(queryKeys.article(articleId), () => commands.getArticle(articleId));
+});
+
+/** The selected article's flags, created outside the template (see above). */
+const stateQuery = $derived.by(() => {
+    const articleId = selectedId;
+    return articleId === null
+        ? null
+        : ensureQuery(queryKeys.articleState(articleId), () => commands.getArticleState(articleId));
 });
 
 function article(): ArticleDto | null {
@@ -186,18 +217,16 @@ function failureMessage(): string {
     return error === null ? '' : commandErrorMessage(error);
 }
 
-function flags(): ArticleStateDto | null {
-    const articleId = selectionStore.selectedArticleId;
-    if (articleId === null) {
-        return null;
-    }
-    return (
-        ensureQuery(queryKeys.articleState(articleId), () => commands.getArticleState(articleId))
-            .data ?? null
-    );
+/** The header source: the full article once loaded, else the list row. */
+function head(): ReaderHead | null {
+    return article() ?? selectionStore.selectedArticle;
 }
 
-function currentFeed(current: ArticleDto): FeedDto | null {
+function flags(): ArticleStateDto | null {
+    return stateQuery?.data ?? null;
+}
+
+function currentFeed(current: Pick<ReaderHead, 'feed_id'>): FeedDto | null {
     const feedId = current.feed_id;
     if (feedId === null) {
         return null;
@@ -205,7 +234,7 @@ function currentFeed(current: ArticleDto): FeedDto | null {
     return feedsStore.feeds.find((candidate) => candidate.id === feedId) ?? null;
 }
 
-function feedTitle(current: ArticleDto): string | null {
+function feedTitle(current: Pick<ReaderHead, 'feed_id'>): string | null {
     const feed = currentFeed(current);
     if (feed === null) {
         return null;
@@ -225,7 +254,44 @@ $effect(() => {
     }
 });
 
-function openSource(event: MouseEvent, current: ArticleDto): void {
+// Prefetch the neighbours' bodies once the selected one has loaded and the
+// selection has sat still for `PREFETCH_SETTLE_MS` — every step restarts the
+// wait (the effect's cleanup cancels it), so a held j creates no neighbour
+// fetches for rows it only passes through, cached or not. What leaves the range
+// is dropped at once, without waiting. Centred on the selection, or on its last
+// position when it left the window (archived out of the view). No selection
+// evicts every prefetched body.
+$effect(() => {
+    const articleId = selectedId;
+    if (articleId === null) {
+        articlePrefetcher.prefetch([], null);
+        return;
+    }
+    const items = articlesStore.activeItems;
+    const index = selectionStore.selectedIndex;
+    const center = index >= 0 ? index : Math.min(selectionStore.lastPresentIndex, items.length - 1);
+    const ids = neighbourIds(items, center, articleId);
+    articlePrefetcher.retain(ids, articleId);
+    if (articleQuery?.loaded !== true) {
+        return;
+    }
+    const timer = setTimeout(() => articlePrefetcher.prefetch(ids, articleId), PREFETCH_SETTLE_MS);
+    return () => clearTimeout(timer);
+});
+
+/**
+ * The selection whose body skeleton was shown — set as it renders, so the body
+ * that later lands over it gets its own fade (`.landing`), while a body
+ * straight from cache rides the scroll body's switch fade only.
+ */
+let skeletonSelection = $state<number | null>(null);
+$effect(() => {
+    if (selectedId !== null && articleQuery !== null && articleQuery.data == null) {
+        skeletonSelection = selectedId;
+    }
+});
+
+function openSource(event: MouseEvent, current: ReaderHead): void {
     event.preventDefault();
     void openInBrowser(current.id, current.source_url);
 }
@@ -234,7 +300,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
 <svelte:window onfocusin={onWindowFocusIn} />
 
 <div class="reader">
-    {#if selectionStore.selectedArticleId === null}
+    {#if selectedId === null}
         <EmptyState icon="sparkle" title={t('reader.empty')}>
             {#snippet hint()}
                 {#each HINT as part, index (part.label)}
@@ -256,25 +322,26 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         </EmptyState>
     {:else}
         {@const current = article()}
-        {#if current === null}
-            {#if failure() !== null}
-                <!-- No article to preserve: the load itself failed. -->
-                <div class="reader-status">
-                    <p class="error" role="alert">{failureMessage()}</p>
-                </div>
-            {:else}
-                <div class="reader-status">
-                    <p>{articleLoaded() ? t('reader.missing') : t('app.loading')}</p>
-                </div>
-            {/if}
+        {@const header = head()}
+        {#if current === null && failure() !== null}
+            <!-- No article to preserve: the load itself failed. -->
+            <div class="reader-status">
+                <p class="error" role="alert">{failureMessage()}</p>
+            </div>
+        {:else if current === null && articleLoaded()}
+            <div class="reader-status">
+                <p>{t('reader.missing')}</p>
+            </div>
         {:else}
-            {#if failure() !== null}
+            {#if current !== null && failure() !== null}
                 <!-- Stale-while-revalidate: a refetch failed but the article is
                      still in hand — keep showing it under a non-destructive
                      banner instead of blanking a populated reader (parity with
                      the article list's refetch banner). -->
                 <p class="reader-banner" role="alert">{failureMessage()}</p>
             {/if}
+            <!-- Mounted for the whole selection — including while the body is
+                 still loading — so j/k never unmounts it or resets its state. -->
             <div class="reader-toolbar" role="toolbar" aria-label={t('reader.toolbar')}>
                 <button
                     class="tool"
@@ -285,7 +352,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         text: flags()?.read === true ? t('reader.action.markUnread') : t('reader.action.markRead'),
                         kbd: shortcutKbd('article.toggleRead'),
                     }}
-                    onclick={() => void toggleRead(current.id)}
+                    onclick={() => void toggleRead(selectedId)}
                 >
                     <Icon name="check" />
                 </button>
@@ -298,7 +365,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         text: flags()?.starred === true ? t('reader.action.unstar') : t('reader.action.star'),
                         kbd: shortcutKbd('article.toggleStar'),
                     }}
-                    onclick={() => void toggleStar(current.id)}
+                    onclick={() => void toggleStar(selectedId)}
                 >
                     <Icon name={flags()?.starred === true ? 'star-filled' : 'star'} />
                 </button>
@@ -311,7 +378,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         text: flags()?.read_later === true ? t('reader.action.readLaterRemove') : t('reader.action.readLater'),
                         kbd: shortcutKbd('article.toggleReadLater'),
                     }}
-                    onclick={() => void toggleReadLater(current.id)}
+                    onclick={() => void toggleReadLater(selectedId)}
                 >
                     <Icon name="bookmark" />
                 </button>
@@ -324,7 +391,7 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                         text: flags()?.archived === true ? t('reader.action.unarchive') : t('reader.action.archive'),
                         kbd: shortcutKbd('article.toggleArchived'),
                     }}
-                    onclick={() => void toggleArchived(current.id)}
+                    onclick={() => void toggleArchived(selectedId)}
                 >
                     <Icon name="archive" />
                 </button>
@@ -376,26 +443,32 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                 </div>
                 <button
                     class="tool"
-                    disabled={hydrating}
+                    disabled={hydrating || current === null}
                     aria-busy={hydrating}
                     aria-label={t('reader.action.loadFull')}
                     use:tooltip={t('reader.action.loadFull')}
-                    onclick={() => void hydrate(current.id)}
+                    onclick={() => void hydrate(selectedId)}
                 >
                     <Icon name="article" />
                 </button>
                 <button
                     class="tool"
+                    disabled={header === null}
                     aria-label={t('reader.action.openInBrowser')}
                     use:tooltip={t('reader.action.openInBrowser')}
-                    onclick={() => void openInBrowser(current.id, current.source_url)}
+                    onclick={() => {
+                        if (header !== null) {
+                            void openInBrowser(selectedId, header.source_url);
+                        }
+                    }}
                 >
                     <Icon name="external" />
                 </button>
             </div>
-            <!-- Key on the article id so switching articles remounts the scroll
-                 body at the top instead of inheriting the previous scroll offset. -->
-            {#key current.id}
+            <!-- Key on the selection so switching articles remounts the
+                 scroll body at the top instead of inheriting the previous scroll
+                 offset; the body landing within one selection does not. -->
+            {#key selectedId}
             <!-- A focusable region named by the article title: Tab, a click,
                  or Enter / → from the list land here, so the platform's native
                  key scrolling works; ← / Esc hand the keyboard back. A focusable
@@ -407,7 +480,8 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
             <div
                 class="reader-scroll"
                 role="region"
-                aria-labelledby="reader-title-{current.id}"
+                aria-labelledby={header !== null ? `reader-title-${selectedId}` : undefined}
+                aria-label={header === null ? t('app.loading') : undefined}
                 tabindex="0"
                 data-reading-theme={typographyStore.readingTheme}
                 bind:this={scrollBody}
@@ -425,42 +499,67 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
                     style:letter-spacing="{typographyStore.letterSpacing}em"
                     style:--para-spacing={typographyStore.paragraphSpacing}
                 >
-                    <header class="reader-header">
-                        {#if feedTitle(current) !== null}
-                            {@const label = feedTitle(current) ?? ''}
-                            <div class="reader-kicker">
-                                <span
-                                    class="feed-mono"
-                                    style:--mono-hue={feedHue(label)}
-                                    aria-hidden="true">{label.slice(0, 1).toUpperCase()}</span
-                                >
-                                <span class="feed-name">{label}</span>
-                            </div>
-                        {/if}
-                        <h1 class="reader-title" id="reader-title-{current.id}">
-                            <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
-                            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-                            <a href={current.source_url} onclick={(event) => openSource(event, current)}>
-                                {current.title}
-                            </a>
-                        </h1>
-                        <p class="reader-meta">
-                            {#if current.author !== null}
-                                <span>{current.author}</span>
+                    {#if header !== null}
+                        <header class="reader-header">
+                            {#if feedTitle(header) !== null}
+                                {@const label = feedTitle(header) ?? ''}
+                                <div class="reader-kicker">
+                                    <span
+                                        class="feed-mono"
+                                        style:--mono-hue={feedHue(label)}
+                                        aria-hidden="true">{label.slice(0, 1).toUpperCase()}</span
+                                    >
+                                    <span class="feed-name">{label}</span>
+                                </div>
                             {/if}
-                            {#if current.published_at !== null}
-                                {@const published = formatIntlDateTime(new Date(current.published_at))}
-                                {#if published !== ''}
-                                    <span>{published}</span>
+                            <h1 class="reader-title" id="reader-title-{selectedId}">
+                                <!-- external URL: the click is intercepted and routed to the URL-scoped opener -->
+                                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                                <a href={header.source_url} onclick={(event) => openSource(event, header)}>
+                                    {header.title}
+                                </a>
+                            </h1>
+                            <p class="reader-meta">
+                                {#if header.author !== null}
+                                    <span>{header.author}</span>
                                 {/if}
-                            {/if}
-                            {#if current.word_count !== null}
-                                <span>{t('reader.meta.words', { count: current.word_count })}</span>
-                            {/if}
-                        </p>
-                        <ArticleTags articleId={current.id} />
-                    </header>
-                    <ViewModeDispatch article={current} feed={currentFeed(current)} />
+                                {#if header.published_at !== null}
+                                    {@const published = formatIntlDateTime(new Date(header.published_at))}
+                                    {#if published !== ''}
+                                        <span>{published}</span>
+                                    {/if}
+                                {/if}
+                                {#if header.word_count !== null}
+                                    <span>{t('reader.meta.words', { count: header.word_count })}</span>
+                                {/if}
+                            </p>
+                            <ArticleTags articleId={header.id} />
+                        </header>
+                    {:else}
+                        <!-- Selected outside the loaded window: no row to
+                             borrow the header from yet. -->
+                        <div class="reader-header header-skeleton" aria-hidden="true">
+                            <Skeleton width="30%" height="0.85rem" />
+                            <Skeleton width="85%" height="1.6rem" />
+                            <Skeleton width="45%" height="0.85rem" />
+                        </div>
+                    {/if}
+                    {#if current !== null}
+                        <div class="reader-body" class:landing={skeletonSelection === selectedId}>
+                            <ViewModeDispatch article={current} feed={currentFeed(current)} />
+                        </div>
+                    {:else}
+                        <div class="body-skeleton" aria-busy="true">
+                            {#each BODY_SKELETON as width, line (line)}
+                                {#if width === ''}
+                                    <span class="paragraph-gap"></span>
+                                {:else}
+                                    <Skeleton {width} height="0.8em" />
+                                {/if}
+                            {/each}
+                            <span class="sr-only">{t('app.loading')}</span>
+                        </div>
+                    {/if}
                 </article>
             </div>
             {/key}
@@ -579,6 +678,52 @@ function openSource(event: MouseEvent, current: ArticleDto): void {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
+        /* A short fade on every article switch (the scroll body is keyed on
+           the selection), so j/k reads as a cross-fade rather than a hard
+           cut. A body already in cache mounts with it and rides this fade
+           alone — stacking a second one would multiply the opacities. */
+        animation: reader-fade-in var(--dur-fast) var(--ease);
+    }
+
+    /* A body that lands over its skeleton, later in the same selection,
+       fades in on its own. */
+    .reader-body.landing {
+        animation: reader-fade-in var(--dur-base) var(--ease);
+    }
+
+    @keyframes reader-fade-in {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    /* The global reduced-motion rule already collapses durations; stop the
+       fades outright too so nothing even flickers. */
+    @media (prefers-reduced-motion: reduce) {
+        .reader-scroll,
+        .reader-body.landing {
+            animation: none;
+        }
+    }
+
+    /* Loading placeholders shaped like the content they stand in for. */
+    .header-skeleton {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    .body-skeleton {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6em;
+    }
+
+    .paragraph-gap {
+        height: 0.6em;
     }
 
     /* Space / Shift+Space page with a glide, unless motion is reduced. */

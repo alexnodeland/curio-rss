@@ -229,6 +229,28 @@ impl PolicedClient {
         })
     }
 
+    /// The politeness delay requests under `host_override` (or none) are
+    /// spaced by.
+    fn politeness_delay(&self, host_override: Option<&HostOverride>) -> Duration {
+        host_override
+            .and_then(|entry| entry.politeness_delay)
+            .unwrap_or(self.config.politeness_delay)
+    }
+
+    /// The host key requests to `raw_url` are paced under — `None` when
+    /// no politeness delay applies to its host (or it is no valid URL).
+    /// A second fetch to a paced host sleeps out the delay before it
+    /// sends anything, so a refresh sweep keeps one fetch per paced host
+    /// in flight instead of parking its other slots in that host's
+    /// politeness queue.
+    pub(crate) fn paced_host(&self, raw_url: &str) -> Option<String> {
+        let url = Url::parse(raw_url).ok()?;
+        if self.politeness_delay(self.override_for(&url)).is_zero() {
+            return None;
+        }
+        url.host_str().map(str::to_owned)
+    }
+
     /// Performs one policed GET: validate → resolve → check policy →
     /// politeness → request → (re-validated) redirects → capped body read.
     ///
@@ -453,9 +475,7 @@ impl PolicedClient {
     /// (so concurrent fetches to one host queue up honestly), then sleeps
     /// out its own wait without holding the lock.
     async fn be_polite(&self, url: &Url, host_override: Option<&HostOverride>) {
-        let delay = host_override
-            .and_then(|entry| entry.politeness_delay)
-            .unwrap_or(self.config.politeness_delay);
+        let delay = self.politeness_delay(host_override);
         if delay.is_zero() {
             return;
         }
@@ -562,6 +582,36 @@ mod tests {
     fn screen_accepts_plain_http_and_https() {
         assert!(screen_url("http://example.com/feed.xml").is_ok());
         assert!(screen_url("https://example.com:8443/feed.xml").is_ok());
+    }
+
+    #[test]
+    fn paced_hosts_are_the_ones_a_politeness_delay_applies_to() {
+        let client = PolicedClient::default();
+        // The 500 ms default paces every host; the key is the host alone.
+        assert_eq!(
+            client
+                .paced_host("https://Example.com:8443/feed.xml")
+                .as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            client
+                .paced_host("https://old.reddit.com/r/rust/.rss")
+                .as_deref(),
+            Some("old.reddit.com")
+        );
+        assert_eq!(client.paced_host("not a url"), None);
+
+        // No default delay: only the overridden host is paced.
+        let client = PolicedClient::new(FetchConfig {
+            politeness_delay: Duration::ZERO,
+            ..FetchConfig::default()
+        });
+        assert_eq!(client.paced_host("https://example.com/feed.xml"), None);
+        assert_eq!(
+            client.paced_host("https://www.reddit.com/.rss").as_deref(),
+            Some("www.reddit.com")
+        );
     }
 
     #[test]

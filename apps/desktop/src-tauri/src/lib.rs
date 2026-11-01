@@ -57,6 +57,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::feeds::reorder_feeds,
             commands::feeds::refresh_feed,
             commands::feeds::refresh_all,
+            commands::feeds::cancel_refresh,
             commands::feeds::recent_fetches,
             refresh_scheduler::connectivity_online,
             // articles

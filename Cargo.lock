@@ -1106,6 +1106,7 @@ dependencies = [
  "feed-rs",
  "flate2",
  "fs4",
+ "futures-util",
  "htmd",
  "icu_normalizer",
  "insta",

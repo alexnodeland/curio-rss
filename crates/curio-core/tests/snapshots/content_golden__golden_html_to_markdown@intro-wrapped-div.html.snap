@@ -1,0 +1,10 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/intro-wrapped-div.html
+---
+A one-line intro that sits outside the body wrapper.
+
+The main body lives inside a wrapper div, as many feed generators emit it. This paragraph is long enough that the wrapper outscores the bare intro.
+
+A second body paragraph keeps the wrapper firmly in the lead.

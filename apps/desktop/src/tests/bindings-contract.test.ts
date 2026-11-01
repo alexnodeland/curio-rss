@@ -23,11 +23,14 @@ import {
     fetchRecordFixture,
     importOutcomeFixture,
     installIpcHarness,
+    legacyProfileFixture,
     opmlImportOutcomeFixture,
     pathTokenFixture,
+    recoveryOutcomeFixture,
     refreshOutcomeFixture,
     rejectWith,
     saveOutcomeFixture,
+    startupFailureFixture,
     unreadCountsFixture,
 } from './ipc-harness';
 
@@ -153,6 +156,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     vacuumDb: { args: [], response: null },
     dbStats: { args: [], response: dbStatsFixture() },
     sweepEventRetention: { args: [], response: ['2026-03-01.jsonl'] },
+    legacyProfiles: { args: [], response: [legacyProfileFixture()] },
     getCachedImage: {
         args: ['https://example.org/img.png'],
         response: '/cache/curio/images/abc123',
@@ -163,6 +167,15 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     pickThemeExportPath: { args: [], response: pathTokenFixture() },
     pickThemeImportFile: { args: [], response: pathTokenFixture() },
     pickDestinationRoot: { args: [], response: pathTokenFixture() },
+    getStartupFailure: { args: [], response: startupFailureFixture() },
+    retryStartup: {
+        args: [],
+        response: recoveryOutcomeFixture({ failure: startupFailureFixture(), set_aside: null }),
+    },
+    restoreStartupBackup: { args: [], response: recoveryOutcomeFixture() },
+    startFreshProfile: { args: [], response: recoveryOutcomeFixture() },
+    revealProfileFolder: { args: [], response: null },
+    quitApp: { args: [], response: null },
 };
 
 /** The wire name every wrapper must invoke: strict snake_case of its own. */

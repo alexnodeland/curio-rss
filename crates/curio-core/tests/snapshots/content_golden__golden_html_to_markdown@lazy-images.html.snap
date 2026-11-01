@@ -1,0 +1,24 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/lazy-images.html
+---
+# Lazy-loaded images must survive
+
+A WordPress-style lazy loader: a data: placeholder in src, the real URL in data-src, and a noscript fallback beside it.
+
+![from data-src](https://example.com/uploads/data-src.jpg)
+
+A rocket-loader style data-lazy-src, behind an http spacer:
+
+![from data-lazy-src](https://cdn.example.com/lazy-src.png)
+
+Only a responsive srcset, CDN commas and all; the widest candidate wins:
+
+![from srcset](https://cdn.example.com/w_1200,h_900/srcset.jpg)
+
+A placeholder whose only real source is the noscript fallback:
+
+![from noscript](https://cdn.example.com/noscript.webp)
+
+And an ordinary image, untouched: ![plain](https://cdn.example.com/plain.png)

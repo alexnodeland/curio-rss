@@ -64,6 +64,41 @@ fn a_garbage_database_is_refused_with_a_clear_message() {
     );
 }
 
+/// #112: a profile inside a synced folder is refused, untouched, until
+/// the user opts in with the flag or the environment variable.
+#[test]
+fn a_profile_in_a_synced_folder_needs_an_explicit_override() {
+    let synced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(synced.path().join(".stfolder")).unwrap();
+    let profile = synced.path().join("curio");
+    curio(&profile)
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is on a Syncthing folder"))
+        .stderr(predicate::str::contains("CURIO_ALLOW_NETWORK_FS"));
+    assert!(
+        !profile.join("curio.db").exists(),
+        "refused before creating"
+    );
+
+    curio(&profile)
+        .args(["init", "--allow-network-fs"])
+        .assert()
+        .success();
+    assert!(profile.join("curio.db").is_file());
+    curio(&profile)
+        .arg("doctor")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is on a Syncthing folder"));
+    curio(&profile)
+        .arg("doctor")
+        .env("CURIO_ALLOW_NETWORK_FS", "1")
+        .assert()
+        .success();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
     clippy::too_many_lines,
@@ -801,4 +836,134 @@ fn failures_are_helpful_and_nonzero() {
             .success(),
     );
     assert_eq!(tail.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn a_missing_profile_is_refused_with_an_init_hint() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("nonexistent");
+    curio(&missing)
+        .arg("list")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no curio profile at"))
+        .stderr(predicate::str::contains("run `curio init`"));
+    assert!(
+        !missing.exists(),
+        "a refused command must not create the profile"
+    );
+
+    // An existing directory that holds no database is not a profile either.
+    let empty = root.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    curio(&empty)
+        .args(["feed", "list"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run `curio init`"));
+    assert!(!empty.join("curio.db").exists());
+
+    // `init` is the one command that creates it; afterwards the rest work.
+    curio(&missing).arg("init").assert().success();
+    curio(&missing).arg("list").assert().success();
+}
+
+#[test]
+fn doctor_names_an_explicit_profile_as_such() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    let doctor = stdout_json(
+        &curio(profile.path())
+            .args(["doctor", "--json"])
+            .assert()
+            .success(),
+    );
+    let checks = doctor["checks"].as_array().unwrap();
+    let detail = checks.iter().find(|c| c["name"] == "profile").unwrap()["detail"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(detail.contains(&profile.path().display().to_string()));
+    assert!(detail.contains("--profile"), "{detail}");
+    // Legacy locations only matter for the default profile.
+    assert!(checks.iter().all(|c| c["name"] != "legacy-profile"));
+}
+
+/// The default profile (no `--profile` / `CURIO_PROFILE`) is the shared
+/// one: `$XDG_DATA_HOME/curio` on Linux, exactly where the desktop app
+/// looks. Linux-only because that is the one platform whose data root an
+/// environment variable can point at a temp dir (macOS and Windows read
+/// the real user folders); the path itself is pinned for every platform by
+/// `curio_core::paths`' unit tests.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_default_profile_is_the_shared_data_dir() {
+    let home = tempfile::tempdir().unwrap();
+    let data = home.path().join("data");
+    let default_profile = data.join("curio");
+    let bare = || {
+        let mut cmd = assert_cmd::Command::cargo_bin("curio").unwrap();
+        cmd.env_remove("CURIO_PROFILE")
+            .env_remove("BROWSER")
+            .env("CURIO_MOCK_KEYRING", "1")
+            .env("HOME", home.path())
+            .env("XDG_DATA_HOME", &data);
+        cmd
+    };
+
+    bare()
+        .arg("list")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            default_profile.display().to_string(),
+        ))
+        .stderr(predicate::str::contains("run `curio init`"));
+
+    let init = stdout_json(&bare().args(["init", "--json"]).assert().success());
+    assert_eq!(init["profile"], default_profile.display().to_string());
+    assert!(default_profile.join("curio.db").is_file());
+
+    let doctor = stdout_json(&bare().args(["doctor", "--json"]).assert().success());
+    let checks = doctor["checks"].as_array().unwrap();
+    let profile = checks.iter().find(|c| c["name"] == "profile").unwrap();
+    assert!(
+        profile["detail"]
+            .as_str()
+            .unwrap()
+            .contains("shared with the desktop app")
+    );
+    let legacy = checks
+        .iter()
+        .find(|c| c["name"] == "legacy-profile")
+        .unwrap();
+    assert_eq!(legacy["ok"], true);
+}
+
+/// Another process holding the profile database (the desktop app
+/// mid-write) is reported as what it is — busy, retry — with its own exit
+/// status (75, `EX_TEMPFAIL`), not a generic `sqlite error` exit 1.
+#[test]
+fn a_busy_profile_says_so_and_exits_75() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    let other = rusqlite::Connection::open(profile.path().join("curio.db")).unwrap();
+    other.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let vault = profile.path().join("vault");
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .code(75)
+        .stderr(predicate::str::contains("busy"))
+        .stderr(predicate::str::contains("another Curio process"));
+    other.execute_batch("ROLLBACK").unwrap();
+
+    // Once the other writer is done, the same command just works.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
 }

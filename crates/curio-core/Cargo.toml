@@ -30,6 +30,9 @@ ammonia = { workspace = true }
 chrono = { workspace = true }
 csv = { workspace = true }
 curio-types = { workspace = true }
+# The platform data dirs behind `paths::default_profile_dir` — the one
+# default profile location both heads open.
+directories = { workspace = true }
 dom_smoothie = { workspace = true }
 ego-tree = { workspace = true }
 encoding_rs = { workspace = true }
@@ -38,10 +41,12 @@ fs4 = { workspace = true }
 htmd = { workspace = true }
 icu_normalizer = { workspace = true }
 keyring = { workspace = true, optional = true }
+markup5ever_rcdom = { workspace = true }
 quick-xml = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+same-file = { workspace = true }
 scraper = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -55,6 +60,9 @@ url = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+# Safe `statfs(2)` for the network-filesystem guard (storage/netfs.rs);
+# already in the tree through fs4 and tempfile.
+rustix = { workspace = true }
 
 [dev-dependencies]
 # Self dev-dependency: the integration tests under tests/ link the library

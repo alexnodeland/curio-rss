@@ -12,6 +12,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'app.tagline': '你的阅读，尽在你的笔记',
     'app.loading': '加载中…',
     'app.error.internal': '出了点问题。重试可能会有帮助。',
+    'app.error.profileBusy': '另一个 Curio 进程（例如命令行运行）正在使用此配置文件。请稍后重试。',
     'a11y.skipToContent': '跳到主要内容',
     'shell.feeds.loading': '正在加载订阅…',
     'shell.feeds.empty': '还没有订阅',
@@ -322,6 +323,27 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': '数据库：{path}',
     'doctor.check.integrity': '完整性检查',
     'doctor.check.fts': '搜索索引检查',
+
+    'legacy.title': '早期版本的资料库',
+    'legacy.notice.moved': '已将早期版本 Curio 的资料库移至 {path}，命令行也会打开这里。',
+    'legacy.notice.openedInPlace':
+        '早期版本 Curio 的资料库暂时无法移动，Curio 已在原位置打开它。详情见{where}。',
+    'legacy.notice.left': '早期版本 Curio 的资料库仍留在 {path}。详情见{where}。',
+    'legacy.detail.moved': '已从 {path} 移至应用与命令行共用的位置。',
+    'legacy.detail.openedInPlace':
+        'Curio 暂时在原位置打开了它，因此没有任何缺失；下次启动时会再次尝试移动。',
+    'legacy.reason.defaultInUse':
+        '{path} 保留在原处：共用位置已有一个资料库，两个资料库永远不会自动合并。请用 curio --profile 从旧资料库导出所需内容，然后将其删除。',
+    'legacy.reason.ambiguous':
+        '{path} 保留在原处：存在多个旧资料库。请手动将要保留的那个移至 {default}。',
+    'legacy.reason.inUse':
+        '{path} 保留在原处：另一个 Curio 进程正在使用它。请退出该进程，然后重启 Curio 以移动它。',
+    'legacy.reason.defaultNotEmpty':
+        '{path} 保留在原处：{default} 已存在且不为空。请手动将旧资料库移到那里。',
+    'legacy.reason.unreadable':
+        '{path} 保留在原处：无法检查其数据库（{detail}）。请手动将其移至 {default}。',
+    'legacy.reason.moveFailed':
+        '{path} 保留在原处：移动失败（{detail}）。请手动将其移至 {default}。',
     'feedHealth.title': '订阅源健康状况',
     'feedHealth.status': '状态',
     'feedHealth.pause': '暂停',
@@ -399,4 +421,52 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'shortcut.help': '键盘快捷键帮助',
     'shortcut.addFeed': '添加订阅源',
     'shortcut.settings': '打开设置',
+
+    'recovery.title.corrupt': 'Curio 无法读取它的数据库',
+    'recovery.title.tooNew': '这个数据库来自更新版本的 Curio',
+    'recovery.title.locked': '另一个 Curio 副本正在使用数据库',
+    'recovery.title.io': 'Curio 无法访问它的数据',
+    'recovery.title.upgrade': 'Curio 未能升级它的数据库',
+    'recovery.title.noProfile': 'Curio 没有地方存放数据',
+    'recovery.title.other': 'Curio 无法打开你的资料库',
+    'recovery.body.corrupt': '数据库文件已损坏，或者不是 Curio 数据库。它没有被改动。',
+    'recovery.body.tooNew': '更新版本的 Curio 已经升级了它。请安装最新版 Curio 继续使用。',
+    'recovery.body.locked': '请退出另一个 Curio 副本，然后重试。',
+    'recovery.body.io':
+        '系统拒绝读写 Curio 的文件。请确认磁盘还有可用空间、个人资料文件夹可写入，然后重试。',
+    'recovery.body.upgrade': '升级已回滚，你的资料库保持原样。请稍后重试。',
+    'recovery.body.noProfile': '系统没有报告用户主文件夹，所以没有地方存放你的资料库。',
+    'recovery.body.other': '发生了意外情况，资料库无法打开。没有删除任何内容。',
+    'recovery.backup': '上次升级前的备份：{name}',
+    'recovery.safety':
+        '恢复或重新开始时，会先把当前数据库移到个人资料中的一个“已移开”文件夹。不会删除任何内容。',
+    'recovery.details': '错误详情',
+    'recovery.profile': '个人资料：{path}',
+    'recovery.action.retry': '重试',
+    'recovery.action.restore': '恢复备份',
+    'recovery.action.fresh': '重新开始',
+    'recovery.action.reveal': '显示个人资料文件夹',
+    'recovery.action.copy': '复制错误',
+    'recovery.action.quit': '退出',
+    'recovery.action.open': '打开 Curio',
+    'recovery.action.cancel': '取消',
+    'recovery.working': '处理中…',
+    'recovery.confirm.restore':
+        '用备份替换当前数据库？那次升级之后新增的内容会留在移开的副本中，而不在你的资料库里。',
+    'recovery.confirm.fresh': '以空资料库重新开始？你的订阅源和文章会保留在移开的数据库副本中。',
+    'recovery.stillFailing': '问题仍未解决。',
+    'recovery.copied': '错误已复制到剪贴板',
+    'recovery.copyFailed': '无法复制错误',
+    'recovery.title.profile': 'Curio 无法使用它的个人资料文件夹',
+    'recovery.body.profile':
+        'Curio 无法创建或打开它的个人资料文件夹。请确认该文件夹（以及它所在的文件夹）可写入，并且没有同名文件，然后重试。没有做任何更改。',
+    'recovery.title.networkFs': '你的资料库位于网络或同步文件夹中',
+    'recovery.body.networkFs':
+        '在网络共享或由同步服务管理的文件夹（iCloud Drive、Dropbox 等）中，Curio 的数据库可能会损坏，因此 Curio 没有打开它。没有做任何更改。请将个人资料文件夹移到本地磁盘，然后重试。',
+    'recovery.action.update': '检查更新',
+    'recovery.update.current': '没有可用的更新。请安装升级了这个资料库的新版 Curio 以继续使用。',
+    'recovery.update.failed': '无法检查更新。请检查网络连接，然后重试。',
+    'recovery.recovered.title': 'Curio 已就绪',
+    'recovery.recovered.body': '你的资料库已打开。',
+    'recovery.recovered.setAside': '之前的数据库已移到 {path}。',
 };

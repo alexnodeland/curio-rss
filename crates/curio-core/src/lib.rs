@@ -14,7 +14,8 @@
 //! OPML), [`content`] (sanitize-at-ingest → readability → markdown),
 //! [`storage`] (WAL `SQLite` behind a single-writer/pooled-reader facade),
 //! [`events`] (the `curio.events.v1` JSONL log with crash-recoverable
-//! emission), [`export`] (the `curio.frontmatter.v1` note writer), and
+//! emission), [`export`] (the `curio.frontmatter.v1` note writer),
+//! [`paths`] (the default profile location every head shares), and
 //! the private `handle` module (the [`CoreHandle`] facade wiring them
 //! together).
 
@@ -32,7 +33,9 @@ pub mod feeds;
 pub mod fetch;
 mod handle;
 pub mod import;
+mod lock;
 pub mod model;
+pub mod paths;
 #[cfg(feature = "keychain")]
 pub mod secrets;
 pub mod storage;

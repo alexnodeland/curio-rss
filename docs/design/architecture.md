@@ -87,9 +87,41 @@ feed-rs parse → normalize (dedupe guid → link → hash(title+published),
               → content_text extraction (FTS is real) → htmd DOM-walk CommonMark
 ```
 
+Dedupe keys are unique within a fetch: a guid the feed reuses for items with
+different links is no identity, so every item sharing it is keyed
+`guid+link:` instead, and an exact repeat of an earlier item is dropped.
+Because that choice sees only one fetch, refresh then settles the keys
+against the stored rows, so an item keeps its article when the guid's
+sharing changes between fetches.
+
 This kills the sketch's stored-XSS chain at the root and fixes full-text search being a
 silent no-op in the same pass. The desktop head's strict CSP + capabilities are
 defense-in-depth, not the primary defense.
+
+The allowlist is strict but not lossy where it matters (`content/sanitize.rs`
+documents each rule; `fixtures/html/` pins each with a golden fixture, and every
+allowance carries a vector in `xss-corpus.html`):
+
+- **Lazy images** — `data-src` / `data-lazy-src` / the widest `srcset` candidate is
+  promoted to `src`, and a `<noscript>` fallback image is lifted out when its visible
+  sibling is only a placeholder; the promoted `src` still faces the http(s)-only check.
+- **Footnotes and in-page links** — `id`s survive as `user-content-<id>` (a namespace
+  the app never uses for its own DOM ids, so feed content cannot clobber them) and
+  fragment-only `href`s are kept in the same namespace instead of being absolutized to
+  the source site. Markdown export turns footnotes into `[^1]` / `[^1]: …` (dropping
+  the `↩` back-references) and drops the destination of any other in-page link.
+- **Direction and structure** — `dir`, `lang`, `ol[start]`, `<bdi>`/`<bdo>`, and the
+  `language-*` class on `pre`/`code` (the exported fence language). When a
+  whole-page feed item is extracted, direction set only on the winning container
+  survives as a `<div dir lang>` wrapper.
+- **Embeds** — iframes from known media/content hosts (YouTube, Vimeo, Spotify,
+  SoundCloud, CodePen, Bluesky) or with an embed-shaped URL (`/embed`, `/player`, …,
+  e.g. Mastodon) become a plain "Embedded media/content (host) ↗" link; invisible
+  tracking frames, ad / comment / share widgets and arbitrary iframes are dropped.
+
+The lazy-image and embed passes run on feed items and on fetched full pages alike: on
+the full-page path they run before readability extraction too, since the extractor
+deletes `<noscript>` and every iframe outside its own short video-host list.
 
 ### `store/` — WAL SQLite behind an async facade
 
@@ -105,7 +137,9 @@ defense-in-depth, not the primary defense.
   `curio.db.pre-vN.bak` (that one plus the highest-numbered other kept) — no backup, no migration. Upgrade-tested
   against fixture DBs written by every released version (`fixtures/db/`).
 - Opening is typed: `OpenError` separates corrupt / too-new / locked / IO / failed-backup /
-  failed-migration so heads act on the class instead of parsing `SQLite` messages. A
+  failed-migration so heads act on the class instead of parsing `SQLite` messages (the
+  desktop head starts in two phases and shows a recovery screen per class: retry, restore
+  the newest openable backup, or start fresh, moving the database aside, never deleting). A
   staged event intent whose envelope no longer decodes is quarantined to
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
@@ -116,8 +150,26 @@ defense-in-depth, not the primary defense.
   reverted to the excerpt), skips rows already holding the incoming values (no
   `modified_at` bump, no write), and the FTS update trigger fires only when `title` or
   `content_text` actually differ.
-- Network-filesystem guard (planned, #112): refuses to open the DB on
-  Syncthing/iCloud/NFS-class mounts without an explicit override flag.
+- Network-filesystem guard: before anything is created, the profile open probes the
+  filesystem type (`statfs` `f_type` on Linux, `f_fstypename` on macOS; UNC paths on
+  Windows), the sync-client root markers (`.stfolder`, a `.dropbox` file) and the
+  well-known sync locations (`~/Library/Mobile Documents`, `~/Library/CloudStorage`),
+  and refuses NFS/SMB/AFP/WebDAV mounts and iCloud/Dropbox/Syncthing folders with
+  `OpenError::NetworkFs` unless `CoreOptions::allow_network_fs` is set (the CLI's
+  `--allow-network-fs`, or `CURIO_ALLOW_NETWORK_FS=1` for either head). The guard
+  lives in `CoreHandle::open_with`, not `Storage::open`. The desktop gives the refusal
+  its own startup class (`network_fs`), whose recovery screen offers only Try again:
+  the database is healthy, so it is never moved aside or replaced by a backup.
+- An events directory that cannot be opened (full or read-only disk, a file in its
+  place) is an emission failure, not an open failure: the handle attaches the log
+  lazily, opens with the backlog flag raised and intents staged, and the next drain
+  retries the attach. Only events-lock contention still fails the open (as "busy").
+- Fault containment: a panicking write job replies `JobPanicked`, its open transaction
+  is rolled back and the writer keeps serving; a panicking read still returns its pooled
+  connection, and a read that waits too long for one fails with `PoolTimeout` rather
+  than hanging. Lock contention with another process on the profile surfaces as the
+  typed, retryable `StorageError::Busy` (CLI exit status 75), never a bare
+  `sqlite error`.
 
 ### `events/` — event-sourced article state
 
@@ -130,6 +182,27 @@ same transaction. One mechanism serves three masters:
    checkpointing, daily rotation, file + webhook sinks).
 3. The substrate for any future sync — server head, client mode, or file-based journal
    merge — as a deterministic merge problem instead of a retrofit.
+
+**Several heads on one profile** (the desktop app plus a CLI cron job) share the JSONL
+log safely: every drain — claim the staged intents, append, fsync, delete the intents —
+runs under an exclusive advisory lock on `.curio/events.lock` (beside the contract
+directory, never inside it), and starts by catching up with the other writers (heal a
+torn tail, adopt a file they rotated to, re-read the size counter). A staged intent is
+therefore drained by one process at a time, lines never interleave, and a heal never
+truncates another process's append in flight. A lock file deleted while in use is
+noticed (file identity is re-checked on every acquire) and re-created. A holder that
+keeps the lock past 15 s yields the typed, retryable `EventLogError::ProfileLocked`
+(at open; a mutation's drain treats it like any emission failure and leaves the
+events staged for the next drain).
+Delivery is **at-least-once**, as the contract already assumes: if deleting the drained
+intents fails after the fsync (a crash, or the database staying busy past its 5 s
+timeout because another process holds a long write), the next drain appends them again
+and consumers drop the duplicate by `event_id`.
+
+Not yet process-safe ([#234](https://github.com/alexnodeland/curio-rss/issues/234)):
+the destination registry is cached per process and written back whole, so one head's
+add/remove can undo another's (and the CLI's `curio.toml` reconcile re-adds a destination
+the desktop removed); and the per-feed refresh lock is in-process only.
 
 Cursor semantics are designed now (`events since <cursor>`) so the JSONL export, `curio
 events tail`, and a future server head's `GET /v1/events?since=` share one cursor.
@@ -222,7 +295,8 @@ disagrees with it, the contract wins.
 
 ## What v1 is honest about
 
-No sync of any kind: single-machine desktop + CLI over one SQLite file. What crosses
+No sync of any kind: single-machine desktop + CLI over one SQLite file (both heads
+resolve the default profile through `curio_core::paths`, so they open the same one). What crosses
 devices is exactly the promoted vault (via whatever syncs it — git, Syncthing) and the
 event stream. The two credible future answers — the server head and GReader/Fever client
 mode — are named seams, not v1 commitments; file-based journal merge (per-device

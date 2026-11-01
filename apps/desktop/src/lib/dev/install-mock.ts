@@ -6,9 +6,72 @@
  * `import.meta.env.DEV` + a no-real-Tauri check and dynamic-imported, so it is
  * absent from the production bundle and never runs inside the packaged app.
  */
-import type { ArticleStateDto } from '$lib/bindings';
+import type { ArticleStateDto, StartupFailureClass, StartupFailureDto } from '$lib/bindings';
 
 let installed = false;
+
+const DEV_PROFILE = '/Users/alex/Library/Application Support/io.github.alexnodeland.curio';
+
+const DEV_STARTUP_MESSAGES: Record<StartupFailureClass, string> = {
+    corrupt: `${DEV_PROFILE}/curio.db is not a readable Curio database (corrupt or not SQLite): file is not a database`,
+    too_new:
+        'database schema version 8 is newer than this build supports (7) — update Curio to open it',
+    locked: `${DEV_PROFILE}/curio.db is locked by another process — close other copies of Curio and retry`,
+    io: `cannot open ${DEV_PROFILE}/curio.db: unable to open database file`,
+    profile: `profile io at ${DEV_PROFILE}: Not a directory (os error 20)`,
+    network_fs: `${DEV_PROFILE}/curio.db is on iCloud Drive, where the database can be corrupted (SQLite's locking is unsafe there and sync clients copy the file mid-write) — move the profile to a local disk, or set CURIO_ALLOW_NETWORK_FS=1 to open it anyway`,
+    upgrade:
+        'migrating the database from schema v6 to v7 failed and was rolled back: sqlite error: disk I/O error',
+    no_profile: 'the platform reports no home directory — cannot resolve profile/cache paths',
+    other: 'could not enable WAL journal mode (got "delete")',
+};
+
+/** The startup failure `?startup=<class>` asks the dev mock to report. */
+function devStartupFailure(): StartupFailureDto | null {
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('startup') as StartupFailureClass | null;
+    if (requested === null || !(requested in DEV_STARTUP_MESSAGES)) {
+        return null;
+    }
+    const hasProfile = requested !== 'no_profile';
+    const hasBackup =
+        hasProfile &&
+        requested !== 'locked' &&
+        requested !== 'profile' &&
+        requested !== 'network_fs' &&
+        params.get('backup') !== '0';
+    return {
+        class: requested,
+        message: DEV_STARTUP_MESSAGES[requested],
+        profile_dir: hasProfile ? DEV_PROFILE : null,
+        backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
+        app_version: '0.4.0',
+    };
+}
+
+/**
+ * `?legacy=<status>` (optionally `&inPlace=1`) previews a startup that met a
+ * library from an earlier release — the notice and the doctor panel.
+ */
+function devLegacyProfiles(): unknown[] {
+    const query = new URLSearchParams(window.location.search);
+    const status = query.get('legacy');
+    if (status === null) {
+        return [];
+    }
+    return [
+        {
+            path: '~/Library/Application Support/curio',
+            default_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
+            status,
+            detail:
+                status === 'move_failed' || status === 'unreadable'
+                    ? 'Cross-device link (os error 18)'
+                    : null,
+            opened_in_place: query.get('inPlace') === '1',
+        },
+    ];
+}
 
 export async function installDevMock(): Promise<void> {
     if (installed) return;
@@ -247,6 +310,8 @@ tokens:
                         db_schema_version: 5,
                         schema_supported: true,
                     };
+                case 'legacy_profiles':
+                    return devLegacyProfiles();
                 case 'db_stats':
                     return {
                         article_count: articles.length,
@@ -341,6 +406,19 @@ tokens:
                 case 'remove_feed':
                 case 'update_feed_metadata':
                     return null;
+                // Startup recovery: `?startup=<class>` (and `&backup=0` for
+                // no backup) previews the recovery screen. A retry still
+                // fails; restore / start fresh succeed.
+                case 'get_startup_failure':
+                    return devStartupFailure();
+                case 'retry_startup':
+                    return { failure: devStartupFailure(), set_aside: null };
+                case 'restore_startup_backup':
+                case 'start_fresh_profile':
+                    return {
+                        failure: null,
+                        set_aside: `${DEV_PROFILE}/set-aside/20261031T120000Z`,
+                    };
                 default:
                     return null;
             }

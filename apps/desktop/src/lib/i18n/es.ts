@@ -11,6 +11,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'app.tagline': 'Tu lectura, en tus notas',
     'app.loading': 'Cargando…',
     'app.error.internal': 'Algo salió mal. Reintentar puede ayudar.',
+    'app.error.profileBusy':
+        'Otro proceso de Curio (por ejemplo, una orden desde la línea de comandos) está usando este perfil ahora mismo. Vuelve a intentarlo en un momento.',
     'a11y.skipToContent': 'Saltar al contenido',
     'shell.feeds.loading': 'Cargando suscripciones…',
     'shell.feeds.empty': 'Aún no hay suscripciones',
@@ -337,6 +339,30 @@ export const es: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Base de datos: {path}',
     'doctor.check.integrity': 'Comprobación de integridad',
     'doctor.check.fts': 'Comprobación del índice de búsqueda',
+
+    'legacy.title': 'Bibliotecas de versiones anteriores',
+    'legacy.notice.moved':
+        'Tu biblioteca de una versión anterior de Curio se ha movido a {path}, donde también la abre la línea de comandos.',
+    'legacy.notice.openedInPlace':
+        'Tu biblioteca de una versión anterior de Curio aún no se ha podido mover, así que Curio la ha abierto donde está. Detalles: {where}.',
+    'legacy.notice.left':
+        'Queda una biblioteca de una versión anterior de Curio en {path}. Detalles: {where}.',
+    'legacy.detail.moved':
+        'Movida de {path} a la ubicación que comparten la app y la línea de comandos.',
+    'legacy.detail.openedInPlace':
+        'Por ahora Curio la ha abierto donde está, así que no falta nada; volverá a intentar moverla en el próximo inicio.',
+    'legacy.reason.defaultInUse':
+        '{path} se ha dejado donde está: la ubicación compartida ya contiene una biblioteca y dos bibliotecas nunca se fusionan. Exporta lo que necesites de la antigua con curio --profile y después elimínala.',
+    'legacy.reason.ambiguous':
+        '{path} se ha dejado donde está: existe más de una biblioteca antigua. Mueve a mano a {default} la que quieras conservar.',
+    'legacy.reason.inUse':
+        '{path} se ha dejado donde está: otro proceso de Curio la tiene abierta. Cierra ese proceso y reinicia Curio para moverla.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} se ha dejado donde está: {default} ya existe y no está vacía. Mueve allí la biblioteca antigua a mano.',
+    'legacy.reason.unreadable':
+        '{path} se ha dejado donde está: no se ha podido comprobar su base de datos ({detail}). Muévela a mano a {default}.',
+    'legacy.reason.moveFailed':
+        '{path} se ha dejado donde está: no se ha podido mover ({detail}). Muévela a mano a {default}.',
     'feedHealth.title': 'Estado del feed',
     'feedHealth.status': 'Estado',
     'feedHealth.pause': 'Pausar',
@@ -417,4 +443,59 @@ export const es: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Ayuda de atajos de teclado',
     'shortcut.addFeed': 'Añadir un feed',
     'shortcut.settings': 'Abrir ajustes',
+
+    'recovery.title.corrupt': 'Curio no puede leer su base de datos',
+    'recovery.title.tooNew': 'Esta base de datos es de un Curio más reciente',
+    'recovery.title.locked': 'Otra copia de Curio está usando la base de datos',
+    'recovery.title.io': 'Curio no puede acceder a sus datos',
+    'recovery.title.upgrade': 'Curio no pudo actualizar su base de datos',
+    'recovery.title.noProfile': 'Curio no tiene dónde guardar sus datos',
+    'recovery.title.other': 'Curio no pudo abrir tu biblioteca',
+    'recovery.body.corrupt':
+        'El archivo de la base de datos está dañado o no es una base de datos de Curio. No se ha modificado.',
+    'recovery.body.tooNew':
+        'Una versión más reciente de Curio la actualizó. Instala el Curio más reciente para seguir usándola.',
+    'recovery.body.locked': 'Cierra la otra copia de Curio y vuelve a intentarlo.',
+    'recovery.body.io':
+        'El sistema no permitió leer ni escribir los archivos de Curio. Comprueba que el disco tenga espacio libre y que la carpeta del perfil admita escritura, y vuelve a intentarlo.',
+    'recovery.body.upgrade':
+        'La actualización se revirtió, así que tu biblioteca está como estaba. Vuelve a intentarlo en un momento.',
+    'recovery.body.noProfile':
+        'El sistema no indica ninguna carpeta personal, así que no hay dónde guardar tu biblioteca.',
+    'recovery.body.other': 'Algo inesperado impidió abrir tu biblioteca. No se ha eliminado nada.',
+    'recovery.backup': 'Copia de seguridad de antes de la última actualización: {name}',
+    'recovery.safety':
+        'Restaurar o empezar de cero primero mueve la base de datos actual a una carpeta aparte dentro de tu perfil. No se elimina nada.',
+    'recovery.details': 'Detalles del error',
+    'recovery.profile': 'Perfil: {path}',
+    'recovery.action.retry': 'Volver a intentar',
+    'recovery.action.restore': 'Restaurar copia',
+    'recovery.action.fresh': 'Empezar de cero',
+    'recovery.action.reveal': 'Mostrar carpeta del perfil',
+    'recovery.action.copy': 'Copiar error',
+    'recovery.action.quit': 'Salir',
+    'recovery.action.open': 'Abrir Curio',
+    'recovery.action.cancel': 'Cancelar',
+    'recovery.working': 'Trabajando…',
+    'recovery.confirm.restore':
+        '¿Sustituir la base de datos actual por la copia? Lo añadido desde esa actualización queda en la copia apartada, no en tu biblioteca.',
+    'recovery.confirm.fresh':
+        '¿Empezar con una biblioteca vacía? Tus feeds y artículos quedan en la copia apartada de la base de datos.',
+    'recovery.stillFailing': 'Eso no lo ha solucionado.',
+    'recovery.copied': 'Error copiado al portapapeles',
+    'recovery.copyFailed': 'No se pudo copiar el error',
+    'recovery.title.profile': 'Curio no puede usar la carpeta de su perfil',
+    'recovery.body.profile':
+        'Curio no pudo crear ni abrir la carpeta de su perfil. Comprueba que la carpeta (y la que la contiene) admita escritura y que ningún archivo tenga su nombre, y vuelve a intentarlo. No se ha cambiado nada.',
+    'recovery.title.networkFs': 'Tu biblioteca está en una carpeta de red o sincronizada',
+    'recovery.body.networkFs':
+        'La base de datos de Curio puede dañarse en una carpeta compartida en red o en una carpeta que gestiona un servicio de sincronización (iCloud Drive, Dropbox…), así que Curio no la abrió. No se ha cambiado nada. Mueve la carpeta del perfil a un disco local y vuelve a intentarlo.',
+    'recovery.action.update': 'Buscar actualizaciones',
+    'recovery.update.current':
+        'No hay ninguna actualización disponible. Instala la versión más reciente de Curio que actualizó esta biblioteca para seguir usándola.',
+    'recovery.update.failed':
+        'No se pudieron buscar actualizaciones. Comprueba tu conexión y vuelve a intentarlo.',
+    'recovery.recovered.title': 'Curio está listo',
+    'recovery.recovered.body': 'Tu biblioteca se abrió.',
+    'recovery.recovered.setAside': 'La base de datos anterior se movió a {path}.',
 };

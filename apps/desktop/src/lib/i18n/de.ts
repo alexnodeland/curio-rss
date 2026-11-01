@@ -11,6 +11,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'app.tagline': 'Deine Lektüre, in deinen Notizen',
     'app.loading': 'Wird geladen…',
     'app.error.internal': 'Etwas ist schiefgelaufen. Ein erneuter Versuch kann helfen.',
+    'app.error.profileBusy':
+        'Ein anderer Curio-Prozess (etwa ein Kommandozeilenaufruf) nutzt dieses Profil gerade. Bitte gleich erneut versuchen.',
     'a11y.skipToContent': 'Zum Inhalt springen',
     'shell.feeds.loading': 'Abonnements werden geladen…',
     'shell.feeds.empty': 'Noch keine Abonnements',
@@ -338,6 +340,30 @@ export const de: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Datenbank: {path}',
     'doctor.check.integrity': 'Integritätsprüfung',
     'doctor.check.fts': 'Suchindexprüfung',
+
+    'legacy.title': 'Bibliotheken aus früheren Versionen',
+    'legacy.notice.moved':
+        'Die Bibliothek aus einer früheren Curio-Version wurde nach {path} verschoben, wo auch die Kommandozeile sie öffnet.',
+    'legacy.notice.openedInPlace':
+        'Die Bibliothek aus einer früheren Curio-Version konnte noch nicht verschoben werden und wurde daher an ihrem bisherigen Ort geöffnet. Details: {where}.',
+    'legacy.notice.left':
+        'Eine Bibliothek aus einer früheren Curio-Version liegt noch unter {path}. Details: {where}.',
+    'legacy.detail.moved':
+        'Von {path} an den gemeinsamen Ort von App und Kommandozeile verschoben.',
+    'legacy.detail.openedInPlace':
+        'Curio hat sie vorerst an ihrem Ort geöffnet, es fehlt also nichts; beim nächsten Start wird das Verschieben erneut versucht.',
+    'legacy.reason.defaultInUse':
+        '{path} wurde nicht verschoben: Am gemeinsamen Ort liegt bereits eine Bibliothek, und zwei Bibliotheken werden nie zusammengeführt. Das Benötigte mit curio --profile aus der alten exportieren und sie danach entfernen.',
+    'legacy.reason.ambiguous':
+        '{path} wurde nicht verschoben: Es gibt mehr als eine alte Bibliothek. Die zu behaltende von Hand nach {default} verschieben.',
+    'legacy.reason.inUse':
+        '{path} wurde nicht verschoben: Ein anderer Curio-Prozess hat sie geöffnet. Diesen Prozess beenden und Curio neu starten, um sie zu verschieben.',
+    'legacy.reason.defaultNotEmpty':
+        '{path} wurde nicht verschoben: {default} existiert bereits und ist nicht leer. Die alte Bibliothek von Hand dorthin verschieben.',
+    'legacy.reason.unreadable':
+        '{path} wurde nicht verschoben: Ihre Datenbank konnte nicht geprüft werden ({detail}). Sie von Hand nach {default} verschieben.',
+    'legacy.reason.moveFailed':
+        '{path} wurde nicht verschoben: Das Verschieben ist fehlgeschlagen ({detail}). Sie von Hand nach {default} verschieben.',
     'feedHealth.title': 'Feed-Zustand',
     'feedHealth.status': 'Status',
     'feedHealth.pause': 'Pausieren',
@@ -418,4 +444,60 @@ export const de: Partial<Record<MessageKey, string>> = {
     'shortcut.help': 'Hilfe zu Tastenkürzeln',
     'shortcut.addFeed': 'Feed hinzufügen',
     'shortcut.settings': 'Einstellungen öffnen',
+
+    'recovery.title.corrupt': 'Curio kann seine Datenbank nicht lesen',
+    'recovery.title.tooNew': 'Diese Datenbank stammt von einem neueren Curio',
+    'recovery.title.locked': 'Eine andere Curio-Instanz verwendet die Datenbank',
+    'recovery.title.io': 'Curio kann nicht auf seine Daten zugreifen',
+    'recovery.title.upgrade': 'Curio konnte seine Datenbank nicht aktualisieren',
+    'recovery.title.noProfile': 'Curio hat keinen Ort für seine Daten',
+    'recovery.title.other': 'Curio konnte deine Bibliothek nicht öffnen',
+    'recovery.body.corrupt':
+        'Die Datenbankdatei ist beschädigt oder keine Curio-Datenbank. Sie wurde nicht verändert.',
+    'recovery.body.tooNew':
+        'Eine neuere Curio-Version hat sie aktualisiert. Installiere das neueste Curio, um sie weiter zu verwenden.',
+    'recovery.body.locked': 'Beende die andere Curio-Instanz und versuche es dann erneut.',
+    'recovery.body.io':
+        'Das System hat das Lesen oder Schreiben der Curio-Dateien verweigert. Prüfe, ob auf dem Datenträger Platz frei ist und der Profilordner beschreibbar ist, und versuche es dann erneut.',
+    'recovery.body.upgrade':
+        'Die Aktualisierung wurde zurückgesetzt, deine Bibliothek ist unverändert. Versuche es gleich noch einmal.',
+    'recovery.body.noProfile':
+        'Das System meldet keinen Benutzerordner, daher gibt es keinen Ort für deine Bibliothek.',
+    'recovery.body.other':
+        'Etwas Unerwartetes hat das Öffnen deiner Bibliothek verhindert. Es wurde nichts gelöscht.',
+    'recovery.backup': 'Sicherung von vor der letzten Aktualisierung: {name}',
+    'recovery.safety':
+        'Wiederherstellen oder Neu beginnen verschiebt die aktuelle Datenbank zuerst in einen beiseitegelegten Ordner in deinem Profil. Es wird nichts gelöscht.',
+    'recovery.details': 'Fehlerdetails',
+    'recovery.profile': 'Profil: {path}',
+    'recovery.action.retry': 'Erneut versuchen',
+    'recovery.action.restore': 'Sicherung wiederherstellen',
+    'recovery.action.fresh': 'Neu beginnen',
+    'recovery.action.reveal': 'Profilordner anzeigen',
+    'recovery.action.copy': 'Fehler kopieren',
+    'recovery.action.quit': 'Beenden',
+    'recovery.action.open': 'Curio öffnen',
+    'recovery.action.cancel': 'Abbrechen',
+    'recovery.working': 'Wird ausgeführt…',
+    'recovery.confirm.restore':
+        'Die aktuelle Datenbank durch die Sicherung ersetzen? Was seit dieser Aktualisierung hinzukam, bleibt in der beiseitegelegten Kopie, nicht in deiner Bibliothek.',
+    'recovery.confirm.fresh':
+        'Mit einer leeren Bibliothek beginnen? Deine Feeds und Artikel bleiben in der beiseitegelegten Kopie der Datenbank.',
+    'recovery.stillFailing': 'Das hat das Problem nicht behoben.',
+    'recovery.copied': 'Fehler in die Zwischenablage kopiert',
+    'recovery.copyFailed': 'Fehler konnte nicht kopiert werden',
+    'recovery.title.profile': 'Curio kann seinen Profilordner nicht verwenden',
+    'recovery.body.profile':
+        'Curio konnte seinen Profilordner nicht anlegen oder öffnen. Prüfe, ob der Ordner (und der Ordner, in dem er liegt) beschreibbar ist und keine Datei denselben Namen trägt, und versuche es dann erneut. Es wurde nichts verändert.',
+    'recovery.title.networkFs': 'Deine Bibliothek liegt in einem Netzwerk- oder Sync-Ordner',
+    'recovery.body.networkFs':
+        'Auf einer Netzwerkfreigabe oder in einem Ordner, den ein Sync-Dienst verwaltet (iCloud Drive, Dropbox…), kann die Datenbank von Curio beschädigt werden, deshalb hat Curio sie nicht geöffnet. Es wurde nichts verändert. Verschiebe den Profilordner auf einen lokalen Datenträger und versuche es dann erneut.',
+    'recovery.action.update': 'Nach Updates suchen',
+    'recovery.update.current':
+        'Es ist kein Update verfügbar. Installiere die neuere Curio-Version, die diese Bibliothek aktualisiert hat, um sie weiter zu verwenden.',
+    'recovery.update.failed':
+        'Die Suche nach Updates ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.',
+    'recovery.recovered.title': 'Curio ist bereit',
+    'recovery.recovered.body': 'Deine Bibliothek wurde geöffnet.',
+    'recovery.recovered.setAside': 'Die vorherige Datenbank wurde nach {path} verschoben.',
 };

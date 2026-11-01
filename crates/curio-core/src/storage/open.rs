@@ -10,9 +10,12 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::ErrorCode;
 
-use super::StorageError;
+use super::{NetworkFsKind, StorageError};
 
-/// Why [`Storage::open`](super::Storage::open) refused or failed.
+/// Why a profile's database would not open: [`Storage::open`](super::Storage::open)
+/// refused or failed, or (for [`OpenError::NetworkFs`] only)
+/// [`CoreHandle::open_with`](crate::CoreHandle::open_with) refused its
+/// location first.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum OpenError {
@@ -83,6 +86,29 @@ pub enum OpenError {
         #[source]
         source: Box<StorageError>,
     },
+    /// The profile sits on network or sync-managed storage, where
+    /// `SQLite`'s locking is unsafe and a sync client can copy the database
+    /// without its WAL. Refused before anything is created or opened;
+    /// [`crate::CoreOptions::allow_network_fs`] (the
+    /// [`super::ALLOW_NETWORK_FS_ENV`] override) opens it anyway.
+    ///
+    /// Only [`CoreHandle::open_with`](crate::CoreHandle::open_with) (and
+    /// so [`CoreHandle::open`](crate::CoreHandle::open)) raises it:
+    /// [`Storage::open`](super::Storage::open) never probes the location,
+    /// so code calling it directly is not guarded.
+    #[error(
+        "{} is on {kind}, where the database can be corrupted (SQLite's locking is unsafe there and \
+         sync clients copy the file mid-write) — move the profile to a local disk, or set \
+         {env}=1 to open it anyway",
+        path.display(),
+        env = super::ALLOW_NETWORK_FS_ENV
+    )]
+    NetworkFs {
+        /// The refused path.
+        path: PathBuf,
+        /// What kind of storage it is on.
+        kind: NetworkFsKind,
+    },
     /// Any other storage failure during open (e.g. the file system
     /// refusing WAL mode).
     #[error(transparent)]
@@ -92,8 +118,11 @@ pub enum OpenError {
 /// Sorts a raw storage failure during open into its typed class. Errors
 /// that fit no class stay [`OpenError::Storage`].
 pub(crate) fn classify(path: &Path, error: StorageError) -> OpenError {
-    let StorageError::Sqlite(source) = error else {
-        return OpenError::Storage(error);
+    // `Busy` is lock contention the `From<rusqlite::Error>` conversion
+    // already recognised; at open it is the same `Locked` class.
+    let source = match error {
+        StorageError::Sqlite(source) | StorageError::Busy(source) => source,
+        other => return OpenError::Storage(other),
     };
     let path = path.to_path_buf();
     match source.sqlite_error_code() {
@@ -153,6 +182,13 @@ mod tests {
             classify(path, sqlite(rusqlite::ffi::SQLITE_LOCKED)),
             OpenError::Locked { .. }
         ));
+        // ...including when the `?` conversion already typed it as Busy.
+        let busy = StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ));
+        assert!(busy.is_busy());
+        assert!(matches!(classify(path, busy), OpenError::Locked { .. }));
         for code in [
             rusqlite::ffi::SQLITE_CANTOPEN,
             rusqlite::ffi::SQLITE_PERM,

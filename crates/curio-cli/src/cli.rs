@@ -14,7 +14,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(name = "curio", version, propagate_version = true)]
 pub(crate) struct Cli {
     /// Profile directory (config, database, event log). Defaults to the
-    /// platform data dir, e.g. ~/.local/share/curio.
+    /// profile the desktop app opens: ~/Library/Application
+    /// Support/io.github.alexnodeland.curio on macOS, ~/.local/share/curio
+    /// on Linux, %LOCALAPPDATA%\alexnodeland\curio\data on Windows.
     #[arg(long, global = true, env = "CURIO_PROFILE", value_name = "DIR")]
     pub(crate) profile: Option<PathBuf>,
 
@@ -22,6 +24,13 @@ pub(crate) struct Cli {
     /// human text.
     #[arg(long, global = true)]
     pub(crate) json: bool,
+
+    /// Open a profile on network or sync-managed storage anyway (NFS, SMB,
+    /// iCloud Drive, Dropbox, Syncthing…), which is refused by default:
+    /// SQLite's locking is unsafe there and sync clients can corrupt the
+    /// database. Setting `CURIO_ALLOW_NETWORK_FS=1` does the same.
+    #[arg(long, global = true)]
+    pub(crate) allow_network_fs: bool,
 
     #[command(subcommand)]
     pub(crate) command: Command,

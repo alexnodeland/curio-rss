@@ -6,24 +6,52 @@
 //! else — scripts, iframes, event-handler attributes, inline style,
 //! `javascript:`/`data:` URLs, `<base>` — is gone before storage.
 //!
-//! One softening, applied *before* ammonia: recognized media embeds
-//! (`<iframe>` from a small allowlist of video hosts, plus `<video>` /
-//! `<audio>` with an `http(s)` source) are rewritten into a plain
-//! `<a href="…">▶ Embedded media (host) ↗</a>` link, so the reader keeps
-//! a way to reach the video instead of a silent gap. The rewrite only
-//! ever emits an anchor whose `href` is the original source; ammonia
-//! still runs afterward and judges that `href` with the same
-//! `http`/`https`-only scheme filter as every other link, so a hostile
-//! `src` can never survive as a live link — the transform cannot weaken
-//! the gate. Unrecognized iframes stay fully dropped.
+//! The few attributes beyond links and image sources are each value-filtered
+//! (see [`filter_attribute`]), never passed through verbatim:
+//!
+//! - `id` on any element, restricted to a plain token and prefixed with
+//!   [`ID_PREFIX`] so author ids can never clobber the reader's own DOM;
+//!   fragment-only `href`s (`#fn1`) are kept, rewritten to the same prefix,
+//!   so footnotes and in-page links stay in-page instead of being
+//!   absolutized into a link back to the source site;
+//! - `dir` (`ltr`/`rtl`/`auto`) and `lang` (a language tag) for RTL and
+//!   mixed-language feeds; `ol[start]` (an integer);
+//! - `class` on `pre`/`code`, reduced to its single `language-*` token —
+//!   the fence language htmd writes into exported markdown.
+//!
+//! Two softenings run *before* ammonia, and neither can weaken it:
+//!
+//! - **Lazy images** (see `lazy_images`): a lazy loader's real URL
+//!   (`data-src`, `data-lazy-src`, the best `srcset` candidate) is promoted
+//!   to `src`, and a `<noscript>` image fallback is lifted out when its
+//!   visible sibling has no fetchable source. Every promoted `src` is still
+//!   judged by ammonia's `http`/`https`-only scheme filter.
+//! - **Embeds** (see `embeds`): visible `<iframe>`s from known providers or
+//!   with an embed-shaped URL, and `<video>`/`<audio>` with an `http(s)`
+//!   source, become a plain placeholder link to the original source, which
+//!   ammonia then judges like every other link. Arbitrary iframes stay
+//!   fully dropped.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
 
-use ammonia::{Builder, UrlRelative};
-use regex::{Captures, Regex};
-use scraper::{Html, Selector};
+use ammonia::{Builder, UrlRelative, UrlRelativeEvaluate};
 use url::Url;
+
+use super::embeds::rewrite_embeds;
+use super::lazy_images::{recover_lazy_images, resolve_http};
+
+/// The prefix every surviving `id` (and every fragment-only `href`) carries.
+/// Author ids live in their own namespace, so `id="main-content"` or
+/// `id="location"` in a feed can never collide with — or clobber — the
+/// reader's own elements and globals. The namespace is deliberately *not*
+/// `curio-`: the desktop app names its own DOM ids that way
+/// (`curio-custom-themes`, …), so the app must never use an id starting
+/// with this prefix — every such id belongs to feed content.
+pub(crate) const ID_PREFIX: &str = "user-content-";
+
+/// Longest `id` / fragment token kept (real footnote ids are short).
+const MAX_ID_LEN: usize = 128;
 
 /// Tags whose entire content is dropped (not just the tag).
 const CLEAN_CONTENT_TAGS: &[&str] = &[
@@ -34,15 +62,18 @@ const CLEAN_CONTENT_TAGS: &[&str] = &[
 
 /// The semantic allowlist. Sectioning elements (`nav`, `header`,
 /// `footer`, `aside`, …) are deliberately *kept* here so the
-/// readability extractor still sees the document's structure — it is
-/// the extractor's job to drop boilerplate, and it can only drop what
-/// it can still recognize.
+/// pipeline after it still sees the document's structure: it tells
+/// page chrome (a `nav`, a page-level `header`) from the content's own
+/// sectioning (a quote's `<footer>`, a section's `<header>`) by position,
+/// and it can only judge what it can still recognize.
 const ALLOWED_TAGS: &[&str] = &[
     "a",
     "abbr",
     "article",
     "aside",
     "b",
+    "bdi",
+    "bdo",
     "blockquote",
     "br",
     "caption",
@@ -102,183 +133,137 @@ const ALLOWED_TAGS: &[&str] = &[
     "wbr",
 ];
 
-/// Host suffixes whose `<iframe>` embeds are surfaced as a clickable
-/// placeholder instead of being dropped. Everything else stays dropped.
-/// Matched as a domain suffix, so `www.youtube.com` and
-/// `player.vimeo.com` both count.
-const EMBED_IFRAME_HOST_SUFFIXES: &[&str] = &[
-    "youtube.com",
-    "youtube-nocookie.com",
-    "youtu.be",
-    "vimeo.com",
-];
+/// Attributes allowed on every element — each one value-filtered by
+/// [`filter_attribute`].
+const GENERIC_ATTRIBUTES: &[&str] = &["id", "dir", "lang"];
 
 /// Sanitizes raw HTML through the strict allowlist. `base_url` resolves
 /// relative `href`/`src` before the http(s)-only scheme check; without
-/// one, relative URLs are dropped. Recognized media embeds are rewritten
-/// to placeholder links first (see the module docs), then judged by the
-/// same gate as everything else.
+/// one, relative URLs are dropped (fragment-only `href`s are kept either
+/// way). Lazy images are recovered and recognized embeds rewritten to
+/// placeholder links first (see the module docs), then judged by the same
+/// gate as everything else.
 #[must_use]
 pub fn sanitize(raw_html: &str, base_url: Option<&str>) -> String {
-    let rewritten = rewrite_embeds(raw_html, base_url);
+    let base = base_url.and_then(|base| Url::parse(base).ok());
+    let rewritten = soften(raw_html, base.as_ref());
     let mut builder = Builder::default();
     builder
         .tags(ALLOWED_TAGS.iter().copied().collect::<HashSet<_>>())
         .clean_content_tags(CLEAN_CONTENT_TAGS.iter().copied().collect::<HashSet<_>>())
         .tag_attributes(tag_attributes())
-        .generic_attributes(HashSet::new())
+        .generic_attributes(GENERIC_ATTRIBUTES.iter().copied().collect::<HashSet<_>>())
+        .attribute_filter(filter_attribute)
         .url_schemes(["http", "https"].into_iter().collect::<HashSet<_>>())
+        .url_relative(UrlRelative::Custom(Box::new(RelativeUrls { base })))
         .strip_comments(true);
-    match base_url.and_then(|base| Url::parse(base).ok()) {
-        Some(base) => builder.url_relative(UrlRelative::RewriteWithBase(base)),
-        None => builder.url_relative(UrlRelative::Deny),
-    };
     builder.clean(&rewritten).to_string()
 }
 
-/// Rewrites recognized `<iframe>`/`<video>`/`<audio>` embeds into
-/// placeholder `<a>` links, in place, before ammonia runs. Anything not
-/// rewritten is left untouched for ammonia to drop as before.
-fn rewrite_embeds(html: &str, base_url: Option<&str>) -> String {
-    let after_iframe = iframe_re().map_or_else(
-        || html.to_owned(),
-        |re| {
-            re.replace_all(html, |caps: &Captures<'_>| {
-                iframe_placeholder(&caps[0], base_url)
-            })
-            .into_owned()
-        },
-    );
-    let after_video = media_re("video").map_or_else(
-        || after_iframe.clone(),
-        |re| {
-            re.replace_all(&after_iframe, |caps: &Captures<'_>| {
-                media_placeholder(&caps[0], base_url)
-            })
-            .into_owned()
-        },
-    );
-    media_re("audio").map_or_else(
-        || after_video.clone(),
-        |re| {
-            re.replace_all(&after_video, |caps: &Captures<'_>| {
-                media_placeholder(&caps[0], base_url)
-            })
-            .into_owned()
-        },
-    )
+/// The two pre-gate softenings (see the module docs): lazy images get
+/// their real `src`, recognized embeds become placeholder links. Both only
+/// ever hand ammonia an `http(s)` candidate to judge. Idempotent, so the
+/// full-page path can run it before readability extraction (which drops
+/// most iframes and every `<noscript>`) and [`sanitize`] again after.
+pub(super) fn soften(raw_html: &str, base: Option<&Url>) -> String {
+    let recovered = recover_lazy_images(raw_html, base);
+    rewrite_embeds(&recovered, base)
 }
 
-/// The `<iframe>…</iframe>` matcher (case-insensitive, dot-matches-newline,
-/// non-greedy). Compiled once; `None` only if the literal pattern fails to
-/// compile, in which case the rewrite is skipped and ammonia drops embeds
-/// as before.
-fn iframe_re() -> Option<&'static Regex> {
-    static RE: LazyLock<Option<Regex>> =
-        LazyLock::new(|| Regex::new(r"(?is)<iframe\b[^>]*>.*?</iframe\s*>").ok());
-    RE.as_ref()
+/// The relative-URL policy: a fragment-only reference stays in-page
+/// (rewritten into the [`ID_PREFIX`] namespace, like the `id` it targets);
+/// anything else resolves against the article base and must come out
+/// `http(s)`. Without a base, non-fragment relative URLs are dropped.
+struct RelativeUrls {
+    base: Option<Url>,
 }
 
-/// The `<video>`/`<audio>` element matcher for a given tag name.
-fn media_re(tag: &str) -> Option<&'static Regex> {
-    static VIDEO: LazyLock<Option<Regex>> =
-        LazyLock::new(|| Regex::new(r"(?is)<video\b[^>]*>.*?</video\s*>").ok());
-    static AUDIO: LazyLock<Option<Regex>> =
-        LazyLock::new(|| Regex::new(r"(?is)<audio\b[^>]*>.*?</audio\s*>").ok());
-    match tag {
-        "video" => VIDEO.as_ref(),
-        "audio" => AUDIO.as_ref(),
-        _ => None,
+impl UrlRelativeEvaluate<'_> for RelativeUrls {
+    fn evaluate<'url>(&self, url: &'url str) -> Option<Cow<'url, str>> {
+        if let Some(fragment) = url.trim().strip_prefix('#') {
+            return prefixed_id(fragment).map(|id| Cow::Owned(format!("#{id}")));
+        }
+        resolve_http(url, self.base.as_ref()).map(|resolved| Cow::Owned(resolved.into()))
     }
 }
 
-/// Turns a matched `<iframe>` block into a placeholder link when its host
-/// is allowlisted; otherwise returns the block unchanged (ammonia drops it).
-/// Returns an owned `String` because a `replace_all` callback may not borrow
-/// from its `Captures` argument.
-fn iframe_placeholder(block: &str, base_url: Option<&str>) -> String {
-    let Some(src) = first_attr(block, "iframe[src]", "src") else {
-        return block.to_owned();
-    };
-    match embed_host(&src, base_url) {
-        Some(host) if is_allowlisted_embed_host(&host) => placeholder_html(&src, &host),
-        _ => block.to_owned(),
+/// Value filter for the non-URL attributes the allowlist admits. Returning
+/// `None` drops the attribute. (`href`/`src` are judged by the scheme
+/// filter and [`RelativeUrls`]; they pass through here unchanged.)
+fn filter_attribute<'a>(element: &str, attribute: &str, value: &'a str) -> Option<Cow<'a, str>> {
+    match attribute {
+        "id" => prefixed_id(value).map(Cow::Owned),
+        "dir" => {
+            let dir = value.trim().to_ascii_lowercase();
+            matches!(dir.as_str(), "ltr" | "rtl" | "auto").then_some(Cow::Owned(dir))
+        }
+        "lang" => is_language_tag(value.trim()).then(|| Cow::Owned(value.trim().to_owned())),
+        "start" if element == "ol" => value
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .map(|start| Cow::Owned(start.to_string())),
+        "class" if matches!(element, "pre" | "code") => language_class(value).map(Cow::Owned),
+        "class" | "start" => None,
+        _ => Some(Cow::Borrowed(value)),
     }
 }
 
-/// Turns a matched `<video>`/`<audio>` block into a placeholder link when a
-/// resolvable `http(s)` source is present (on the element or a child
-/// `<source>`); otherwise returns the block unchanged.
-fn media_placeholder(block: &str, base_url: Option<&str>) -> String {
-    let src = first_attr(block, "video[src], audio[src]", "src")
-        .or_else(|| first_attr(block, "source[src]", "src"));
-    let Some(src) = src else {
-        return block.to_owned();
-    };
-    match embed_host(&src, base_url) {
-        Some(host) => placeholder_html(&src, &host),
-        None => block.to_owned(),
+/// `raw` as a prefixed id: a non-empty token of ASCII letters, digits and
+/// `-_.:` (what footnote generators emit: `fn1`, `fn:1`, `fnref-2`), with
+/// [`ID_PREFIX`] prepended unless already present (re-sanitizing is
+/// idempotent). Anything else — whitespace, quotes, markup — is dropped.
+fn prefixed_id(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let is_token = !raw.is_empty()
+        && raw.len() <= MAX_ID_LEN
+        && raw
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
+    if !is_token {
+        return None;
     }
-}
-
-/// Parses a small HTML block and returns the first matching element's
-/// attribute value, if any.
-fn first_attr(html: &str, selector: &str, attr: &str) -> Option<String> {
-    let doc = Html::parse_fragment(html);
-    let selector = Selector::parse(selector).ok()?;
-    doc.select(&selector)
-        .next()?
-        .value()
-        .attr(attr)
-        .map(str::to_owned)
-}
-
-/// The lowercase host of a source URL, resolving relative sources against
-/// `base_url`. `None` when there is no host (e.g. a `javascript:` source,
-/// or a relative source with no base) — the caller then emits no link.
-fn embed_host(src: &str, base_url: Option<&str>) -> Option<String> {
-    if let Ok(url) = Url::parse(src) {
-        return url.host_str().map(str::to_ascii_lowercase);
-    }
-    let base = Url::parse(base_url?).ok()?;
-    base.join(src).ok()?.host_str().map(str::to_ascii_lowercase)
-}
-
-/// Whether `host` matches (as a domain suffix) one of the allowlisted
-/// embed hosts.
-fn is_allowlisted_embed_host(host: &str) -> bool {
-    EMBED_IFRAME_HOST_SUFFIXES.iter().any(|&suffix| {
-        host == suffix
-            || host
-                .strip_suffix(suffix)
-                .is_some_and(|prefix| prefix.ends_with('.'))
+    Some(if raw.starts_with(ID_PREFIX) {
+        raw.to_owned()
+    } else {
+        format!("{ID_PREFIX}{raw}")
     })
 }
 
-/// The placeholder anchor. `href` is the raw source (ammonia validates its
-/// scheme and resolves it against the base); `host` is display-only.
-fn placeholder_html(src: &str, host: &str) -> String {
-    format!(
-        "<p><a href=\"{href}\">▶ Embedded media ({host}) ↗</a></p>",
-        href = escape_attr(src),
-        host = escape_text(host),
-    )
+/// A BCP 47-shaped language tag: alphanumeric subtags of 1–8 characters
+/// joined by `-`, starting with a letter (`en`, `ar-EG`, `zh-Hant-TW`).
+fn is_language_tag(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 35
+        && value.starts_with(|c: char| c.is_ascii_alphabetic())
+        && value.split('-').all(|sub| {
+            (1..=8).contains(&sub.len()) && sub.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+}
+
+/// The fence language of a `pre`/`code` class list, normalized to
+/// `language-<name>` (Prism's `lang-<name>` alias included). Every other
+/// class token is dropped; `None` when no language token is present.
+fn language_class(value: &str) -> Option<String> {
+    value.split_ascii_whitespace().find_map(|token| {
+        let name = token
+            .strip_prefix("language-")
+            .or_else(|| token.strip_prefix("lang-"))?;
+        let valid = !name.is_empty()
+            && name.len() <= 32
+            && name.bytes().all(|b| {
+                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'+' | b'#' | b'.')
+            });
+        valid.then(|| format!("language-{name}"))
+    })
 }
 
 /// Minimal HTML-attribute escaping for a value placed inside `"…"`.
-fn escape_attr(value: &str) -> String {
+pub(super) fn escape_attr(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;")
-}
-
-/// Minimal HTML text escaping for character data.
-fn escape_text(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn tag_attributes() -> HashMap<&'static str, HashSet<&'static str>> {
@@ -288,6 +273,9 @@ fn tag_attributes() -> HashMap<&'static str, HashSet<&'static str>> {
     attrs.insert("time", ["datetime"].into_iter().collect());
     attrs.insert("td", ["colspan", "rowspan"].into_iter().collect());
     attrs.insert("th", ["colspan", "rowspan"].into_iter().collect());
+    attrs.insert("ol", ["start"].into_iter().collect());
+    attrs.insert("pre", ["class"].into_iter().collect());
+    attrs.insert("code", ["class"].into_iter().collect());
     attrs
 }
 
@@ -382,106 +370,118 @@ mod tests {
     }
 
     #[test]
-    fn youtube_iframe_becomes_a_clickable_placeholder() {
+    fn fragment_links_and_ids_share_the_prefixed_namespace() {
         let out = sanitize(
-            "<p>Watch:</p><iframe src=\"https://www.youtube-nocookie.com/embed/abc123\" \
-             width=\"560\" height=\"315\"></iframe>",
-            None,
+            "<p>x<sup id=\"fnref:1\"><a href=\"#fn:1\">1</a></sup></p>\
+             <ol><li id=\"fn:1\">note <a href=\"#fnref:1\">↩</a></li></ol>",
+            Some("https://example.com/post"),
         );
-        assert!(!out.contains("iframe"), "iframe tag survived: {out}");
+        assert!(out.contains("<sup id=\"user-content-fnref:1\">"), "{out}");
+        assert!(out.contains("href=\"#user-content-fn:1\""), "{out}");
+        assert!(out.contains("<li id=\"user-content-fn:1\">"), "{out}");
+        assert!(out.contains("href=\"#user-content-fnref:1\""), "{out}");
         assert!(
-            out.contains("href=\"https://www.youtube-nocookie.com/embed/abc123\""),
-            "placeholder href missing: {out}"
-        );
-        assert!(
-            out.contains("Embedded media"),
-            "placeholder text missing: {out}"
-        );
-        assert!(
-            out.contains("www.youtube-nocookie.com"),
-            "host label missing: {out}"
-        );
-        assert!(
-            out.contains("<p>Watch:</p>"),
-            "surrounding content dropped: {out}"
+            !out.contains("example.com/post#"),
+            "fragment was absolutized: {out}"
         );
     }
 
     #[test]
-    fn vimeo_iframe_becomes_a_placeholder() {
+    fn fragment_links_survive_without_a_base() {
+        let out = sanitize("<a href=\"#fn1\">1</a><a href=\"/rel\">r</a>", None);
+        assert!(out.contains("href=\"#user-content-fn1\""), "{out}");
+        assert!(!out.contains("/rel"), "{out}");
+    }
+
+    #[test]
+    fn hostile_ids_and_fragments_are_dropped() {
         let out = sanitize(
-            "<iframe src=\"https://player.vimeo.com/video/12345\"></iframe>",
+            "<p id=\"a b\">1</p><p id=\"x&quot;onclick=&quot;y\">2</p><p id=\"\">3</p>\
+             <a href=\"#\">4</a><a href=\"#a(1)\">5</a><a href=\"#x y\">6</a>",
+            None,
+        );
+        assert!(!out.contains("id="), "{out}");
+        assert!(!out.contains("href="), "{out}");
+    }
+
+    #[test]
+    fn ids_are_prefixed_once() {
+        let once = sanitize("<p id=\"location\">x</p>", None);
+        assert_eq!(once, "<p id=\"user-content-location\">x</p>");
+        assert_eq!(sanitize(&once, None), once, "re-sanitizing is idempotent");
+    }
+
+    #[test]
+    fn direction_and_language_survive_filtered() {
+        let out = sanitize(
+            "<p dir=\"RTL\" lang=\"ar-EG\">مرحبا</p><bdo dir=\"ltr\">x</bdo>\
+             <p dir=\"sideways\" lang=\"en&quot;x\">y</p><p lang=\"1en\">z</p>",
             None,
         );
         assert!(
-            out.contains("href=\"https://player.vimeo.com/video/12345\""),
+            out.contains("<p dir=\"rtl\" lang=\"ar-EG\">مرحبا</p>"),
             "{out}"
         );
-        assert!(out.contains("player.vimeo.com"), "{out}");
+        assert!(out.contains("<bdo dir=\"ltr\">x</bdo>"), "{out}");
+        assert!(out.contains("<p>y</p>"), "{out}");
+        assert!(out.contains("<p>z</p>"), "{out}");
     }
 
     #[test]
-    fn unknown_iframe_host_is_still_dropped() {
-        // The allowlist is what keeps the hostile-corpus gate green: an
-        // iframe to an arbitrary host must leave no trace, no link.
+    fn ordered_list_start_survives_as_an_integer() {
+        assert_eq!(
+            sanitize("<ol start=\" 4 \"><li>d</li></ol>", None),
+            "<ol start=\"4\"><li>d</li></ol>"
+        );
+        assert_eq!(
+            sanitize("<ol start=\"4 onclick=x\"><li>d</li></ol>", None),
+            "<ol><li>d</li></ol>"
+        );
+        assert_eq!(
+            sanitize("<ul start=\"4\"><li>d</li></ul>", None),
+            "<ul><li>d</li></ul>"
+        );
+    }
+
+    #[test]
+    fn code_class_is_reduced_to_its_language() {
+        assert_eq!(
+            sanitize(
+                "<pre class=\"highlight\"><code class=\"hljs language-rust evil\">x</code></pre>",
+                None
+            ),
+            "<pre><code class=\"language-rust\">x</code></pre>"
+        );
+        assert_eq!(
+            sanitize("<pre class=\"lang-c++\"><code>x</code></pre>", None),
+            "<pre class=\"language-c++\"><code>x</code></pre>"
+        );
+        assert_eq!(
+            sanitize("<code class=\"language-a&quot;b\">x</code>", None),
+            "<code>x</code>"
+        );
+        assert_eq!(
+            sanitize("<p class=\"language-rust\">x</p>", None),
+            "<p>x</p>"
+        );
+    }
+
+    #[test]
+    fn lazy_images_reach_the_gate_with_their_real_source() {
         let out = sanitize(
-            "<iframe src=\"https://ads.evil.example/track\"></iframe><p>ok</p>",
+            "<img src=\"data:image/gif;base64,R0lGOD\" data-src=\"/real.jpg\" alt=\"a\">\
+             <noscript><img src=\"/real.jpg\" alt=\"a\"></noscript>",
+            Some("https://example.com/post"),
+        );
+        assert_eq!(out, "<img src=\"https://example.com/real.jpg\" alt=\"a\">");
+    }
+
+    #[test]
+    fn a_hostile_lazy_source_is_still_judged_by_the_gate() {
+        let out = sanitize(
+            "<img data-src=\"javascript:alert(1)\" srcset=\"data:text/html,x 2x\" alt=\"a\">",
             None,
         );
-        assert!(!out.contains("iframe"), "{out}");
-        assert!(
-            !out.contains("ads.evil.example"),
-            "hostile host leaked: {out}"
-        );
-        assert!(
-            !out.contains("Embedded media"),
-            "unexpected placeholder: {out}"
-        );
-        assert!(out.contains("<p>ok</p>"), "{out}");
-    }
-
-    #[test]
-    fn video_element_becomes_a_placeholder() {
-        let out = sanitize("<video src=\"https://cdn.example/v.mp4\"></video>", None);
-        assert!(!out.contains("<video"), "{out}");
-        assert!(out.contains("href=\"https://cdn.example/v.mp4\""), "{out}");
-        assert!(out.contains("cdn.example"), "{out}");
-    }
-
-    #[test]
-    fn video_with_a_source_child_becomes_a_placeholder() {
-        let out = sanitize(
-            "<video controls><source src=\"https://cdn.example/v.mp4\" type=\"video/mp4\"></video>",
-            None,
-        );
-        assert!(out.contains("href=\"https://cdn.example/v.mp4\""), "{out}");
-        assert!(out.contains("Embedded media"), "{out}");
-    }
-
-    #[test]
-    fn audio_element_becomes_a_placeholder() {
-        let out = sanitize("<audio src=\"https://cdn.example/a.mp3\"></audio>", None);
-        assert!(!out.contains("<audio"), "{out}");
-        assert!(out.contains("href=\"https://cdn.example/a.mp3\""), "{out}");
-    }
-
-    #[test]
-    fn a_non_http_media_source_yields_no_live_link() {
-        // `javascript:` has no host → no placeholder is emitted, and even
-        // if one were, ammonia's scheme filter would strip the href.
-        let out = sanitize("<video src=\"javascript:alert(1)\"></video>ok", None);
-        assert!(!out.contains("javascript"), "{out}");
-        assert!(!out.contains("Embedded media"), "{out}");
-        assert!(out.contains("ok"), "{out}");
-    }
-
-    #[test]
-    fn a_relative_embed_src_resolves_against_the_base() {
-        let out = sanitize(
-            "<iframe src=\"/embed/xyz\"></iframe>",
-            Some("https://www.youtube.com/watch?v=xyz"),
-        );
-        assert!(out.contains("https://www.youtube.com/embed/xyz"), "{out}");
-        assert!(out.contains("Embedded media"), "{out}");
+        assert_eq!(out, "<img alt=\"a\">");
     }
 }

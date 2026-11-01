@@ -24,6 +24,7 @@ fn open_core(profile: &std::path::Path) -> CoreHandle {
                 politeness_delay: Duration::ZERO,
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()

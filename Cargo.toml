@@ -46,8 +46,9 @@ dom_smoothie = "0.18"
 encoding_rs = "0.8"
 ego-tree = "0.11"
 feed-rs = "2"
-# Advisory cross-process file locks (flock / LockFileEx) for the per-destination
-# export lock. std's File::lock needs Rust 1.89; the engine MSRV is 1.88.
+# Advisory cross-process file locks (flock / LockFileEx): the per-destination
+# export lock and the events-log lock that serializes emission across heads
+# sharing one profile. std's File::lock needs Rust 1.89; the engine MSRV is 1.88.
 fs4 = { version = "1", default-features = false, features = ["sync"] }
 htmd = "0.5"
 # NFC for note filenames. Already in the graph via url → idna; the
@@ -56,10 +57,21 @@ icu_normalizer = { version = "2", default-features = false, features = ["compile
 # OS error codes only (ENOLCK & co.): telling "this filesystem has no advisory
 # locks" from a real lock failure in the export lock. Already in the tree.
 libc = "0.2"
+# htmd's DOM node type (`htmd::Node` = `markup5ever_rcdom::Node`): footnote
+# export inspects a list's items without re-walking it. Same minor as htmd's
+# so the types unify; already in the tree via htmd.
+markup5ever_rcdom = "0.38"
 quick-xml = "0.41"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
+# Safe statfs(2) (Unix) for the network-filesystem guard. Already in the tree
+# via fs4 and tempfile.
+rustix = { version = "1.1", features = ["fs"] }
+# File identity (dev/inode, volume/file index) for the events lock: notices a
+# lock file deleted and re-created under a long-lived handle. Already in the
+# graph via walkdir.
+same-file = "1"
 scraper = "0.27"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

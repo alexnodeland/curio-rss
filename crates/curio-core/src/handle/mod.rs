@@ -42,6 +42,7 @@ mod imports;
 mod maintenance;
 mod refresh;
 mod settings;
+mod sink;
 mod state;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -54,7 +55,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use curio_types::DestinationName;
 
 use crate::content::ContentError;
-use crate::events::{EventEmitter, EventLog, EventsError};
+use crate::events::EventsError;
 use crate::export::{ExportDisposition, ExportError};
 use crate::feeds::{FeedParseError, OpmlError};
 use crate::fetch::{FetchConfig, FetchError, PolicedClient};
@@ -154,6 +155,13 @@ pub enum CoreError {
 pub struct CoreOptions {
     /// Policy configuration of the outbound client.
     pub fetch: FetchConfig,
+    /// Open a profile on network or sync-managed storage anyway (NFS,
+    /// SMB, iCloud Drive, Dropbox, Syncthing…), which is otherwise
+    /// refused with [`OpenError::NetworkFs`]. Heads set it from an
+    /// explicit user choice — the CLI's `--allow-network-fs`, or the
+    /// [`crate::storage::ALLOW_NETWORK_FS_ENV`] variable
+    /// ([`crate::storage::network_fs_override_from_env`]).
+    pub allow_network_fs: bool,
 }
 
 /// What one feed refresh did.
@@ -287,9 +295,10 @@ impl ImportOutcome {
 pub struct CoreHandle {
     profile_dir: PathBuf,
     storage: Arc<Storage>,
-    emitter: Mutex<EventEmitter>,
+    events: Mutex<sink::EventSink>,
     /// The "pending events" health flag: set when a flush failed and
-    /// intents are left staged, cleared by the next successful drain.
+    /// intents are left staged (or the log could not be opened at all),
+    /// cleared by the next successful drain.
     events_backlog: AtomicBool,
     client: PolicedClient,
     destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
@@ -326,42 +335,69 @@ impl CoreHandle {
     /// log (with crash-recovery replay of staged intents), policed
     /// client, and the persisted destination registry.
     ///
+    /// A profile on network or sync-managed storage is refused before
+    /// anything is created (see [`CoreOptions::allow_network_fs`]). An
+    /// events directory that cannot be opened does not fail the open: the
+    /// handle comes up with [`CoreHandle::has_pending_events`] raised,
+    /// mutations keep their intents staged, and a later drain opens the
+    /// log once it is writable.
+    ///
     /// # Errors
     ///
     /// [`CoreError::Open`] when the database cannot be opened (match the
-    /// inner [`OpenError`] for the failure class); other [`CoreError`]s
-    /// on filesystem, storage or event-log failures.
+    /// inner [`OpenError`] for the failure class, [`OpenError::NetworkFs`]
+    /// included); [`CoreError::is_profile_busy`] contention on the
+    /// database or the events lock; other [`CoreError`]s on filesystem or
+    /// storage failures.
     pub fn open_with(
         profile_dir: impl AsRef<Path>,
         options: CoreOptions,
     ) -> Result<Self, CoreError> {
         let profile_dir = profile_dir.as_ref().to_path_buf();
+        let db_path = profile_dir.join(crate::paths::DB_FILE);
+        if let Some(kind) = crate::storage::detect_network_fs(&db_path) {
+            if !options.allow_network_fs {
+                return Err(OpenError::NetworkFs {
+                    path: db_path,
+                    kind,
+                }
+                .into());
+            }
+            tracing::warn!(
+                path = %db_path.display(),
+                %kind,
+                "opening a profile on network or sync-managed storage (override set)"
+            );
+        }
         std::fs::create_dir_all(&profile_dir).map_err(|source| CoreError::Io {
             path: profile_dir.clone(),
             source,
         })?;
-        let storage = Arc::new(Storage::open(profile_dir.join("curio.db"))?);
-        let events_dir = profile_dir.join(".curio").join("events");
-        let log = EventLog::open(&events_dir).map_err(EventsError::Log)?;
-        // Contract: the event log is never committed to git.
-        let gitignore = profile_dir.join(".curio").join(".gitignore");
-        if !gitignore.exists() {
-            std::fs::write(&gitignore, "events/\n").map_err(|source| CoreError::Io {
-                path: gitignore.clone(),
-                source,
-            })?;
-        }
-        // No fatal replay here: intents a previous process left staged
-        // are drained by the `emit` below, which degrades to the backlog
-        // flag instead of refusing to open a profile on a full disk.
-        let emitter = EventEmitter::attach(Arc::clone(&storage), log);
+        let storage = Arc::new(Storage::open(&db_path)?);
+        // The events log is attached lazily (see `sink`): an events
+        // directory that cannot be opened degrades to the backlog flag
+        // below instead of refusing a profile whose database is fine.
+        // Only contention is reported, as the retryable "busy".
+        let mut events =
+            sink::EventSink::detached(Arc::clone(&storage), profile_dir.join(".curio"));
+        let attached = match events.emitter() {
+            Ok(_) => true,
+            Err(error) if error.is_profile_busy() => return Err(error),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "the event log cannot be opened; events stay staged until it can"
+                );
+                false
+            }
+        };
         let destinations = destinations::load_destinations(&storage)?;
         let exported_destinations = destinations::load_exported(&storage)?;
         let core = Self {
             profile_dir,
             storage,
-            emitter: Mutex::new(emitter),
-            events_backlog: AtomicBool::new(false),
+            events: Mutex::new(events),
+            events_backlog: AtomicBool::new(!attached),
             client: PolicedClient::new(options.fetch),
             destinations: RwLock::new(destinations),
             exported_destinations: RwLock::new(exported_destinations),
@@ -371,7 +407,11 @@ impl CoreHandle {
             #[cfg(feature = "enrich-reddit")]
             reddit_auth: crate::enrich::reddit_auth::TokenManager::default(),
         };
-        core.emit();
+        // The startup replay: intents a previous process left staged are
+        // drained here, non-fatally (a failure raises the backlog flag).
+        if attached {
+            core.emit();
+        }
         Ok(core)
     }
 
@@ -437,5 +477,156 @@ impl CoreHandle {
             self.emit();
         }
         changed
+    }
+}
+
+impl CoreError {
+    /// Whether this is transient contention with another process sharing
+    /// the profile — the database stayed busy
+    /// ([`StorageError::Busy`], or [`OpenError::Locked`] while opening) or
+    /// the events lock stayed held
+    /// ([`crate::events::EventLogError::ProfileLocked`]). Retrying the
+    /// same operation once the other process finishes can succeed; heads
+    /// surface it as "busy, try again" (the CLI exits with a distinct
+    /// code).
+    #[must_use]
+    pub fn is_profile_busy(&self) -> bool {
+        match self {
+            Self::Storage(err)
+            | Self::Events(EventsError::Storage(err))
+            | Self::Open(OpenError::Storage(err)) => err.is_busy(),
+            Self::Open(OpenError::Locked { .. })
+            | Self::Events(EventsError::Log(crate::events::EventLogError::ProfileLocked {
+                ..
+            })) => true,
+            _ => false,
+        }
+    }
+}
+
+/// The cross-process events lock, inside `.curio/` beside (never inside)
+/// the `events/` contract directory (see [`EventLog`]).
+const EVENTS_LOCK_FILE: &str = "events.lock";
+
+/// Lines `.curio/.gitignore` must carry: the events directory and its
+/// lock file.
+const GITIGNORE_LINES: [&str; 2] = ["events/", EVENTS_LOCK_FILE];
+
+/// Writes `.curio/.gitignore`, or appends whichever required lines an
+/// existing one (from an older build, or hand-edited) lacks.
+fn ensure_gitignore(path: &Path) -> Result<(), CoreError> {
+    let io = |source| CoreError::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+    let existing = match std::fs::read_to_string(path) {
+        Ok(existing) => existing,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(io(err)),
+    };
+    let missing: Vec<&str> = GITIGNORE_LINES
+        .into_iter()
+        .filter(|line| !existing.lines().any(|have| have.trim() == *line))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    for line in missing {
+        next.push_str(line);
+        next.push('\n');
+    }
+    std::fs::write(path, next).map_err(io)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use crate::events::EventLogError;
+
+    fn busy() -> StorageError {
+        StorageError::from(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ))
+    }
+
+    #[test]
+    fn contention_from_either_side_reads_as_profile_busy() {
+        assert!(CoreError::Storage(busy()).is_profile_busy());
+        assert!(CoreError::Events(EventsError::Storage(busy())).is_profile_busy());
+        assert!(
+            CoreError::Events(EventsError::Log(EventLogError::ProfileLocked {
+                path: PathBuf::from("events.lock"),
+                waited_ms: 15_000,
+            }))
+            .is_profile_busy()
+        );
+        assert!(
+            CoreError::Open(OpenError::Locked {
+                path: PathBuf::from("curio.db"),
+                source: rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                    None,
+                ),
+            })
+            .is_profile_busy()
+        );
+        assert!(CoreError::Open(OpenError::Storage(busy())).is_profile_busy());
+        assert!(
+            !CoreError::Open(OpenError::TooNew {
+                found: 99,
+                supported: 8
+            })
+            .is_profile_busy()
+        );
+        assert!(!CoreError::Storage(StorageError::WriterGone).is_profile_busy());
+        assert!(
+            !CoreError::Events(EventsError::Log(EventLogError::Io(std::io::Error::other(
+                "disk"
+            ))))
+            .is_profile_busy()
+        );
+        assert!(!CoreError::NotFound { entity: "article" }.is_profile_busy());
+    }
+
+    #[test]
+    fn gitignore_is_written_then_upgraded_without_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".gitignore");
+        ensure_gitignore(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "events/\nevents.lock\n"
+        );
+
+        // An older build's file (no lock line, no trailing newline) gains
+        // only the missing line; the user's own lines stay.
+        std::fs::write(&path, "events/\n*.bak").unwrap();
+        ensure_gitignore(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "events/\n*.bak\nevents.lock\n"
+        );
+        ensure_gitignore(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "events/\n*.bak\nevents.lock\n",
+            "idempotent"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_gitignore_is_a_profile_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where the file should be: reading it fails.
+        let path = dir.path().join(".gitignore");
+        std::fs::create_dir(&path).unwrap();
+        assert!(matches!(ensure_gitignore(&path), Err(CoreError::Io { .. })));
     }
 }

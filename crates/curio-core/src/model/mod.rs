@@ -177,7 +177,8 @@ pub struct NewArticle {
     pub source_url: String,
     /// Author, if known.
     pub author: Option<String>,
-    /// Publication time, if known.
+    /// Publication time, if known. Storage clamps a value later than the
+    /// article's first-seen time (`saved_at`) to that time.
     pub published_at: Option<Timestamp>,
     /// Sanitized content.
     pub content: ArticleContent,

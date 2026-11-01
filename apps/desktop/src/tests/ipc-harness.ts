@@ -22,10 +22,13 @@ import type {
     FeedDto,
     FetchRecordDto,
     ImportOutcomeDto,
+    LegacyProfileDto,
     OpmlImportOutcomeDto,
     PathTokenDto,
+    RecoveryOutcomeDto,
     RefreshOutcomeDto,
     SaveOutcomeDto,
+    StartupFailureDto,
     UnreadCountsDto,
 } from '$lib/bindings';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
@@ -278,6 +281,17 @@ export function appInfoFixture(overrides: Partial<AppInfoDto> = {}): AppInfoDto 
     };
 }
 
+export function legacyProfileFixture(overrides: Partial<LegacyProfileDto> = {}): LegacyProfileDto {
+    return {
+        path: '/home/user/Library/Application Support/curio',
+        default_dir: '/home/user/Library/Application Support/io.github.alexnodeland.curio',
+        status: 'in_use',
+        detail: null,
+        opened_in_place: false,
+        ...overrides,
+    };
+}
+
 export function dbStatsFixture(overrides: Partial<DbStatsDto> = {}): DbStatsDto {
     return {
         article_count: 42,
@@ -291,6 +305,30 @@ export function pathTokenFixture(overrides: Partial<PathTokenDto> = {}): PathTok
     return {
         token: '01JZ0000000000000000000000',
         path: '/home/user/Downloads/subs.opml',
+        ...overrides,
+    };
+}
+
+export function startupFailureFixture(
+    overrides: Partial<StartupFailureDto> = {},
+): StartupFailureDto {
+    return {
+        class: 'corrupt',
+        message:
+            '/home/user/.local/share/curio/curio.db is not a readable Curio database (corrupt or not SQLite): file is not a database',
+        profile_dir: '/home/user/.local/share/curio',
+        backup: '/home/user/.local/share/curio/curio.db.pre-v7.bak',
+        app_version: '0.4.0',
+        ...overrides,
+    };
+}
+
+export function recoveryOutcomeFixture(
+    overrides: Partial<RecoveryOutcomeDto> = {},
+): RecoveryOutcomeDto {
+    return {
+        failure: null,
+        set_aside: '/home/user/.local/share/curio/set-aside/20261031T120000Z',
         ...overrides,
     };
 }

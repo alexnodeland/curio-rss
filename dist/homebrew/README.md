@@ -21,7 +21,8 @@ Then open once via **right-click → Open** (or `xattr -dr com.apple.quarantine
 The cask here is the **source of truth template**; the tap is a thin mirror.
 This repo never pushes to the tap. To publish an update:
 
-1. Cut a GitHub release (push a `vX.Y.Z` tag — `release.yml` builds + drafts it;
+1. Cut a GitHub release (merge the version-bump PR — `release-tag.yml` tags
+   `vX.Y.Z` and `release.yml` builds + drafts it;
    see [`docs/release/runbook.md`](../../docs/release/runbook.md)) with the
    stably-named universal DMG the cask URL expects:
    - `Curio-universal.dmg`

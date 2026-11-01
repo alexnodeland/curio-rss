@@ -71,7 +71,14 @@ describe('AddFeedModal', () => {
             { url: 'https://example.org/feed.xml' },
         ]);
         expect(harness.callsFor('add_feed')).toEqual([
-            { newFeed: { url: 'https://example.org/feed.xml', title: null, tags: [] } },
+            {
+                newFeed: {
+                    url: 'https://example.org/feed.xml',
+                    title: null,
+                    tags: [],
+                    validate: true,
+                },
+            },
         ]);
         expect(onclose).toHaveBeenCalledOnce();
     });
@@ -96,7 +103,14 @@ describe('AddFeedModal', () => {
         await fireEvent.click(getByText('Subscribe'));
         await flushIpc();
         expect(harness.callsFor('add_feed')).toEqual([
-            { newFeed: { url: 'https://other.example/feed.xml', title: null, tags: [] } },
+            {
+                newFeed: {
+                    url: 'https://other.example/feed.xml',
+                    title: null,
+                    tags: [],
+                    validate: true,
+                },
+            },
         ]);
     });
 
@@ -118,6 +132,7 @@ describe('AddFeedModal', () => {
                 url: 'https://example.org/feed.xml',
                 title: null,
                 tags: ['rust', 'reading'],
+                validate: true,
             },
         });
     });
@@ -193,6 +208,7 @@ describe('AddFeedModal', () => {
                     url: 'https://www.reddit.com/r/rust/.rss',
                     title: null,
                     tags: ['Community/Reddit'],
+                    validate: true,
                 },
             },
         ]);
@@ -279,6 +295,250 @@ describe('AddFeedModal', () => {
                     url: 'https://hnrss.org/frontpage',
                     title: null,
                     tags: ['Community/Hacker News'],
+                    validate: true,
+                },
+            },
+        ]);
+    });
+
+    it('validates a typed homepage, and subscribes unvalidated only when asked', async () => {
+        const onclose = vi.fn();
+        let attempts = 0;
+        harness = installIpcHarness(
+            base({
+                add_feed: () => {
+                    attempts += 1;
+                    return attempts === 1
+                        ? Promise.reject(
+                              commandErrorFixture({
+                                  kind: 'user',
+                                  code: 'NO_FEED',
+                                  message: 'no feed found at example.com',
+                              }),
+                          )
+                        : feedFixture({ url: 'https://example.com/', title: null });
+                },
+            }),
+        );
+        const { getByText, getByTestId, getByPlaceholderText } = render(AddFeedModal, { onclose });
+
+        // A bare domain, Find never pressed: Subscribe still validates.
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'example.com' },
+        });
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+
+        expect(harness.callsFor('add_feed')).toEqual([
+            { newFeed: { url: 'example.com', title: null, tags: [], validate: true } },
+        ]);
+        // Refused inline — no subscription, no error toast, the modal stays.
+        expect(getByText('No feeds found on that page — try the direct feed URL.')).toBeTruthy();
+        expect(toastStore.toasts).toHaveLength(0);
+        expect(onclose).not.toHaveBeenCalled();
+
+        // The explicit escape hatch subscribes without validation.
+        await fireEvent.click(getByTestId('add-feed-unvalidated'));
+        await flushIpc();
+        expect(harness.callsFor('add_feed')[1]).toEqual({
+            newFeed: { url: 'example.com', title: null, tags: [], validate: false },
+        });
+        expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('offers the escape hatch when the address is unreachable, and toasts why', async () => {
+        harness = installIpcHarness(
+            base({
+                add_feed: rejectWith(
+                    commandErrorFixture({
+                        kind: 'user',
+                        code: 'NETWORK',
+                        message: 'could not reach https://lan.example/',
+                    }),
+                ),
+            }),
+        );
+        const { getByText, getByTestId, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'https://lan.example/' },
+        });
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+
+        expect(toastStore.toasts.at(-1)?.message).toBe('could not reach https://lan.example/');
+        expect(getByText('Couldn’t reach that address to check it for a feed.')).toBeTruthy();
+        expect(getByTestId('add-feed-unvalidated')).toBeTruthy();
+    });
+
+    it('offers the escape hatch when Find comes back empty, and clears it on edit', async () => {
+        harness = installIpcHarness(base({ discover_feeds: discoveryFixture({ feeds: [] }) }));
+        const { getByText, queryByTestId, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+        const input = getByPlaceholderText('https://example.com');
+
+        await fireEvent.input(input, { target: { value: 'https://plain.example' } });
+        await fireEvent.click(getByText('Find feeds'));
+        await flushIpc();
+        expect(queryByTestId('add-feed-unvalidated')).toBeTruthy();
+
+        await fireEvent.input(input, { target: { value: 'https://other.example' } });
+        expect(queryByTestId('add-feed-unvalidated')).toBeNull();
+    });
+
+    it('drops a late subscribe refusal once the URL was edited meanwhile', async () => {
+        let refuse: (error: unknown) => void = () => {};
+        harness = installIpcHarness(
+            base({
+                add_feed: () =>
+                    new Promise((_resolve, reject) => {
+                        refuse = reject;
+                    }),
+            }),
+        );
+        const { getByText, queryByTestId, queryByText, getByPlaceholderText } = render(
+            AddFeedModal,
+            { onclose: vi.fn() },
+        );
+        const input = getByPlaceholderText('https://example.com');
+
+        await fireEvent.input(input, { target: { value: 'https://first.example' } });
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+        // The validating subscribe is still in flight: the user edits the URL.
+        await fireEvent.input(input, { target: { value: 'https://second.example' } });
+        refuse(
+            commandErrorFixture({
+                kind: 'user',
+                code: 'NO_FEED',
+                message: 'no feed found at https://first.example',
+            }),
+        );
+        await flushIpc();
+
+        // The refusal was about the first URL: no escape hatch for the second.
+        expect(queryByText('No feeds found on that page — try the direct feed URL.')).toBeNull();
+        expect(queryByTestId('add-feed-unvalidated')).toBeNull();
+    });
+
+    it('drops a late unreachable discovery once the URL was edited meanwhile', async () => {
+        let refuse: (error: unknown) => void = () => {};
+        harness = installIpcHarness(
+            base({
+                discover_feeds: () =>
+                    new Promise((_resolve, reject) => {
+                        refuse = reject;
+                    }),
+            }),
+        );
+        const { getByText, queryByTestId, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+        const input = getByPlaceholderText('https://example.com');
+
+        await fireEvent.input(input, { target: { value: 'https://first.example' } });
+        await fireEvent.click(getByText('Find feeds'));
+        await flushIpc();
+        await fireEvent.input(input, { target: { value: 'https://second.example' } });
+        refuse(
+            commandErrorFixture({
+                kind: 'user',
+                code: 'NETWORK',
+                message: 'could not reach https://first.example',
+            }),
+        );
+        await flushIpc();
+
+        expect(queryByTestId('add-feed-unvalidated')).toBeNull();
+        expect(toastStore.toasts).toHaveLength(0);
+    });
+
+    it('warns when the typed address resolves to a feed already subscribed', async () => {
+        harness = installIpcHarness(
+            base({
+                add_feed: rejectWith(
+                    commandErrorFixture({
+                        kind: 'user',
+                        code: 'ALREADY_SUBSCRIBED',
+                        message: 'already subscribed to https://example.org/feed.xml',
+                    }),
+                ),
+            }),
+        );
+        const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose: vi.fn() });
+
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'example.org' },
+        });
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+
+        expect(toastStore.toasts.at(-1)?.message).toBe('You are already subscribed to this feed.');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('warning');
+    });
+
+    it('falls back to the opted-in Google favicon for a scheme-less address', async () => {
+        prefsStore.allowRemoteFavicon = true;
+        harness = installIpcHarness(
+            base({
+                discover_feeds: discoveryFixture({ favicon: 'https://example.com/favicon.ico' }),
+                get_cached_image: (args) =>
+                    String(args.url).startsWith('https://www.google.com/')
+                        ? '/cache/google.png'
+                        : Promise.reject(
+                              commandErrorFixture({
+                                  kind: 'user',
+                                  code: 'NETWORK',
+                                  message: '404',
+                              }),
+                          ),
+            }),
+        );
+        const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose: vi.fn() });
+
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'example.com' },
+        });
+        await fireEvent.click(getByText('Find feeds'));
+        await flushIpc();
+        await flushIpc();
+
+        expect(harness.callsFor('get_cached_image').map((call) => call.url)).toContain(
+            'https://www.google.com/s2/favicons?domain=example.com&sz=64',
+        );
+    });
+
+    it('offers GitHub-releases and newsletter presets', async () => {
+        harness = installIpcHarness(base());
+        const { getByText, queryByText, getByPlaceholderText } = render(AddFeedModal, {
+            onclose: vi.fn(),
+        });
+        const input = getByPlaceholderText('https://example.com') as HTMLInputElement;
+
+        await fireEvent.click(getByText('GitHub releases'));
+        expect(input.value).toBe('https://github.com/');
+        await fireEvent.input(input, { target: { value: 'https://github.com/rust-lang/rust' } });
+        expect(getByText('https://github.com/rust-lang/rust/releases.atom')).toBeTruthy();
+
+        // The newsletter preset explains the email-to-feed bridge.
+        expect(queryByText('Open Kill the Newsletter')).toBeNull();
+        await fireEvent.click(getByText('Newsletter'));
+        expect(getByText('Open Kill the Newsletter')).toBeTruthy();
+        await fireEvent.input(input, { target: { value: 'abc123@kill-the-newsletter.com' } });
+        expect(getByText('https://kill-the-newsletter.com/feeds/abc123.xml')).toBeTruthy();
+
+        await fireEvent.click(getByText('Subscribe'));
+        await flushIpc();
+        expect(harness.callsFor('add_feed')).toEqual([
+            {
+                newFeed: {
+                    url: 'https://kill-the-newsletter.com/feeds/abc123.xml',
+                    title: null,
+                    tags: ['Newsletters'],
+                    validate: true,
                 },
             },
         ]);

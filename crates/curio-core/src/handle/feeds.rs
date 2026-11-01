@@ -3,7 +3,7 @@
 
 use std::sync::PoisonError;
 
-use crate::feeds::{DiscoverError, DiscoverOptions, Discovery};
+use crate::feeds::{DiscoverError, DiscoverOptions, Discovery, Resolution};
 use crate::model::{Feed, FeedId, FeedStatus, FetchRecord, NewFeed};
 
 use super::{CoreError, CoreHandle};
@@ -27,7 +27,28 @@ impl CoreHandle {
         crate::feeds::discover(&self.client, input, options).await
     }
 
-    /// Subscribes to a feed; emits `feed.added` (with tags).
+    /// Resolves what a user typed to the validated feed URL a subscribe
+    /// should store — the shared validating subscribe path of every head
+    /// (CLI `feed add`, the desktop's Subscribe): discovery, then its best
+    /// candidate. See [`crate::feeds::resolve()`]. No storage write: pass
+    /// the result to [`Self::add_feed`].
+    ///
+    /// # Errors
+    ///
+    /// Every [`Self::discover_feeds`] error, plus [`DiscoverError::NoFeed`]
+    /// when the page answered but offers no feed.
+    pub async fn resolve_feed_url(
+        &self,
+        input: &str,
+        options: DiscoverOptions,
+    ) -> Result<Resolution, DiscoverError> {
+        crate::feeds::resolve(&self.client, input, options).await
+    }
+
+    /// Subscribes to a feed URL as given; emits `feed.added` (with tags).
+    /// It neither normalizes nor validates: a head subscribing what a user
+    /// typed resolves it with [`Self::resolve_feed_url`] first (or, on an
+    /// explicit "subscribe anyway", [`crate::feeds::normalize_input`]).
     ///
     /// # Errors
     ///
@@ -217,5 +238,87 @@ impl CoreHandle {
     /// Storage errors.
     pub fn reorder_feeds(&self, ordered: &[FeedId]) -> Result<(), CoreError> {
         Ok(self.storage.reorder_feeds(ordered)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::collections::HashSet;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::CoreOptions;
+    use crate::fetch::FetchConfig;
+
+    const RSS: &str =
+        r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Blog</title></channel></rss>"#;
+
+    /// A handle whose policed client trusts the loopback fixture server.
+    fn core_trusting_localhost(profile: &std::path::Path) -> CoreHandle {
+        CoreHandle::open_with(
+            profile,
+            CoreOptions {
+                fetch: FetchConfig {
+                    politeness_delay: Duration::ZERO,
+                    trusted_addrs: HashSet::from([IpAddr::V4(Ipv4Addr::LOCALHOST)]),
+                    ..FetchConfig::default()
+                },
+                ..CoreOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// The handle's validating subscribe path resolves a homepage to the
+    /// feed it declares — through the handle's own policed client — and
+    /// writes nothing until `add_feed`.
+    #[tokio::test]
+    async fn resolve_feed_url_finds_the_declared_feed_without_subscribing() {
+        let server = MockServer::start().await;
+        let page = format!(
+            r#"<link rel="alternate" type="application/rss+xml" href="{}/feed.xml">"#,
+            server.uri()
+        );
+        for (at, body) in [("/", page.as_str()), ("/feed.xml", RSS)] {
+            Mock::given(method("GET"))
+                .and(path(at))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body))
+                .mount(&server)
+                .await;
+        }
+        let profile = tempfile::tempdir().unwrap();
+        let core = core_trusting_localhost(profile.path());
+
+        let resolution = core
+            .resolve_feed_url(&format!("{}/", server.uri()), DiscoverOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(resolution.url, format!("{}/feed.xml", server.uri()));
+        assert_eq!(resolution.alternates, Vec::<String>::new());
+        assert_eq!(core.list_feeds().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn resolve_feed_url_reports_a_feedless_page() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<p>hello</p>"))
+            .mount(&server)
+            .await;
+        let profile = tempfile::tempdir().unwrap();
+        let core = core_trusting_localhost(profile.path());
+
+        let error = core
+            .resolve_feed_url(&format!("{}/", server.uri()), DiscoverOptions::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, DiscoverError::NoFeed { .. }), "{error}");
     }
 }

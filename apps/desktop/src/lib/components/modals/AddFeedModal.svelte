@@ -8,17 +8,27 @@
  * fetched and parsed, plus a favicon. Favicon precedence is same-origin only; the Google favicon service is an
  * opt-in fallback (`prefsStore.allowRemoteFavicon`) applied here — nothing
  * reaches Google unless the user turned it on. Adding dedupes against
- * `get_feed_by_url` first, then subscribes through the feeds store.
+ * `get_feed_by_url` first, then subscribes through the feeds store — and
+ * `add_feed` validates: what was typed is resolved through the same core
+ * discovery, so a homepage or bare domain subscribes to its feed and a page
+ * with none (`NO_FEED`) or an unreachable one is refused, with an explicit
+ * "use this URL directly" (`validate: false`) offered instead.
  */
 import CachedImage from '$components/common/CachedImage.svelte';
 import Modal from '$components/common/Modal.svelte';
-import { type DiscoveredFeedDto, commands } from '$lib/bindings';
+import { type CommandError, type DiscoveredFeedDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
-import { HN_PRESETS, detectSource } from '$lib/utils/source-presets';
+import { openExternal } from '$lib/utils/external';
+import {
+    HN_PRESETS,
+    KILL_THE_NEWSLETTER_URL,
+    detectSource,
+    hostOf,
+} from '$lib/utils/source-presets';
 
 let { onclose }: { onclose: () => void } = $props();
 
@@ -34,6 +44,15 @@ let savingLink = $state(false);
 let searched = $state(false);
 let urlInput = $state<HTMLInputElement>();
 let showHnPresets = $state(false);
+let showNewsletterHelp = $state(false);
+// Why the last subscribe (or find) could not validate the URL — the cue to
+// offer subscribing to it unvalidated. `null`: nothing failed.
+let unverified = $state<'noFeed' | 'unreachable' | null>(null);
+// Bumped by every edit of the URL (`resetDiscovery`). A find or subscribe
+// captures it before awaiting the core — which can take the whole discovery
+// budget — and drops its result if the URL changed meanwhile, so a late
+// reply about an earlier URL never unlocks the escape hatch for a new one.
+let generation = 0;
 
 // What the typed string resolves to, if it's a recognized source (a
 // subreddit, Mastodon handle, YouTube channel, HN URL). A YouTube @handle
@@ -43,6 +62,12 @@ const detected = $derived(detectSource(url));
 // The typed text is a fetchable page URL ⇒ offer the read-later save
 // (the GoodLinks path: one article, no subscription).
 const canSaveLink = $derived(/^https?:\/\//i.test(url.trim()));
+
+// Discovery found nothing, or a subscribe could not validate: say so and
+// offer the explicit unvalidated subscribe.
+const offerUnvalidated = $derived(
+    unverified !== null || (searched && detected === null && candidates.length === 0),
+);
 
 /**
  * The URL a subscribe will use: a recognized source's constructed feed URL
@@ -55,11 +80,13 @@ function targetUrl(): string {
 /** Clears any prior discovery result — the candidates belong to an earlier URL
  *  and must not survive an edit, or `add()` would subscribe to a stale one. */
 function resetDiscovery(): void {
+    generation += 1;
     candidates = [];
     selectedUrl = null;
     searched = false;
     faviconSrc = null;
     triedRemoteFavicon = false;
+    unverified = null;
 }
 
 /** Fills the URL input with a starter pattern and focuses it (presets row). */
@@ -67,7 +94,14 @@ function useTemplate(template: string): void {
     url = template;
     resetDiscovery();
     showHnPresets = false;
+    showNewsletterHelp = false;
     urlInput?.focus();
+}
+
+/** Toggles the newsletters-as-feeds explainer (presets row). */
+function toggleNewsletterHelp(): void {
+    showNewsletterHelp = !showNewsletterHelp;
+    showHnPresets = false;
 }
 
 /** Picks a Hacker News feed: sets the URL and suggests the HN folder. */
@@ -75,6 +109,7 @@ function pickHnPreset(feedUrl: string): void {
     url = feedUrl;
     resetDiscovery();
     showHnPresets = false;
+    showNewsletterHelp = false;
     if (tagsInput.trim() === '') {
         tagsInput = 'Community/Hacker News';
     }
@@ -98,10 +133,17 @@ async function find(): Promise<void> {
     }
     finding = true;
     triedRemoteFavicon = false;
+    const asked = generation;
     try {
         const result = await commands.discoverFeeds(query);
+        if (asked !== generation) {
+            return; // the URL was edited while discovery ran: this answer is stale
+        }
         if (result.status === 'error') {
             toastCommandError(result.error);
+            if (result.error.code === 'NETWORK') {
+                unverified = 'unreachable';
+            }
             return;
         }
         candidates = result.data.feeds;
@@ -127,15 +169,12 @@ function onFaviconFail(): void {
     faviconSrc = host === null ? null : `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
 }
 
-function hostOf(value: string): string | null {
-    try {
-        return new URL(value.trim()).hostname || null;
-    } catch {
-        return null;
-    }
-}
-
-async function add(): Promise<void> {
+/**
+ * Subscribes to {@link targetUrl}. `validate` (the default) has the core
+ * resolve and check it first; `false` is the explicit "use this URL
+ * directly" escape hatch offered once validation failed.
+ */
+async function add(validate = true): Promise<void> {
     if (adding) {
         return; // reentrancy guard against a double-submit
     }
@@ -145,6 +184,7 @@ async function add(): Promise<void> {
         return;
     }
     adding = true;
+    const asked = generation;
     try {
         const existing = await commands.getFeedByUrl(target);
         if (existing.status === 'error') {
@@ -160,9 +200,9 @@ async function add(): Promise<void> {
         if (tags.length === 0 && detected !== null) {
             tags.push(detected.suggestedTag);
         }
-        const result = await feedsStore.addFeed({ url: target, title: null, tags });
+        const result = await feedsStore.addFeed({ url: target, title: null, tags, validate });
         if (result.status === 'error') {
-            toastCommandError(result.error);
+            subscribeFailed(result.error, asked !== generation);
             return;
         }
         toastStore.showToast(
@@ -174,6 +214,33 @@ async function add(): Promise<void> {
         toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
         adding = false;
+    }
+}
+
+/** Presents a refused subscribe: a duplicate warns, an unvalidated URL
+ *  offers the escape hatch, anything else toasts. `stale`: the URL was
+ *  edited while the subscribe ran, so the refusal is about a URL no longer
+ *  in the field — it must not offer the escape hatch for the new one. */
+function subscribeFailed(error: CommandError, stale: boolean): void {
+    switch (error.code) {
+        case 'ALREADY_SUBSCRIBED':
+            toastStore.showToast(t('addFeed.already'), 'warning');
+            return;
+        case 'NO_FEED':
+            // Said inline, beside the escape hatch — no toast on top, and
+            // nothing at all once the field shows a different URL.
+            if (!stale) {
+                unverified = 'noFeed';
+            }
+            return;
+        case 'NETWORK':
+            if (!stale) {
+                unverified = 'unreachable';
+            }
+            toastCommandError(error);
+            return;
+        default:
+            toastCommandError(error);
     }
 }
 
@@ -281,8 +348,23 @@ async function saveLink(): Promise<void> {
                 <button
                     type="button"
                     class="preset"
+                    onclick={() => useTemplate('https://github.com/')}
+                    >{t('presets.github')}</button
+                >
+                <button
+                    type="button"
+                    class="preset"
+                    aria-expanded={showNewsletterHelp}
+                    onclick={toggleNewsletterHelp}>{t('presets.newsletter')}</button
+                >
+                <button
+                    type="button"
+                    class="preset"
                     aria-expanded={showHnPresets}
-                    onclick={() => (showHnPresets = !showHnPresets)}>{t('presets.hn')}</button
+                    onclick={() => {
+                        showHnPresets = !showHnPresets;
+                        showNewsletterHelp = false;
+                    }}>{t('presets.hn')}</button
                 >
             </div>
             {#if showHnPresets}
@@ -296,27 +378,48 @@ async function saveLink(): Promise<void> {
                     {/each}
                 </div>
             {/if}
+            {#if showNewsletterHelp}
+                <div class="newsletter-help" role="note">
+                    <p>{t('presets.newsletter.hint')}</p>
+                    <button
+                        type="button"
+                        class="link-button"
+                        onclick={() => void openExternal(KILL_THE_NEWSLETTER_URL)}
+                        >{t('presets.newsletter.open')}</button
+                    >
+                </div>
+            {/if}
         </div>
 
-        {#if searched && detected === null}
-            {#if candidates.length > 0}
-                <fieldset class="candidates">
-                    <legend>{t('addFeed.candidates')}</legend>
-                    {#each candidates as candidate (candidate.url)}
-                        <label class="candidate">
-                            <input type="radio" name="feed" value={candidate.url} bind:group={selectedUrl} />
-                            <span class="candidate-main">
-                                <span class="candidate-title truncate"
-                                    >{candidate.title ?? candidate.url}</span
-                                >
-                                <span class="candidate-url truncate">{candidate.url}</span>
-                            </span>
-                        </label>
-                    {/each}
-                </fieldset>
-            {:else}
-                <p class="status">{t('addFeed.noneFound')}</p>
-            {/if}
+        {#if searched && detected === null && candidates.length > 0}
+            <fieldset class="candidates">
+                <legend>{t('addFeed.candidates')}</legend>
+                {#each candidates as candidate (candidate.url)}
+                    <label class="candidate">
+                        <input type="radio" name="feed" value={candidate.url} bind:group={selectedUrl} />
+                        <span class="candidate-main">
+                            <span class="candidate-title truncate"
+                                >{candidate.title ?? candidate.url}</span
+                            >
+                            <span class="candidate-url truncate">{candidate.url}</span>
+                        </span>
+                    </label>
+                {/each}
+            </fieldset>
+        {/if}
+        {#if offerUnvalidated}
+            <div class="unvalidated" role="status">
+                <p class="status">
+                    {unverified === 'unreachable' ? t('addFeed.unreachable') : t('addFeed.noneFound')}
+                </p>
+                <button
+                    type="button"
+                    class="link-button"
+                    data-testid="add-feed-unvalidated"
+                    onclick={() => void add(false)}
+                    disabled={adding}>{t('addFeed.useUrl')}</button
+                >
+            </div>
         {/if}
 
         <label class="field">
@@ -508,6 +611,38 @@ async function saveLink(): Promise<void> {
     .status {
         font-size: var(--text-sm);
         color: var(--fg-muted);
+    }
+
+    .unvalidated,
+    .newsletter-help {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-1);
+    }
+
+    .newsletter-help {
+        padding: var(--space-2) var(--space-3);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-lg);
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+    }
+
+    .link-button {
+        padding: 0;
+        background: transparent;
+        color: var(--accent);
+        font-size: var(--text-sm);
+    }
+
+    .link-button:hover:not(:disabled) {
+        text-decoration: underline;
+    }
+
+    .link-button:disabled {
+        opacity: 0.5;
     }
 
     .favicon-optin {

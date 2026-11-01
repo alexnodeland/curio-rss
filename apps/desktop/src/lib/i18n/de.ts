@@ -173,6 +173,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'addFeed.noneFound':
         'Auf dieser Seite wurden keine Feeds gefunden — versuche die direkte Feed-URL.',
     'addFeed.useUrl': 'Diese URL direkt verwenden',
+    'addFeed.unreachable': 'Diese Adresse war nicht erreichbar, um sie auf einen Feed zu prüfen.',
     'addFeed.already': 'Du hast diesen Feed bereits abonniert.',
     'addFeed.added': '{title} abonniert',
     'addFeed.saveLink': 'Für später speichern',
@@ -189,6 +190,11 @@ export const de: Partial<Record<MessageKey, string>> = {
     'presets.reddit': 'Reddit',
     'presets.youtube': 'YouTube',
     'presets.mastodon': 'Mastodon',
+    'presets.github': 'GitHub-Releases',
+    'presets.newsletter': 'Newsletter',
+    'presets.newsletter.hint':
+        'Newsletter kommen per E-Mail. Lege bei Kill the Newsletter ein Postfach an, abonniere den Newsletter mit dessen Adresse und füge dann diese Adresse oder ihre Feed-URL hier ein. Substack-Newsletter brauchen kein Postfach — füge ihre Webadresse ein.',
+    'presets.newsletter.open': 'Kill the Newsletter öffnen',
     'presets.hn': 'Hacker News',
     'presets.hn.frontpage': 'Startseite',
     'presets.hn.newest': 'Neueste',

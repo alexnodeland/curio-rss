@@ -10,7 +10,7 @@ import Icon from '$components/common/Icon.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { runCommand, selectFolder } from '$lib/state/actions';
+import { markFolderRead, runCommand, selectFolder } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedDnd } from '$lib/state/feed-dnd.svelte';
 import { type FeedFolder, folderRowKey } from '$lib/state/feed-tree';
@@ -111,7 +111,7 @@ function folderMenu(): MenuItem[] {
         {
             id: 'markread',
             labelKey: 'folder.menu.markRead',
-            onSelect: () => void runCommand(() => feedsStore.markFolderRead(folder)),
+            onSelect: () => void markFolderRead(folder),
         },
         {
             id: 'delete',

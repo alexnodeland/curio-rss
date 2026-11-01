@@ -10,7 +10,7 @@ import type { FeedDto } from '$lib/bindings';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
-import { markAllRead, runCommand, toastCommandError } from '$lib/state/actions';
+import { markAllRead, runCommand, unsubscribeWithUndo } from '$lib/state/actions';
 import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
 import { feedRowKey } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -108,15 +108,6 @@ async function copyUrl(): Promise<void> {
     );
 }
 
-async function unsubscribe(): Promise<void> {
-    const result = await feedsStore.removeFeed(feed.id);
-    if (result.status === 'error') {
-        toastCommandError(result.error);
-        return;
-    }
-    toastStore.showToast(t('feed.unsubscribed', { name: label }), 'info');
-}
-
 /** A unique default name for a fresh top-level folder (matches Sidebar.newFolder). */
 function uniqueTopLevelName(): string {
     const existing = new Set(
@@ -193,7 +184,8 @@ function feedMenu(): MenuItem[] {
             labelKey: 'feed.menu.unsubscribe',
             danger: true,
             separatorBefore: true,
-            onSelect: () => void unsubscribe(),
+            // One click, but never irreversible: the toast offers Undo.
+            onSelect: () => unsubscribeWithUndo(feed.id, label),
         },
     ];
 }

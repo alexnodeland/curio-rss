@@ -25,30 +25,63 @@ import {
     unreadScopeDto,
 } from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
+import type { FeedFolder } from './feed-tree';
 import { feedsStore } from './feeds.svelte';
 import { feedInFolder } from './folder-ops';
 import { layoutStore } from './layout.svelte';
 import type { CommandResult } from './query-cache.svelte';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
-import { toastStore } from './toasts.svelte';
+import { type ToastOptions, toastStore } from './toasts.svelte';
 
-/** Surfaces a command failure as an error toast. */
-export function toastCommandError(error: CommandError): void {
-    toastStore.showToast(commandErrorMessage(error), 'error');
+/** Re-runs the action that failed (the error toast's Retry button). */
+export type Retry = () => void;
+
+/**
+ * An error toast's Retry button. Retries are interchangeable, so a repeat of
+ * the same failure merges into the showing toast (taking the newest retry).
+ */
+function retryOptions(retry: Retry): ToastOptions {
+    return { action: { label: t('toast.retry'), run: retry }, dedupe: true };
 }
 
-/** Unwraps a command result; failures (including thrown) become toasts. */
-async function run<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | undefined> {
+/**
+ * Surfaces a command failure as an error toast (sticky until dismissed).
+ * With `retry`, a failure the backend marks `recoverable` offers a Retry
+ * button that re-runs the action; a non-recoverable one (bad input, a row
+ * that's gone) doesn't — retrying it can't help.
+ */
+export function toastCommandError(error: CommandError, retry?: Retry): void {
+    toastStore.showToast(
+        commandErrorMessage(error),
+        'error',
+        retry !== undefined && error.recoverable ? retryOptions(retry) : {},
+    );
+}
+
+/**
+ * Unwraps a command result; failures (including thrown) become error toasts.
+ * `retry`, when given, is what the toast's Retry button runs — the whole user
+ * action, not just this invoke, so a compound flow restarts from the top.
+ */
+async function run<T>(
+    invoke: () => Promise<CommandResult<T>>,
+    retry?: Retry,
+): Promise<T | undefined> {
     let result: CommandResult<T>;
     try {
         result = await invoke();
     } catch {
-        toastStore.showToast(t('app.error.internal'), 'error');
+        // A thrown (non-contract) failure is internal; retrying may help.
+        toastStore.showToast(
+            t('app.error.internal'),
+            'error',
+            retry === undefined ? {} : retryOptions(retry),
+        );
         return undefined;
     }
     if (result.status === 'error') {
-        toastCommandError(result.error);
+        toastCommandError(result.error, retry);
         return undefined;
     }
     return result.data;
@@ -57,11 +90,12 @@ async function run<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | unde
 /**
  * Public unwrap for fire-and-forget mutation call sites that would otherwise
  * `void` the `CommandResult` and swallow failures (sidebar/folder ops). A
- * failure toasts; success is silent. Route every such mutation through this so
- * no failure is lost and none falsely reports success.
+ * failure toasts with a Retry that re-invokes the same command; success is
+ * silent. Route every such mutation through this so no failure is lost and
+ * none falsely reports success.
  */
 export function runCommand<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | undefined> {
-    return run(invoke);
+    return run(invoke, () => void runCommand(invoke));
 }
 
 type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
@@ -86,10 +120,12 @@ async function toggleFlag(
     const previous = toggleChain.get(key) ?? Promise.resolve();
     const task = previous.then(async () => {
         let current: boolean;
+        // Retry re-runs the whole toggle (a failed write left the flag as it was).
+        const retry = (): void => void toggleFlag(articleId, field, write);
         if (toggleDesired.has(key)) {
             current = toggleDesired.get(key) as boolean;
         } else {
-            const state = await run(() => commands.getArticleState(articleId));
+            const state = await run(() => commands.getArticleState(articleId), retry);
             if (state === undefined) {
                 return; // read failed (a toast fired); nothing to flip
             }
@@ -97,7 +133,7 @@ async function toggleFlag(
         }
         const target = !current;
         toggleDesired.set(key, target);
-        const ok = await run(() => write(articleId, target));
+        const ok = await run(() => write(articleId, target), retry);
         if (ok === undefined) {
             // The write failed (toast already fired) — forget the optimistic
             // value so the next press reads the real backend flag again.
@@ -140,7 +176,10 @@ export async function toggleArchived(articleId: number): Promise<void> {
  * j/k scanning.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
-    await run(() => commands.markRead(articleId, true));
+    await run(
+        () => commands.markRead(articleId, true),
+        () => void markReadOnOpen(articleId),
+    );
 }
 
 /**
@@ -163,20 +202,106 @@ export async function markReadOnScroll(articleId: number): Promise<void> {
  * emitted `ArticlesChanged`. Returns whether it succeeded (for a loading UI).
  */
 export async function loadFullArticle(articleId: number): Promise<boolean> {
-    return (await run(() => commands.loadFullArticle(articleId))) !== undefined;
+    return (
+        (await run(
+            () => commands.loadFullArticle(articleId),
+            () => void loadFullArticle(articleId),
+        )) !== undefined
+    );
+}
+
+/**
+ * Puts a bulk mark-read back: exactly the snapshot of ids it flipped return
+ * to unread (one `mark_read_many` transaction — ids purged since are
+ * skipped), and the toast says how many came back.
+ */
+export async function undoMarkRead(articleIds: readonly number[]): Promise<void> {
+    const restored = await run(
+        () => commands.markReadMany([...articleIds], false),
+        () => void undoMarkRead(articleIds),
+    );
+    if (restored !== undefined) {
+        toastStore.showToast(t('toast.markReadUndone', { count: restored }), 'info');
+    }
+}
+
+/** The "Marked N read" toast, with Undo when anything changed. */
+function toastMarkedRead(articleIds: readonly number[]): void {
+    const message = t('toast.markAllRead', { count: articleIds.length });
+    if (articleIds.length === 0) {
+        toastStore.showToast(message, 'success');
+        return;
+    }
+    toastStore.showToast(message, 'success', {
+        action: { label: t('toast.undo'), run: () => undoMarkRead(articleIds) },
+    });
 }
 
 /**
  * Marks every unread article in a feed (`feedId`) — or the whole library
- * (`null`) — read, and toasts how many changed. The sidebar badges and the
- * list refresh off the Rust-emitted `ArticlesChanged`.
+ * (`null`) — read, and toasts how many changed, with an Undo that restores
+ * exactly the articles this sweep flipped (the backend returns their ids).
+ * The sidebar badges and the list refresh off the Rust-emitted
+ * `ArticlesChanged`.
  */
 export async function markAllRead(feedId: number | null): Promise<void> {
-    const changed = await run(() => commands.markAllRead(feedId));
-    if (changed === undefined) {
-        return;
+    const changed = await run(
+        () => commands.markAllRead(feedId),
+        () => void markAllRead(feedId),
+    );
+    if (changed !== undefined) {
+        toastMarkedRead(changed);
     }
-    toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+}
+
+/**
+ * Marks a whole folder subtree read, all or nothing: a failure part-way rolls
+ * back the feeds already marked (the store does it) and toasts with Retry;
+ * success toasts the count with Undo.
+ */
+export async function markFolderRead(folder: FeedFolder): Promise<void> {
+    const changed = await run(
+        () => feedsStore.markFolderRead(folder),
+        () => void markFolderRead(folder),
+    );
+    if (changed !== undefined) {
+        toastMarkedRead(changed);
+    }
+}
+
+/**
+ * Unsubscribes with an undo window instead of a confirm: the feed leaves the
+ * sidebar at once, and the toast's Undo brings it back untouched. The backend
+ * removal (which deletes the subscription row — its id, health and history
+ * can't be recreated) runs only once the toast closes any other way — its
+ * timer, the close button, eviction, or the window unloading — so an undo
+ * never has anything to restore.
+ */
+export function unsubscribeWithUndo(feedId: number, name: string): void {
+    if (selectionStore.selectedFeedId === feedId) {
+        selectView('all'); // don't leave the list showing a feed that's going away
+    }
+    feedsStore.hideFeed(feedId);
+    toastStore.showToast(t('feed.unsubscribed', { name }), 'info', {
+        action: { label: t('toast.undo'), run: () => feedsStore.unhideFeed(feedId) },
+        onClose: (reason) => {
+            if (reason !== 'action') {
+                void finishUnsubscribe(feedId);
+            }
+        },
+    });
+}
+
+/** The deferred half of {@link unsubscribeWithUndo}: the backend removal. */
+async function finishUnsubscribe(feedId: number): Promise<void> {
+    const removed = await run(
+        () => feedsStore.removeFeed(feedId),
+        () => void finishUnsubscribe(feedId),
+    );
+    if (removed === undefined) {
+        // Still subscribed after all: show it again (the error toast has Retry).
+        feedsStore.unhideFeed(feedId);
+    }
 }
 
 /** How many unread rows one mark-view-read listing page asks for. */
@@ -504,7 +629,10 @@ export async function promoteSelected(): Promise<void> {
         layoutStore.openModal('destinations');
         return;
     }
-    const outcome = await run(() => destinationsStore.promote(articleId, target));
+    const outcome = await run(
+        () => destinationsStore.promote(articleId, target),
+        () => void promoteSelected(),
+    );
     if (outcome === undefined) {
         return;
     }
@@ -524,12 +652,22 @@ function refreshSelectedFeed(): void {
     if (feedId === null) {
         return;
     }
-    void run(() => feedsStore.refreshFeed(feedId));
+    refreshFeedById(feedId);
+}
+
+function refreshFeedById(feedId: number): void {
+    void run(
+        () => feedsStore.refreshFeed(feedId),
+        () => refreshFeedById(feedId),
+    );
 }
 
 /** Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar). */
 export function refreshAll(): void {
-    void run(() => feedsStore.refreshAll());
+    void run(
+        () => feedsStore.refreshAll(),
+        () => refreshAll(),
+    );
 }
 
 function openSelected(): void {

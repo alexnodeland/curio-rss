@@ -74,6 +74,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             // read-state / stars / read-later
             commands::state::mark_read,
             commands::state::mark_all_read,
+            commands::state::mark_read_many,
             commands::state::record_opened,
             commands::state::set_archived,
             commands::state::set_starred,

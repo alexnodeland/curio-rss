@@ -1415,6 +1415,30 @@ fn unread_counts_are_served_by_the_facade() {
     assert_eq!(counts.values().sum::<u64>(), 1);
 }
 
+/// Mark-all-read hands back the exact ids it flipped, and the batch
+/// `mark_read_many` puts precisely those back — the desktop's undo.
+#[test]
+fn mark_all_read_round_trips_through_mark_read_many() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    assert!(core.mark_read(articles[0].id, true).unwrap());
+
+    let flipped = core.mark_all_read(None).unwrap();
+    assert_eq!(flipped, vec![articles[1].id], "only the unread one");
+    assert_eq!(core.unread_counts().unwrap().values().sum::<u64>(), 0);
+
+    assert_eq!(core.mark_read_many(&flipped, false).unwrap(), 1);
+    assert!(!core.article_state(articles[1].id).unwrap().read);
+    assert!(core.article_state(articles[0].id).unwrap().read);
+}
+
 #[tokio::test]
 async fn hydrate_article_replaces_the_excerpt_with_the_extracted_full_body() {
     let server = MockServer::start().await;

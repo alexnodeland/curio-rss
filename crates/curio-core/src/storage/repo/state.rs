@@ -53,36 +53,71 @@ impl Storage {
     /// Marks every currently-unread article read in one statement — a whole
     /// feed (`Some`) or the entire library (`None`, feedless rows included).
     /// A set-based upsert: articles with no `article_state` row get one,
-    /// articles with `is_read = 0` are flipped, already-read ones are skipped
-    /// (so the returned count is the number actually changed). DB-local, like
-    /// [`Self::mark_read`] — no event.
+    /// articles with `is_read = 0` are flipped, already-read ones are skipped.
+    /// Returns the ids actually changed (so `len()` is the changed count, and
+    /// the set is exactly what an undo hands to [`Self::mark_read_many`]).
+    /// DB-local, like [`Self::mark_read`] — no event.
     ///
     /// # Errors
     ///
     /// Database errors.
-    pub fn mark_all_read(&self, feed_id: Option<FeedId>) -> Result<u64, StorageError> {
+    pub fn mark_all_read(&self, feed_id: Option<FeedId>) -> Result<Vec<ArticleId>, StorageError> {
         const ON_CONFLICT: &str = "ON CONFLICT(article_id) DO UPDATE SET \
-             is_read = 1, updated_at = excluded.updated_at";
+             is_read = 1, updated_at = excluded.updated_at RETURNING article_id";
         const UNREAD: &str = "NOT EXISTS (SELECT 1 FROM article_state s \
              WHERE s.article_id = a.id AND s.is_read = 1)";
         self.write(move |conn| {
             let now = Timestamp::now().to_string();
-            let n = match feed_id {
+            let mut ids = match feed_id {
                 Some(fid) => conn
                     .prepare_cached(&format!(
                         "INSERT INTO article_state (article_id, is_read, updated_at) \
                          SELECT a.id, 1, ?2 FROM articles a \
                          WHERE a.feed_id = ?1 AND {UNREAD} {ON_CONFLICT}"
                     ))?
-                    .execute((fid.0, &now))?,
+                    .query_map((fid.0, &now), |row| row.get(0).map(ArticleId))?
+                    .collect::<Result<Vec<_>, _>>()?,
                 None => conn
                     .prepare_cached(&format!(
                         "INSERT INTO article_state (article_id, is_read, updated_at) \
                          SELECT a.id, 1, ?1 FROM articles a WHERE {UNREAD} {ON_CONFLICT}"
                     ))?
-                    .execute([&now])?,
+                    .query_map([&now], |row| row.get(0).map(ArticleId))?
+                    .collect::<Result<Vec<_>, _>>()?,
             };
-            Ok(u64::try_from(n).unwrap_or_default())
+            // RETURNING order is unspecified; callers (and tests) get a
+            // stable ascending set.
+            ids.sort_unstable_by_key(|id| id.0);
+            Ok(ids)
+        })
+    }
+
+    /// Sets read/unread on many articles in one transaction — the batch
+    /// behind undoing a mark-all-read (and other bulk actions). Ids that no
+    /// longer exist (purged by retention since the snapshot) are skipped, not
+    /// errors, so an undo restores whatever is still there. Returns how many
+    /// articles actually changed. DB-local, like [`Self::mark_read`].
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn mark_read_many(&self, ids: &[ArticleId], read: bool) -> Result<u64, StorageError> {
+        let ids = ids.to_vec();
+        self.write(move |conn| {
+            let tx = begin_write(conn)?;
+            let mut changed = 0_u64;
+            for id in ids {
+                match require_article(&tx, id.0) {
+                    Ok(_) => {}
+                    Err(StorageError::NotFound { .. }) => continue,
+                    Err(error) => return Err(error),
+                }
+                if set_flag(&tx, id.0, "is_read", read)? {
+                    changed += 1;
+                }
+            }
+            tx.commit()?;
+            Ok(changed)
         })
     }
 

@@ -17,8 +17,8 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Fails with [`StorageError::Sqlite`] if the URL is already
-    /// subscribed (UNIQUE), or on any database error.
+    /// [`StorageError::Duplicate`] (`entity: "feed"`) if the URL is
+    /// already subscribed; any other database error.
     pub fn add_feed(&self, new: NewFeed) -> Result<(Feed, EventEnvelope), StorageError> {
         self.write(move |conn| {
             let tx = begin_write(conn)?;

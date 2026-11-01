@@ -11,9 +11,12 @@
 //! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) are user-tier, as
 //! is a missing destination folder (`ExportError::DestinationMissing`, code
 //! `IO`) and a profile on network or sync-managed storage
-//! (`OpenError::NetworkFs`, code `IO`); `Sqlite` / `WriterGone` / `JobPanicked` / `PoolTimeout` /
-//! `IntegrityFailed` / other IO / a corrupt or failed-upgrade database
-//! are internal-tier.
+//! (`OpenError::NetworkFs`, code `IO`). A duplicate row
+//! (`StorageError::Duplicate`, code `INVALID_INPUT`), a full disk
+//! (`DiskFull`, recoverable) and a read-only profile (`ReadOnly`) are
+//! user-tier too (code `STORAGE`). `Sqlite` / `WriterGone` / `JobPanicked` /
+//! `PoolTimeout` / `IntegrityFailed` / other IO / a corrupt or failed-upgrade
+//! database are internal-tier.
 //!
 //! Contention with another Curio process on the profile — a busy database
 //! (`StorageError::Busy`, `OpenError::Locked`) or a held events lock
@@ -125,7 +128,17 @@ impl From<StorageError> for CommandError {
             // Another Curio process (a CLI run) is writing to the
             // profile: tell the user why, and that a retry will work.
             StorageError::Busy(_) => Self::profile_busy(&error),
+            // Subscribing to a URL that is already subscribed: the user's
+            // input, and the same input fails the same way again.
+            StorageError::Duplicate { .. } => {
+                Self::user(ErrorCode::InvalidInput, error.to_string(), false)
+            }
+            // The user can act on both — free space and retry; fix the
+            // permissions of the profile folder or volume.
+            StorageError::DiskFull(_) => Self::user(ErrorCode::Storage, error.to_string(), true),
+            StorageError::ReadOnly(_) => Self::user(ErrorCode::Storage, error.to_string(), false),
             StorageError::Sqlite(_)
+            | StorageError::DatabaseCorrupt(_)
             | StorageError::WriterGone
             | StorageError::JobPanicked { .. }
             | StorageError::PoolTimeout { .. }
@@ -270,6 +283,37 @@ mod tests {
         assert_eq!(error.code, ErrorCode::ProfileBusy);
         assert!(error.recoverable);
         assert!(error.message.contains("another Curio process"), "{error}");
+    }
+
+    #[test]
+    fn typed_storage_classes_reach_the_user_with_their_own_tier() {
+        let sqlite = |code| {
+            StorageError::from(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("UNIQUE constraint failed: feeds.url".to_owned()),
+            ))
+        };
+        let duplicate = CommandError::from(sqlite(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE));
+        assert_eq!(
+            (duplicate.kind, duplicate.code, duplicate.recoverable),
+            (ErrorKind::User, ErrorCode::InvalidInput, false)
+        );
+        assert_eq!(duplicate.message, "feed already exists");
+        let full = CommandError::from(sqlite(rusqlite::ffi::SQLITE_FULL));
+        assert_eq!(
+            (full.kind, full.code, full.recoverable),
+            (ErrorKind::User, ErrorCode::Storage, true)
+        );
+        let read_only = CommandError::from(sqlite(rusqlite::ffi::SQLITE_READONLY));
+        assert_eq!(
+            (read_only.kind, read_only.code, read_only.recoverable),
+            (ErrorKind::User, ErrorCode::Storage, false)
+        );
+        let corrupt = CommandError::from(sqlite(rusqlite::ffi::SQLITE_CORRUPT));
+        assert_eq!(
+            (corrupt.kind, corrupt.code),
+            (ErrorKind::Internal, ErrorCode::Storage)
+        );
     }
 
     #[test]

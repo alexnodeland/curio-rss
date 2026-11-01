@@ -427,6 +427,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         'Aktualisierung abgeschlossen: {count, plural, one {# neuer Artikel} other {# neue Artikel}} in {feeds, plural, one {# Feed} other {# Feeds}}',
     'refresh.inProgress': 'Wird aktualisiert… {done} von {total}',
+    'connectivity.offline': 'Offline',
+    'connectivity.offline.hint': 'Kein Netzwerk – Hintergrundaktualisierung pausiert',
     'pane.sidebar.resize': 'Seitenleiste anpassen',
     'pane.list.resize': 'Artikelliste anpassen',
     'toast.dismiss': 'Schließen',

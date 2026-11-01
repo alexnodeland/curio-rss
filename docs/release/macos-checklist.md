@@ -31,6 +31,7 @@ production feed).
 - [ ] **Keyboard-only session** — navigate feeds/articles and read one end-to-end with only the keyboard (`j`/`k`, `o`, `s`, `l`, `m`, `p`, `/`, `?`).
 - [ ] **Listbox + reader keys in WKWebView** — on a fresh launch (nothing focused) `↓`/`↑` move the selection and `Enter` (or `→`) puts focus in the article (soft accent frame); `↓`/`Page Down` scroll it natively, `Space`/`⇧ Space` page it, and `Space` on the last screen opens the next unread with focus still in the reader; `←`/`Esc` return to the list without closing the article. With VoiceOver on, the listbox announces the selected row and the article body is announced as a region named by its title. `e` archives, `A` marks the current view read (try it in Starred: only starred articles change).
 - [ ] **Promote-to-destination** — press `p`, pick a temp destination, confirm a Markdown note with valid `curio.frontmatter.v1` frontmatter is written.
+- [ ] **System theme follows the OS** — in Settings → Appearance pick **System**, then flip System Settings → Appearance between Light and Dark (or let **Auto** cross sunset): Curio repaints immediately, without a relaunch. Pick an explicit theme (e.g. Nord) and flip again: Curio stays on Nord.
 - [ ] **APFS filenames** — on an APFS destination, promote two local-feed articles titled "Café", one spelled NFC (precomposed U+00E9) and one NFD (`e` + combining U+0301): two distinct notes exist afterwards (`café.md` and `café-<id prefix>.md`) and the first one's text was not replaced.
 
 - [ ] **Per-profile Reddit credentials (real Keychain)** — `curio --profile /tmp/a reddit login --client-id a` and `curio --profile /tmp/b reddit login --client-id b` (any secrets); Keychain Access shows two `Curio` items with accounts `reddit-api/<key>`, `reddit status` reports `a` / `b` per profile, and `reddit logout` on one leaves the other configured. Moving a profile (`mv /tmp/a /tmp/a2`) keeps its credentials. Upgrading from 0.4.x: the old single `reddit-api` item is copied into each profile that opens (both the CLI and the desktop app come up authenticated) and stays in Keychain Access until a `reddit logout`.
@@ -62,6 +63,18 @@ directory, never your real one.
 - [ ] **Profile folder can't be created** — `export CURIO_PROFILE="$(mktemp -d)/blocked" && touch "$CURIO_PROFILE"`, launch with `--env`: the screen says Curio can't use its profile folder and offers only Try again (no Restore, no Start fresh); `rm "$CURIO_PROFILE"`, Try again, and an empty library opens.
 - [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
 - [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
+
+## Background refresh: sleep/wake and offline (real macOS only — CI can't suspend a machine or drop its network)
+
+Use a throwaway profile with a few real public feeds, the refresh interval
+at 15 minutes, and notifications on (Settings → General / Notifications).
+
+- [ ] **Catches up after sleep** — refresh, then close the lid (or Apple menu → Sleep) for longer than the interval. Within about a minute of waking, a refresh runs on its own (the refresh pill appears, `logs/curio.log.*` has a `woke from sleep` line), not up to a full interval later.
+- [ ] **Remembers the last refresh** — with Refresh on launch off, quit and relaunch more than one interval after the last refresh: a refresh runs within about a minute. Relaunch again straight away: none runs until the interval is up.
+- [ ] **Offline is quiet** — turn Wi-Fi off and wait for a scheduled refresh (or relaunch with Refresh on launch on): the sidebar's brand tile turns into the amber "Offline" badge, no feed gets a new error in its health log, and no "feeds failed to refresh" notification appears.
+- [ ] **Back online** — turn Wi-Fi on: within about a minute the badge clears and the overdue refresh runs. A manual Refresh while still offline does not cancel it.
+- [ ] **Launch-only, started offline** — interval set to Off, Refresh on launch on: launch with Wi-Fi off (the badge appears), then turn Wi-Fi on: within about a minute the skipped launch refresh runs.
+- [ ] **Badge by keyboard** — while offline, Tab to the badge: the "No network — background refresh is paused" hint appears with a focus ring.
 
 ## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
 

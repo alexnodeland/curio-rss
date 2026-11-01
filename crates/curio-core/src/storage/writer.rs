@@ -133,7 +133,7 @@ pub(super) fn rollback_if_open(conn: &Connection) {
 
 /// The human-readable part of a panic payload (`panic!("…")` carries a
 /// `&str` or a `String`; anything else is opaque).
-pub(super) fn panic_message(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_owned()
     } else if let Some(message) = payload.downcast_ref::<String>() {

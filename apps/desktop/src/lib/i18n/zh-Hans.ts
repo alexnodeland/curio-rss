@@ -404,6 +404,8 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         '刷新完成：{feeds, plural, other {# 个订阅源}}共有 {count, plural, other {# 篇新文章}}',
     'refresh.inProgress': '正在刷新… {done}/{total}',
+    'connectivity.offline': '离线',
+    'connectivity.offline.hint': '无网络，后台刷新已暂停',
     'pane.sidebar.resize': '调整侧边栏大小',
     'pane.list.resize': '调整文章列表大小',
     'toast.dismiss': '关闭',

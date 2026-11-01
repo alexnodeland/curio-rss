@@ -429,6 +429,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         'Actualisation terminée : {count, plural, one {# nouvel article} other {# nouveaux articles}} dans {feeds, plural, one {# flux} other {# flux}}',
     'refresh.inProgress': 'Actualisation… {done} sur {total}',
+    'connectivity.offline': 'Hors ligne',
+    'connectivity.offline.hint': 'Pas de réseau — actualisation auto en pause',
     'pane.sidebar.resize': 'Redimensionner la barre latérale',
     'pane.list.resize': 'Redimensionner la liste des articles',
     'toast.dismiss': 'Ignorer',

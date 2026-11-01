@@ -428,6 +428,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'refresh.announce.done':
         'Odświeżanie zakończone: {count, plural, one {# nowy artykuł} few {# nowe artykuły} many {# nowych artykułów} other {# nowych artykułów}} w {feeds, plural, one {# kanale} few {# kanałach} many {# kanałach} other {# kanałach}}',
     'refresh.inProgress': 'Odświeżanie… {done} z {total}',
+    'connectivity.offline': 'Offline',
+    'connectivity.offline.hint': 'Brak sieci — odświeżanie w tle wstrzymane',
     'pane.sidebar.resize': 'Zmień rozmiar paska bocznego',
     'pane.list.resize': 'Zmień rozmiar listy artykułów',
     'toast.dismiss': 'Odrzuć',

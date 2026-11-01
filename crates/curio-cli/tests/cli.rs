@@ -1075,3 +1075,53 @@ fn a_busy_profile_says_so_and_exits_75() {
         .assert()
         .success();
 }
+
+/// #122: a failed feed backs off — a bare `fetch` leaves it alone until
+/// it is due, `fetch <feed>` retries it at once, and `feed list --json`
+/// shows the schedule.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failing_feed_backs_off_between_bare_fetches() {
+    let server = feedless_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    curio(profile.path())
+        .args(["feed", "add"])
+        .arg(format!("{server}/missing.xml"))
+        .args(["--no-validate", "--allow-private-network"])
+        .assert()
+        .success();
+
+    let first = stdout_json(
+        &curio(profile.path())
+            .args(["fetch", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(first[0]["http_status"], 404);
+    curio(profile.path())
+        .arg("fetch")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("no feeds are due for a refresh"));
+
+    let retried = stdout_json(
+        &curio(profile.path())
+            .args(["fetch", "1", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        retried[0]["http_status"], 404,
+        "a named feed is fetched now"
+    );
+
+    let feeds = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "list", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(feeds[0]["consecutive_failures"], 2);
+    assert!(feeds[0]["next_attempt_at"].is_string());
+    assert!(feeds[0]["auto_paused_at"].is_null());
+}

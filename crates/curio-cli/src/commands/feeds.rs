@@ -214,7 +214,7 @@ pub(crate) fn fetch(app: &App, reference: Option<&str>) -> anyhow::Result<ExitCo
     if app.json {
         emit_json(&views)?;
     } else if views.is_empty() {
-        println!("no active feeds to fetch");
+        println!("no feeds are due for a refresh");
     } else {
         let mut total_new = 0;
         for view in &views {

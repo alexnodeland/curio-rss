@@ -4,6 +4,7 @@
  * and the keyboard actions so each surface reads them the same way.
  */
 import type { ArticleSummaryDto, FeedDto } from '$lib/bindings';
+import { formatIntlDate, t } from '$lib/i18n';
 
 /**
  * Whether the article is a link-less feed entry. The published frontmatter
@@ -48,4 +49,29 @@ export function articleDate(
     return article.published_at === null
         ? { iso: article.saved_at, firstSeen: true }
         : { iso: article.published_at, firstSeen: false };
+}
+
+/** A list layout's date label: display text, and whether it is a first-seen stand-in. */
+export interface ListDateLabel {
+    /** The localized date — prefixed "First seen" when `firstSeen`. */
+    text: string;
+    /** True when the feed gave no date and `text` is the first-seen date. */
+    firstSeen: boolean;
+}
+
+/**
+ * The date every list layout (row, Reddit card, YouTube card) shows: the
+ * publication date, or — for a date-less entry — when Curio first saw it,
+ * labelled as such so it never reads as a publish date. `null` when the
+ * timestamp is unparseable, so the layout renders no date at all.
+ */
+export function listDateLabel(
+    article: Pick<ArticleSummaryDto, 'published_at' | 'saved_at'>,
+): ListDateLabel | null {
+    const { iso, firstSeen } = articleDate(article);
+    const date = formatIntlDate(new Date(iso));
+    if (date === '') {
+        return null;
+    }
+    return { text: firstSeen ? t('article.date.firstSeen', { date }) : date, firstSeen };
 }

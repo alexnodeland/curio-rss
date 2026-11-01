@@ -90,9 +90,9 @@ export function buildArticleMenu(
 import { commands } from '$lib/bindings';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
-import { formatIntlDate, t } from '$lib/i18n';
+import { t } from '$lib/i18n';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
-import { articleDate } from '$lib/utils/article';
+import { listDateLabel } from '$lib/utils/article';
 import { highlightSegments } from '$lib/utils/highlight';
 
 let {
@@ -134,20 +134,8 @@ function feedTitle(): string | null {
     return feed.title ?? feed.url;
 }
 
-/**
- * The row's date: the publication date, or — for a date-less entry — when
- * Curio first saw it, labelled as such so it never reads as a publish date.
- */
-function dateLabel(): { text: string; firstSeen: boolean } | null {
-    const { iso, firstSeen } = articleDate(article);
-    const date = formatIntlDate(new Date(iso));
-    if (date === '') {
-        return null;
-    }
-    return { text: firstSeen ? t('article.date.firstSeen', { date }) : date, firstSeen };
-}
-
-const date = $derived(dateLabel());
+/** The row's date — publication, or a labelled first-seen stand-in. */
+const date = $derived(listDateLabel(article));
 
 </script>
 

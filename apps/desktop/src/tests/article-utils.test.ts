@@ -1,9 +1,9 @@
 /**
  * The article display facts core encodes in data: a link-less entry carries
  * its feed's own URL as `source_url`, and a date-less entry keeps
- * `published_at` null (shown under its first-seen `saved_at` instead).
+ * `published_at` null (dated by its first-seen `saved_at` instead).
  */
-import { articleDate, isLinkless } from '$lib/utils/article';
+import { articleDate, isLinkless, listDateLabel } from '$lib/utils/article';
 import { describe, expect, it } from 'vitest';
 import { articleSummaryFixture, feedFixture } from './ipc-harness';
 
@@ -75,5 +75,32 @@ describe('articleDate', () => {
             iso: '2026-07-02T10:00:00.000Z',
             firstSeen: true,
         });
+    });
+});
+
+describe('listDateLabel', () => {
+    it('labels the publication date as-is', () => {
+        const article = articleSummaryFixture({
+            published_at: '2026-07-01T12:00:00.000Z',
+            saved_at: '2026-07-02T12:00:00.000Z',
+        });
+        const label = listDateLabel(article);
+        expect(label?.firstSeen).toBe(false);
+        expect(label?.text).toContain('July 1');
+        expect(label?.text).not.toContain('First seen');
+    });
+
+    it('prefixes the first-seen date for a date-less entry', () => {
+        const article = articleSummaryFixture({
+            published_at: null,
+            saved_at: '2026-07-02T12:00:00.000Z',
+        });
+        const label = listDateLabel(article);
+        expect(label?.firstSeen).toBe(true);
+        expect(label?.text).toMatch(/^First seen July 2/);
+    });
+
+    it('is null for an unparseable timestamp, so no date renders', () => {
+        expect(listDateLabel(articleSummaryFixture({ published_at: 'not a date' }))).toBeNull();
     });
 });

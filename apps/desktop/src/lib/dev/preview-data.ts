@@ -427,7 +427,7 @@ export const previewArticles: PreviewArticle[] = [
         'Weeknotes: margins, measures, and a new notebook',
         '2026-07-06T07:40:00.000Z',
         `<p>A short one this week. The new notebook has a narrower page than I am used to, and it has quietly changed how I draft — fewer words per line, more white space, slower thinking.</p>
-<p>This entry has no link and no date in the feed: Curio shows it under the day it first saw it, and offers no "open in browser".</p>`,
+<p>This entry has no link and no date in the feed: Curio dates it by the day it first saw it, and offers no "open in browser".</p>`,
     ),
 ];
 

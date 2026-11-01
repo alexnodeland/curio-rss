@@ -6,7 +6,7 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
  * j/k path: a toolbar + header that stay mounted while a body loads, and the
  * neighbour prefetch that lets the next step render straight from cache.
  */
-import { type ArticleDto, events } from '$lib/bindings';
+import { events, type ArticleDto } from '$lib/bindings';
 import { localeStore } from '$lib/i18n';
 import { keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS } from '$lib/keyboard/registry';
@@ -560,6 +560,44 @@ describe('ReaderPane — link-less and date-less feed entries', () => {
         expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
         // The rest of the toolbar is untouched.
         expect(getByRole('button', { name: 'Star' })).toBeTruthy();
+    });
+
+    it('a link-less list row hides both actions before its body lands', async () => {
+        // The header renders from the list row while get_article is pending;
+        // the row already tells the link-less case apart.
+        harness = installIpcHarness({
+            ...responders({}),
+            get_article: () => new Promise(() => undefined),
+            list_articles: [
+                articleSummaryFixture({
+                    id: 100,
+                    title: 'The row',
+                    feed_id: 1,
+                    source_url: FEED_URL,
+                    published_at: null,
+                    saved_at: '2026-07-02T10:00:00.000Z',
+                }),
+            ],
+        });
+        articlesStore.filters = ALL_ARTICLES;
+        void articlesStore.current; // touch to start the list fetch
+        await flushIpc();
+        selectionStore.selectedArticleId = 100;
+        const { container, getByRole, queryByRole } = render(ReaderPane);
+        await flushIpc();
+
+        const title = getByRole('heading', { level: 1 });
+        expect(title.textContent?.trim()).toBe('The row');
+        expect(title.querySelector('a')).toBeNull();
+        expect(queryByRole('button', { name: 'Open in browser' })).toBeNull();
+        expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
+        expect(container.querySelector('.body-skeleton')).not.toBeNull();
+        const date = container.querySelector('.reader-meta [data-first-seen]');
+        expect(date?.textContent).toMatch(/^First seen .*2026/);
+        // Assistive tech gets the hint the pointer tooltip shows.
+        expect(date?.querySelector('.sr-only')?.textContent).toContain(
+            'The feed gave no publication date',
+        );
     });
 
     it('an entry with its own link keeps the link and both actions', async () => {

@@ -21,6 +21,7 @@
 //! - An honest User-Agent naming Curio and the repository.
 
 mod client;
+mod headers;
 pub mod policy;
 
 pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient};

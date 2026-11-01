@@ -44,6 +44,7 @@ mod maintenance;
 mod refresh;
 mod schedule;
 mod settings;
+mod settle;
 mod sink;
 mod state;
 mod sweep;

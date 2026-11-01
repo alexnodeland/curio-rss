@@ -80,6 +80,15 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
 - Conditional GET with `etag`/`last_modified` **preserved on error paths** (the sketch
   clobbered them on any failure).
 - Permanent-redirect stored-URL updates; 410 dead-feed auto-pause; feed-health tracking.
+- Transparent gzip/brotli/deflate decompression, with the size cap counted on the
+  **decoded** body so a compression bomb fails as `BodyTooLarge`. An `Accept` header per
+  request kind (feed / page / image), and the response `Content-Type` carried on
+  `FetchResponse`.
+- `fetch::decode` turns bodies into text: BOM → HTTP `charset` → `<meta charset>` (HTML)
+  or the XML declaration (feeds) → UTF-8, so windows-1251 or Shift_JIS sources never
+  come out as mojibake (a feed is transcoded to UTF-8 before feed-rs sees it). Full-page
+  extraction ("load full article", URL clips) runs only on HTML: a PDF or image URL is
+  clipped link-only.
 
 ### `ingest/` — sanitize-at-ingest
 

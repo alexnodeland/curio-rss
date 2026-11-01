@@ -82,9 +82,9 @@ pub(crate) enum Command {
     Untag { id: String, tag: String },
     /// Save a single URL as a feedless read-later article: the page is
     /// fetched through the policed client and readability-extracted
-    /// (emits the read-later-added event). An unreachable page still
-    /// saves the bare link. Re-clipping a known URL re-flags it without
-    /// refetching.
+    /// (emits the read-later-added event). An unreachable page, or a
+    /// non-HTML URL such as a PDF or an image, still saves the bare link.
+    /// Re-clipping a known URL re-flags it without refetching.
     Clip {
         /// The http(s) URL to save.
         url: String,

@@ -79,7 +79,13 @@ same-file = "1"
 scraper = "0.27"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+# YAML 1.2 event parser in safe Rust: frontmatter (curio-core) and the
+# workflow lint (xtask) parse through it. Replaced the deprecated
+# serde_yaml / unmaintained unsafe-libyaml pair (RUSTSEC-2024-0449, #180).
+saphyr-parser = "0.3"
+# Shortest round-trip float text for the frontmatter emitter (already in the
+# tree via serde_json).
+ryu = "1"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", default-features = false, features = ["net", "time"] }

@@ -20,7 +20,13 @@ Current layout:
 - `export/` — destination-state inputs for the exporter's integration
   tests: `manifest-conflict/` is a `.curio/` with a manifest plus two
   sync-tool conflict copies (Dropbox-style `manifest (conflicted
-  copy).json`, iCloud-style `manifest 2.json`) to detect and merge
+  copy).json`, iCloud-style `manifest 2.json`) to detect and merge;
+  `frontmatter/` holds the byte-for-byte frontmatter goldens
+  (`render/<case>.json` → the note Curio writes, `reexport/<case>.edited.md`
+  → the note a re-export writes over a hand-edited one). The expected `.md`
+  files are the compatibility baseline the notes in users' vaults were
+  written with — a diff in them is a `curio.frontmatter.v1` contract
+  decision, never a regenerate-and-commit
 
 - `generated/` — output of the deterministic seeded fixture generator
   (`crates/curio-fixtures`; default 1000 feeds / 50k articles). **Never

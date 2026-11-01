@@ -222,7 +222,7 @@ impl BulkSaveOutcome {
 }
 
 /// Outcome of an OPML import.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OpmlImportOutcome {
     /// Feeds newly subscribed.
     pub added: usize,
@@ -230,6 +230,9 @@ pub struct OpmlImportOutcome {
     pub skipped: usize,
     /// Outlines dropped as unreadable or with an unusable URL.
     pub invalid: usize,
+    /// Why outlines were dropped — the first [`MAX_REJECTED_DETAILS`] of
+    /// them, in document order (`invalid` stays exact past the cap).
+    pub rejected: Vec<Rejected>,
 }
 
 /// How many [`Rejected`] rows an [`ImportOutcome`] keeps in detail. The

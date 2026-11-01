@@ -195,6 +195,8 @@ struct OpmlImportView {
     skipped: usize,
     /// Outlines dropped as unreadable or with an unusable URL.
     invalid: usize,
+    /// Why outlines were dropped (capped; `invalid` stays exact).
+    rejected: Vec<RejectedView>,
 }
 
 #[derive(Debug, Serialize)]
@@ -293,8 +295,10 @@ pub(crate) fn opml(app: &App, command: OpmlCommand) -> anyhow::Result<ExitCode> 
                     added: outcome.added,
                     skipped: outcome.skipped,
                     invalid: outcome.invalid,
+                    rejected: outcome.rejected.iter().map(RejectedView::from).collect(),
                 })?;
             } else {
+                warn_rejected(&outcome.rejected);
                 println!(
                     "imported {} feed(s), skipped {} already subscribed, {} invalid",
                     outcome.added, outcome.skipped, outcome.invalid

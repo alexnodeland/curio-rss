@@ -150,9 +150,11 @@ all is skipped, not fatal. Every URL is trimmed, `feed://…` / `feed:https://�
 become `https://…`, anything that is not `http(s)` (`webcal:`, `javascript:`)
 is dropped, and duplicates are matched on the normalized URL — so re-importing
 a file adds nothing. Dropped rows are counted (`… N invalid`), each named on
-stderr; with `--json` they come back as `feeds_invalid` / `articles_invalid`
-plus a `rejected` list of `{kind, reason, detail}` (`reason`: `malformed`,
-`invalid_url` or `unsupported_scheme`). `curio opml export` replaces its
+stderr, by both `curio import` and `curio opml import`; with `--json` they
+come back as `feeds_invalid` / `articles_invalid` (`invalid` for `curio opml
+import`) plus a `rejected` list of `{kind, reason, detail}` (`reason`:
+`malformed`, `invalid_url` or `unsupported_scheme`) — the first 100 rows,
+while the counts stay exact. `curio opml export` replaces its
 target atomically, so a failed write never truncates the previous file.
 
 **Per-host fetch policy.** A few hosts fingerprint-block the honest `curio`

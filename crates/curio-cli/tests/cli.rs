@@ -458,7 +458,28 @@ fn messy_import_files_import_and_report_their_bad_rows() {
         .success()
         .stdout(predicate::str::contains(
             "imported 5 feed(s), skipped 0 already subscribed, 2 invalid",
+        ))
+        .stderr(predicate::str::contains(
+            "skipped invalid entry (unsupported scheme): webcal://calendar.example/events.ics",
         ));
+    let again = stdout_json(
+        &curio(profile.path())
+            .args(["opml", "import"])
+            .arg(&opml)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(again["added"], 0);
+    assert_eq!(again["skipped"], 5);
+    assert_eq!(again["invalid"], 2);
+    let rejected = again["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 2);
+    assert!(rejected.iter().all(|row| row["kind"] == "feed"));
+    assert!(rejected.iter().any(|row| {
+        row["reason"] == "unsupported_scheme"
+            && row["detail"] == "webcal://calendar.example/events.ics"
+    }));
     curio(profile.path())
         .args(["import", "--from", "opml"])
         .arg(&opml)

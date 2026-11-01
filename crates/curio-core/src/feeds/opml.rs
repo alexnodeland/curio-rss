@@ -38,9 +38,6 @@ pub enum OpmlError {
     /// The document is not well-formed XML.
     #[error("opml parse: {0}")]
     Xml(#[from] quick_xml::Error),
-    /// An attribute failed to decode.
-    #[error("opml attribute: {0}")]
-    Attr(#[from] quick_xml::events::attributes::AttrError),
     /// The writer's sink failed (unreachable for in-memory export).
     #[error("opml write: {0}")]
     Io(#[from] std::io::Error),

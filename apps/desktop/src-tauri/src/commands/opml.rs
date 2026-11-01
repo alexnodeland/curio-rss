@@ -179,8 +179,11 @@ mod tests {
         std::fs::write(&source, OPML).unwrap();
         import_opml_impl(&core, &source).unwrap();
 
-        // A previous, longer export: a non-truncating write would leave
-        // its tail behind. Atomic replace leaves exactly the new document.
+        // A previous, longer export is replaced whole, and the head's
+        // temp-file-then-rename leaves no stray behind. (That a *failed*
+        // write keeps the previous file is proven in curio-core, through
+        // the `write_file_atomic_with` seam — a plain truncating write
+        // would pass this test too.)
         let out = dir.path().join("out.opml");
         std::fs::write(&out, "x".repeat(64 * 1024)).unwrap();
         export_opml_impl(&core, &out).unwrap();

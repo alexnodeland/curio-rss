@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use curio_core::fetch::FetchConfig;
 use curio_core::import::read_import_file;
-use curio_core::storage::ListArticles;
+use curio_core::model::{ArticleContent, NewArticle};
+use curio_core::storage::{ListArticles, Storage};
 use curio_core::{CoreHandle, CoreOptions, ImportKind, ImportSource, RejectReason};
 
 fn open_core(profile: &std::path::Path) -> CoreHandle {
@@ -237,6 +238,43 @@ fn feed_scheme_and_padded_urls_normalize_and_dedupe() {
     assert_eq!(again.added, 0, "a second import adds nothing");
     assert_eq!(again.skipped, 6);
     assert_eq!(again.invalid, 2);
+}
+
+#[test]
+fn an_article_imported_before_normalization_is_not_duplicated() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    // What an older Curio stored for a Pocket row `https://Example.com`:
+    // a feedless save keyed on the URL as the file spelled it.
+    {
+        let storage = Storage::open(profile.path().join("curio.db")).unwrap();
+        storage
+            .upsert_articles(vec![NewArticle {
+                feed_id: None,
+                dedupe_key: "link:https://Example.com".to_owned(),
+                title: "Old save".to_owned(),
+                source_url: "https://Example.com".to_owned(),
+                author: None,
+                published_at: None,
+                content: ArticleContent::default(),
+                lang: None,
+                word_count: None,
+                source_updated_at: None,
+                lead_image: None,
+            }])
+            .unwrap();
+    }
+    let before = core.list_articles(ListArticles::default()).unwrap().len();
+
+    let csv = "title,url,time_added,tags,status\nOld save, https://Example.com ,,,unread\n";
+    let outcome = core.import_file(ImportSource::PocketCsv, csv).unwrap();
+    assert_eq!(outcome.articles_added, 0, "{outcome:?}");
+    assert_eq!(outcome.articles_skipped, 1);
+    assert_eq!(
+        core.list_articles(ListArticles::default()).unwrap().len(),
+        before,
+        "the legacy row is matched, not duplicated"
+    );
 }
 
 #[test]

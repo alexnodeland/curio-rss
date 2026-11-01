@@ -24,6 +24,7 @@ impl CoreHandle {
             added: outcome.feeds_added,
             skipped: outcome.feeds_skipped,
             invalid: outcome.feeds_invalid,
+            rejected: outcome.rejected,
         })
     }
 
@@ -62,8 +63,9 @@ impl CoreHandle {
     /// usable http(s) URL is counted as invalid, not imported. URLs already
     /// present (a subscribed feed, a previously imported article — compared
     /// in normalized form, so `HTTPS://Example.com` matches
-    /// `https://example.com/`) are skipped, so re-importing the same export
-    /// is idempotent. Every staged event flushes in a single emission at
+    /// `https://example.com/`; an article imported before normalization
+    /// also matches on its URL as spelled) are skipped, so re-importing the
+    /// same export is idempotent. Every staged event flushes in a single emission at
     /// the end.
     ///
     /// # Errors
@@ -90,20 +92,28 @@ impl CoreHandle {
             .map(|feed| import::normalize_url(&feed.url).unwrap_or(feed.url))
             .collect();
         for mut item in items {
-            item.url = match import::normalize_url(&item.url) {
+            let raw_url = std::mem::take(&mut item.url);
+            item.url = match import::normalize_url(&raw_url) {
                 Ok(url) => url,
                 Err(reason) => {
                     outcome.reject(Rejected {
                         kind: item.kind,
                         reason,
-                        detail: item.url,
+                        detail: raw_url,
                     });
                     continue;
                 }
             };
             match item.kind {
                 ImportKind::Feed => {
-                    if !known_feeds.insert(item.url.clone()) {
+                    // The snapshot catches older spellings; the per-row
+                    // lookup catches a feed another head (CLI and desktop
+                    // share the DB) added since the snapshot, so the
+                    // `feeds.url UNIQUE` race stays a microsecond window
+                    // rather than the whole import.
+                    if !known_feeds.insert(item.url.clone())
+                        || self.storage.get_feed_by_url(&item.url)?.is_some()
+                    {
                         outcome.feeds_skipped += 1;
                         continue;
                     }
@@ -118,7 +128,19 @@ impl CoreHandle {
                     let title = item.title.unwrap_or_else(|| item.url.clone());
                     let key =
                         crate::feeds::dedupe_key(None, Some(&item.url), &title, item.saved_at);
-                    if self.storage.article_id_by_dedupe_key(None, &key)?.is_some() {
+                    // Imports before URL normalization keyed an article on
+                    // its URL as the file spelled it (`link:https://Example.com`);
+                    // matching that legacy key too keeps re-importing an
+                    // old export idempotent across the upgrade.
+                    let legacy_key =
+                        crate::feeds::dedupe_key(None, Some(&raw_url), &title, item.saved_at);
+                    if self.storage.article_id_by_dedupe_key(None, &key)?.is_some()
+                        || (legacy_key != key
+                            && self
+                                .storage
+                                .article_id_by_dedupe_key(None, &legacy_key)?
+                                .is_some())
+                    {
                         outcome.articles_skipped += 1;
                         continue;
                     }

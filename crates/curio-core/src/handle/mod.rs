@@ -42,19 +42,21 @@ mod imports;
 mod maintenance;
 mod refresh;
 mod settings;
+mod sink;
 mod state;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::Mutex as AsyncMutex;
 
 use curio_types::DestinationName;
 
 use crate::content::ContentError;
-use crate::events::{EventEmitter, EventLog, EventsError};
+use crate::events::EventsError;
 use crate::export::{ExportDisposition, ExportError};
 use crate::feeds::{FeedParseError, OpmlError};
 use crate::fetch::{FetchConfig, FetchError, PolicedClient};
@@ -111,8 +113,8 @@ pub enum CoreError {
         name: String,
     },
     /// The settings key is owned by the facade (the `"destinations"`
-    /// registry, `"destinations.exported"`) and cannot be read or
-    /// written as a raw value.
+    /// registry, `"destinations.exported"`, `"destinations.seeded"`) and
+    /// cannot be read or written as a raw value.
     #[error("the {key:?} settings key is facade-owned — use the destination operations")]
     ReservedSettingKey {
         /// The refused key.
@@ -154,6 +156,13 @@ pub enum CoreError {
 pub struct CoreOptions {
     /// Policy configuration of the outbound client.
     pub fetch: FetchConfig,
+    /// Open a profile on network or sync-managed storage anyway (NFS,
+    /// SMB, iCloud Drive, Dropbox, Syncthing…), which is otherwise
+    /// refused with [`OpenError::NetworkFs`]. Heads set it from an
+    /// explicit user choice — the CLI's `--allow-network-fs`, or the
+    /// [`crate::storage::ALLOW_NETWORK_FS_ENV`] variable
+    /// ([`crate::storage::network_fs_override_from_env`]).
+    pub allow_network_fs: bool,
 }
 
 /// What one feed refresh did.
@@ -250,19 +259,20 @@ pub struct ImportOutcome {
 pub struct CoreHandle {
     profile_dir: PathBuf,
     storage: Arc<Storage>,
-    emitter: Mutex<EventEmitter>,
+    events: Mutex<sink::EventSink>,
     /// The "pending events" health flag: set when a flush failed and
-    /// intents are left staged, cleared by the next successful drain.
+    /// intents are left staged (or the log could not be opened at all),
+    /// cleared by the next successful drain.
     events_backlog: AtomicBool,
     client: PolicedClient,
-    destinations: RwLock<BTreeMap<DestinationName, PathBuf>>,
-    /// Destinations that completed an export since they were
-    /// (re-)registered: their root and `.curio/` marker must still exist
-    /// (see [`CoreHandle::save_to_destination`]).
-    exported_destinations: RwLock<BTreeSet<DestinationName>>,
-    /// Per-feed refresh serialization (see [`CoreHandle::refresh_feed`]).
-    /// Bounded by the subscription count; `remove_feed` drops entries.
+    /// Per-feed refresh serialization inside this process (see
+    /// [`CoreHandle::refresh_feed`]); the per-feed lock files under
+    /// `.curio/locks/` serialize across processes. Bounded by the
+    /// subscription count; `remove_feed` drops entries.
     refresh_locks: Mutex<HashMap<FeedId, Arc<AsyncMutex<()>>>>,
+    /// How long a refresh waits for another process to finish refreshing
+    /// the same feed (derived from the fetch timeouts at open).
+    refresh_lock_wait: Duration,
     /// Circuit breaker over enrichment calls (D8/D14): repeated provider
     /// failures skip enrichment for a cool-down instead of stalling
     /// every hydrate.
@@ -289,48 +299,81 @@ impl CoreHandle {
     /// log (with crash-recovery replay of staged intents), policed
     /// client, and the persisted destination registry.
     ///
+    /// A profile on network or sync-managed storage is refused before
+    /// anything is created (see [`CoreOptions::allow_network_fs`]). An
+    /// events directory that cannot be opened does not fail the open: the
+    /// handle comes up with [`CoreHandle::has_pending_events`] raised,
+    /// mutations keep their intents staged, and a later drain opens the
+    /// log once it is writable.
+    ///
     /// # Errors
     ///
     /// [`CoreError::Open`] when the database cannot be opened (match the
-    /// inner [`OpenError`] for the failure class); other [`CoreError`]s
-    /// on filesystem, storage or event-log failures.
+    /// inner [`OpenError`] for the failure class, [`OpenError::NetworkFs`]
+    /// included); [`CoreError::is_profile_busy`] contention on the
+    /// database or the events lock; other [`CoreError`]s on filesystem or
+    /// storage failures.
     pub fn open_with(
         profile_dir: impl AsRef<Path>,
         options: CoreOptions,
     ) -> Result<Self, CoreError> {
         let profile_dir = profile_dir.as_ref().to_path_buf();
+        let db_path = profile_dir.join(crate::paths::DB_FILE);
+        if let Some(kind) = crate::storage::detect_network_fs(&db_path) {
+            if !options.allow_network_fs {
+                return Err(OpenError::NetworkFs {
+                    path: db_path,
+                    kind,
+                }
+                .into());
+            }
+            tracing::warn!(
+                path = %db_path.display(),
+                %kind,
+                "opening a profile on network or sync-managed storage (override set)"
+            );
+        }
         std::fs::create_dir_all(&profile_dir).map_err(|source| CoreError::Io {
             path: profile_dir.clone(),
             source,
         })?;
-        let storage = Arc::new(Storage::open(profile_dir.join("curio.db"))?);
-        let state_dir = profile_dir.join(".curio");
-        let log = EventLog::open(state_dir.join("events"), state_dir.join(EVENTS_LOCK_FILE))
-            .map_err(EventsError::Log)?;
-        // Contract: the event log is never committed to git — nor is the
-        // cross-process lock file guarding it.
-        ensure_gitignore(&state_dir.join(".gitignore"))?;
-        // No fatal replay here: intents a previous process left staged
-        // are drained by the `emit` below, which degrades to the backlog
-        // flag instead of refusing to open a profile on a full disk.
-        let emitter = EventEmitter::attach(Arc::clone(&storage), log);
-        let destinations = destinations::load_destinations(&storage)?;
-        let exported_destinations = destinations::load_exported(&storage)?;
+        let storage = Arc::new(Storage::open(&db_path)?);
+        // The events log is attached lazily (see `sink`): an events
+        // directory that cannot be opened degrades to the backlog flag
+        // below instead of refusing a profile whose database is fine.
+        // Only contention is reported, as the retryable "busy".
+        let mut events =
+            sink::EventSink::detached(Arc::clone(&storage), profile_dir.join(".curio"));
+        let attached = match events.emitter() {
+            Ok(_) => true,
+            Err(error) if error.is_profile_busy() => return Err(error),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "the event log cannot be opened; events stay staged until it can"
+                );
+                false
+            }
+        };
+        let refresh_lock_wait = refresh::lock_wait(&options.fetch);
         let core = Self {
             profile_dir,
             storage,
-            emitter: Mutex::new(emitter),
-            events_backlog: AtomicBool::new(false),
+            events: Mutex::new(events),
+            events_backlog: AtomicBool::new(!attached),
             client: PolicedClient::new(options.fetch),
-            destinations: RwLock::new(destinations),
-            exported_destinations: RwLock::new(exported_destinations),
             refresh_locks: Mutex::new(HashMap::new()),
+            refresh_lock_wait,
             #[cfg(feature = "enrich-reddit")]
             enrich_breaker: crate::enrich::Breaker::default(),
             #[cfg(feature = "enrich-reddit")]
             reddit_auth: crate::enrich::reddit_auth::TokenManager::default(),
         };
-        core.emit();
+        // The startup replay: intents a previous process left staged are
+        // drained here, non-fatally (a failure raises the backlog flag).
+        if attached {
+            core.emit();
+        }
         Ok(core)
     }
 
@@ -427,9 +470,13 @@ impl CoreError {
 /// the `events/` contract directory (see [`EventLog`]).
 const EVENTS_LOCK_FILE: &str = "events.lock";
 
-/// Lines `.curio/.gitignore` must carry: the events directory and its
-/// lock file.
-const GITIGNORE_LINES: [&str; 2] = ["events/", EVENTS_LOCK_FILE];
+/// The directory of the cross-process per-feed refresh locks, inside
+/// `.curio/` (see [`CoreHandle::refresh_feed`]).
+const LOCKS_DIR: &str = "locks";
+
+/// Lines `.curio/.gitignore` must carry: the events directory, its lock
+/// file and the refresh locks.
+const GITIGNORE_LINES: [&str; 3] = ["events/", EVENTS_LOCK_FILE, "locks/"];
 
 /// Writes `.curio/.gitignore`, or appends whichever required lines an
 /// existing one (from an older build, or hand-edited) lacks.
@@ -521,21 +568,21 @@ mod tests {
         ensure_gitignore(&path).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "events/\nevents.lock\n"
+            "events/\nevents.lock\nlocks/\n"
         );
 
-        // An older build's file (no lock line, no trailing newline) gains
-        // only the missing line; the user's own lines stay.
+        // An older build's file (no lock lines, no trailing newline) gains
+        // only the missing lines; the user's own lines stay.
         std::fs::write(&path, "events/\n*.bak").unwrap();
         ensure_gitignore(&path).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "events/\n*.bak\nevents.lock\n"
+            "events/\n*.bak\nevents.lock\nlocks/\n"
         );
         ensure_gitignore(&path).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "events/\n*.bak\nevents.lock\n",
+            "events/\n*.bak\nevents.lock\nlocks/\n",
             "idempotent"
         );
     }

@@ -1478,6 +1478,77 @@ fn absent_lead_image_reads_back_as_none() {
     assert_eq!(stored.lead_image, None);
 }
 
+#[test]
+fn a_future_published_date_is_clamped_to_first_seen_and_stays_put() {
+    let (dir, storage) = temp_storage();
+    let mut article = new_article("future:1", "From the future", "body");
+    article.published_at = Some("2999-01-01T00:00:00.000Z".parse().unwrap());
+    let before = Timestamp::now();
+    storage.upsert_articles(vec![article.clone()]).unwrap();
+    let id = storage
+        .article_id_by_dedupe_key(None, "future:1")
+        .unwrap()
+        .unwrap();
+    let stored = storage.get_article(id).unwrap().unwrap();
+    assert_eq!(
+        stored.published_at,
+        Some(stored.saved_at),
+        "a future date is clamped to the first-seen time"
+    );
+    assert!(stored.saved_at >= before);
+
+    // Re-ingesting the same future date clamps to the STORED saved_at, not
+    // to a fresh now — so the row is not rewritten on every refresh.
+    let conn = side_conn(&dir);
+    let stamp = modified_at(&conn, id);
+    let outcome = storage.upsert_articles(vec![article.clone()]).unwrap();
+    assert_eq!((outcome.inserted, outcome.updated), (0, 0));
+    assert_eq!(modified_at(&conn, id), stamp);
+
+    // A past date passes through untouched.
+    let past: Timestamp = "2020-05-01T08:00:00.000Z".parse().unwrap();
+    article.published_at = Some(past);
+    assert_eq!(storage.upsert_articles(vec![article]).unwrap().updated, 1);
+    let stored = storage.get_article(id).unwrap().unwrap();
+    assert_eq!(stored.published_at, Some(past));
+}
+
+#[test]
+fn source_urls_by_dedupe_key_reads_only_stored_keys_in_scope() {
+    let (_dir, storage) = temp_storage();
+    let feed = add_feed(&storage, "https://example.com/feed.xml");
+    let mut in_feed = new_article("guid:same", "In feed", "body");
+    in_feed.feed_id = Some(feed.id);
+    let manual = new_article("guid:other", "Manual", "body");
+    storage.upsert_articles(vec![in_feed, manual]).unwrap();
+
+    let keys = || {
+        vec![
+            "guid:same".to_owned(),
+            "guid:other".to_owned(),
+            "guid:missing".to_owned(),
+        ]
+    };
+    let in_scope = storage
+        .source_urls_by_dedupe_key(Some(feed.id), keys())
+        .unwrap();
+    assert_eq!(
+        in_scope.len(),
+        1,
+        "the manual row is out of the feed's scope"
+    );
+    assert_eq!(
+        in_scope.get("guid:same").map(String::as_str),
+        Some("https://example.com/guid:same")
+    );
+    let manual_scope = storage.source_urls_by_dedupe_key(None, keys()).unwrap();
+    assert_eq!(
+        manual_scope.keys().collect::<Vec<_>>(),
+        ["guid:other"],
+        "keyed by the unscoped key"
+    );
+}
+
 // ------------------------------- change-aware, provenance-aware upsert (#111)
 
 /// A side connection onto the profile database, for asserting on columns

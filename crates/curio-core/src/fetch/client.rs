@@ -197,6 +197,12 @@ impl PolicedClient {
     /// transport failures.
     pub async fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
         let mut url = screen_url(&request.url)?;
+        let origin = url.origin();
+        let max_redirects = request
+            .max_redirects
+            .map_or(self.config.max_redirects, |cap| {
+                cap.min(self.config.max_redirects)
+            });
         let mut hops: u32 = 0;
         let mut all_permanent = true;
 
@@ -234,9 +240,9 @@ impl PolicedClient {
             let status = response.status().as_u16();
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
                 hops += 1;
-                if hops > self.config.max_redirects {
+                if hops > max_redirects {
                     return Err(FetchError::TooManyRedirects {
-                        limit: self.config.max_redirects,
+                        limit: max_redirects,
                         url: request.url.clone(),
                     });
                 }
@@ -258,7 +264,15 @@ impl PolicedClient {
                 // Re-validation: the next hop goes through the exact same
                 // scheme/userinfo screen — and, at the top of the loop,
                 // the same DNS + address policy — as the first hop.
-                url = screen_url(&next)?;
+                let next = screen_url(&next)?;
+                if request.same_origin_redirects && next.origin() != origin {
+                    return Err(FetchError::CrossOriginRedirect {
+                        url: url.to_string(),
+                        location: next.to_string(),
+                        hops: hops - 1,
+                    });
+                }
+                url = next;
                 continue;
             }
 
@@ -278,6 +292,7 @@ impl PolicedClient {
                 status,
                 final_url: url.to_string(),
                 permanent_redirect: hops > 0 && all_permanent,
+                redirects: hops,
                 etag,
                 last_modified,
                 retry_after,
@@ -340,6 +355,7 @@ impl PolicedClient {
             status,
             final_url: url.to_string(),
             permanent_redirect: false,
+            redirects: 0,
             etag: None,
             last_modified: None,
             retry_after,

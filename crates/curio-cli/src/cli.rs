@@ -14,7 +14,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(name = "curio", version, propagate_version = true)]
 pub(crate) struct Cli {
     /// Profile directory (config, database, event log). Defaults to the
-    /// platform data dir, e.g. ~/.local/share/curio.
+    /// profile the desktop app opens: ~/Library/Application
+    /// Support/io.github.alexnodeland.curio on macOS, ~/.local/share/curio
+    /// on Linux, %LOCALAPPDATA%\alexnodeland\curio\data on Windows.
     #[arg(long, global = true, env = "CURIO_PROFILE", value_name = "DIR")]
     pub(crate) profile: Option<PathBuf>,
 
@@ -22,6 +24,13 @@ pub(crate) struct Cli {
     /// human text.
     #[arg(long, global = true)]
     pub(crate) json: bool,
+
+    /// Open a profile on network or sync-managed storage anyway (NFS, SMB,
+    /// iCloud Drive, Dropbox, Syncthing…), which is refused by default:
+    /// SQLite's locking is unsafe there and sync clients can corrupt the
+    /// database. Setting `CURIO_ALLOW_NETWORK_FS=1` does the same.
+    #[arg(long, global = true)]
+    pub(crate) allow_network_fs: bool,
 
     #[command(subcommand)]
     pub(crate) command: Command,
@@ -150,8 +159,11 @@ pub(crate) enum Command {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum FeedCommand {
-    /// Subscribe to a feed URL.
+    /// Subscribe to a feed. Takes a feed URL, a site or page URL (the feed
+    /// is autodiscovered and validated first), or a bare domain
+    /// (`example.com` → `https://example.com/`).
     Add {
+        /// A feed URL, a page/site URL, or a bare domain.
         url: String,
         /// Tags for the subscription (repeat or comma-separate).
         #[arg(long, value_delimiter = ',')]
@@ -161,6 +173,10 @@ pub(crate) enum FeedCommand {
         /// curio.toml — an explicit config edit, never feed content.
         #[arg(long)]
         allow_private_network: bool,
+        /// Subscribe to the URL exactly as given (scheme added if missing)
+        /// without fetching it — no autodiscovery, no validation.
+        #[arg(long)]
+        no_validate: bool,
     },
     /// List every subscription.
     List,

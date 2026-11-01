@@ -8,9 +8,11 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	/**
-	 *  Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
-	 *  the page once through the policed client and scans it. Head-local
-	 *  platform policy; the Google favicon fallback is the frontend's opt-in.
+	 *  Autodiscovers feeds (and a favicon) for what the user typed — a bare
+	 *  domain, a site, a page, or a feed URL. The core's discovery normalizes
+	 *  it, applies the fetch-free rewrites, scans and probes through the
+	 *  policed client and offers only validated feeds; the Google favicon
+	 *  fallback is the frontend's opt-in.
 	 */
 	discoverFeeds: (url: string) => typedError<DiscoveryDto, CommandError>(__TAURI_INVOKE("discover_feeds", { url })),
 	/**
@@ -324,6 +326,12 @@ export const commands = {
 	 */
 	sweepEventRetention: () => typedError<string[], CommandError>(__TAURI_INVOKE("sweep_event_retention")),
 	/**
+	 *  What startup did with profiles an earlier release kept outside the
+	 *  shared default (moved, or left where it is and why) — the startup
+	 *  notice and the doctor panel. Empty when there were none.
+	 */
+	legacyProfiles: () => typedError<LegacyProfileDto[], CommandError>(__TAURI_INVOKE("legacy_profiles")),
+	/**
 	 *  The local path of a cached copy of `url`, fetched through the policed
 	 *  client on a miss. The frontend serves it via the `asset:` protocol —
 	 *  this is how images load without opening the CSP to `https:`.
@@ -379,6 +387,45 @@ export const commands = {
 	/**  Absolute path, for display only — never accepted back as input. */
 	path: string,
 } | null, CommandError>(__TAURI_INVOKE("pick_destination_root")),
+	/**
+	 *  Why startup failed, or `None` when the app started normally — the
+	 *  frontend asks this first, to pick the reader or the recovery screen.
+	 */
+	getStartupFailure: () => typedError<{
+	/**  The failure class. */
+	class: StartupFailureClass,
+	/**  The underlying error (for "Copy error" and the details disclosure). */
+	message: string,
+	/**  The profile directory, when one was resolved. */
+	profile_dir: string | null,
+	/**
+	 *  The pre-migration backup "Restore" would bring back: the newest one
+	 *  this build can open. `None` = nothing to restore.
+	 */
+	backup: string | null,
+	/**  The running Curio version, for the "Copy error" report. */
+	app_version: string,
+} | null, CommandError>(__TAURI_INVOKE("get_startup_failure")),
+	/**
+	 *  Opens the profile again unchanged (after quitting another copy, or
+	 *  freeing disk space).
+	 */
+	retryStartup: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("retry_startup")),
+	/**
+	 *  Moves the database aside and restores the newest pre-migration backup
+	 *  this build can open, then opens the profile.
+	 */
+	restoreStartupBackup: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("restore_startup_backup")),
+	/**  Moves the database aside (never deletes it) and opens an empty one. */
+	startFreshProfile: () => typedError<RecoveryOutcomeDto, CommandError>(__TAURI_INVOKE("start_fresh_profile")),
+	/**  Shows the failed profile's database (or folder) in the file manager. */
+	revealProfileFolder: () => typedError<null, CommandError>(__TAURI_INVOKE("reveal_profile_folder")),
+	/**
+	 *  Quits the app (the recovery screen's last resort). Waits for a
+	 *  recovery action in flight to finish first, so a quit never lands
+	 *  between two file moves.
+	 */
+	quitApp: () => typedError<null, CommandError>(__TAURI_INVOKE("quit_app")),
 };
 
 /** Events */
@@ -535,28 +582,25 @@ export type DestinationDto = {
 	root: string,
 };
 
-/**  One discovered feed candidate. */
+/**  One discovered — and validated — feed candidate. */
 export type DiscoveredFeedDto = {
-	/**  Absolute feed URL (resolved against the fetched page). */
+	/**  Absolute feed URL, fetched and parsed before it was offered. */
 	url: string,
-	/**  The `title` the page gave the `<link>`, if any. */
+	/**  The feed's own title, else the title the page gave its `<link>`. */
 	title: string | null,
 };
 
 /**
- *  What one autodiscovery fetch turned up: zero or more feed candidates
+ *  What one autodiscovery turned up: zero or more validated feed candidates
  *  plus a best-guess favicon URL (same-origin only — the Google fallback
  *  is the frontend's opt-in concern).
  */
 export type DiscoveryDto = {
-	/**
-	 *  Feed candidates, in document order (the page URL itself if it *is* a
-	 *  feed).
-	 */
+	/**  Feed candidates, best first (the URL itself if it *is* a feed). */
 	feeds: DiscoveredFeedDto[],
 	/**
 	 *  A favicon URL to preview (declared icon or `/favicon.ico`), if the
-	 *  final URL was absolute enough to resolve one.
+	 *  URL was absolute enough to resolve one.
 	 */
 	favicon: string | null,
 };
@@ -713,6 +757,51 @@ export type ImportSourceDto =
 "readwise_csv";
 
 /**
+ *  What startup did with a profile an earlier release kept outside the
+ *  shared default location ([`curio_core::paths::adopt_legacy_profiles`]):
+ *  the startup notice and the doctor panel render it.
+ */
+export type LegacyProfileDto = {
+	/**
+	 *  The legacy profile's directory — where it was, when moved (display
+	 *  only).
+	 */
+	path: string,
+	/**  The default profile shared with the CLI (display only). */
+	default_dir: string,
+	/**  Moved, or why it was left where it is. */
+	status: LegacyProfileStatusDto,
+	/**
+	 *  The OS / database error behind `unreadable` and `move_failed`
+	 *  (engine English, display only); `null` otherwise.
+	 */
+	detail: string | null,
+	/**
+	 *  `true` when this session opened it where it is, because a fresh
+	 *  default would have stranded it (see
+	 *  [`curio_core::paths::in_place_fallback`]).
+	 */
+	opened_in_place: boolean,
+};
+
+/**  Mirror of [`curio_core::paths::LegacyProfile`]'s outcome. */
+export type LegacyProfileStatusDto = 
+/**  Moved into the shared default location. */
+"moved" | 
+/**  The default already holds a library; never merged. */
+"default_in_use" | 
+/**  More than one legacy profile exists. */
+"ambiguous" | 
+/**  Another process has it open. */
+"in_use" | 
+/**  The default directory exists and is not empty. */
+"default_not_empty" | 
+/**  Its database could not be checked. */
+"unreadable" | 
+/**  The move failed. */
+"move_failed";
+
+/**
  *  Mirror of [`ListArticles`] — filters are backend-owned; the head never
  *  re-filters or re-sorts client-side. Keyset order is fixed (`id DESC`).
  */
@@ -783,6 +872,17 @@ export type PathTokenDto = {
 	path: string,
 };
 
+/**  What a recovery action did. */
+export type RecoveryOutcomeDto = {
+	/**
+	 *  `None`: the profile opened and the app is running — reload into
+	 *  it. `Some`: it still fails, for this reason.
+	 */
+	failure: StartupFailureDto | null,
+	/**  Where the replaced database was moved, when anything was moved. */
+	set_aside: string | null,
+};
+
 /**
  *  Reddit API credential status (D15). Deliberately secret-free: the
  *  client secret never crosses IPC back toward the webview.
@@ -850,6 +950,63 @@ export type SavedUrlDto = {
 	 *  unreachable page — the bare link is kept — and for existing rows).
 	 */
 	hydrated: boolean,
+};
+
+/**  Why startup failed — the class the recovery screen branches on. */
+export type StartupFailureClass = 
+/**  `curio.db` is not a readable `SQLite` database. */
+"corrupt" | 
+/**  The database was written by a newer build of Curio. */
+"too_new" | 
+/**  Another process holds the database. */
+"locked" | 
+/**
+ *  The OS refused a read or write of the database file (permissions,
+ *  disk full, read-only media).
+ */
+"io" | 
+/**
+ *  The database is not what failed: the profile folder itself could
+ *  not be created (its parent is read-only, or a file has its name).
+ *  Replacing the database cannot help, so recovery only offers to
+ *  retry once the cause is fixed. (An event log that cannot be opened
+ *  does not fail startup: the library opens with its events staged.)
+ */
+"profile" | 
+/**
+ *  The profile sits on network or sync-managed storage (an SMB/NFS
+ *  share, iCloud Drive, Dropbox, Syncthing…), where the database can
+ *  be corrupted, so the open was refused before touching anything.
+ *  The database is healthy and stays put: recovery only offers to
+ *  retry, after the profile has moved to a local disk or the user has
+ *  set the override variable.
+ */
+"network_fs" | 
+/**
+ *  The schema upgrade (or its pre-migration backup) failed and was
+ *  rolled back.
+ */
+"upgrade" | 
+/**  The platform reported no home directory: there is no profile. */
+"no_profile" | 
+/**  Anything else. */
+"other";
+
+/**  A failed startup, as the recovery screen sees it. */
+export type StartupFailureDto = {
+	/**  The failure class. */
+	class: StartupFailureClass,
+	/**  The underlying error (for "Copy error" and the details disclosure). */
+	message: string,
+	/**  The profile directory, when one was resolved. */
+	profile_dir: string | null,
+	/**
+	 *  The pre-migration backup "Restore" would bring back: the newest one
+	 *  this build can open. `None` = nothing to restore.
+	 */
+	backup: string | null,
+	/**  The running Curio version, for the "Copy error" report. */
+	app_version: string,
 };
 
 /**

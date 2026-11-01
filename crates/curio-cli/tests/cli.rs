@@ -13,8 +13,8 @@ use predicates::prelude::predicate;
 use serde_json::json;
 
 use support::{
-    article_id_by_title, assert_valid, curio, events_lines, events_validator, fixture_server,
-    frontmatter_validator, manifest_validator, note_frontmatter, repo_root, seed,
+    article_id_by_title, assert_valid, curio, events_lines, events_validator, feedless_server,
+    fixture_server, frontmatter_validator, manifest_validator, note_frontmatter, repo_root, seed,
     set_default_destination, stdout_json,
 };
 
@@ -62,6 +62,41 @@ fn a_garbage_database_is_refused_with_a_clear_message() {
             .unwrap()
             .starts_with("not a database")
     );
+}
+
+/// #112: a profile inside a synced folder is refused, untouched, until
+/// the user opts in with the flag or the environment variable.
+#[test]
+fn a_profile_in_a_synced_folder_needs_an_explicit_override() {
+    let synced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(synced.path().join(".stfolder")).unwrap();
+    let profile = synced.path().join("curio");
+    curio(&profile)
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is on a Syncthing folder"))
+        .stderr(predicate::str::contains("CURIO_ALLOW_NETWORK_FS"));
+    assert!(
+        !profile.join("curio.db").exists(),
+        "refused before creating"
+    );
+
+    curio(&profile)
+        .args(["init", "--allow-network-fs"])
+        .assert()
+        .success();
+    assert!(profile.join("curio.db").is_file());
+    curio(&profile)
+        .arg("doctor")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is on a Syncthing folder"));
+    curio(&profile)
+        .arg("doctor")
+        .env("CURIO_ALLOW_NETWORK_FS", "1")
+        .assert()
+        .success();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -546,6 +581,65 @@ async fn a_vanished_vault_is_refused_not_recreated() {
     assert!(vault.join(".curio/manifest.json").is_file());
 }
 
+/// #114: curio.toml seeds destinations; it does not own them. A
+/// destination removed in the desktop app (a second engine handle on the
+/// same profile, open the whole time) stays removed after later CLI runs,
+/// and one the desktop adds shows up in `curio dest list` without
+/// touching curio.toml.
+#[test]
+fn a_destination_removed_in_the_desktop_stays_removed_after_a_cli_run() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let vault = parent.path().join("vault");
+    curio(profile.path()).arg("init").assert().success();
+    let desktop = curio_core::CoreHandle::open(profile.path()).unwrap();
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    let listed = |profile: &std::path::Path| -> Vec<String> {
+        stdout_json(
+            &curio(profile)
+                .args(["dest", "list", "--json"])
+                .assert()
+                .success(),
+        )
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|dest| dest["name"].as_str().unwrap().to_owned())
+        .collect()
+    };
+    assert_eq!(listed(profile.path()), ["vault"]);
+
+    let vault_name: curio_types::DestinationName = "vault".parse().unwrap();
+    desktop.remove_destination(&vault_name).unwrap();
+    desktop
+        .add_destination("notes".parse().unwrap(), parent.path().join("notes"))
+        .unwrap();
+    // Every CLI command reconciles curio.toml, which still declares vault.
+    assert_eq!(listed(profile.path()), ["notes"]);
+    assert_eq!(listed(profile.path()), ["notes"]);
+    let names: Vec<String> = desktop
+        .destinations()
+        .unwrap()
+        .into_iter()
+        .map(|dest| dest.name.to_string())
+        .collect();
+    assert_eq!(names, ["notes"], "the desktop's view agrees");
+    let config = std::fs::read_to_string(profile.path().join("curio.toml")).unwrap();
+    assert!(config.contains("vault"), "curio.toml itself is untouched");
+
+    // `curio dest add` is the explicit act: it registers the name again.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(&vault)
+        .assert()
+        .success();
+    assert_eq!(listed(profile.path()), ["notes", "vault"]);
+}
+
 #[test]
 fn reddit_credentials_have_a_full_cli_surface_and_never_echo_the_secret() {
     let profile = tempfile::tempdir().unwrap();
@@ -710,6 +804,122 @@ async fn open_emits_article_opened_and_launches_the_browser() {
     assert_eq!(last["payload"]["curio_id"], json!(curio_id));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn feed_add_subscribes_to_the_feed_discovered_on_a_site_url() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add"])
+            .arg(format!("{server}/"))
+            .args(["--allow-private-network", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], format!("{server}/feed.xml"));
+    // The W1 exemption is recorded under the URL actually subscribed.
+    let config = std::fs::read_to_string(profile.path().join("curio.toml")).unwrap();
+    assert!(config.contains(&format!("{server}/feed.xml")), "{config}");
+
+    // Re-adding the site resolves to the same feed: a duplicate, refused.
+    curio(profile.path())
+        .args(["feed", "add"])
+        .arg(format!("{server}/"))
+        .arg("--allow-private-network")
+        .assert()
+        .failure();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feed_add_probes_common_paths_when_a_page_declares_nothing() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    // `/plain` has no <link>; the same-origin probe finds `/feed.xml`.
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add"])
+            .arg(format!("{server}/plain"))
+            .args(["--allow-private-network", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], format!("{server}/feed.xml"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feed_add_refuses_a_page_with_no_feed_unless_told_not_to_validate() {
+    let server = feedless_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    curio(profile.path())
+        .args(["feed", "add"])
+        .arg(format!("{server}/"))
+        .arg("--allow-private-network")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no feed found"))
+        .stderr(predicate::str::contains("--no-validate"));
+    let feeds = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "list", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(feeds.as_array().unwrap().len(), 0, "nothing was subscribed");
+
+    // The escape hatch subscribes the URL as given, without fetching it.
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add"])
+            .arg(format!("{server}/"))
+            .args(["--allow-private-network", "--no-validate", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], format!("{server}/"));
+}
+
+#[test]
+fn feed_add_normalizes_a_bare_domain() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    // --no-validate keeps the test offline; normalization runs either way.
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add", "example.test", "--no-validate", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], "https://example.test/");
+
+    curio(profile.path())
+        .args(["feed", "add", "ftp://example.test/", "--no-validate"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a fetchable http(s) URL"));
+}
+
+#[test]
+fn feed_add_reports_an_unreachable_site() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    // Port 9 (discard) on loopback: refused, never the internet.
+    curio(profile.path())
+        .args([
+            "feed",
+            "add",
+            "http://127.0.0.1:9/",
+            "--allow-private-network",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("could not reach"));
+}
+
 #[test]
 fn failures_are_helpful_and_nonzero() {
     let profile = tempfile::tempdir().unwrap();
@@ -734,6 +944,108 @@ fn failures_are_helpful_and_nonzero() {
             .success(),
     );
     assert_eq!(tail.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn a_missing_profile_is_refused_with_an_init_hint() {
+    let root = tempfile::tempdir().unwrap();
+    let missing = root.path().join("nonexistent");
+    curio(&missing)
+        .arg("list")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no curio profile at"))
+        .stderr(predicate::str::contains("run `curio init`"));
+    assert!(
+        !missing.exists(),
+        "a refused command must not create the profile"
+    );
+
+    // An existing directory that holds no database is not a profile either.
+    let empty = root.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    curio(&empty)
+        .args(["feed", "list"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run `curio init`"));
+    assert!(!empty.join("curio.db").exists());
+
+    // `init` is the one command that creates it; afterwards the rest work.
+    curio(&missing).arg("init").assert().success();
+    curio(&missing).arg("list").assert().success();
+}
+
+#[test]
+fn doctor_names_an_explicit_profile_as_such() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    let doctor = stdout_json(
+        &curio(profile.path())
+            .args(["doctor", "--json"])
+            .assert()
+            .success(),
+    );
+    let checks = doctor["checks"].as_array().unwrap();
+    let detail = checks.iter().find(|c| c["name"] == "profile").unwrap()["detail"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(detail.contains(&profile.path().display().to_string()));
+    assert!(detail.contains("--profile"), "{detail}");
+    // Legacy locations only matter for the default profile.
+    assert!(checks.iter().all(|c| c["name"] != "legacy-profile"));
+}
+
+/// The default profile (no `--profile` / `CURIO_PROFILE`) is the shared
+/// one: `$XDG_DATA_HOME/curio` on Linux, exactly where the desktop app
+/// looks. Linux-only because that is the one platform whose data root an
+/// environment variable can point at a temp dir (macOS and Windows read
+/// the real user folders); the path itself is pinned for every platform by
+/// `curio_core::paths`' unit tests.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_default_profile_is_the_shared_data_dir() {
+    let home = tempfile::tempdir().unwrap();
+    let data = home.path().join("data");
+    let default_profile = data.join("curio");
+    let bare = || {
+        let mut cmd = assert_cmd::Command::cargo_bin("curio").unwrap();
+        cmd.env_remove("CURIO_PROFILE")
+            .env_remove("BROWSER")
+            .env("CURIO_MOCK_KEYRING", "1")
+            .env("HOME", home.path())
+            .env("XDG_DATA_HOME", &data);
+        cmd
+    };
+
+    bare()
+        .arg("list")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            default_profile.display().to_string(),
+        ))
+        .stderr(predicate::str::contains("run `curio init`"));
+
+    let init = stdout_json(&bare().args(["init", "--json"]).assert().success());
+    assert_eq!(init["profile"], default_profile.display().to_string());
+    assert!(default_profile.join("curio.db").is_file());
+
+    let doctor = stdout_json(&bare().args(["doctor", "--json"]).assert().success());
+    let checks = doctor["checks"].as_array().unwrap();
+    let profile = checks.iter().find(|c| c["name"] == "profile").unwrap();
+    assert!(
+        profile["detail"]
+            .as_str()
+            .unwrap()
+            .contains("shared with the desktop app")
+    );
+    let legacy = checks
+        .iter()
+        .find(|c| c["name"] == "legacy-profile")
+        .unwrap();
+    assert_eq!(legacy["ok"], true);
 }
 
 /// Another process holding the profile database (the desktop app

@@ -1,0 +1,14 @@
+<article>
+<h1>Lazy-loaded images must survive</h1>
+<p>A WordPress-style lazy loader: a data: placeholder in src, the real URL in data-src, and a noscript fallback beside it.</p>
+<img class="lazyload" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="/uploads/data-src.jpg" alt="from data-src">
+<noscript><img src="/uploads/data-src.jpg" alt="from data-src"></noscript>
+<p>A rocket-loader style data-lazy-src, behind an http spacer:</p>
+<img src="https://example.com/spacer.gif" data-lazy-src="https://cdn.example.com/lazy-src.png" alt="from data-lazy-src">
+<p>Only a responsive srcset, CDN commas and all; the widest candidate wins:</p>
+<img srcset="https://cdn.example.com/w_400,h_300/srcset.jpg 400w, https://cdn.example.com/w_1200,h_900/srcset.jpg 1200w, https://cdn.example.com/w_800,h_600/srcset.jpg 800w" sizes="100vw" alt="from srcset">
+<p>A placeholder whose only real source is the noscript fallback:</p>
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="placeholder">
+<noscript><img src="https://cdn.example.com/noscript.webp" alt="from noscript"></noscript>
+<p>And an ordinary image, untouched: <img src="https://cdn.example.com/plain.png" alt="plain"></p>
+</article>

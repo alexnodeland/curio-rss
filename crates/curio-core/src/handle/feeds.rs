@@ -3,11 +3,30 @@
 
 use std::sync::PoisonError;
 
+use crate::feeds::{DiscoverError, DiscoverOptions, Discovery};
 use crate::model::{Feed, FeedId, FeedStatus, FetchRecord, NewFeed};
 
 use super::{CoreError, CoreHandle};
 
 impl CoreHandle {
+    /// Autodiscovers the feeds behind what a user typed — a bare domain, a
+    /// homepage, a feed URL, or a page a rewrite rule knows — through the
+    /// handle's policed client: every candidate returned is validated
+    /// (fetched and parsed). See [`crate::feeds::discover()`]. No storage
+    /// write and no event: subscribing is a separate [`Self::add_feed`].
+    ///
+    /// # Errors
+    ///
+    /// [`DiscoverError`] for input that is not a URL, or a page that could
+    /// not be fetched. Finding no feed is `Ok` with empty `feeds`.
+    pub async fn discover_feeds(
+        &self,
+        input: &str,
+        options: DiscoverOptions,
+    ) -> Result<Discovery, DiscoverError> {
+        crate::feeds::discover(&self.client, input, options).await
+    }
+
     /// Subscribes to a feed; emits `feed.added` (with tags).
     ///
     /// # Errors
@@ -31,6 +50,18 @@ impl CoreHandle {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
+        // Its refresh lock file goes too, best effort. Safe even while
+        // another process holds it: a lock file deleted under a holder is
+        // re-created, not trusted (see `crate::lock`). A refresh of this
+        // feed already under way in another process can re-create it
+        // after this delete (it only finds the feed gone once it holds
+        // the lock), leaving one empty, gitignored lock file behind.
+        let lock_file = super::refresh::feed_lock_path(&self.profile_dir, id);
+        if let Err(err) = std::fs::remove_file(&lock_file)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %lock_file.display(), %err, "could not delete a feed's refresh lock file");
+        }
         self.emit();
         Ok(())
     }

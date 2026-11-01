@@ -20,20 +20,21 @@ future head.
 - The CLI and the desktop app can run on one profile at the same time: state
   changes and the event log are serialized between them (an event is never
   lost, and lines never interleave; a rare duplicate line can appear, which
-  consumers drop by `event_id`). Two things are **not process-safe yet**
-  ([#234](https://github.com/alexnodeland/curio-rss/issues/234)): a
-  destination removed in the desktop app comes back on the next CLI command
-  if `curio.toml` still lists it, and adding or removing a destination in one
-  head while the other is open can undo the other's change (restart the app
-  after `curio dest add`). Refreshing the same feed from both heads at
-  once is harmless but can cost one extra full download.
+  consumers drop by `event_id`). Both heads share one destination
+  registry: a destination added or removed in the desktop app is seen by
+  the next CLI command, and one removed there stays removed even though
+  `curio.toml` still lists it (see `curio.toml` below). The desktop app
+  loads its destinations list once per session and again after its own
+  changes, so a destination `curio dest add` registers while the app is
+  open shows up there once the app restarts (#256).
+  Refreshes of the same feed from both heads take turns.
 
 ## Commands at a glance
 
 | Command | What it does |
 |---------|--------------|
 | `curio init [dir]` | Scaffold a profile (`curio.toml`, `curio.db`, events log) |
-| `curio feed add <url> [--tags …]` | Subscribe (autodiscovers the feed on a site URL) |
+| `curio feed add <url> [--tags …]` | Subscribe — to a feed URL, or the validated feed autodiscovered from a site, page or bare domain |
 | `curio feed list` / `curio feed rm <id>` | List / unsubscribe |
 | `curio fetch` | Refresh every feed; reports new-article counts |
 | `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
@@ -70,11 +71,48 @@ All state lives in one profile directory:
 | `.curio/events.lock` | the lock that lets several Curio processes share the events log (holds no data; safe to ignore, never commit) |
 | `.curio/.gitignore` | scaffolded so the events log and its lock file are never committed |
 | `.curio/profile-id` | the profile's opaque keychain id (created the first time a head loads Reddit credentials — every CLI command and app launch; holds no secret) |
+| `set-aside/<timestamp>/` | databases the desktop recovery screen moved out of the way (never deleted; see [Upgrades and backups](#upgrades-and-backups)) |
 
-The default location is the platform data directory —
-`~/.local/share/curio` on Linux (XDG-respecting: `XDG_DATA_HOME` wins),
-`~/Library/Application Support/curio` on macOS. Override per invocation
-with `--profile DIR` or persistently with `CURIO_PROFILE=DIR`.
+The default profile is **shared with the desktop app** — the CLI and the
+app open the same database, so `curio clip <url>` shows up in the reader
+and a cron job sees the reader's library:
+
+| Platform | Default profile |
+|----------|-----------------|
+| macOS | `~/Library/Application Support/io.github.alexnodeland.curio` |
+| Linux | `~/.local/share/curio` (XDG-respecting: `XDG_DATA_HOME` wins) |
+| Windows | `%LOCALAPPDATA%\alexnodeland\curio\data` |
+
+Override per invocation with `--profile DIR` or persistently with
+`CURIO_PROFILE=DIR` (the desktop app honours `CURIO_PROFILE` too).
+`curio doctor` prints the resolved path and whether it is the shared
+default.
+
+A profile on network or sync-managed storage is refused before anything
+is created or opened: NFS, SMB/CIFS, AFP and WebDAV mounts, iCloud Drive
+(`~/Library/Mobile Documents`), the macOS cloud-sync folders under
+`~/Library/CloudStorage` (Dropbox, OneDrive, Google Drive…), a Dropbox
+folder, a Syncthing folder, or a Windows `\\server\share` path. SQLite's
+locking is unsafe there and sync clients copy the database without its
+write-ahead log, which corrupts it. Move the profile to a local disk, or
+pass the global `--allow-network-fs` flag (or set
+`CURIO_ALLOW_NETWORK_FS=1`) to open it anyway. A mapped Windows drive
+letter is not recognised.
+
+The desktop app applies the same guard: a refused profile opens on the
+recovery screen, which only offers Try again (the database is healthy, so
+it never offers to replace it). The app reads `CURIO_ALLOW_NETWORK_FS` as
+its override, but an app started from Finder or the Dock does not inherit
+your shell's environment, so set the variable for the launch itself:
+
+```sh
+open --env CURIO_ALLOW_NETWORK_FS=1 -a Curio   # this launch only
+launchctl setenv CURIO_ALLOW_NETWORK_FS 1      # every app launched until you log out
+```
+
+Quit Curio first: a running app keeps the environment it started with. On
+Linux and Windows, set the variable in the environment the app is started
+from.
 
 ```sh
 curio init                 # scaffold the default profile
@@ -82,6 +120,34 @@ curio --profile /tmp/p init  # or an explicit one (great for testing)
 ```
 
 `init` is idempotent: re-running never clobbers an existing `curio.toml`.
+It is also the only command that creates a profile: every other command
+refuses a directory without a `curio.db` (exit 1, with a "run `curio
+init`" hint), so a mistyped `--profile` can't silently show an empty
+library.
+
+**Upgrading from 0.4 or earlier.** Older CLIs used
+`~/Library/Application Support/curio` on macOS (and the Windows app kept
+its library in Roaming AppData). The first run of either head on the
+default profile moves a lone old profile into the shared location — a
+same-volume rename, so the library moves whole or not at all. Nothing is
+ever merged:
+
+- **The shared location already holds a library.** The old one stays where
+  it is; every command prints a warning and `curio doctor` fails its
+  `legacy-profile` check until you reconcile by hand (open the old one with
+  `--profile` to export what you need, then remove it).
+- **The old library can't be moved yet** — another curio process still has
+  it open (a stale `curio.db-wal` left by an app that exited is not enough:
+  the move checks whether any process is attached), there are two old
+  libraries, or the move fails. A fresh empty library would strand the old
+  one for good, so neither head creates one: every CLI command (`init`
+  included) exits 1 naming the old library — quit the other process and run
+  curio again, or open it with `--profile` — and the desktop app opens the
+  old library where it is for that session and tries the move again at the
+  next start.
+
+The desktop app reports what it did once at startup and keeps the
+explanation under Settings › Advanced.
 
 ## `curio.toml`
 
@@ -98,11 +164,18 @@ vault = "/home/you/notes/reading"
 allow_private_network = true    # contract W1 — see below
 ```
 
-Ownership split: feeds, articles, and reading state live in `curio.db`
-(the engine's domain — don't edit); `curio.toml` owns what a human should
-be able to change with a text editor. On every run the CLI reconciles the
-file into the engine: destinations are (re-)registered and per-feed
-overrides are applied.
+Ownership split: feeds, articles, reading state and the destination
+registry live in `curio.db` (the engine's domain — don't edit);
+`curio.toml` holds what a human should be able to change with a text
+editor: settings, per-feed overrides, and the destinations to seed. On
+every run the CLI reconciles the file into the engine: per-feed
+overrides are applied, and destinations are **seeded**. Each `name = "path"` line is applied once (it registers
+the destination, as `curio dest add` would). After that the line is
+left alone: if the desktop app removes the destination or moves it to
+another folder, the next CLI run keeps that change rather than undo it.
+Editing a line to a new path applies it again, and so does deleting a
+line and adding it back later. `curio dest add` always registers,
+whatever happened before.
 
 **Contract W1 (`allow_private_network`).** The fetch client is
 SSRF-guarded by default: it refuses to touch loopback, RFC 1918, and
@@ -117,10 +190,42 @@ for you). Nothing in feed content can ever set it.
 
 ```sh
 curio feed add https://example.com/feed.xml --tags rust,databases
+curio feed add example.com                     # bare domain → https://example.com/
+curio feed add https://github.com/rust-lang/rust   # → its releases.atom
 curio feed add http://127.0.0.1:8787/digest.xml --allow-private-network
+curio feed add https://example.com/beta --no-validate   # as given, unfetched
 curio feed list [--json]
 curio feed rm example.com          # by id, exact URL, or unique substring
 ```
+
+`feed add` never subscribes to something a refresh could not parse. It
+takes whatever you typed — a feed URL, a site or page URL, or a bare
+domain (given `https://`; a legacy `feed://` link works too; a URL with a
+`user:password@` part is refused) — and
+autodiscovers the feed before subscribing:
+
+1. **Known sites, no scraping.** reddit `/r/<sub>` and `/user/<name>`,
+   GitHub `<owner>/<repo>` (its releases feed), YouTube playlists and
+   `/channel/UC…` pages, Mastodon `@user` profiles and Substack
+   publications map straight to their feed URL.
+2. **The page itself.** If the URL is a feed, that's it — subscribed as
+   typed, or at its new address only when it has moved permanently (a
+   temporary redirect's target is never stored). Otherwise its
+   declared `<link rel="alternate">` feeds count — RSS, Atom and JSON Feed
+   only; oEmbed and REST-API alternates are ignored, and comment feeds are
+   dropped when the page also declares its main feed.
+3. **Probing**, only when nothing is declared: feed-shaped links on the
+   page, then `/feed`, `/feed.xml`, `/index.xml`, `/rss.xml`, `/atom.xml`
+   and `/rss` — at most six requests in total (redirect hops count), all
+   on the page's own origin: a probe that redirects to another site is
+   dropped without that site ever being contacted.
+
+Every candidate is fetched and parsed before it is offered; the first one
+is subscribed (the others are listed). Discovery as a whole gives up after
+45 seconds, keeping whatever validated by then. A page with no feed is refused with
+a hint — `--no-validate` subscribes the URL as given, without fetching it.
+`--allow-private-network` also lets discovery reach the private address,
+and is recorded under the feed URL actually subscribed.
 
 `feed add` emits `feed.added` (with the tags — tags-in-payload rule);
 `feed rm` emits the `feed.removed` negation and keeps the articles.
@@ -140,6 +245,19 @@ database. An article whose full text was loaded (load-full, a feed's
 full-text mode, or Reddit enrichment) keeps that body: later refreshes of
 a feed still listing the item update its title and metadata, never revert
 it to the feed's excerpt.
+
+Sloppy feeds are normalized on the way in. An entry with no publication
+date takes its last-updated date, and a date in the future is clamped to
+when Curio first saw the article (the future value itself is not kept; if
+the feed later corrects the date, the next refresh stores the correction).
+Items that reuse one guid for different links are stored as separate
+articles, each keeping its article from one refresh to the next even as
+the feed starts or stops reusing the guid, and an item listed twice is
+stored once. Relative lead images are resolved instead of dropped: a
+`media:thumbnail` against the entry link (else the feed URL), the way the
+entry's inline images are; an image enclosure or `media:content` against
+its `xml:base`, else the feed URL. An entry with no link of its own
+records the feed URL as its source, and full-text mode never fetches it.
 
 ```sh
 curio opml import subscriptions.opml   # folders become tags; known URLs skipped
@@ -323,7 +441,9 @@ events-log parseability, the events `.gitignore` scaffold, staged
 event intents (a non-empty set means emission was interrupted — a crash,
 or a flush that failed on a full disk or an unwritable events directory;
 the change itself is already stored, and the next command, or the next
-open, replays the staged events into the log), and quarantined intents
+open, replays the staged events into the log — an events directory that
+cannot be opened at all does not stop the profile from opening, it only
+keeps the events staged until it is writable again), and quarantined intents
 (`dead-intents`: staged rows whose envelope no longer decoded — they are
 moved to `curio.db`'s `event_intents_dead` table so they stop blocking
 every open and emit, and their events never reached the log).
@@ -346,3 +466,18 @@ that is not a Curio database at all.
 
 To roll back by hand: quit every Curio process, delete `curio.db-wal`
 and `curio.db-shm` if present, then copy the backup over `curio.db`.
+
+The desktop app does this for you. When the profile won't open (a
+corrupt or too-new database, a lock held by another copy, an unwritable
+data folder, a failed upgrade), it shows a recovery screen instead of
+quitting, and logs the cause to `logs/curio.log.*`. From there you can
+try again, restore the newest backup this version can open, start fresh,
+show the profile folder, copy the error, or quit; for a database a newer
+Curio wrote, it first offers to check for updates. Restoring and starting
+fresh never delete anything: the current `curio.db` (and its `-wal` /
+`-shm` files) is first moved to `set-aside/<UTC timestamp>/` inside the
+profile, all or nothing — if any file can't be moved, the ones already
+moved go back. When the database is fine but the rest of the profile
+isn't (an unwritable `.curio/events` log, say), the screen only offers
+to try again once you've fixed it: replacing a healthy database would
+not help.

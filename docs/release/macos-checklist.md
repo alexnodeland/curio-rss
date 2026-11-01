@@ -34,6 +34,53 @@ production feed).
 
 - [ ] **Per-profile Reddit credentials (real Keychain)** — `curio --profile /tmp/a reddit login --client-id a` and `curio --profile /tmp/b reddit login --client-id b` (any secrets); Keychain Access shows two `Curio` items with accounts `reddit-api/<key>`, `reddit status` reports `a` / `b` per profile, and `reddit logout` on one leaves the other configured. Moving a profile (`mv /tmp/a /tmp/a2`) keeps its credentials. Upgrading from 0.4.x: the old single `reddit-api` item is copied into each profile that opens (both the CLI and the desktop app come up authenticated) and stays in Keychain Access until a `reddit logout`.
 
+## Startup recovery (do each on the built .app)
+
+A bundled app has no visible stderr, so a profile that won't open must land
+on the recovery screen, never a bouncing icon that vanishes. Use a
+throwaway profile — `open -a` starts the app through LaunchServices, which
+does not pass on your shell's environment, so hand the variable over with
+`--env` (and `export` it so the later steps can use it):
+
+```sh
+export CURIO_PROFILE="$(mktemp -d)"
+open --env CURIO_PROFILE="$CURIO_PROFILE" -a Curio   # quit it, then break the profile
+# or run the one executable inside the bundle, which inherits the environment:
+# /Applications/Curio.app/Contents/MacOS/*
+```
+
+Relaunch the same way after each step, and check that the profile the app
+reports (Settings, or the recovery screen's error details) is the temp
+directory, never your real one.
+
+- [ ] **Corrupt DB → recovery screen** — `printf 'garbage, not sqlite' > "$CURIO_PROFILE/curio.db"`, relaunch: the window opens on "Curio can't read its database" (no crash, no silent exit), and `logs/curio.log.*` in the profile has an `ERROR … startup failed` line naming the class.
+- [ ] **Start fresh** — on that screen, Start fresh → confirm: the app opens into an empty reader after "Open Curio", and the garbage file sits untouched in `set-aside/<timestamp>/curio.db`.
+- [ ] **Restore backup** — with a profile from the previous release (so the upgrade wrote `curio.db.pre-vN.bak`), corrupt `curio.db` again and relaunch: "Restore backup" is offered, and restoring brings back the feeds.
+- [ ] **Too-new DB** — `sqlite3 "$CURIO_PROFILE/curio.db" 'PRAGMA user_version = 999'`: the screen says the database is from a newer Curio and leads with Check for updates (which reports no newer version, or installs one).
+- [ ] **Unwritable event log is not a startup failure** — on a healthy profile, `chmod 000 "$CURIO_PROFILE/.curio/events"` and relaunch: the library opens with its feeds, no recovery screen. Star an article and quit: `curio --profile "$CURIO_PROFILE" doctor` reports the star as a staged intent. `chmod 755` it, relaunch, and the star event is in the log.
+- [ ] **Profile folder can't be created** — `export CURIO_PROFILE="$(mktemp -d)/blocked" && touch "$CURIO_PROFILE"`, launch with `--env`: the screen says Curio can't use its profile folder and offers only Try again (no Restore, no Start fresh); `rm "$CURIO_PROFILE"`, Try again, and an empty library opens.
+- [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
+- [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
+
+## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
+
+- [ ] **iCloud Drive refused (CLI)** — `curio --profile ~/Library/Mobile\ Documents/com~apple~CloudDocs/curio-test init` fails with "is on iCloud Drive" and creates nothing. With `--allow-network-fs` (or `CURIO_ALLOW_NETWORK_FS=1`) it opens.
+- [ ] **iCloud Drive refused (app)** — `open --env CURIO_PROFILE="$HOME/Library/Mobile Documents/com~apple~CloudDocs/curio-test" -a Curio` (`open -a` alone does not pass the variable on): the window opens on "Your library is on a network or synced folder", offering only Try again (no Restore, no Start fresh, even with a backup there), and the error details name `CURIO_ALLOW_NETWORK_FS`. Quit, then relaunch with `--env CURIO_ALLOW_NETWORK_FS=1` added: the library opens. Delete the folder afterwards.
+- [ ] **SMB share refused** — mount any SMB share in Finder (`⌘K`, `smb://…`), then `curio --profile /Volumes/<share>/curio-test init` fails with "is on an SMB/CIFS network share"; the override opens it.
+- [ ] **Local disk unaffected** — the default profile and `CURIO_PROFILE=$(mktemp -d)` open with no warning.
+
+## Shared default profile (real macOS only — CI can't point the app at a temp `~/Library`)
+
+Use a throwaway macOS user account, or move your real
+`~/Library/Application Support/io.github.alexnodeland.curio` and
+`~/Library/Application Support/curio` aside first.
+
+- [ ] **One library** — with no `CURIO_PROFILE`, `curio clip <local-url>` then launch the app: the clip is in Read Later. `curio doctor` reports the profile as `~/Library/Application Support/io.github.alexnodeland.curio (the default, shared with the desktop app)`.
+- [ ] **Legacy CLI profile is adopted** — with only an old-CLI profile at `~/Library/Application Support/curio` (made with `curio --profile ~/Library/Application\ Support/curio init` + one `clip`), the first `curio list` (or app launch) prints/logs "moved the profile…", and the clip is visible in the app.
+- [ ] **Legacy profile never merged** — with both directories holding a `curio.db`, every `curio` command warns about the old one, `curio doctor` fails `legacy-profile`, the app shows a "left at…" notice (and the reason under Settings › Advanced), and neither directory is modified.
+- [ ] **A legacy library last used by the app still moves** — quit a pre-0.5 app that used the old location (it leaves `curio.db-wal` behind), then start the new CLI or app: the library moves, and its last writes are there.
+- [ ] **An open legacy library is never stranded** — with an old-location library held open by a running pre-0.5 `curio` (e.g. a long `fetch`), `curio list` warns "another curio process has it open" and exits 1 without creating the shared directory; the new app opens the old library in place and says so. After the old process quits, the next start moves it.
+
 ## Gatekeeper (unsigned) sanity
 
 - [ ] Fresh-install path works: right-click → Open (or `xattr -dr com.apple.quarantine`) launches the app.

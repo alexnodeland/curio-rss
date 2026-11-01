@@ -1,6 +1,6 @@
 //! The key/value settings store heads keep their preferences in.
 
-use super::destinations::{DESTINATIONS_KEY, EXPORTED_DESTINATIONS_KEY};
+use super::destinations::{DESTINATIONS_KEY, EXPORTED_DESTINATIONS_KEY, SEEDED_DESTINATIONS_KEY};
 use super::{CoreError, CoreHandle};
 
 impl CoreHandle {
@@ -12,9 +12,9 @@ impl CoreHandle {
     /// # Errors
     ///
     /// [`CoreError::ReservedSettingKey`] for the facade-owned
-    /// `"destinations"` / `"destinations.exported"` keys (raw paths never
-    /// cross the facade — read the registry with [`Self::destinations`]);
-    /// storage errors.
+    /// `"destinations"`, `"destinations.exported"` and
+    /// `"destinations.seeded"` keys (raw paths never cross the facade —
+    /// read the registry with [`Self::destinations`]); storage errors.
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, CoreError> {
         reject_reserved(key)?;
         Ok(self.storage.get_setting(key)?)
@@ -25,9 +25,11 @@ impl CoreHandle {
     /// # Errors
     ///
     /// [`CoreError::ReservedSettingKey`] for the facade-owned
-    /// `"destinations"` / `"destinations.exported"` keys — the destination
-    /// registry changes only through [`Self::add_destination`] /
-    /// [`Self::remove_destination`] (and exports); storage errors.
+    /// `"destinations"`, `"destinations.exported"` and
+    /// `"destinations.seeded"` keys — the destination registry changes
+    /// only through [`Self::add_destination`] /
+    /// [`Self::remove_destination`] /
+    /// [`Self::reconcile_destinations`] (and exports); storage errors.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
         reject_reserved(key)?;
         Ok(self.storage.set_setting(key, value)?)
@@ -37,7 +39,13 @@ impl CoreHandle {
 /// Refuses the settings keys the facade owns, so no head can read or
 /// clobber them as raw values.
 fn reject_reserved(key: &str) -> Result<(), CoreError> {
-    if key == DESTINATIONS_KEY || key == EXPORTED_DESTINATIONS_KEY {
+    if [
+        DESTINATIONS_KEY,
+        EXPORTED_DESTINATIONS_KEY,
+        SEEDED_DESTINATIONS_KEY,
+    ]
+    .contains(&key)
+    {
         return Err(CoreError::ReservedSettingKey {
             key: key.to_owned(),
         });

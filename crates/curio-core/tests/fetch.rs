@@ -112,6 +112,7 @@ async fn redirects_are_followed_with_relative_locations() {
         response.permanent_redirect,
         "301 → 308 chain is permanent end-to-end"
     );
+    assert_eq!(response.redirects, 2, "two hops followed");
 }
 
 #[tokio::test]
@@ -158,6 +159,108 @@ async fn redirect_cap_is_enforced() {
         matches!(err, FetchError::TooManyRedirects { limit: 5, .. }),
         "expected TooManyRedirects, got {err:?}"
     );
+}
+
+#[tokio::test]
+async fn a_per_request_redirect_cap_tightens_but_never_loosens_the_config() {
+    let server = MockServer::start().await;
+    for hop in 0..7 {
+        Mock::given(method("GET"))
+            .and(path(format!("/hop{hop}")))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("location", format!("/hop{}", hop + 1)),
+            )
+            .mount(&server)
+            .await;
+    }
+    let client = PolicedClient::new(fast_config());
+    let start = format!("{}/hop0", server.uri());
+
+    let err = client
+        .fetch(&FetchRequest {
+            max_redirects: Some(1),
+            ..allowed(start.clone())
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, FetchError::TooManyRedirects { limit: 1, .. }),
+        "{err:?}"
+    );
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        2,
+        "the first request plus the one allowed hop"
+    );
+
+    let err = client
+        .fetch(&FetchRequest {
+            max_redirects: Some(50),
+            ..allowed(start)
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, FetchError::TooManyRedirects { limit: 5, .. }),
+        "the config cap still applies: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn same_origin_redirects_refuses_an_off_origin_hop_without_requesting_it() {
+    let server = MockServer::start().await;
+    let elsewhere = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/target"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("off origin"))
+        .mount(&elsewhere)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/away"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/target", elsewhere.uri())),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/near"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", "/end"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/end"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("same origin"))
+        .mount(&server)
+        .await;
+    let client = PolicedClient::new(fast_config());
+    let same_origin = |at: &str| FetchRequest {
+        same_origin_redirects: true,
+        ..allowed(format!("{}{at}", server.uri()))
+    };
+
+    let err = client.fetch(&same_origin("/away")).await.unwrap_err();
+    assert!(
+        matches!(&err, FetchError::CrossOriginRedirect { location, hops: 0, .. }
+            if location.starts_with(&elsewhere.uri())),
+        "{err:?}"
+    );
+    assert!(
+        elsewhere.received_requests().await.unwrap().is_empty(),
+        "the off-origin target is never requested"
+    );
+
+    // A same-origin hop is still followed.
+    let response = client.fetch(&same_origin("/near")).await.unwrap();
+    assert_eq!(response.body, b"same origin");
+    assert_eq!(response.redirects, 1);
+
+    // Without the flag, the off-origin hop is followed as before.
+    let response = client
+        .fetch(&allowed(format!("{}/away", server.uri())))
+        .await
+        .unwrap();
+    assert_eq!(response.body, b"off origin");
 }
 
 #[tokio::test]

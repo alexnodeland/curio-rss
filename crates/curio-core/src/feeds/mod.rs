@@ -1,11 +1,18 @@
-//! Feed understanding: RSS/Atom/JSON-Feed parsing and OPML exchange.
+//! Feed understanding: RSS/Atom/JSON-Feed parsing, autodiscovery and OPML
+//! exchange.
 //!
 //! [`parse_feed`] turns fetched bytes into normalized [`ParsedFeed`] /
 //! [`ParsedEntry`] values with a **total dedupe key** (D3):
 //! `guid → link → hash(title + published)` — every entry gets a stable
-//! key, no matter how sloppy the feed. Content here is still *raw*
+//! key, no matter how sloppy the feed — and the keys are unique within one
+//! fetch (a guid reused across different links falls back to a `guid+link`
+//! key; [`ParsedFeed::settle_keys`] keeps an item's key stable across
+//! fetches). Content here is still *raw*
 //! source HTML: sanitization happens in [`crate::content`] before
 //! anything reaches storage.
+//!
+//! [`discover()`] turns whatever a user typed (a bare domain, a homepage, a
+//! reddit/GitHub/YouTube/Mastodon/Substack page) into validated feed URLs.
 //!
 //! [`import_opml`] / [`export_opml`] exchange subscription lists; folder
 //! nesting maps onto tags — the enclosing folder path becomes one
@@ -13,9 +20,15 @@
 //! attribute (which import also reads), so an import/export cycle is
 //! lossless after one normalization.
 
+pub mod discover;
+mod image;
+mod keys;
 mod opml;
 mod parse;
 
+pub use discover::{
+    DiscoverError, DiscoverOptions, DiscoveredFeed, Discovery, discover, normalize_input,
+};
 pub use opml::{OpmlError, OpmlFeed, export_opml, import_opml};
 pub use parse::{FeedParseError, ParsedEntry, ParsedFeed, ParsedFeedMeta, parse_feed};
 
@@ -56,6 +69,15 @@ pub fn dedupe_key(
         write!(hex, "{byte:02x}").unwrap();
     }
     format!("hash:{hex}")
+}
+
+/// The disambiguated key for an item whose guid the feed reuses for items
+/// with different links (see [`ParsedEntry::dedupe_key`]). Its own
+/// `guid+link:` namespace never collides with the [`dedupe_key`] tiers;
+/// the unit separator keeps `("a b", "c")` apart from `("a", "b c")`.
+fn guid_link_key(guid: &str, link: Option<&str>) -> String {
+    let link = link.map(str::trim).unwrap_or_default();
+    format!("guid+link:{guid}\u{1f}{link}")
 }
 
 #[cfg(test)]
@@ -99,6 +121,19 @@ mod tests {
         let base = dedupe_key(None, None, "Title", Some(ts));
         assert_ne!(dedupe_key(None, None, "Other", Some(ts)), base);
         assert_ne!(dedupe_key(None, None, "Title", None), base);
+    }
+
+    #[test]
+    fn guid_link_keys_live_in_their_own_namespace() {
+        let key = guid_link_key("g", Some(" https://x/a "));
+        assert_eq!(key, "guid+link:g\u{1f}https://x/a");
+        assert_ne!(key, dedupe_key(Some("g"), Some("https://x/a"), "T", None));
+        assert_ne!(
+            guid_link_key("a b", Some("c")),
+            guid_link_key("a", Some("b c")),
+            "the separator keeps the halves apart"
+        );
+        assert_eq!(guid_link_key("g", None), "guid+link:g\u{1f}");
     }
 
     #[test]

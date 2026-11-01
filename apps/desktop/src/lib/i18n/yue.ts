@@ -323,6 +323,25 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': '資料庫：{path}',
     'doctor.check.integrity': '完整性檢查',
     'doctor.check.fts': '搜尋索引檢查',
+
+    'legacy.title': '舊版本嘅資料庫',
+    'legacy.notice.moved': '已經將舊版本 Curio 嘅資料庫搬去 {path}，命令列都會開呢度。',
+    'legacy.notice.openedInPlace':
+        '舊版本 Curio 嘅資料庫暫時搬唔到，所以 Curio 喺原位打開咗佢。詳情睇{where}。',
+    'legacy.notice.left': '舊版本 Curio 嘅資料庫仲留喺 {path}。詳情睇{where}。',
+    'legacy.detail.moved': '已經由 {path} 搬去 App 同命令列共用嘅位置。',
+    'legacy.detail.openedInPlace': 'Curio 暫時喺原位打開咗佢，所以乜都冇少；下次啟動會再試搬。',
+    'legacy.reason.defaultInUse':
+        '{path} 留咗喺原處：共用位置已經有一個資料庫，兩個資料庫永遠唔會自動合併。請用 curio --profile 由舊資料庫匯出你要嘅內容，然後刪除佢。',
+    'legacy.reason.ambiguous':
+        '{path} 留咗喺原處：有多過一個舊資料庫。請自己將想保留嗰個搬去 {default}。',
+    'legacy.reason.inUse':
+        '{path} 留咗喺原處：另一個 Curio 程序打開緊佢。請關閉嗰個程序，然後重新開 Curio 嚟搬佢。',
+    'legacy.reason.defaultNotEmpty':
+        '{path} 留咗喺原處：{default} 已經存在而且唔係空嘅。請自己將舊資料庫搬過去。',
+    'legacy.reason.unreadable':
+        '{path} 留咗喺原處：檢查唔到佢嘅資料庫（{detail}）。請自己將佢搬去 {default}。',
+    'legacy.reason.moveFailed': '{path} 留咗喺原處：搬唔到（{detail}）。請自己將佢搬去 {default}。',
     'feedHealth.title': '訂閱源狀況',
     'feedHealth.status': '狀態',
     'feedHealth.pause': '暫停',
@@ -400,4 +419,53 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'shortcut.help': '鍵盤快捷鍵說明',
     'shortcut.addFeed': '加訂閱源',
     'shortcut.settings': '打開設定',
+
+    'recovery.title.corrupt': 'Curio 讀唔到佢嘅資料庫',
+    'recovery.title.tooNew': '呢個資料庫嚟自新啲版本嘅 Curio',
+    'recovery.title.locked': '另一個 Curio 正喺度用緊個資料庫',
+    'recovery.title.io': 'Curio 存取唔到佢嘅資料',
+    'recovery.title.upgrade': 'Curio 升級唔到佢嘅資料庫',
+    'recovery.title.noProfile': 'Curio 冇地方放佢嘅資料',
+    'recovery.title.other': 'Curio 開唔到你嘅資料庫',
+    'recovery.body.corrupt': '資料庫檔案壞咗，或者唔係 Curio 嘅資料庫。佢冇被改過。',
+    'recovery.body.tooNew': '新啲版本嘅 Curio 已經升級咗佢。裝最新嘅 Curio 就可以繼續用。',
+    'recovery.body.locked': '閂咗另一個 Curio，然後再試。',
+    'recovery.body.io':
+        '系統唔俾讀寫 Curio 嘅檔案。睇吓磁碟仲有冇位、個人檔案資料夾寫唔寫得入，然後再試。',
+    'recovery.body.upgrade': '升級已經還原返，你嘅資料庫同之前一樣。等陣再試吓。',
+    'recovery.body.noProfile': '系統話冇主資料夾，所以冇地方放你嘅資料庫。',
+    'recovery.body.other': '有啲意料之外嘅嘢令你嘅資料庫開唔到。乜都冇刪除。',
+    'recovery.backup': '上次升級之前嘅備份：{name}',
+    'recovery.safety':
+        '還原或者重新開始之前，會先將而家嘅資料庫搬去個人檔案入面一個「擺埋一邊」嘅資料夾。乜都唔會刪除。',
+    'recovery.details': '錯誤詳情',
+    'recovery.profile': '個人檔案：{path}',
+    'recovery.action.retry': '再試',
+    'recovery.action.restore': '還原備份',
+    'recovery.action.fresh': '重新開始',
+    'recovery.action.reveal': '顯示個人檔案資料夾',
+    'recovery.action.copy': '複製錯誤',
+    'recovery.action.quit': '結束',
+    'recovery.action.open': '開 Curio',
+    'recovery.action.cancel': '取消',
+    'recovery.working': '處理緊…',
+    'recovery.confirm.restore':
+        '用備份換走而家嘅資料庫？嗰次升級之後加嘅嘢會留喺擺埋一邊嘅副本，唔會喺你嘅資料庫度。',
+    'recovery.confirm.fresh':
+        '用一個空嘅資料庫重新開始？你嘅訂閱同文章會留喺擺埋一邊嘅資料庫副本度。',
+    'recovery.stillFailing': '咁都仲未搞掂。',
+    'recovery.copied': '已經將錯誤複製到剪貼簿',
+    'recovery.copyFailed': '複製唔到個錯誤',
+    'recovery.title.profile': 'Curio 用唔到佢嘅個人檔案資料夾',
+    'recovery.body.profile':
+        'Curio 建立或者開唔到佢嘅個人檔案資料夾。睇吓個資料夾（同裝住佢嘅資料夾）寫唔寫得入、有冇檔案用咗佢個名，然後再試。乜都冇改過。',
+    'recovery.title.networkFs': '你嘅資料庫喺網絡或者同步資料夾入面',
+    'recovery.body.networkFs':
+        'Curio 嘅資料庫放喺網絡共享或者同步服務管理嘅資料夾（iCloud Drive、Dropbox 等）入面可能會損壞，所以 Curio 冇開佢。乜都冇改過。將個人檔案資料夾搬去本機磁碟，然後再試。',
+    'recovery.action.update': '檢查更新',
+    'recovery.update.current': '冇可用嘅更新。裝返升級咗呢個資料庫嘅新版 Curio 就可以繼續用。',
+    'recovery.update.failed': '檢查唔到更新。睇吓網絡連線，然後再試。',
+    'recovery.recovered.title': 'Curio 準備好喇',
+    'recovery.recovered.body': '你嘅資料庫開咗喇。',
+    'recovery.recovered.setAside': '之前嘅資料庫已經搬咗去 {path}。',
 };

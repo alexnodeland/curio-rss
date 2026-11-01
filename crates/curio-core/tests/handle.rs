@@ -34,6 +34,7 @@ fn open_core(profile: &std::path::Path) -> CoreHandle {
                 politeness_delay: Duration::ZERO,
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()
@@ -51,6 +52,7 @@ fn open_core_trusting_localhost(profile: &std::path::Path) -> CoreHandle {
                 trusted_addrs: std::iter::once(std::net::IpAddr::from([127, 0, 0, 1])).collect(),
                 ..FetchConfig::default()
             },
+            ..CoreOptions::default()
         },
     )
     .unwrap()
@@ -75,6 +77,15 @@ fn manual_article(key: &str, title: &str) -> NewArticle {
         source_updated_at: None,
         lead_image: None,
     }
+}
+
+/// Reconciles a one-destination head configuration.
+fn reconcile(
+    core: &CoreHandle,
+    name: &DestinationName,
+    root: &std::path::Path,
+) -> Result<(), curio_core::CoreError> {
+    core.reconcile_destinations([(name.clone(), root.to_path_buf())].into())
 }
 
 /// Subscribes to the mock feed with the W1 exemption set (the fixture
@@ -287,6 +298,74 @@ async fn concurrent_refreshes_of_one_feed_cannot_clobber_validators() {
         .get("if-none-match")
         .map(|v| v.to_str().unwrap().to_owned());
     assert_eq!(last_inm.as_deref(), Some("\"v2\""));
+}
+
+/// The same race across processes (#114 / #234): the desktop app and a
+/// CLI `curio fetch` are two handles on one profile, with separate
+/// in-process locks — only the per-feed lock file serializes them. Two
+/// handles in one process stand in for the two processes: file locks are
+/// per open file, so they exclude each other exactly as across processes.
+#[tokio::test]
+async fn concurrent_refreshes_from_two_handles_cannot_clobber_validators() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Request 1 (setup): 200 + etag v1. Request 2: 200 + etag v2.
+    /// Request 3: a slow 500 — the error path whose validator preserve
+    /// would clobber.
+    struct Script(AtomicUsize);
+    impl wiremock::Respond for Script {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 => ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v1\"")
+                    .set_body_raw(RSS, "application/rss+xml"),
+                1 => ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v2\"")
+                    .set_body_raw(RSS, "application/rss+xml"),
+                _ => ResponseTemplate::new(500).set_delay(Duration::from_millis(150)),
+            }
+        }
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(Script(AtomicUsize::new(0)))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let desktop = open_core(profile.path());
+    let cli = open_core(profile.path());
+    let feed = subscribe(&desktop, &format!("{}/feed.xml", server.uri()));
+    let setup = desktop.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(setup.status, FetchStatus::Ok);
+
+    let (a, b) = tokio::join!(desktop.refresh_feed(feed.id), cli.refresh_feed(feed.id));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert!(
+        (a.status == FetchStatus::Ok) ^ (b.status == FetchStatus::Ok),
+        "exactly one refresh succeeds: {a:?} / {b:?}"
+    );
+
+    // The fresher validators won, whichever handle reads them.
+    for core in [&desktop, &cli] {
+        let stored = core.get_feed(feed.id).unwrap().unwrap();
+        assert_eq!(stored.etag.as_deref(), Some("\"v2\""));
+    }
+    // Serialization proof: the queued refresh read the feed only once it
+    // held the lock, so its conditional GET already carried the new etag.
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 3);
+    let last_inm = requests[2]
+        .headers
+        .get("if-none-match")
+        .map(|v| v.to_str().unwrap().to_owned());
+    assert_eq!(last_inm.as_deref(), Some("\"v2\""));
+    // The lock files live under .curio/locks/, which is gitignored.
+    assert!(profile.path().join(".curio/locks").is_dir());
+    let gitignore = std::fs::read_to_string(profile.path().join(".curio/.gitignore")).unwrap();
+    assert!(gitignore.lines().any(|line| line == "locks/"));
 }
 
 #[tokio::test]
@@ -726,7 +805,11 @@ fn concurrent_destination_registrations_all_persist() {
         }
     }
     let core = open_core(profile.path());
-    assert_eq!(core.destinations().len(), 8, "every registration persisted");
+    assert_eq!(
+        core.destinations().unwrap().len(),
+        8,
+        "every registration persisted"
+    );
 }
 
 #[tokio::test]
@@ -746,7 +829,7 @@ async fn reopening_a_profile_restores_destinations_and_state() {
         .unwrap();
     }
     let core = open_core(profile.path());
-    let destinations = core.destinations();
+    let destinations = core.destinations().unwrap();
     assert_eq!(destinations.len(), 1);
     assert_eq!(destinations[0].name, dest);
     assert_eq!(core.list_feeds().unwrap().len(), 1);
@@ -773,7 +856,10 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
         let saved = core.save_to_destination(article, &dest).unwrap();
 
         core.remove_destination(&dest).unwrap();
-        assert_eq!(core.destinations(), [] as [curio_types::Destination; 0]);
+        assert_eq!(
+            core.destinations().unwrap(),
+            [] as [curio_types::Destination; 0]
+        );
         // The name is gone from the operation surface…
         let err = core.save_to_destination(article, &dest).unwrap_err();
         assert!(matches!(
@@ -790,7 +876,10 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
     // The exported note survives, and the removal persisted.
     assert!(vault.path().join(&note_path).is_file());
     let core = open_core(profile.path());
-    assert!(core.destinations().is_empty(), "removal survives reopen");
+    assert!(
+        core.destinations().unwrap().is_empty(),
+        "removal survives reopen"
+    );
 }
 
 /// #116: once a destination has exported, a vault that moved or was
@@ -855,7 +944,7 @@ fn an_exported_destination_that_vanished_is_destination_missing() {
 }
 
 /// A head re-applying its own configuration (the CLI's curio.toml, on
-/// every invocation) through `reconcile_destination` never undoes the
+/// every invocation) through `reconcile_destinations` never undoes the
 /// missing-destination check: an unchanged, exported destination is left
 /// alone — root not recreated, flag kept — while a new name, a new root or
 /// a not-yet-exported destination registers as `add_destination` does.
@@ -867,8 +956,7 @@ fn reconciling_an_exported_destination_never_recreates_it() {
     let dest: DestinationName = "vault".parse().unwrap();
     let core = open_core(profile.path());
     // Not registered yet: reconciling registers it and creates the root.
-    core.reconcile_destination(dest.clone(), root.clone())
-        .unwrap();
+    reconcile(&core, &dest, &root).unwrap();
     assert!(root.is_dir());
     core.storage()
         .upsert_articles(vec![
@@ -887,8 +975,7 @@ fn reconciling_an_exported_destination_never_recreates_it() {
     std::fs::remove_dir_all(&root).unwrap();
     drop(core);
     let core = open_core(profile.path());
-    core.reconcile_destination(dest.clone(), root.clone())
-        .unwrap();
+    reconcile(&core, &dest, &root).unwrap();
     assert!(!root.exists(), "reconciling must not recreate the root");
     assert!(matches!(
         core.save_to_destination(ids[1], &dest).unwrap_err(),
@@ -897,11 +984,35 @@ fn reconciling_an_exported_destination_never_recreates_it() {
 
     // A changed root is a new destination: registered and started afresh.
     let moved = parent.path().join("moved");
-    core.reconcile_destination(dest.clone(), moved.clone())
-        .unwrap();
-    assert_eq!(core.destinations()[0].root, moved);
+    reconcile(&core, &dest, &moved).unwrap();
+    assert_eq!(core.destinations().unwrap()[0].root, moved);
     let saved = core.save_to_destination(ids[1], &dest).unwrap();
     assert!(moved.join(&saved.path).is_file());
+}
+
+/// A declared root that cannot be created fails the reconcile before
+/// anything is registered or recorded as seeded (roots are created ahead
+/// of the settings transaction, as `add_destination` does): fixing the
+/// path and running again applies it as new.
+#[test]
+fn a_root_that_cannot_be_created_registers_nothing() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let blocker = parent.path().join("not-a-dir");
+    std::fs::write(&blocker, "a file, not a directory").unwrap();
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+
+    let err = reconcile(&core, &dest, &blocker.join("vault")).unwrap_err();
+    assert!(matches!(err, curio_core::CoreError::Io { .. }), "{err:?}");
+    assert_eq!(core.destinations().unwrap(), [] as [Destination; 0]);
+
+    // Not recorded as seeded either: the same declaration, once its path
+    // can be created, registers.
+    std::fs::remove_file(&blocker).unwrap();
+    reconcile(&core, &dest, &blocker.join("vault")).unwrap();
+    assert!(blocker.join("vault").is_dir());
+    assert_eq!(core.destinations().unwrap()[0].root, blocker.join("vault"));
 }
 
 /// Removing a destination clears its exported flag too: a destination
@@ -922,10 +1033,158 @@ fn a_removed_then_re_added_destination_starts_afresh() {
 
     core.remove_destination(&dest).unwrap();
     std::fs::remove_dir_all(&root).unwrap();
-    core.reconcile_destination(dest.clone(), root.clone())
-        .unwrap();
+    reconcile(&core, &dest, &root).unwrap();
     assert!(root.is_dir(), "a fresh registration creates its root");
     core.save_to_destination(id, &dest).unwrap();
+}
+
+/// #114 / #234: curio.toml seeds a destination, it does not own it. A
+/// destination the desktop app removed (another handle on the profile)
+/// stays removed through every later CLI run (a fresh handle reconciling
+/// the same curio.toml), and a re-root made elsewhere stands too.
+#[test]
+fn a_destination_removed_by_another_head_stays_removed_after_a_cli_run() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let vault = parent.path().join("vault");
+    let notes = parent.path().join("notes");
+    let declared: std::collections::BTreeMap<DestinationName, std::path::PathBuf> = [
+        ("vault".parse().unwrap(), vault.clone()),
+        ("notes".parse().unwrap(), notes.clone()),
+    ]
+    .into();
+    let names = |core: &CoreHandle| -> Vec<(String, std::path::PathBuf)> {
+        core.destinations()
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.name.to_string(), d.root))
+            .collect()
+    };
+
+    let desktop = open_core(profile.path());
+    {
+        let cli = open_core(profile.path());
+        cli.reconcile_destinations(declared.clone()).unwrap();
+    }
+    // The desktop sees what the CLI seeded without reopening.
+    assert_eq!(
+        names(&desktop),
+        [
+            ("notes".to_owned(), notes.clone()),
+            ("vault".to_owned(), vault.clone())
+        ]
+    );
+
+    // The desktop removes one destination and re-roots the other.
+    let elsewhere = parent.path().join("elsewhere");
+    desktop
+        .remove_destination(&"vault".parse().unwrap())
+        .unwrap();
+    desktop
+        .add_destination("notes".parse().unwrap(), elsewhere.clone())
+        .unwrap();
+
+    // Two more CLI runs with the unchanged curio.toml change nothing.
+    for _ in 0..2 {
+        let cli = open_core(profile.path());
+        cli.reconcile_destinations(declared.clone()).unwrap();
+        assert_eq!(names(&cli), [("notes".to_owned(), elsewhere.clone())]);
+    }
+    assert_eq!(names(&desktop), [("notes".to_owned(), elsewhere.clone())]);
+
+    // Editing curio.toml is a new declaration: a changed root applies.
+    let moved = parent.path().join("vault-moved");
+    let mut edited = declared.clone();
+    edited.insert("vault".parse().unwrap(), moved.clone());
+    open_core(profile.path())
+        .reconcile_destinations(edited)
+        .unwrap();
+    assert!(names(&desktop).contains(&("vault".to_owned(), moved)));
+
+    // Dropping a name from curio.toml and declaring it again later
+    // applies it afresh.
+    desktop
+        .remove_destination(&"notes".parse().unwrap())
+        .unwrap();
+    open_core(profile.path())
+        .reconcile_destinations(std::collections::BTreeMap::new())
+        .unwrap();
+    open_core(profile.path())
+        .reconcile_destinations(declared)
+        .unwrap();
+    assert!(names(&desktop).contains(&("notes".to_owned(), notes)));
+}
+
+/// #234: no handle writes back a stale copy of the registry. Changes made
+/// through one handle while another is open survive every later change
+/// the other one makes, and the other one sees them at once.
+#[test]
+fn a_destination_added_through_another_handle_is_never_erased() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let first = open_core(profile.path());
+    let second = open_core(profile.path());
+    let names = |core: &CoreHandle| -> Vec<String> {
+        core.destinations()
+            .unwrap()
+            .into_iter()
+            .map(|d| d.name.to_string())
+            .collect()
+    };
+
+    first
+        .add_destination("x".parse().unwrap(), parent.path().join("x"))
+        .unwrap();
+    second
+        .add_destination("y".parse().unwrap(), parent.path().join("y"))
+        .unwrap();
+    assert_eq!(names(&first), ["x", "y"]);
+    second.remove_destination(&"y".parse().unwrap()).unwrap();
+    first
+        .add_destination("z".parse().unwrap(), parent.path().join("z"))
+        .unwrap();
+    assert_eq!(names(&second), ["x", "z"]);
+    // A name another handle added is known to this one's operations too.
+    second.remove_destination(&"z".parse().unwrap()).unwrap();
+    drop((first, second));
+    assert_eq!(names(&open_core(profile.path())), ["x"]);
+}
+
+/// The registrations of several handles racing on one profile (several
+/// processes, as far as the registry can tell) all persist.
+#[test]
+fn concurrent_registrations_through_separate_handles_all_persist() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    std::thread::scope(|scope| {
+        for handle in 0..4 {
+            let core = open_core(profile.path());
+            let vault = vault.path();
+            scope.spawn(move || {
+                for i in 0..4 {
+                    let name = format!("h{handle}-{i}");
+                    core.add_destination(name.parse().unwrap(), vault.join(&name))
+                        .unwrap();
+                }
+            });
+        }
+    });
+    assert_eq!(open_core(profile.path()).destinations().unwrap().len(), 16);
+}
+
+/// The seeded-destinations record is facade-owned like the registry.
+#[test]
+fn the_facade_refuses_its_reserved_seeded_destinations_setting() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    assert!(matches!(
+        core.set_setting("destinations.seeded", "{}"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
+    assert!(matches!(
+        core.get_setting("destinations.seeded"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
 }
 
 /// The exported-destinations record is facade-owned like the registry.
@@ -1424,6 +1683,228 @@ async fn full_text_mode_hydrates_new_articles_at_refresh() {
     assert_eq!(after.word_count, article.word_count);
 }
 
+/// A page the readability scorer confidently extracts, longer than any
+/// feed stub.
+fn full_page(title: &str) -> String {
+    format!(
+        r"<html><body><article>
+        <h1>{title}</h1>
+        <p>The full body of the post that the feed only excerpted, with enough
+           genuine running prose that the readability scorer confidently keeps
+           this container as the main content of the fetched page.</p>
+        <p>A second paragraph makes the extraction unambiguous and pushes the
+           word count well past the one-line stub the feed shipped.</p>
+        </article></body></html>"
+    )
+}
+
+/// #130: a feed reusing one guid for three different posts stores three
+/// articles (not one, overwritten twice) and full-text mode hydrates each
+/// page exactly once — no duplicate hydrations queued for a shared key.
+#[tokio::test]
+async fn a_guid_reused_across_items_stores_each_and_hydrates_each_once() {
+    let server = MockServer::start().await;
+    let feed_xml = format!(
+        r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Reused</title><link>{0}</link>
+        <item><guid>same</guid><title>A</title><link>{0}/a</link><description>stub</description></item>
+        <item><guid>same</guid><title>B</title><link>{0}/b</link><description>stub</description></item>
+        <item><guid>same</guid><title>C</title><link>{0}/c</link><description>stub</description></item>
+        </channel></rss>"#,
+        server.uri()
+    );
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .mount(&server)
+        .await;
+    for post in ["a", "b", "c"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/{post}")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(full_page(post), "text/html"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+    core.set_feed_full_text(feed.id, true).unwrap();
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(outcome.new_articles, 3);
+    let mut titles: Vec<String> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|article| article.title)
+        .collect();
+    titles.sort();
+    assert_eq!(titles, ["A", "B", "C"]);
+
+    // Stable across refreshes: the same three keys, nothing new or changed.
+    let second = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((second.new_articles, second.updated_articles), (0, 0));
+}
+
+/// #130: whether a guid counts as reused is decided per fetch, but an item
+/// keeps one article as the guid's sharing changes between fetches — no
+/// duplicate rows, and read state stays put. The first fetch lists one item
+/// under the guid, so it is stored under the plain `guid:` key, as every
+/// reused-guid feed was before `guid+link:` keys existed.
+#[tokio::test]
+async fn a_reused_guid_keeps_each_item_one_article_as_its_sharing_changes() {
+    let server = MockServer::start().await;
+    let serve = |posts: &[&str]| {
+        let items = posts
+            .iter()
+            .map(|post| {
+                format!(
+                    "<item><guid>same</guid><title>{}</title><link>{}/{post}</link>\
+                     <description>stub</description></item>",
+                    post.to_uppercase(),
+                    server.uri()
+                )
+            })
+            .collect::<Vec<_>>()
+            .concat();
+        let xml = format!(
+            r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Reused</title>{items}</channel></rss>"#
+        );
+        Mock::given(method("GET"))
+            .and(path("/feed.xml"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(xml, "application/rss+xml"))
+    };
+    let titles = |core: &CoreHandle| {
+        let mut articles: Vec<(String, bool)> = core
+            .list_articles(ListArticles::default())
+            .unwrap()
+            .into_iter()
+            .map(|article| (article.title, core.article_state(article.id).unwrap().read))
+            .collect();
+        articles.sort();
+        articles
+    };
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &format!("{}/feed.xml", server.uri()));
+
+    serve(&["c"]).mount(&server).await;
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let c = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    core.mark_read(c.id, true).unwrap();
+
+    // The guid becomes shared: c keeps its row (and read state).
+    server.reset().await;
+    serve(&["a", "b", "c"]).mount(&server).await;
+    let shared = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((shared.new_articles, shared.updated_articles), (2, 0));
+    assert_eq!(
+        titles(&core),
+        [("A".into(), false), ("B".into(), false), ("C".into(), true)]
+    );
+
+    // Unshared again, by an item other than the plain row's: b keeps its
+    // own row and never overwrites c's.
+    server.reset().await;
+    serve(&["b"]).mount(&server).await;
+    let alone = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((alone.new_articles, alone.updated_articles), (0, 0));
+
+    // And shared once more: still the same three articles.
+    server.reset().await;
+    serve(&["a", "b", "c"]).mount(&server).await;
+    let again = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((again.new_articles, again.updated_articles), (0, 0));
+    assert_eq!(
+        titles(&core),
+        [("A".into(), false), ("B".into(), false), ("C".into(), true)]
+    );
+    let c_now = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|article| article.title == "C")
+        .unwrap();
+    assert_eq!(c_now.id, c.id, "c is still the row it was first stored as");
+}
+
+/// #130: an item without a link is stored under the feed URL (the contract
+/// needs a source URI) but is never hydrated against it — not at refresh
+/// in full-text mode, and not on an explicit load-full.
+#[tokio::test]
+async fn a_link_less_item_is_never_hydrated_against_the_feed_url() {
+    let server = MockServer::start().await;
+    let feed_xml = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Link-less</title>
+        <item><guid>n1</guid><title>Note</title><description>The whole note.</description></item>
+        </channel></rss>"#;
+    // expect(1): only the refresh itself may fetch the feed URL.
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed_url = format!("{}/feed.xml", server.uri());
+    let feed = subscribe(&core, &feed_url);
+    core.set_feed_full_text(feed.id, true).unwrap();
+
+    assert_eq!(core.refresh_feed(feed.id).await.unwrap().new_articles, 1);
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    assert_eq!(article.source_url, feed_url);
+    assert_eq!(article.content.text.trim(), "The whole note.");
+
+    let after = core.hydrate_article(article.id).await.unwrap();
+    assert_eq!(after.content, article.content, "nothing to load: unchanged");
+    server.verify().await;
+}
+
+/// #130: a stored article whose fetch lands on its feed's URL (e.g. a
+/// link-less entry stored under the feed's pre-redirect URL) keeps its
+/// body — the feed XML is never extracted as the article.
+#[tokio::test]
+async fn a_hydrate_that_lands_on_the_feed_url_changes_nothing() {
+    let server = MockServer::start().await;
+    let feed_url = format!("{}/feed.xml", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/old-feed.xml"))
+        .respond_with(ResponseTemplate::new(301).insert_header("location", feed_url.as_str()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(full_page("feed"), "text/html"))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed = subscribe(&core, &feed_url);
+    let mut stale = manual_article("guid:n1", "Note");
+    stale.feed_id = Some(feed.id);
+    stale.source_url = format!("{}/old-feed.xml", server.uri());
+    core.storage().upsert_articles(vec![stale]).unwrap();
+    let article = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+
+    let after = core.hydrate_article(article.id).await.unwrap();
+    assert_eq!(after.content, article.content);
+}
+
 /// A feed that only ships an excerpt of one post whose source page lives
 /// at `post_path` on the mock server.
 fn excerpt_feed(server: &MockServer, post_path: &str) -> String {
@@ -1822,11 +2303,11 @@ fn the_facade_refuses_its_reserved_destinations_setting_both_ways() {
             Err(curio_core::CoreError::ReservedSettingKey { .. })
         ));
         // The registry the refused write would have clobbered is intact.
-        assert_eq!(core.destinations().len(), 1);
+        assert_eq!(core.destinations().unwrap().len(), 1);
     }
     // ... and still intact on disk after a reopen.
     let core = open_core(profile.path());
-    let registered = core.destinations();
+    let registered = core.destinations().unwrap();
     assert_eq!(registered.len(), 1);
     assert_eq!(registered[0].name, name);
 }
@@ -1995,4 +2476,122 @@ fn the_next_mutation_drains_a_staged_backlog() {
         events[1].event,
         EventPayload::ArticleTagged { .. }
     ));
+}
+
+/// #112: an events directory that cannot be opened no longer fails the
+/// profile open. The handle comes up with the backlog flag raised, a
+/// mutation commits with its intent staged, and once the directory is
+/// repaired the next drain opens the log and emits — the intent a
+/// previous session left staged first, in order.
+#[test]
+fn an_unopenable_events_dir_does_not_block_open() {
+    let profile = tempfile::tempdir().unwrap();
+    let (article, events_dir) = {
+        let core = open_core(profile.path());
+        core.storage()
+            .upsert_articles(vec![manual_article("k1", "One")])
+            .unwrap();
+        let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+        let events_dir = break_events_dir(profile.path());
+        // Left staged by this session: its flush fails.
+        assert!(core.set_starred(article, true).unwrap());
+        assert_eq!(core.pending_intent_count().unwrap(), 1);
+        (article, events_dir)
+    };
+
+    let core = open_core(profile.path());
+    assert!(core.has_pending_events(), "nothing could be flushed");
+    assert!(core.tag_article(article, "rust").unwrap());
+    assert_eq!(core.pending_intent_count().unwrap(), 2);
+    assert!(core.article_state(article).unwrap().starred);
+    core.flush_pending_events().unwrap_err();
+    core.sweep_event_retention().unwrap_err();
+
+    repair_events_dir(&events_dir);
+    assert_eq!(core.flush_pending_events().unwrap(), 2);
+    assert!(!core.has_pending_events());
+    let events = read_all(&events_dir).unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[0].event,
+        EventPayload::ArticleStarred { .. }
+    ));
+    assert!(matches!(
+        events[1].event,
+        EventPayload::ArticleTagged { .. }
+    ));
+    // The log stays attached: later mutations emit as usual.
+    assert!(core.set_archived(article, true).unwrap());
+    assert!(!core.has_pending_events());
+    assert_eq!(read_all(&events_dir).unwrap().len(), 3);
+    assert_eq!(
+        core.sweep_event_retention().unwrap(),
+        Vec::<std::path::PathBuf>::new()
+    );
+}
+
+/// #112: a `.curio/` that cannot hold the events directory at all (a
+/// file squats it) still opens the profile; the gitignore and the log
+/// appear once it is fixed.
+#[test]
+fn an_unusable_state_dir_does_not_block_open() {
+    let profile = tempfile::tempdir().unwrap();
+    let state_dir = profile.path().join(".curio");
+    std::fs::write(&state_dir, b"not a directory").unwrap();
+
+    let core = open_core(profile.path());
+    assert!(core.has_pending_events());
+    core.storage()
+        .upsert_articles(vec![manual_article("k1", "One")])
+        .unwrap();
+    let article = core.list_articles(ListArticles::default()).unwrap()[0].id;
+    assert!(core.set_starred(article, true).unwrap());
+    assert_eq!(core.pending_intent_count().unwrap(), 1);
+
+    std::fs::remove_file(&state_dir).unwrap();
+    assert_eq!(core.flush_pending_events().unwrap(), 1);
+    let gitignore = std::fs::read_to_string(state_dir.join(".gitignore")).unwrap();
+    assert!(
+        gitignore.lines().any(|line| line == "events/"),
+        "{gitignore}"
+    );
+    assert_eq!(read_all(&state_dir.join("events")).unwrap().len(), 1);
+}
+
+/// #112: a profile on sync-managed storage is refused before anything is
+/// created, with a typed error naming the kind; the explicit override
+/// opens it.
+#[test]
+fn a_profile_on_sync_managed_storage_needs_the_override() {
+    use curio_core::CoreError;
+    use curio_core::storage::{NetworkFsKind, OpenError};
+
+    let synced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(synced.path().join(".stfolder")).unwrap();
+    let profile = synced.path().join("curio");
+
+    let err = CoreHandle::open(&profile).unwrap_err();
+    match &err {
+        CoreError::Open(OpenError::NetworkFs { path, kind }) => {
+            assert_eq!(*kind, NetworkFsKind::Syncthing);
+            assert_eq!(*path, profile.join("curio.db"));
+        }
+        other => panic!("expected NetworkFs, got {other:?}"),
+    }
+    let message = err.to_string();
+    assert!(message.contains("Syncthing"), "{message}");
+    assert!(message.contains("CURIO_ALLOW_NETWORK_FS"), "{message}");
+    assert!(!err.is_profile_busy());
+    assert!(!profile.exists(), "a refused open creates nothing");
+
+    let core = CoreHandle::open_with(
+        &profile,
+        CoreOptions {
+            allow_network_fs: true,
+            ..CoreOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(core.db_path().is_file());
+    assert!(!core.has_pending_events());
 }

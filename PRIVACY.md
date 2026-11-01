@@ -39,9 +39,15 @@ classes of request the app can make; there are no others:
    apps. Removing the credentials returns that profile to the
    unauthenticated behavior above; nothing else changes.
 
-2. **Favicons.** *Add feed* fetches the page you typed to discover its feeds
-   and reads its declared icon (or the site's own `/favicon.ico`) —
-   **same-origin only**. The **Google favicon service is never contacted
+2. **Feed discovery and favicons.** *Add feed* (and `curio feed add`)
+   fetches the page you typed to discover its feeds, then fetches each
+   candidate feed once to check it parses. If the page declares no feed, it
+   tries at most six requests for common feed paths, **all on the same
+   site** — a guessed path that redirects elsewhere is dropped without
+   following it. For reddit,
+   GitHub, YouTube, Mastodon and Substack URLs it may request the site's own
+   feed URL directly instead of the page. It reads the page's declared icon
+   (or the site's own `/favicon.ico`) — **same-origin only**. The **Google favicon service is never contacted
    unless you explicitly opt in** (a checkbox, off by default); turning it on
    sends only a site's *domain* to Google, and only for sites that declare no
    icon of their own.

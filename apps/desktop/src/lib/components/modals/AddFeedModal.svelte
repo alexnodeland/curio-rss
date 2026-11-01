@@ -1,9 +1,11 @@
 <script lang="ts">
 /**
  * Add-feed modal (ported from the sketch's error-unwrap reference to runes).
- * Autodiscovery: the typed URL is fetched once Rust-side (`discover_feeds`,
- * policed) and scanned for `<link rel="alternate">` feeds + a favicon.
- * Favicon precedence is same-origin only; the Google favicon service is an
+ * Autodiscovery: `discover_feeds` hands the typed text to the core's
+ * discovery (`curio_core::feeds::discover`, policed) — it normalizes a bare
+ * domain, applies the fetch-free site rewrites, scans the page's declared
+ * feeds, probes same-origin common paths, and offers only candidates it
+ * fetched and parsed, plus a favicon. Favicon precedence is same-origin only; the Google favicon service is an
  * opt-in fallback (`prefsStore.allowRemoteFavicon`) applied here — nothing
  * reaches Google unless the user turned it on. Adding dedupes against
  * `get_feed_by_url` first, then subscribes through the feeds store.

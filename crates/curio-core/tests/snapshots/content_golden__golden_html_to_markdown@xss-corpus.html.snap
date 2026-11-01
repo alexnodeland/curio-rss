@@ -9,6 +9,18 @@ Every vector below must be inert in the stored output.
 
 Event handler in attribute.
 
-![](https://example.com/posts/x) javascript: link data: link [handler on a good link](https://example.com/ok)
+![](https://example.com/posts/x) javascript: link data: link [handler on a good link](https://example.com/ok) "> ![lazy with handler](https://example.com/lazy.png)
+
+Hostile id, dir and lang.
+
+Hostile quoted id.
+
+quoted fragment fragment with parens bare fragment
+
+```js
+code
+```
+
+1.  clobber attempt
 
 Legitimate **content** around the attacks [survives](https://example.com/fine).

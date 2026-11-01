@@ -248,3 +248,34 @@ requests outright (www/old/api hosts, any User-Agent) — the unauthenticated ti
 effectively serves only `.rss`. So BYO OAuth is not merely the fast lane; it is the
 working path for full posts. An anonymous 403 surfaces as explicit guidance ("add your
 own free Reddit API credentials"), never as a fallback HTML fetch of the same host.
+
+## D16. Destinations across heads: one registry, config seeds it
+
+Since #114/#234 several heads share one profile (the desktop app, CLI runs, cron jobs),
+and each can change the destination registry. **Resolved:**
+
+- **The persisted registry is the only source of truth.** No `CoreHandle` caches it: reads
+  go to the settings table, and `add_destination`, `remove_destination`, the exported
+  flag and the seeding record each change through a read-modify-write inside one
+  `IMMEDIATE` transaction. A head never writes back a stale copy over a change another
+  head made while it was open, and sees that change on its next read.
+- **A head configuration seeds destinations; it does not own them.** `curio.toml` is
+  applied on every CLI run (`reconcile_destinations`), but each `name → root` pair only
+  once: the registry remembers which pairs it applied (`destinations.seeded`). After
+  that, whatever any head does with the destination (remove it, re-root it) stands, so a
+  destination removed in the desktop app stays removed after a CLI run. A changed
+  root, or a name dropped from the file and declared again later, is a new declaration
+  and is applied. `curio dest add` stays the explicit act and always registers.
+- **Rejected: `curio.toml` is authoritative** (the desktop app could not remove what the
+  file declares). The app has no way to edit the file, so its Remove button would have
+  to refuse or silently come back; and a file the CLI rewrites on `dest add` is the
+  CLI's convenience, not a profile-wide policy.
+- **Rejected: a tombstone per removal.** It answers removal but not a re-root made in the
+  app, which the next CLI run would revert; remembering what was seeded covers both
+  with one record.
+
+Upgrade gap, accepted: the seeding record starts empty, so a change made in the app before
+the upgrade to a destination `curio.toml` still lists is undone once on the first CLI run
+(the pre-upgrade behaviour): a removed destination comes back, and a re-rooted one goes
+back to its `curio.toml` root and starts afresh for the missing-destination check.
+Repeating the change after that sticks.

@@ -44,16 +44,74 @@ pub fn audit_html(html: &str) -> Result<(), String> {
                     "forbidden attribute {attr:?} survived on <{name}>:\n{html}"
                 ));
             }
-            if matches!(attr, "href" | "src")
-                && !(value.starts_with("http://") || value.starts_with("https://"))
-            {
+            if !ALLOWED_ATTRIBUTES.contains(&attr) {
                 return Err(format!(
-                    "non-http(s) {attr} survived on <{name}>: {value:?}\n{html}"
+                    "unexpected attribute {attr:?} survived on <{name}>:\n{html}"
+                ));
+            }
+            if matches!(attr, "href" | "src") {
+                let in_page_fragment = attr == "href"
+                    && value
+                        .strip_prefix("#user-content-")
+                        .is_some_and(is_plain_token);
+                if !(value.starts_with("http://") || value.starts_with("https://"))
+                    && !in_page_fragment
+                {
+                    return Err(format!(
+                        "non-http(s) {attr} survived on <{name}>: {value:?}\n{html}"
+                    ));
+                }
+            }
+            if !value_is_filtered(name, attr, value) {
+                return Err(format!(
+                    "unfiltered {attr} on <{name}>: {value:?}\n{html}"
                 ));
             }
         }
     }
     Ok(())
+}
+
+/// Every attribute the sanitize gate may leave on stored HTML.
+const ALLOWED_ATTRIBUTES: &[&str] = &[
+    "href", "rel", "title", "src", "alt", "datetime", "colspan", "rowspan", "id", "dir", "lang",
+    "start", "class",
+];
+
+/// The id/fragment token shape: ASCII alphanumerics and `-_.:`.
+fn is_plain_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+}
+
+/// Whether a value-filtered attribute carries only what the sanitizer's
+/// filter lets through (attributes without a filter always pass here).
+fn value_is_filtered(element: &str, attr: &str, value: &str) -> bool {
+    match attr {
+        "id" => value
+            .strip_prefix("user-content-")
+            .is_some_and(is_plain_token),
+        "dir" => matches!(value, "ltr" | "rtl" | "auto"),
+        "lang" => {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        }
+        "start" => element == "ol" && value.parse::<i32>().is_ok(),
+        "class" => {
+            matches!(element, "pre" | "code")
+                && value.strip_prefix("language-").is_some_and(|lang| {
+                    !lang.is_empty()
+                        && lang
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"-_+#.".contains(&b))
+                })
+        }
+        _ => true,
+    }
 }
 
 /// Audit of exported markdown, judged the way a `CommonMark` renderer

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use curio_types::Timestamp;
 
 use crate::content;
-use crate::fetch::FetchRequest;
+use crate::fetch::{FetchKind, FetchRequest};
 use crate::model::{
     Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, NewArticle,
 };
@@ -92,14 +92,17 @@ impl CoreHandle {
             .fetch(&FetchRequest {
                 url: article.source_url.clone(),
                 allow_private_network,
+                kind: FetchKind::Page,
                 ..FetchRequest::default()
             })
             .await?;
-        if !response.is_success() || lands_on_feed(&response.final_url) {
+        // A PDF, image or other non-HTML body has no main content to
+        // extract — readability over binary data would only make noise.
+        if !response.is_success() || lands_on_feed(&response.final_url) || !response.is_html_page()
+        {
             return Ok(article);
         }
-        let raw = String::from_utf8_lossy(&response.body);
-        let processed = content::process_full_page(&raw, &response.final_url)?;
+        let processed = content::process_full_page(&response.html_text(), &response.final_url)?;
         // A mis-scored thin page must not clobber real feed content.
         if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len() {
             return Ok(article);
@@ -122,7 +125,9 @@ impl CoreHandle {
     /// GoodLinks-style clip path. The page is fetched through the policed
     /// client (no private-network exemption — that flag belongs to feeds)
     /// and readability-extracted, adopting the page's own title, byline,
-    /// language, publish time and lead image where declared. An
+    /// language, publish time and lead image where declared. The page is
+    /// decoded by its BOM, HTTP charset, then `<meta charset>`. A non-HTML
+    /// URL (a PDF, an image) is clipped link-only without extraction. An
     /// unreachable or unextractable page still saves the bare link
     /// (`hydrated: false`) — a save must never lose the URL.
     ///
@@ -159,13 +164,15 @@ impl CoreHandle {
             .client
             .fetch(&FetchRequest {
                 url: canonical.clone(),
+                kind: FetchKind::Page,
                 ..FetchRequest::default()
             })
             .await
         {
-            Ok(response) if response.is_success() => {
-                let raw = String::from_utf8_lossy(&response.body);
-                content::process_page(&raw, &response.final_url).ok()
+            // Only an HTML page is extracted; a PDF or image URL is clipped
+            // link-only, like an unreachable page.
+            Ok(response) if response.is_success() && response.is_html_page() => {
+                content::process_page(&response.html_text(), &response.final_url).ok()
             }
             _ => None,
         };

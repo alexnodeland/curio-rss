@@ -1,0 +1,16 @@
+
+
+  <?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Leading Whitespace Feed</title>
+    <link>https://example.com/</link>
+    <description>Blank lines before the XML declaration.</description>
+    <item>
+      <title>Still parses — résumé</title>
+      <link>https://example.com/ws/1</link>
+      <guid>https://example.com/ws/1</guid>
+      <description>Servers that template feeds often emit a newline first.</description>
+    </item>
+  </channel>
+</rss>

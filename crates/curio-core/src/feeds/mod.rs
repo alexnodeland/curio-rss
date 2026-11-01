@@ -32,7 +32,9 @@ pub use discover::{
     normalize_input, resolve,
 };
 pub use opml::{OpmlError, OpmlFeed, OpmlImport, export_opml, import_opml, parse_opml};
-pub use parse::{FeedParseError, ParsedEntry, ParsedFeed, ParsedFeedMeta, parse_feed};
+pub use parse::{
+    FeedParseError, ParsedEntry, ParsedFeed, ParsedFeedMeta, parse_feed, parse_fetched_feed,
+};
 
 use sha2::{Digest as _, Sha256};
 

@@ -67,6 +67,8 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'reader.empty': '揀篇文章嚟睇',
     'reader.imagesOff': '呢篇文章已經關咗圖片。',
     'reader.imagesOff.enable': '開啟',
+    'reader.tableScroll': '可捲動表格',
+    'reader.imageViewer': '圖片檢視器',
     'reader.missing': '呢篇文章已經冇咗',
     'reader.toolbar': '文章操作',
     'reader.action.markRead': '標為已睇',

@@ -11,8 +11,14 @@
  *   reader's typography is ours), no frames/objects/base/meta;
  * - `data:` URIs stripped everywhere except `data:image/*` (which the CSP
  *   `img-src` deliberately allows);
- * - link clicks never navigate the webview: delegated to the URL-scoped
+ * - link clicks never navigate the webview: same-document `#fragment` links
+ *   (footnotes — ingest keeps their `user-content-` ids and hrefs) scroll
+ *   within the reader, everything else is delegated to the URL-scoped
  *   opener (http/https only), matching the no-window.open rule.
+ *
+ * On top of the sanitized body: wide tables scroll inside the column, body
+ * images load lazily through the policed cache and collapse when they
+ * fail, and a loaded image opens a lightbox (see `utils/reader-content`).
  */
 import DOMPurify, { type Config } from 'dompurify';
 
@@ -50,14 +56,34 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 
 <script lang="ts">
 import Icon from '$components/common/Icon.svelte';
+import { trapFocus } from '$lib/actions/trap-focus';
 import { t } from '$lib/i18n';
-import { openExternal } from '$lib/utils/external';
 import { prefsStore } from '$lib/state/prefs.svelte';
-import { loadCachedImage } from '$lib/utils/images';
+import { openExternal } from '$lib/utils/external';
+import {
+    isZoomable,
+    mountBodyImages,
+    scrollToFragment,
+    wrapTables,
+} from '$lib/utils/reader-content';
 
 let { html }: { html: string } = $props();
 
-const clean = $derived(DOMPurify.sanitize(html, SANITIZE_CONFIG));
+/**
+ * Sanitize, then shape the detached tree before `{@html}` owns it: wide
+ * tables get their scroll wrapper here, as markup, because wrapping nodes
+ * after render would move them out from under Svelte's node tracking.
+ */
+function prepare(source: string, tableLabel: string): string {
+    // A <template> parses into an inert document: nothing in it loads or
+    // runs, and it re-serializes exactly what `{@html}` would parse anyway.
+    const template = document.createElement('template');
+    template.innerHTML = DOMPurify.sanitize(source, SANITIZE_CONFIG);
+    wrapTables(template.content, tableLabel);
+    return template.innerHTML;
+}
+
+const clean = $derived(prepare(html, t('reader.tableScroll')));
 
 let contentEl: HTMLElement | undefined = $state();
 
@@ -69,12 +95,13 @@ const showMediaHint = $derived(
     !prefsStore.mediaPrefetch && offImageCount > 0 && !prefsStore.mediaHintDismissed,
 );
 
+/** The image the lightbox is showing, or null when it is closed. */
+let zoomed: { src: string; alt: string } | null = $state(null);
+
 /**
- * Remote body images (`http(s)`) never load unmediated — the CSP `img-src`
- * forbids `https:`. When the media-prefetch setting is on we resolve each
- * through the policed cache (→ `asset:`) and swap the src; when off, the src
- * is cleared so nothing hits the network. `data:image/*` (inline) is left
- * alone — it needs no fetch and the CSP already allows it.
+ * Body images resolve lazily through the policed cache (or stay hidden with
+ * media prefetch off) — see `mountBodyImages`. Re-runs when the sanitized
+ * body or the prefetch setting changes.
  */
 $effect(() => {
     void clean; // re-run when the sanitized body changes
@@ -83,71 +110,104 @@ $effect(() => {
     if (root === undefined) {
         return;
     }
-    let cancelled = false;
-    let offCount = 0;
-    // Strip srcset/sizes on <img> and any <picture><source>: responsive
-    // candidates bypass the src-only media pipeline entirely — with media on
-    // the CSP blocks them (broken image), with media off they aren't hidden.
-    // Removing them forces the browser to fall back to the routed `src`.
-    for (const source of root.querySelectorAll('source[srcset]')) {
-        source.removeAttribute('srcset');
-    }
-    for (const img of root.querySelectorAll('img')) {
-        img.removeAttribute('srcset');
-        img.removeAttribute('sizes');
-        const original = img.dataset.origSrc ?? img.getAttribute('src') ?? '';
-        img.dataset.origSrc = original;
-        if (!/^https?:\/\//i.test(original)) {
-            continue; // data: / already-local — leave as-is
-        }
-        img.removeAttribute('src');
-        img.toggleAttribute('data-media-off', !on);
-        if (on) {
-            void loadCachedImage(original).then((result) => {
-                if (!cancelled && result.status === 'ok') {
-                    img.setAttribute('src', result.data);
-                    img.removeAttribute('data-media-off');
-                }
-            });
-        } else {
-            offCount += 1;
-        }
-    }
-    offImageCount = offCount;
+    const mounted = mountBodyImages(root, on);
+    offImageCount = mounted.offCount;
     return () => {
-        cancelled = true;
+        mounted.dispose();
     };
 });
 
-/** Delegates anchor clicks to the OS browser; the webview never navigates. */
-function interceptLinks(node: HTMLElement): { destroy(): void } {
-    function onClick(event: MouseEvent): void {
-        // `auxclick` fires for middle/right; only middle-click (button 1)
-        // should open — otherwise a middle-click bypasses the opener and the
-        // webview navigates. Right-click (button 2) is left for the menu.
-        if (event.type === 'auxclick' && event.button !== 1) {
-            return;
-        }
-        const target = event.target;
-        if (!(target instanceof Element)) {
-            return;
-        }
-        const anchor = target.closest('a[href]');
-        if (anchor === null) {
-            return;
-        }
-        event.preventDefault();
-        const href = anchor.getAttribute('href');
-        if (href !== null) {
-            void openExternal(href);
-        }
+// A new article closes any lightbox left open on the previous one.
+$effect(() => {
+    void clean;
+    zoomed = null;
+});
+
+function openLightbox(img: HTMLImageElement): void {
+    zoomed = { src: img.getAttribute('src') ?? '', alt: img.getAttribute('alt') ?? '' };
+}
+
+function closeLightbox(): void {
+    zoomed = null;
+}
+
+/** `auxclick` fires for middle/right; only a middle-click (button 1) counts. */
+function isPrimaryOrMiddle(event: MouseEvent): boolean {
+    // Middle-click must be intercepted too — otherwise it bypasses the
+    // opener and the webview navigates. Right-click is left for the menu.
+    return event.type !== 'auxclick' || event.button === 1;
+}
+
+/**
+ * Body clicks never navigate the webview: a same-document `#fragment`
+ * (footnotes, in-page contents) scrolls within the reader, every other
+ * link goes to the URL-scoped OS opener, and a loaded image outside a link
+ * opens the lightbox.
+ */
+function onContentClick(event: MouseEvent): void {
+    const target = event.target;
+    if (!(target instanceof Element) || !isPrimaryOrMiddle(event)) {
+        return;
     }
-    node.addEventListener('click', onClick);
-    node.addEventListener('auxclick', onClick);
+    const anchor = target.closest('a[href]');
+    if (anchor === null) {
+        if (event.type === 'click' && isZoomable(target)) {
+            openLightbox(target);
+        }
+        return;
+    }
+    event.preventDefault();
+    const href = anchor.getAttribute('href') ?? '';
+    if (href.startsWith('#')) {
+        if (event.type === 'click' && contentEl !== undefined) {
+            scrollToFragment(contentEl, href);
+        }
+        return;
+    }
+    void openExternal(href);
+}
+
+/** Enter / Space on a focused body image opens the lightbox. */
+function onContentKeydown(event: KeyboardEvent): void {
+    const target = event.target;
+    if ((event.key === 'Enter' || event.key === ' ') && target instanceof Element && isZoomable(target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        openLightbox(target);
+    }
+}
+
+function interceptContent(node: HTMLElement): { destroy(): void } {
+    node.addEventListener('click', onContentClick);
+    node.addEventListener('auxclick', onContentClick);
+    node.addEventListener('keydown', onContentKeydown);
     return {
         destroy(): void {
-            node.removeEventListener('click', onClick);
-            node.removeEventListener('auxclick', onClick);
+            node.removeEventListener('click', onContentClick);
+            node.removeEventListener('auxclick', onContentClick);
+            node.removeEventListener('keydown', onContentKeydown);
+        },
+    };
+}
+
+/**
+ * The lightbox owns the keyboard while open: Escape closes it, and no key
+ * leaks to the app shortcuts underneath (j/k would change the article
+ * behind it). A direct listener — not a delegated `onkeydown` — so the
+ * stop happens before the window-level shortcut handler sees the event.
+ */
+function lightboxKeys(node: HTMLElement): { destroy(): void } {
+    function onKeydown(event: KeyboardEvent): void {
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeLightbox();
+        }
+    }
+    node.addEventListener('keydown', onKeydown);
+    return {
+        destroy(): void {
+            node.removeEventListener('keydown', onKeydown);
         },
     };
 }
@@ -175,7 +235,29 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
 {/if}
 
 <!-- eslint-disable-next-line svelte/no-at-html-tags -- the ONE sanctioned {@html} site: DOMPurify-wrapped, grep-gated (scripts/check-frontend-bans.sh) -->
-<div class="sanitized-content" data-testid="reader-content" bind:this={contentEl} use:interceptLinks>{@html clean}</div>
+<div class="sanitized-content" data-testid="reader-content" bind:this={contentEl} use:interceptContent>{@html clean}</div>
+
+{#if zoomed !== null}
+    <!-- The backdrop click is a pointer convenience; Escape and the close
+         button are the keyboard paths, and focus is trapped in the dialog. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="lightbox" data-testid="reader-lightbox" onclick={closeLightbox}>
+        <div
+            class="lightbox-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={zoomed.alt.length > 0 ? zoomed.alt : t('reader.imageViewer')}
+            tabindex="-1"
+            use:trapFocus
+            use:lightboxKeys
+        >
+            <img class="lightbox-image" src={zoomed.src} alt={zoomed.alt} />
+            <button class="lightbox-close" type="button" aria-label={t('modal.close')} onclick={closeLightbox}>
+                <Icon name="close" size={16} />
+            </button>
+        </div>
+    </div>
+{/if}
 
 <style>
     /* Editorial reading rhythm. The article sets the font-family / size /
@@ -294,16 +376,101 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
         box-shadow: var(--shadow-md);
     }
 
-    /* Remote images with prefetch off never load — collapse them cleanly
-       (no broken glyph) rather than leave a gap. */
-    .sanitized-content :global(img[data-media-off]) {
+    /* A loaded image outside a link opens the lightbox. */
+    .sanitized-content :global(img[src][tabindex]) {
+        cursor: zoom-in;
+    }
+
+    /* Waiting for the lazy loader: a quiet placeholder in the reserved box
+       (the aspect ratio comes from the image's width/height), with no
+       shadow and no alt text bleeding through an empty <img>. */
+    .sanitized-content :global(img[data-media-pending]) {
+        display: block;
+        background: var(--surface-inset);
+        box-shadow: none;
+        color: transparent;
+    }
+
+    /* Remote images with prefetch off never load, and failed ones never
+       will — collapse them cleanly (no broken glyph, no empty shadowed
+       box) rather than leave a gap. */
+    .sanitized-content :global(img[data-media-off]),
+    .sanitized-content :global(img[data-media-failed]) {
         display: none;
     }
 
-    /* A figure whose only child is a collapsed remote image would otherwise
-       leave its margin (and an orphaned caption) behind — fold the wrapper. */
-    .sanitized-content :global(figure:has(> img[data-media-off]:only-child)) {
+    /* A figure whose only child is a collapsed image would otherwise leave
+       its margin (and an orphaned caption) behind — fold the wrapper. */
+    .sanitized-content :global(figure:has(> img[data-media-off]:only-child)),
+    .sanitized-content :global(figure:has(> img[data-media-failed]:only-child)) {
         display: none;
+    }
+
+    /* Wide tables scroll inside the column instead of blowing it out. */
+    .sanitized-content :global(.table-scroll) {
+        margin: 1.6em 0;
+        max-width: 100%;
+        overflow-x: auto;
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-lg);
+        background: var(--surface-raised);
+    }
+
+    .sanitized-content :global(table) {
+        min-width: 100%;
+        border-collapse: collapse;
+        font-family: var(--font-family);
+        font-size: 0.84em;
+        line-height: 1.45;
+        font-variant-numeric: lining-nums tabular-nums;
+    }
+
+    .sanitized-content :global(th),
+    .sanitized-content :global(td) {
+        padding: 0.55em 0.85em;
+        border-bottom: 1px solid var(--hairline);
+        text-align: start;
+        vertical-align: top;
+    }
+
+    .sanitized-content :global(th) {
+        background: var(--surface-inset);
+        color: var(--fg);
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .sanitized-content :global(tr:last-child > td) {
+        border-bottom: none;
+    }
+
+    .sanitized-content :global(caption) {
+        caption-side: bottom;
+        padding: 0.6em 0.85em;
+        font-size: 0.92em;
+        color: var(--fg-muted);
+        text-align: start;
+    }
+
+    /* Footnote jump target: scroll lands with breathing room, and the
+       target glows briefly so the eye finds it. */
+    .sanitized-content :global([id]) {
+        scroll-margin-top: var(--space-6);
+    }
+
+    .sanitized-content :global([data-fragment-target]) {
+        border-radius: var(--radius-sm);
+        animation: fragment-flash 1.6s var(--ease);
+    }
+
+    .sanitized-content :global([data-fragment-target]:focus) {
+        outline: none;
+    }
+
+    @keyframes fragment-flash {
+        from {
+            background: var(--accent-muted);
+        }
     }
 
     .sanitized-content :global(figcaption) {
@@ -340,7 +507,11 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
         background: var(--surface-inset);
         border: 1px solid var(--hairline);
         font-size: 0.82em;
-        white-space: nowrap;
+        /* Long paths and identifiers wrap instead of overflowing the
+           column; each wrapped line keeps its own chip edges. */
+        overflow-wrap: anywhere;
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
     }
 
     .sanitized-content :global(blockquote) {
@@ -394,5 +565,66 @@ function interceptLinks(node: HTMLElement): { destroy(): void } {
     .sanitized-content :global(strong) {
         font-weight: 680;
         color: var(--fg);
+    }
+
+    /* Click-to-zoom: the image at up to the full window, over a dimmed,
+       blurred backdrop (the same scrim the modals use). Any click closes. */
+    .lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-8);
+        background: color-mix(in srgb, #000, transparent 25%);
+        backdrop-filter: blur(3px);
+        cursor: zoom-out;
+        animation: lightbox-in var(--dur-base) var(--ease);
+    }
+
+    .lightbox-dialog {
+        position: relative;
+        display: flex;
+        max-width: 100%;
+        max-height: 100%;
+    }
+
+    .lightbox-dialog:focus-visible {
+        outline: none;
+    }
+
+    .lightbox-image {
+        max-width: 100%;
+        max-height: calc(100vh - 2 * var(--space-8));
+        object-fit: contain;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+    }
+
+    .lightbox-close {
+        position: absolute;
+        top: var(--space-2);
+        right: var(--space-2);
+        display: inline-grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        color: #fff;
+        background: color-mix(in srgb, #000, transparent 45%);
+        border: none;
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .lightbox-close:hover {
+        background: color-mix(in srgb, #000, transparent 20%);
+    }
+
+    @keyframes lightbox-in {
+        from {
+            opacity: 0;
+        }
     }
 </style>

@@ -71,6 +71,8 @@ export const en = {
     'reader.empty': 'Select an article to read',
     'reader.imagesOff': 'Images are off in this article.',
     'reader.imagesOff.enable': 'Turn on',
+    'reader.tableScroll': 'Scrollable table',
+    'reader.imageViewer': 'Image viewer',
     'reader.missing': 'This article no longer exists',
     'reader.toolbar': 'Article actions',
     'reader.action.markRead': 'Mark read',

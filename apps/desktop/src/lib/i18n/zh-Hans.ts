@@ -65,6 +65,8 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'reader.empty': '选择一篇文章来阅读',
     'reader.imagesOff': '本文已关闭图片。',
     'reader.imagesOff.enable': '开启',
+    'reader.tableScroll': '可滚动表格',
+    'reader.imageViewer': '图片查看器',
     'reader.missing': '这篇文章已不存在',
     'reader.toolbar': '文章操作',
     'reader.action.markRead': '标为已读',

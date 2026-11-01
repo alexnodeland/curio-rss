@@ -69,6 +69,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.empty': 'Wybierz artykuł do przeczytania',
     'reader.imagesOff': 'Obrazy są wyłączone w tym artykule.',
     'reader.imagesOff.enable': 'Włącz',
+    'reader.tableScroll': 'Przewijana tabela',
+    'reader.imageViewer': 'Podgląd obrazu',
     'reader.missing': 'Ten artykuł już nie istnieje',
     'reader.toolbar': 'Działania na artykule',
     'reader.action.markRead': 'Oznacz jako przeczytany',

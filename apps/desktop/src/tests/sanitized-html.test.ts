@@ -10,9 +10,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import SanitizedHtml from '$components/reader/SanitizedHtml.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
+import { resetImageCache } from '$lib/utils/images';
+import { LAZY_IMAGE_MARGIN } from '$lib/utils/reader-content';
 import { fireEvent, render } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
-import { type IpcHarness, installIpcHarness } from './ipc-harness';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type IpcHarness, commandErrorFixture, installIpcHarness } from './ipc-harness';
 
 const corpusPath = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -110,6 +113,93 @@ describe('SanitizedHtml', () => {
         expect(opens[0]?.url).toBe('https://example.com/post');
     });
 
+    it('wraps a wide table in a focusable horizontal-scroll container', () => {
+        const cells = (tag: string): string =>
+            Array.from({ length: 12 }, (_, i) => `<${tag}>col ${i + 1}</${tag}>`).join('');
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html: `<p>before</p><table><thead><tr>${cells('th')}</tr></thead><tbody><tr>${cells('td')}</tr></tbody></table><p>after</p>`,
+            },
+        });
+        const root = container.querySelector('.sanitized-content');
+        const table = root?.querySelector('table');
+        expect(table?.querySelectorAll('th')).toHaveLength(12);
+        const wrapper = table?.parentElement;
+        // Contained: the table sits in the scroll wrapper, the wrapper in the
+        // reading column — never a sibling the column has to stretch around.
+        expect(wrapper?.classList.contains('table-scroll')).toBe(true);
+        expect(wrapper?.parentElement).toBe(root);
+        expect(wrapper?.getAttribute('tabindex')).toBe('0');
+        expect(wrapper?.getAttribute('role')).toBe('group');
+        expect(wrapper?.getAttribute('aria-label')).toBe('Scrollable table');
+        expect(root?.textContent).toContain('after');
+    });
+
+    it('names a captioned table scroll region by its caption', () => {
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html: '<table><caption>Results by year</caption><tr><td>1</td></tr></table>',
+            },
+        });
+        const wrapper = container.querySelector('.table-scroll');
+        expect(wrapper?.getAttribute('aria-label')).toBe('Results by year');
+    });
+
+    it('scrolls footnote links within the reader, with no opener call', async () => {
+        harness = installIpcHarness({ 'plugin:opener|open_url': null });
+        const scrolled: Element[] = [];
+        const original = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function (this: Element): void {
+            scrolled.push(this);
+        };
+        try {
+            const { container } = render(SanitizedHtml, {
+                props: {
+                    html:
+                        '<p>Claim<sup id="user-content-fnref1"><a href="#user-content-fn1">1</a></sup>.</p>' +
+                        '<ol><li id="user-content-fn1">First note. <a href="#user-content-fnref1">↩</a></li></ol>',
+                },
+            });
+            const ref = container.querySelector('a[href="#user-content-fn1"]');
+            const note = container.querySelector('li');
+            expect(ref).not.toBeNull();
+            if (ref === null || note === null) {
+                return;
+            }
+            await fireEvent.click(ref);
+            expect(scrolled).toEqual([note]);
+            expect(document.activeElement).toBe(note);
+            expect(note.hasAttribute('data-fragment-target')).toBe(true);
+
+            // The back-link jumps home the same way, and the highlight moves.
+            const back = container.querySelector('a[href="#user-content-fnref1"]');
+            if (back === null) {
+                return;
+            }
+            await fireEvent.click(back);
+            expect(scrolled[1]?.id).toBe('user-content-fnref1');
+            expect(note.hasAttribute('data-fragment-target')).toBe(false);
+
+            // A fragment with no target is a no-op — never a navigation.
+            expect(harness.calls).toHaveLength(0);
+        } finally {
+            Element.prototype.scrollIntoView = original;
+        }
+    });
+
+    it('ignores fragment links whose target is missing or malformed', async () => {
+        harness = installIpcHarness({ 'plugin:opener|open_url': null });
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<p><a href="#user-content-gone">x</a><a href="#%E0%A4%A">y</a></p>' },
+        });
+        for (const anchor of container.querySelectorAll('a')) {
+            const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+            anchor.dispatchEvent(click);
+            expect(click.defaultPrevented).toBe(true);
+        }
+        expect(harness.calls).toHaveLength(0);
+    });
+
     it('drops non-http(s) link schemes before they reach IPC', async () => {
         harness = installIpcHarness({ 'plugin:opener|open_url': null });
         const { container } = render(SanitizedHtml, {
@@ -121,6 +211,215 @@ describe('SanitizedHtml', () => {
             return;
         }
         await fireEvent.click(anchor);
+        expect(harness.calls).toHaveLength(0);
+    });
+});
+
+/**
+ * A controllable IntersectionObserver: records what each observer watches
+ * and lets a test bring chosen elements "near the viewport".
+ */
+class FakeIntersectionObserver {
+    static instances: FakeIntersectionObserver[] = [];
+    readonly observed = new Set<Element>();
+    readonly options: IntersectionObserverInit | undefined;
+    private readonly callback: IntersectionObserverCallback;
+
+    constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        this.callback = callback;
+        this.options = options;
+        FakeIntersectionObserver.instances.push(this);
+    }
+
+    observe(target: Element): void {
+        this.observed.add(target);
+    }
+
+    unobserve(target: Element): void {
+        this.observed.delete(target);
+    }
+
+    disconnect(): void {
+        this.observed.clear();
+    }
+
+    takeRecords(): IntersectionObserverEntry[] {
+        return [];
+    }
+
+    /** Fires the callback as if `targets` scrolled within the root margin. */
+    enter(targets: Element[]): void {
+        const entries = targets.map(
+            (target) => ({ target, isIntersecting: true }) as unknown as IntersectionObserverEntry,
+        );
+        this.callback(entries, this as unknown as IntersectionObserver);
+    }
+}
+
+const flush = (): Promise<void> => new Promise((done) => setTimeout(done, 0));
+
+describe('SanitizedHtml body media', () => {
+    let harness: IpcHarness | null = null;
+
+    beforeEach(() => {
+        prefsStore.mediaPrefetch = true;
+    });
+
+    afterEach(() => {
+        harness?.teardown();
+        harness = null;
+        prefsStore.reset();
+        resetImageCache();
+        FakeIntersectionObserver.instances = [];
+        vi.unstubAllGlobals();
+    });
+
+    it('only resolves images that come near the viewport', async () => {
+        vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+        harness = installIpcHarness({ get_cached_image: '/cache/near.png' });
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html:
+                    '<p><img src="https://x.test/1.png" alt="one"></p>' +
+                    '<p><img src="https://x.test/2.png" alt="two"></p>' +
+                    '<p><img src="https://x.test/3.png" alt="three"></p>',
+            },
+        });
+        const images = Array.from(container.querySelectorAll('img'));
+        expect(images.every((img) => img.hasAttribute('data-media-pending'))).toBe(true);
+        expect(harness.callsFor('get_cached_image')).toHaveLength(0);
+
+        const observer = FakeIntersectionObserver.instances.at(-1);
+        expect(observer?.observed.size).toBe(3);
+        expect(observer?.options?.rootMargin).toBe(LAZY_IMAGE_MARGIN);
+        const first = images[0];
+        if (observer === undefined || first === undefined) {
+            return;
+        }
+        observer.enter([first]);
+        await flush();
+
+        expect(harness.callsFor('get_cached_image')).toEqual([{ url: 'https://x.test/1.png' }]);
+        expect(first.getAttribute('src')).toBe('/cache/near.png');
+        expect(first.hasAttribute('data-media-pending')).toBe(false);
+        expect(images[1]?.hasAttribute('src')).toBe(false);
+        expect(observer.observed.has(first)).toBe(false);
+    });
+
+    it('collapses an image whose fetch fails instead of leaving an empty box', async () => {
+        harness = installIpcHarness({
+            get_cached_image: () => Promise.reject(commandErrorFixture({ code: 'NETWORK' })),
+        });
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<figure><img src="https://x.test/gone.png" alt="gone"></figure>' },
+        });
+        await flush();
+        const img = container.querySelector('img');
+        expect(harness.callsFor('get_cached_image')).toHaveLength(1);
+        expect(img?.hasAttribute('data-media-failed')).toBe(true);
+        expect(img?.hasAttribute('data-media-pending')).toBe(false);
+        expect(img?.hasAttribute('src')).toBe(false);
+    });
+
+    it('collapses an image that fails to decode after loading', async () => {
+        harness = installIpcHarness({ get_cached_image: '/cache/corrupt.png' });
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<p><img src="https://x.test/corrupt.png" alt="c"></p>' },
+        });
+        await flush();
+        const img = container.querySelector('img');
+        expect(img?.getAttribute('src')).toBe('/cache/corrupt.png');
+        img?.dispatchEvent(new Event('error'));
+        expect(img?.hasAttribute('data-media-failed')).toBe(true);
+    });
+
+    it('reserves the aspect ratio from width/height before the image loads', () => {
+        vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html: '<p><img src="https://x.test/w.png" width="640" height="360" alt="w"></p>',
+            },
+        });
+        const img = container.querySelector('img');
+        expect(img?.style.aspectRatio).toBe('640 / 360');
+    });
+
+    it('opens a loaded image in a lightbox that Escape closes, restoring focus', async () => {
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<p><img src="data:image/png;base64,AAAA" alt="A chart"></p>' },
+        });
+        const img = container.querySelector('img');
+        expect(img?.getAttribute('tabindex')).toBe('0');
+        if (img === null) {
+            return;
+        }
+        img.focus();
+        await fireEvent.keyDown(img, { key: 'Enter' });
+        const dialog = document.querySelector('[data-testid="reader-lightbox"] [role="dialog"]');
+        expect(dialog).not.toBeNull();
+        expect(dialog?.getAttribute('aria-label')).toBe('A chart');
+        expect(document.activeElement).toBe(dialog);
+
+        // App shortcuts underneath never see the lightbox's keys.
+        const shortcut = vi.fn();
+        window.addEventListener('keydown', shortcut);
+        try {
+            if (dialog === null) {
+                return;
+            }
+            await fireEvent.keyDown(dialog, { key: 'j' });
+            await fireEvent.keyDown(dialog, { key: 'Escape' });
+        } finally {
+            window.removeEventListener('keydown', shortcut);
+        }
+        expect(shortcut).not.toHaveBeenCalled();
+        expect(document.querySelector('[data-testid="reader-lightbox"]')).toBeNull();
+        expect(document.activeElement).toBe(img);
+    });
+
+    it('opens on click and closes from the close button', async () => {
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<p><img src="data:image/png;base64,AAAA" alt=""></p>' },
+        });
+        const img = container.querySelector('img');
+        if (img === null) {
+            return;
+        }
+        await fireEvent.click(img);
+        const dialog = document.querySelector('[role="dialog"]');
+        expect(dialog?.getAttribute('aria-label')).toBe('Image viewer');
+        const close = document.querySelector<HTMLButtonElement>('.lightbox-close');
+        if (close === null) {
+            return;
+        }
+        await fireEvent.click(close);
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it('never zooms an image inside a link — the link wins', async () => {
+        harness = installIpcHarness({ 'plugin:opener|open_url': null });
+        const { container } = render(SanitizedHtml, {
+            props: {
+                html: '<a href="https://x.test/post"><img src="data:image/png;base64,AAAA" alt="x"></a>',
+            },
+        });
+        const img = container.querySelector('img');
+        if (img === null) {
+            return;
+        }
+        expect(img.hasAttribute('tabindex')).toBe(false);
+        await fireEvent.click(img);
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        expect(harness.callsFor('plugin:opener|open_url')).toHaveLength(1);
+    });
+
+    it('never fetches with media prefetch off', () => {
+        prefsStore.mediaPrefetch = false;
+        harness = installIpcHarness({});
+        const { container } = render(SanitizedHtml, {
+            props: { html: '<p><img src="https://x.test/off.png" alt="off"></p>' },
+        });
+        expect(container.querySelector('img')?.hasAttribute('data-media-off')).toBe(true);
         expect(harness.calls).toHaveLength(0);
     });
 });

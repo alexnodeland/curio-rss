@@ -210,7 +210,7 @@ impl From<CoreError> for CommandError {
             CoreError::Io { .. } | CoreError::Export(_) | CoreError::Events(_) => {
                 Self::internal(ErrorCode::Io, error.to_string())
             }
-            CoreError::Content(_) | CoreError::Settings(_) => {
+            CoreError::Content(_) | CoreError::Settings(_) | CoreError::Panicked { .. } => {
                 Self::internal(ErrorCode::Internal, error.to_string())
             }
         }
@@ -392,6 +392,12 @@ mod tests {
             assert_eq!(error.kind, ErrorKind::Internal);
             assert_eq!(error.code, ErrorCode::Storage);
         }
+        // A panic in a refresh's blocking half is a bug, not user input.
+        let error = CommandError::from(CoreError::Panicked {
+            message: "parser bug".into(),
+        });
+        assert_eq!(error.kind, ErrorKind::Internal);
+        assert_eq!(error.code, ErrorCode::Internal);
     }
 
     #[test]

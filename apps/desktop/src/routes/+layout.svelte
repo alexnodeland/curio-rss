@@ -4,6 +4,7 @@ import { onMount } from 'svelte';
 import RecoveryScreen from '$components/layout/RecoveryScreen.svelte';
 import { localeStore, t } from '$lib/i18n';
 import { wireMenuActions } from '$lib/state/actions';
+import { connectivityStore } from '$lib/state/connectivity.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { wireInvalidation } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
@@ -54,11 +55,13 @@ onMount(() => {
         prefsStore.initUpdates();
         feedsStore.initSidebarState();
 
-        // Event-driven invalidation: the query cache and the refresh
-        // progress fields subscribe to the Rust-emitted specta events.
+        // Event-driven invalidation: the query cache, the refresh progress
+        // fields and the offline badge subscribe to the Rust-emitted specta
+        // events.
         const unsubscribers = await Promise.all([
             wireInvalidation(),
             feedsStore.wireRefreshEvents(),
+            connectivityStore.wire(),
             wireMenuActions(),
         ]);
         if (unmounted) {

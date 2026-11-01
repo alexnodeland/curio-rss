@@ -27,20 +27,44 @@ pub struct ArticlesChanged {
     pub feed_id: Option<i64>,
 }
 
-/// One feed finished during `refresh_all` — drive the progress UI.
+/// One feed finished during a `refresh_all` sweep — drive the progress UI
+/// ("12/300"). Feeds refresh concurrently, so progress arrives in
+/// completion order.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct RefreshProgress {
+    /// The sweep this progress belongs to (counts up per app run).
+    pub sweep_id: u64,
+    /// Feeds finished so far, this one included.
+    pub done: u32,
+    /// Feeds the sweep set out to refresh.
+    pub total: u32,
     /// The feed that finished.
     pub feed_id: i64,
     /// Its outcome.
     pub outcome: RefreshOutcomeDto,
 }
 
-/// The whole `refresh_all` sweep finished.
+/// The whole `refresh_all` sweep finished (or was cancelled).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct RefreshFinished {
-    /// Every feed's outcome, in refresh order.
+    /// The sweep that finished.
+    pub sweep_id: u64,
+    /// Whether `cancel_refresh` stopped it early.
+    pub cancelled: bool,
+    /// One outcome per feed the sweep refreshed, in feed-list order (a
+    /// cancelled sweep has none for the feeds it never started or whose
+    /// fetch it abandoned — those were not refreshed, they did not fail).
     pub outcomes: Vec<RefreshOutcomeDto>,
+}
+
+/// The background scheduler's connectivity verdict changed (#123): a probe
+/// before a scheduled sweep found the network gone — the sweep was skipped,
+/// so no feed errors were recorded — or back. Drives the "Offline" badge;
+/// fires on change only, and `connectivity_online` answers the current state.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+pub struct ConnectivityChanged {
+    /// Whether the network is reachable.
+    pub online: bool,
 }
 
 /// A native menu item was chosen — the head emits its id and the frontend

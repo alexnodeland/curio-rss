@@ -30,6 +30,7 @@ pub use netfs::{
 pub use open::OpenError;
 pub(crate) use repo::SettingsTx;
 pub use repo::{ListArticles, PendingIntent, UpsertOutcome};
+pub(crate) use writer::panic_message;
 
 use pool::ReadPool;
 use writer::WriterHandle;

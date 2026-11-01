@@ -144,17 +144,36 @@ export const commands = {
 	 */
 	refreshFeed: (feedId: number) => typedError<RefreshOutcomeDto, CommandError>(__TAURI_INVOKE("refresh_feed", { feedId })),
 	/**
-	 *  Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
-	 *  (core's own `refresh_all` is sequential and silent — the head loops
-	 *  `refresh_feed` so the UI can watch; orchestration, not business logic).
-	 *  A manual refresh resets the background scheduler's interval clock.
+	 *  Refreshes every `active` feed as one core sweep (bounded concurrency),
+	 *  emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
+	 *  end. Pressing refresh while a sweep runs joins it — no feed is fetched
+	 *  twice. Any feed answering clears the scheduler's "Offline" verdict right
+	 *  away; a manual refresh resets the background scheduler's interval clock,
+	 *  except one made while offline that reached nothing (the overdue sweep
+	 *  stays due).
 	 */
 	refreshAll: () => typedError<RefreshOutcomeDto[], CommandError>(__TAURI_INVOKE("refresh_all")),
+	/**
+	 *  Cancels the refresh sweep in flight: no further feed starts and the
+	 *  fetches in flight are dropped, so the sweep finishes early
+	 *  ([`RefreshFinished::cancelled`]). `false` when no sweep is running.
+	 */
+	cancelRefresh: () => typedError<boolean, CommandError>(__TAURI_INVOKE("cancel_refresh")),
 	/**
 	 *  The recent fetch log for one feed, newest first — the feed-health
 	 *  surface.
 	 */
 	recentFetches: (feedId: number, limit: number) => typedError<FetchRecordDto[], CommandError>(__TAURI_INVOKE("recent_fetches", { feedId, limit })),
+	/**
+	 *  Whether the network is up, as far as the frontend's "Offline" badge goes:
+	 *  the scheduler's last connectivity verdict. Online until a probe fails.
+	 * 
+	 *  # Errors
+	 * 
+	 *  Never in practice — the `Result` keeps the generated wrapper on the same
+	 *  typed `{ status, data | error }` shape as every other command.
+	 */
+	connectivityOnline: () => typedError<boolean, CommandError>(__TAURI_INVOKE("connectivity_online")),
 	/**
 	 *  Lists article summaries. Filters and order are backend-owned — the
 	 *  frontend passes them through and never re-filters or re-sorts.
@@ -440,6 +459,7 @@ export const commands = {
 /** Events */
 export const events = {
 	articlesChanged: makeEvent<ArticlesChanged>("articles-changed"),
+	connectivityChanged: makeEvent<ConnectivityChanged>("connectivity-changed"),
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
@@ -571,6 +591,17 @@ export type CommandError = {
 	message: string,
 	/**  Whether retrying the same action can plausibly succeed. */
 	recoverable: boolean,
+};
+
+/**
+ *  The background scheduler's connectivity verdict changed (#123): a probe
+ *  before a scheduled sweep found the network gone — the sweep was skipped,
+ *  so no feed errors were recorded — or back. Drives the "Offline" badge;
+ *  fires on change only, and `connectivity_online` answers the current state.
+ */
+export type ConnectivityChanged = {
+	/**  Whether the network is reachable. */
+	online: boolean,
 };
 
 /**  Doctor-panel database stats. */
@@ -1005,9 +1036,17 @@ export type RedditApiStatusDto = {
 	client_id: string | null,
 };
 
-/**  The whole `refresh_all` sweep finished. */
+/**  The whole `refresh_all` sweep finished (or was cancelled). */
 export type RefreshFinished = {
-	/**  Every feed's outcome, in refresh order. */
+	/**  The sweep that finished. */
+	sweep_id: number,
+	/**  Whether `cancel_refresh` stopped it early. */
+	cancelled: boolean,
+	/**
+	 *  One outcome per feed the sweep refreshed, in feed-list order (a
+	 *  cancelled sweep has none for the feeds it never started or whose
+	 *  fetch it abandoned — those were not refreshed, they did not fail).
+	 */
 	outcomes: RefreshOutcomeDto[],
 };
 
@@ -1032,8 +1071,18 @@ export type RefreshOutcomeDto = {
 	error_kind: FetchErrorKindDto | null,
 };
 
-/**  One feed finished during `refresh_all` — drive the progress UI. */
+/**
+ *  One feed finished during a `refresh_all` sweep — drive the progress UI
+ *  ("12/300"). Feeds refresh concurrently, so progress arrives in
+ *  completion order.
+ */
 export type RefreshProgress = {
+	/**  The sweep this progress belongs to (counts up per app run). */
+	sweep_id: number,
+	/**  Feeds finished so far, this one included. */
+	done: number,
+	/**  Feeds the sweep set out to refresh. */
+	total: number,
 	/**  The feed that finished. */
 	feed_id: number,
 	/**  Its outcome. */

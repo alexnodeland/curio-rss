@@ -47,7 +47,7 @@ describe('root layout startup gate', () => {
     });
 
     it('mounts the reader and loads settings on a normal start', async () => {
-        harness = installIpcHarness({ get_startup_failure: null });
+        harness = installIpcHarness({ get_startup_failure: null, connectivity_online: true });
         const load = vi.spyOn(settingsStore, 'load').mockResolvedValue();
         const fromSystem = vi.spyOn(localeStore, 'initFromSystem');
         render(Layout, { children: reader });

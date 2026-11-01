@@ -27,6 +27,24 @@ describe('HelpOverlay', () => {
         expect(getAllByText('then').length).toBe(5);
     });
 
+    it('lists the reading keys: pane keys beside their global key', () => {
+        const { container } = render(HelpOverlay, { props: { onclose: vi.fn() } });
+        const rowKeys = (description: string): string[] => {
+            const row = [...container.querySelectorAll('li')].find(
+                (item) => item.querySelector('.description')?.textContent === description,
+            );
+            return [...(row?.querySelectorAll('kbd') ?? [])].map((kbd) => kbd.textContent ?? '');
+        };
+        expect(rowKeys('Next article')).toEqual(['j', '↓']);
+        expect(rowKeys('Previous article')).toEqual(['k', '↑']);
+        expect(rowKeys('Read the selected article (focus the reader)')).toEqual(['Enter', '→']);
+        expect(rowKeys('Back to the article list')).toEqual(['←', 'Esc']);
+        expect(rowKeys('Page down; at the end, next unread')).toEqual(['Space']);
+        expect(rowKeys('Page up')).toEqual(['⇧ Space']);
+        expect(rowKeys('Archive / unarchive article')).toEqual(['e']);
+        expect(rowKeys('Mark all read in the current view')).toEqual(['A']);
+    });
+
     it('renders the category headings in registry order', () => {
         const { container } = render(HelpOverlay, { props: { onclose: vi.fn() } });
         const headings = [...container.querySelectorAll('.shortcut-group h3')].map(

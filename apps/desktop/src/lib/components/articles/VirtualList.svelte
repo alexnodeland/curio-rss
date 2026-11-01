@@ -31,6 +31,7 @@ export interface ViewportReport {
  * looking at the same rows (scroll anchoring, as the CSS `overflow-anchor`
  * does for ordinary flow — which a translated virtual window never gets).
  */
+import { eventKeyName } from '$lib/keyboard/registry';
 import { type Snippet, untrack } from 'svelte';
 
 let {
@@ -48,6 +49,7 @@ let {
     onnearend,
     onviewport,
     onmove,
+    onpanekey,
     onmenukey,
     row,
 }: {
@@ -80,12 +82,19 @@ let {
      */
     onviewport?: (report: ViewportReport) => void;
     /**
-     * A listbox navigation key was pressed while the list held focus. The
-     * owner moves selection (the same move `j`/`k` make); the listbox itself
-     * stays selection-agnostic. Row-by-row movement is `j`/`k` only — the
-     * arrow keys are deliberately unbound.
+     * A listbox jump key (Home / End / PageUp / PageDown) was pressed while
+     * the list held focus. The owner moves selection; the listbox itself
+     * stays selection-agnostic.
      */
     onmove?: (to: 'first' | 'last' | 'pageDown' | 'pageUp') => void;
+    /**
+     * Offered every other unmodified key (an `eventKeyName` value) while the
+     * list holds focus — the ARIA listbox keys the owner binds from the
+     * shortcut registry (↑/↓ move like k/j, Enter/→ open the reader).
+     * Returns whether it handled the key; handled keys are preventDefault'ed
+     * so the listbox's native line-scroll doesn't fight the selection move.
+     */
+    onpanekey?: (key: string) => boolean;
     /**
      * The keyboard context-menu key (ContextMenu / Shift+F10) was pressed while
      * the list held focus. Rows are `tabindex="-1"` so their own menu-key
@@ -95,7 +104,7 @@ let {
     row: Snippet<[T, number]>;
 } = $props();
 
-/** Maps the roving-navigation keys to a move; other keys fall through. */
+/** Maps the listbox jump keys to a move; other keys fall through. */
 const MOVE_KEYS: Record<string, 'first' | 'last' | 'pageDown' | 'pageUp'> = {
     Home: 'first',
     End: 'last',
@@ -120,8 +129,15 @@ function onKeydown(event: KeyboardEvent): void {
         return;
     }
     if (event.key === ' ') {
-        // Suppress Space's native page-scroll; selection is driven by j/k.
+        // Suppress Space's native list page-scroll; the press still bubbles
+        // to the shell, where Space pages the *reader*.
         event.preventDefault();
+        return;
+    }
+    const modified = event.ctrlKey || event.altKey || event.metaKey;
+    if (!modified && onpanekey?.(eventKeyName(event)) === true) {
+        event.preventDefault();
+        keyboardMode = true;
         return;
     }
     const move = MOVE_KEYS[event.key];

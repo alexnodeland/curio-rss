@@ -118,13 +118,16 @@ command-key chords).
 |-----|--------|-|-----|--------|
 | <kbd>j</kbd> / <kbd>k</kbd> | Next / previous article | | <kbd>s</kbd> | Star |
 | <kbd>n</kbd> | Next unread (across feeds) | | <kbd>l</kbd> | Read-later |
-| <kbd>m</kbd> | Mark read / unread | | <kbd>a</kbd> | Archive |
+| <kbd>m</kbd> | Mark read / unread | | <kbd>e</kbd> | Archive |
 | <kbd>o</kbd> | Open in browser | | <kbd>p</kbd> | Save to notes |
+| <kbd>Space</kbd> / <kbd>⇧ Space</kbd> | Page the article down / up — <kbd>Space</kbd> at the end opens the next unread | | <kbd>A</kbd> | Mark all read in the current view |
 | <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
 
-Move between panes with the arrow keys (<kbd>←</kbd>/<kbd>→</kbd> across panes,
-<kbd>↑</kbd>/<kbd>↓</kbd> within one), and reorder a feed inside its folder with
-<kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
+The article list is a standard listbox: <kbd>↑</kbd>/<kbd>↓</kbd> move like
+<kbd>j</kbd>/<kbd>k</kbd>, <kbd>Home</kbd>/<kbd>End</kbd>/<kbd>Page Up</kbd>/<kbd>Page Down</kbd>
+jump, and <kbd>Enter</kbd> or <kbd>→</kbd> moves focus into the article so the
+arrow and page keys scroll it; <kbd>←</kbd> or <kbd>Esc</kbd> returns to the
+list. Reorder a feed inside its folder with <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
 
 macOS command chords (also in the menu bar):
 <kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·

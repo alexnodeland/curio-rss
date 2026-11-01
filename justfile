@@ -79,7 +79,9 @@ boundary:
 # environment job, SHA256SUMS/SBOM/attestation,
 # no retired runner images, a nightly that self-validates on PRs + hard-gates,
 # and a cold-start bench the tracker can read (stateless criterion under
-# pipefail, `xtask bench-output` before the tracker, a hard 130% alert)
+# pipefail, `xtask bench-output` before the tracker, a hard 130% alert), and
+# the release tagger (release-tag.yml: the only tag creator, main pushes only,
+# no secrets, the release dispatched on the tag ref and released by that ref)
 workflows:
     cargo run -p xtask -- workflows
 

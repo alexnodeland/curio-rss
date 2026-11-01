@@ -7,7 +7,8 @@
 //! - `workflows` — the supply-chain lint over `.github/workflows`: SHA-pinned
 //!   actions, the release gated on CI, the updater signing key confined to
 //!   one build-free step of a job in the `updater-signing` environment,
-//!   checksums/SBOM/attestation on the draft release,
+//!   checksums/SBOM/attestation on the draft release, the real release decided
+//!   by the tag ref and `release-tag.yml` its only, narrow tagger,
 //!   no retired runner images, a nightly that runs on the PRs editing it,
 //!   a cold-start bench the regression tracker can parse (see
 //!   `xtask::workflows`), and a bounded nightly run of every cargo-fuzz
@@ -16,6 +17,11 @@
 //!   `cargo bench` log before the nightly hands it to the regression tracker:
 //!   no criterion error line, a result line the tracker can parse, and each
 //!   `--expect`ed benchmark present (see `xtask::bench`).
+//! - `release-tag` — what `release-tag.yml` tags on a push to `main`: prints
+//!   `tag=`/`sha=`/`message=` lines for `$GITHUB_OUTPUT` when the workspace
+//!   version is untagged (the tag goes on the commit that introduced the
+//!   version), nothing when it is tagged, and fails when the version must
+//!   not be tagged automatically (see `xtask::release_tag`).
 
 use std::process::{Command, ExitCode};
 
@@ -27,6 +33,7 @@ fn main() -> ExitCode {
         Some("boundary") => boundary(),
         Some("workflows") => workflows(),
         Some("bench-output") => bench_output(std::env::args().skip(2).collect()),
+        Some("release-tag") => release_tag(),
         Some(other) => {
             eprintln!("xtask: unknown task `{other}`");
             usage();
@@ -41,8 +48,37 @@ fn main() -> ExitCode {
 
 fn usage() {
     eprintln!(
-        "usage: cargo run -p xtask -- <boundary|workflows|bench-output <file> [--expect <bench-id>]...>"
+        "usage: cargo run -p xtask -- <boundary|workflows|bench-output <file> [--expect <bench-id>]...|release-tag>"
     );
+}
+
+fn release_tag() -> ExitCode {
+    let root = match xtask::paths::repo_root() {
+        Ok(root) => root,
+        Err(err) => {
+            eprintln!("xtask release-tag: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match xtask::release_tag::plan(&xtask::release_tag::Git::new(&root)) {
+        Ok(plan) => {
+            match &plan {
+                xtask::release_tag::Plan::Tagged { tag } => {
+                    eprintln!("xtask release-tag: {tag} exists — nothing to tag");
+                }
+                xtask::release_tag::Plan::Tag { tag, sha, .. } => {
+                    eprintln!("xtask release-tag: {tag} goes on {sha}");
+                }
+            }
+            print!("{}", plan.outputs());
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            // `::error::` surfaces the reason as a run annotation.
+            println!("::error::xtask release-tag: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn bench_output(args: Vec<String>) -> ExitCode {
@@ -125,7 +161,7 @@ fn workflows() -> ExitCode {
     }) {
         Ok(violations) if violations.is_empty() => {
             println!(
-                "xtask workflows: OK — actions SHA-pinned, release gated on CI, signing key isolated, release assets complete, no retired runners, nightly self-validating, bench trackable, every fuzz target fuzzed nightly"
+                "xtask workflows: OK — actions SHA-pinned, release gated on CI, signing key isolated, release assets complete, release by tag ref with one narrow tagger, no retired runners, nightly self-validating, bench trackable, every fuzz target fuzzed nightly"
             );
             ExitCode::SUCCESS
         }

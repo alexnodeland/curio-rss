@@ -223,7 +223,9 @@ jobs:
     # build gated on this workflow, the updater signing key confined to one
     # build-free step, and the draft release carrying SHA256SUMS + SBOM +
     # attestation; no job on a retired runner image, and nightly.yml run by
-    # the PRs that edit it, a hard gate, uploading Linux + Windows bundles.
+    # the PRs that edit it, a hard gate, uploading Linux + Windows bundles;
+    # release-tag.yml the only workflow that creates tags, and release.yml
+    # releasing for real by the tag ref, so its dispatch on the tag signs.
     # Local mirror: `just workflows`.
     name: workflow lint (pins, release gate, signing-key isolation)
     runs-on: ubuntu-latest

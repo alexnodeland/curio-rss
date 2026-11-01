@@ -1,4 +1,4 @@
-# Release workflow — pushing a `vX.Y.Z` tag runs the full CI gate, builds the
+# Release workflow — a run on a `vX.Y.Z` tag runs the full CI gate, builds the
 # unsigned macOS **universal** bundle (arm64 + x64 in one binary) on a single
 # Apple-silicon runner, signs the updater archive in an isolated job, and
 # publishes a DRAFT GitHub release with the DMG under the stable name the
@@ -29,10 +29,19 @@
 # (docs/release/runbook.md §2) moves it there — so the sign job waits for a
 # maintainer's approval on every tag and no other ref can read it.
 #
-# Dry run: `workflow_dispatch` runs everything except the publish steps — the
-# signing step is replaced by one that signs with a throwaway key generated on
-# the runner, no attestation is minted, and no release is drafted; the would-be
-# release assets are uploaded as the `release-dry-run` run artifact instead.
+# Real release vs dry run is decided by the REF, never by the event: a run
+# whose `github.ref` is a `refs/tags/v*` tag is a real release, however it
+# started — a tag push (the manual fallback), or the `workflow_dispatch` on the
+# tag ref that release-tag.yml sends once it has tagged a merged version bump
+# (a tag created with GITHUB_TOKEN fires no `push` event, but a dispatch does;
+# issue #298). A dispatch on the tag ref keeps `github.ref = refs/tags/v…`, so
+# the `updater-signing` environment's tag-only deployment rule still applies.
+#
+# Dry run: `workflow_dispatch` on a branch (`main`) runs everything except the
+# publish steps — the signing step is replaced by one that signs with a
+# throwaway key generated on the runner, no attestation is minted, and no
+# release is drafted; the would-be release assets are uploaded as the
+# `release-dry-run` run artifact instead.
 name: release
 
 on:
@@ -73,17 +82,23 @@ jobs:
           persist-credentials: false
       - name: Resolve the release version
         id: meta
-        # A tag push releases the tag's version; a dry run (workflow_dispatch)
-        # releases the workspace version as if it were tagged.
+        # A run on a tag releases the tag's version, which must be the
+        # workspace version it was cut from; a dry run (a dispatch on a
+        # branch) releases the workspace version as if it were tagged.
         env:
-          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" = "push" ]; then
+          workspace="v$(sed -nE 's/^version = "([^"]+)".*/\1/p' Cargo.toml | head -1)"
+          if [[ "$REF" == refs/tags/v* ]]; then
             tag="$REF_NAME"
+            if [ "$tag" != "$workspace" ]; then
+              echo "::error::tag $tag is on a commit whose workspace version is $workspace — tag the commit that bumped Cargo.toml to ${tag#v}"
+              exit 1
+            fi
           else
-            tag="v$(sed -nE 's/^version = "([^"]+)".*/\1/p' Cargo.toml | head -1)"
+            tag="$workspace"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
@@ -165,12 +180,14 @@ jobs:
     # there), whose deployment rule admits `v*` tags alone and which waits for
     # a required reviewer: a workflow on any other ref reads the key as empty,
     # and a deployment nobody approved never runs. The environment is
-    # selected under exactly the real key step's `if:`; on the
-    # `workflow_dispatch` dry run the name is '' (= no environment), so the
-    # dry run is not held at a tag-only rule it can never pass. Setup is in
-    # docs/release/runbook.md §2; `cargo run -p xtask -- workflows` fails if
-    # this line is dropped or drifts from the key step's condition.
-    environment: ${{ github.event_name == 'push' && 'updater-signing' || '' }}
+    # selected under exactly the real key step's `if:` — the tag ref, never
+    # the event name, so a dispatch on the tag (release-tag.yml) is held at
+    # the same approval as a tag push; on the dry run (a dispatch on a
+    # branch) the name is '' (= no environment), so it is not held at a
+    # tag-only rule it can never pass. Setup is in docs/release/runbook.md
+    # §2; `cargo run -p xtask -- workflows` fails if this line is dropped or
+    # drifts from the key step's condition.
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'updater-signing' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -191,7 +208,7 @@ jobs:
           name: unsigned
           path: dist
       - name: Sign the updater archive
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         # The one step holding the key. It runs the prebuilt signer only;
         # `--app-version` binds the version into the signed trusted comment,
         # exactly as `tauri build` does when it signs.
@@ -222,7 +239,7 @@ jobs:
           fi
           ../apps/desktop/node_modules/.bin/tauri signer sign --app-version "$VERSION" Curio.app.tar.gz
       - name: Sign with a throwaway key (dry run)
-        if: github.event_name != 'push'
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         # Exercises the exact signing invocation without the real key. The
         # resulting .sig verifies against nothing a user trusts.
         working-directory: dist
@@ -337,12 +354,12 @@ jobs:
           cat SHA256SUMS
       - name: Attest build provenance
         id: attest
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/SHA256SUMS
       - name: Attach the attestation bundle
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         # The sigstore bundle as a release asset, so the provenance travels
         # with the download (`gh attestation verify <file> --bundle …`), not
         # only in the repo's attestation store.
@@ -371,7 +388,7 @@ jobs:
           } > NOTES.md
           cat NOTES.md
       - name: Draft the release
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         # Still a DRAFT on purpose (human review before public). The updater
         # endpoint `releases/latest/download/latest.json` resolves only once a
         # human clicks Publish — which is exactly the review gate we want: no
@@ -394,7 +411,7 @@ jobs:
             dist/Curio-npm.cdx.json
             dist/Curio-provenance.sigstore.json
       - name: Upload the would-be release (dry run)
-        if: github.event_name != 'push'
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-dry-run

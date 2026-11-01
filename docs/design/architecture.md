@@ -67,8 +67,12 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   resolution; redirects re-checked per hop (cap 5). Per-feed
   `allow_private_network = true` (explicit config edit only, never settable from feed
   content) exempts a feed — the W1 allowlist in the contract, kept so localhost digest
-  feeds stay subscribable.
-- Streaming-enforced size caps, connect/total timeouts, shared pooled client, and an
+  feeds stay subscribable. Each hop's one DNS lookup (bounded by the connect timeout)
+  is screened in full and *pinned*: the connection dials only those addresses — all of
+  them, in resolver order, so a dead first record (a broken IPv6 route) falls back to the
+  next — with no second lookup for a rebinding answer to slip into.
+- Streaming-enforced size caps, connect/total timeouts, shared pooled client (one per TLS
+  backend and SSRF policy — keep-alive and TLS sessions reused across requests to a host), and an
   honest default User-Agent — overridden by a **per-host fetch policy** (a browser UA +
   a longer politeness delay, on the platform-native TLS stack) for hosts that reject the
   default, so sources like Reddit's `.rss` fetch. Still RSS-native, not enrichment; every
@@ -76,6 +80,38 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
 - Conditional GET with `etag`/`last_modified` **preserved on error paths** (the sketch
   clobbered them on any failure).
 - Permanent-redirect stored-URL updates; 410 dead-feed auto-pause; feed-health tracking.
+- Transparent gzip/brotli/deflate decompression, with the size cap counted on the
+  **decoded** body so a compression bomb fails as `BodyTooLarge`. An `Accept` header per
+  request kind (feed / page / image), and the response `Content-Type` carried on
+  `FetchResponse`.
+- `fetch::decode` turns bodies into text: BOM → HTTP `charset` → `<meta charset>` (HTML)
+  or the XML declaration (feeds, XHTML) → UTF-8, so windows-1251 or Shift_JIS sources
+  never come out as mojibake (a feed is transcoded to UTF-8 before feed-rs sees it). A
+  server-default header that contradicts the document yields to it in both directions: a
+  UTF-8 header over non-UTF-8 bytes, and a single-byte legacy header (`iso-8859-1`) over
+  valid non-ASCII UTF-8 that declares UTF-8. Full-page
+  extraction ("load full article", URL clips) runs only on HTML: a PDF or image URL is
+  clipped link-only.
+- **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
+  both heads: 8 feeds in flight by default, so a few hung hosts cost about one request
+  timeout between them. The slots are shared fairly between hosts: a politeness-paced
+  host (the 500 ms default paces every host; reddit.com's override is 6.5 s) has at most
+  one feed in flight — a second would only sleep out the delay in a slot — and hosts
+  take turns at the free slots, so 40 reddit feeds in a row no longer park all 8 slots in
+  reddit's politeness queue while every other host waits. A per-feed `Err` — the feed
+  removed mid-sweep, a storage error, a panicking parse — becomes that feed's outcome;
+  the sweep always runs to the end. One sweep runs per handle: a second request (refresh
+  pressed twice, the scheduler firing mid-sweep) joins it and gets its report, so no
+  feed is fetched twice. Progress carries `sweep_id`/`done`/`total`; `cancel_refresh`
+  stops new fetches and drops the ones in flight, full-text page fetches included. An
+  abandoned feed records nothing and gets no outcome (it was not refreshed, it did not
+  fail). Each feed's storage reads/writes and its parse → sanitize → ingest run via
+  `spawn_blocking`, inside the per-feed locks (they move into the blocking job, so a
+  dropped sweep cannot let the next refresh of a feed in while its writes still run),
+  so a large feed never stalls the async runtime (the CLI's is current-thread). The one
+  exception is full-text hydration of a refresh's new articles: `hydrate_article`'s
+  storage calls and readability extraction still run on the runtime, one page at a
+  time, so a full-text feed with many new items still holds it per page.
 
 ### `ingest/` — sanitize-at-ingest
 
@@ -172,7 +208,9 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   `sqlite error`. The same `SQLite` result codes sort the other actionable failures
   into their own classes — `Duplicate { entity }` (a UNIQUE collision, e.g. a feed
   URL already subscribed), `DiskFull`, `ReadOnly` and `DatabaseCorrupt`; only what
-  fits none stays the generic `Sqlite`.
+  fits none stays the generic `Sqlite` (so does a desynced FTS index,
+  `SQLITE_CORRUPT_VTAB`, which a rebuild fixes). The desktop keeps these classes
+  internal-tier until each has its own localized message.
 - Fetch failures are outcomes with a class: each errored `fetch_log` row stores a
   stable `error_kind` (`refused`, `tls_certificate`, `connect_timeout`, `not_a_feed`,
   …) beside its short message, derived from the policed client's `FetchError::kind`

@@ -18,11 +18,28 @@ export const commands = {
 	/**
 	 *  Subscribes to a feed and kicks off its first fetch in the background —
 	 *  a new subscription must not sit empty until the next refresh cycle.
-	 *  Duplicate URLs are a storage error (user tier).
+	 *  By default the typed URL is resolved through the core's validating
+	 *  discovery first, so a homepage or a bare domain subscribes to its feed
+	 *  and a page with none is refused (`NO_FEED`) instead of becoming a
+	 *  subscription that fails on every refresh; `validate: false` is the
+	 *  explicit "subscribe anyway" (normalized only). A URL already subscribed
+	 *  — including one a homepage resolved to — is `ALREADY_SUBSCRIBED`.
 	 */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
-	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
+	/**
+	 *  Unsubscribes. Stored articles survive (they lose their `feed_id`).
+	 *  Settles any staged removal of the feed either way: a success needs no
+	 *  exit flush, and a failure leaves the feed subscribed (the UI shows it
+	 *  again), so quitting must not remove it behind the user's back.
+	 */
 	removeFeed: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("remove_feed", { feedId })),
+	/**
+	 *  Stages an unsubscribe that is waiting out its undo window, so it still
+	 *  happens if the app quits first (see [`PendingRemovals`]).
+	 */
+	stageFeedRemoval: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("stage_feed_removal", { feedId })),
+	/**  Withdraws a staged unsubscribe — the undo toast's Undo. */
+	unstageFeedRemoval: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("unstage_feed_removal", { feedId })),
 	/**  Every subscription. */
 	listFeeds: () => typedError<FeedDto[], CommandError>(__TAURI_INVOKE("list_feeds")),
 	/**  One subscription, if it exists. */
@@ -139,17 +156,36 @@ export const commands = {
 	 */
 	refreshFeed: (feedId: number) => typedError<RefreshOutcomeDto, CommandError>(__TAURI_INVOKE("refresh_feed", { feedId })),
 	/**
-	 *  Refreshes every `active` feed, emitting [`RefreshProgress`] per feed
-	 *  (core's own `refresh_all` is sequential and silent — the head loops
-	 *  `refresh_feed` so the UI can watch; orchestration, not business logic).
-	 *  A manual refresh resets the background scheduler's interval clock.
+	 *  Refreshes every `active` feed as one core sweep (bounded concurrency),
+	 *  emitting [`RefreshProgress`] per feed and [`RefreshFinished`] at the
+	 *  end. Pressing refresh while a sweep runs joins it — no feed is fetched
+	 *  twice. Any feed answering clears the scheduler's "Offline" verdict right
+	 *  away; a manual refresh resets the background scheduler's interval clock,
+	 *  except one made while offline that reached nothing (the overdue sweep
+	 *  stays due).
 	 */
 	refreshAll: () => typedError<RefreshOutcomeDto[], CommandError>(__TAURI_INVOKE("refresh_all")),
+	/**
+	 *  Cancels the refresh sweep in flight: no further feed starts and the
+	 *  fetches in flight are dropped, so the sweep finishes early
+	 *  ([`RefreshFinished::cancelled`]). `false` when no sweep is running.
+	 */
+	cancelRefresh: () => typedError<boolean, CommandError>(__TAURI_INVOKE("cancel_refresh")),
 	/**
 	 *  The recent fetch log for one feed, newest first — the feed-health
 	 *  surface.
 	 */
 	recentFetches: (feedId: number, limit: number) => typedError<FetchRecordDto[], CommandError>(__TAURI_INVOKE("recent_fetches", { feedId, limit })),
+	/**
+	 *  Whether the network is up, as far as the frontend's "Offline" badge goes:
+	 *  the scheduler's last connectivity verdict. Online until a probe fails.
+	 * 
+	 *  # Errors
+	 * 
+	 *  Never in practice — the `Result` keeps the generated wrapper on the same
+	 *  typed `{ status, data | error }` shape as every other command.
+	 */
+	connectivityOnline: () => typedError<boolean, CommandError>(__TAURI_INVOKE("connectivity_online")),
 	/**
 	 *  Lists article summaries. Filters and order are backend-owned — the
 	 *  frontend passes them through and never re-filters or re-sorts.
@@ -218,10 +254,18 @@ export const commands = {
 	markRead: (articleId: number, read: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("mark_read", { articleId, read })),
 	/**
 	 *  Marks every unread article read — one feed (`Some`) or the whole
-	 *  library (`None`). Returns how many changed; invalidates only if something
-	 *  did (the `ArticlesChanged` refresh also updates the unread badges).
+	 *  library (`None`). Returns the ids that changed (ascending; the length is
+	 *  the count), which the UI keeps for an exact undo via [`mark_read_many`].
+	 *  Invalidates only if something changed (the `ArticlesChanged` refresh also
+	 *  updates the unread badges).
 	 */
-	markAllRead: (feedId: number | null) => typedError<number, CommandError>(__TAURI_INVOKE("mark_all_read", { feedId })),
+	markAllRead: (feedId: number | null) => typedError<number[], CommandError>(__TAURI_INVOKE("mark_all_read", { feedId })),
+	/**
+	 *  Marks many articles read/unread in one transaction — undo for a
+	 *  mark-all-read, and the batch for bulk actions. Ids that no longer exist
+	 *  are skipped. Returns how many changed; invalidates only if any did.
+	 */
+	markReadMany: (articleIds: number[], read: boolean) => typedError<number, CommandError>(__TAURI_INVOKE("mark_read_many", { articleIds, read })),
 	/**
 	 *  Records an open (emits the `article.opened` contract event with the
 	 *  optional dwell time). No invalidation — opening changes no list.
@@ -438,6 +482,7 @@ export const commands = {
 /** Events */
 export const events = {
 	articlesChanged: makeEvent<ArticlesChanged>("articles-changed"),
+	connectivityChanged: makeEvent<ConnectivityChanged>("connectivity-changed"),
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
@@ -579,6 +624,17 @@ export type CommandError = {
 	recoverable: boolean,
 };
 
+/**
+ *  The background scheduler's connectivity verdict changed (#123): a probe
+ *  before a scheduled sweep found the network gone — the sweep was skipped,
+ *  so no feed errors were recorded — or back. Drives the "Offline" badge;
+ *  fires on change only, and `connectivity_online` answers the current state.
+ */
+export type ConnectivityChanged = {
+	/**  Whether the network is reachable. */
+	online: boolean,
+};
+
 /**  Doctor-panel database stats. */
 export type DbStatsDto = {
 	/**  Total stored articles. */
@@ -682,13 +738,22 @@ export type ErrorCode =
 "RATE_LIMITED" | 
 /**  Feed/OPML bytes did not parse. */
 "PARSE" | 
+/**
+ *  Subscribe-time validation: the page answered but neither it nor
+ *  anything it declares (or the probes found) is a feed. The UI offers
+ *  an explicit "subscribe anyway".
+ */
+"NO_FEED" | 
+/**
+ *  The feed URL (as typed, or as a homepage resolved to) is already a
+ *  subscription.
+ */
+"ALREADY_SUBSCRIBED" | 
 /**  The storage layer failed. */
 "STORAGE" | 
 /**  The row already exists. Params: `entity` (English, diagnostic). */
 "DUPLICATE" | 
-/**  The feed URL is already subscribed. */
-"DUPLICATE_FEED" | 
-/**  The disk holding the profile is full. */
+/**  The disk holding the profile (or an export destination) is full. */
 "DISK_FULL" | 
 /**  The profile database or its folder is read-only. */
 "READ_ONLY" | 
@@ -992,12 +1057,22 @@ export type MenuAction = {
 
 /**  Args for adding a subscription. */
 export type NewFeedDto = {
-	/**  Feed URL. */
+	/**
+	 *  What to subscribe: a feed URL, or anything discovery understands
+	 *  (a site, a bare domain, a page a rewrite rule knows).
+	 */
 	url: string,
 	/**  Optional user-supplied title. */
 	title: string | null,
 	/**  Initial tags. */
 	tags: string[],
+	/**
+	 *  Resolve `url` through the core's validating discovery and subscribe
+	 *  to the feed it finds — the default. `false` is the explicit
+	 *  "subscribe anyway" escape hatch: `url` is only normalized (a bare
+	 *  domain gains `https://`), never fetched.
+	 */
+	validate: boolean,
 };
 
 /**  Mirror of [`OpmlImportOutcome`]. */
@@ -1045,9 +1120,17 @@ export type RedditApiStatusDto = {
 	client_id: string | null,
 };
 
-/**  The whole `refresh_all` sweep finished. */
+/**  The whole `refresh_all` sweep finished (or was cancelled). */
 export type RefreshFinished = {
-	/**  Every feed's outcome, in refresh order. */
+	/**  The sweep that finished. */
+	sweep_id: number,
+	/**  Whether `cancel_refresh` stopped it early. */
+	cancelled: boolean,
+	/**
+	 *  One outcome per feed the sweep refreshed, in feed-list order (a
+	 *  cancelled sweep has none for the feeds it never started or whose
+	 *  fetch it abandoned — those were not refreshed, they did not fail).
+	 */
 	outcomes: RefreshOutcomeDto[],
 };
 
@@ -1072,8 +1155,18 @@ export type RefreshOutcomeDto = {
 	error_kind: FetchErrorKindDto | null,
 };
 
-/**  One feed finished during `refresh_all` — drive the progress UI. */
+/**
+ *  One feed finished during a `refresh_all` sweep — drive the progress UI
+ *  ("12/300"). Feeds refresh concurrently, so progress arrives in
+ *  completion order.
+ */
 export type RefreshProgress = {
+	/**  The sweep this progress belongs to (counts up per app run). */
+	sweep_id: number,
+	/**  Feeds finished so far, this one included. */
+	done: number,
+	/**  Feeds the sweep set out to refresh. */
+	total: number,
 	/**  The feed that finished. */
 	feed_id: number,
 	/**  Its outcome. */

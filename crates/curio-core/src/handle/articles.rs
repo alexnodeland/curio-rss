@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use curio_types::Timestamp;
 
 use crate::content;
-use crate::fetch::FetchRequest;
+use crate::fetch::{FetchKind, FetchRequest};
 use crate::model::{
     Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, NewArticle,
 };
@@ -92,14 +92,17 @@ impl CoreHandle {
             .fetch(&FetchRequest {
                 url: article.source_url.clone(),
                 allow_private_network,
+                kind: FetchKind::Page,
                 ..FetchRequest::default()
             })
             .await?;
-        if !response.is_success() || lands_on_feed(&response.final_url) {
+        // A PDF, image or other non-HTML body has no main content to
+        // extract — readability over binary data would only make noise.
+        if !response.is_success() || lands_on_feed(&response.final_url) || !response.is_html_page()
+        {
             return Ok(article);
         }
-        let raw = String::from_utf8_lossy(&response.body);
-        let processed = content::process_full_page(&raw, &response.final_url)?;
+        let processed = content::process_full_page(&response.html_text(), &response.final_url)?;
         // A mis-scored thin page must not clobber real feed content.
         if processed.text.trim().is_empty() || processed.text.len() < article.content.text.len() {
             return Ok(article);
@@ -122,7 +125,9 @@ impl CoreHandle {
     /// GoodLinks-style clip path. The page is fetched through the policed
     /// client (no private-network exemption — that flag belongs to feeds)
     /// and readability-extracted, adopting the page's own title, byline,
-    /// language, publish time and lead image where declared. An
+    /// language, publish time and lead image where declared. The page is
+    /// decoded by its BOM, HTTP charset, then `<meta charset>`. A non-HTML
+    /// URL (a PDF, an image) is clipped link-only without extraction. An
     /// unreachable or unextractable page still saves the bare link
     /// (`hydrated: false`) — a save must never lose the URL.
     ///
@@ -159,13 +164,15 @@ impl CoreHandle {
             .client
             .fetch(&FetchRequest {
                 url: canonical.clone(),
+                kind: FetchKind::Page,
                 ..FetchRequest::default()
             })
             .await
         {
-            Ok(response) if response.is_success() => {
-                let raw = String::from_utf8_lossy(&response.body);
-                content::process_page(&raw, &response.final_url).ok()
+            // Only an HTML page is extracted; a PDF or image URL is clipped
+            // link-only, like an unreachable page.
+            Ok(response) if response.is_success() && response.is_html_page() => {
+                content::process_page(&response.html_text(), &response.final_url).ok()
             }
             _ => None,
         };
@@ -226,6 +233,43 @@ impl CoreHandle {
             .ok_or(CoreError::NotFound { entity: "article" })
     }
 
+    /// BYO OAuth (D15): trades the installed credentials for a bearer.
+    /// `Ok((None, None))` = no credentials installed; `Ok((None,
+    /// Some(_)))` = a failed grant, which degrades to the unauthenticated
+    /// endpoint and is remembered so that if reddit then blocks the
+    /// anonymous request the user hears what actually went wrong — their
+    /// credentials were refused, or the token endpoint was unavailable —
+    /// not that they have none. A 429 from the token endpoint is a rate
+    /// limit like any other: it trips the breaker and is returned as
+    /// [`CoreError::RateLimited`].
+    #[cfg(feature = "enrich-reddit")]
+    async fn reddit_bearer(&self) -> Result<(Option<String>, Option<GrantFailure>), CoreError> {
+        use crate::enrich::EnrichError;
+
+        match self.reddit_auth.bearer(&self.client).await {
+            Ok(bearer) => Ok((bearer, None)),
+            Err(EnrichError::Http {
+                status: 429,
+                retry_after,
+            }) => {
+                self.enrich_breaker.trip(retry_after);
+                tracing::warn!("reddit token endpoint rate limit; enrichment breaker opened");
+                Err(reddit_rate_limited(self.enrich_breaker.open_remaining()))
+            }
+            Err(err) => {
+                let failure = match err {
+                    EnrichError::Http {
+                        status: status @ (400 | 401 | 403),
+                        ..
+                    } => GrantFailure::Refused(status),
+                    _ => GrantFailure::Unavailable,
+                };
+                tracing::warn!(%err, "reddit token grant failed; using the public endpoint");
+                Ok((None, Some(failure)))
+            }
+        }
+    }
+
     /// The reddit enrichment attempt (D14/D15), split out of
     /// [`Self::hydrate_article`]: `Ok(Some(_))` = enriched and stored;
     /// `Ok(None)` = not a reddit post / soft failure, use the generic
@@ -240,36 +284,17 @@ impl CoreHandle {
         article: &Article,
         allow_private_network: bool,
     ) -> Result<Option<Article>, CoreError> {
+        use crate::RedditAuthReason;
         use crate::enrich::{EnrichError, reddit};
 
         if !reddit::is_reddit_post(&article.source_url) {
             return Ok(None);
         }
-        let rate_limited = |remaining: Option<std::time::Duration>| CoreError::RateLimited {
-            host: "reddit.com".to_owned(),
-            retry_after_secs: remaining.map_or(60, |d| d.as_secs().max(1)),
-        };
+
         if !self.enrich_breaker.closed() {
-            return Err(rate_limited(self.enrich_breaker.open_remaining()));
+            return Err(reddit_rate_limited(self.enrich_breaker.open_remaining()));
         }
-        // BYO OAuth (D15): trade the installed credentials for a bearer.
-        // A 429 from the token endpoint is a rate limit like any other;
-        // a failed grant (bad credentials) degrades to unauthenticated.
-        let bearer = match self.reddit_auth.bearer(&self.client).await {
-            Ok(bearer) => bearer,
-            Err(EnrichError::Http {
-                status: 429,
-                retry_after,
-            }) => {
-                self.enrich_breaker.trip(retry_after);
-                tracing::warn!("reddit token endpoint rate limit; enrichment breaker opened");
-                return Err(rate_limited(self.enrich_breaker.open_remaining()));
-            }
-            Err(err) => {
-                tracing::warn!(%err, "reddit token grant failed; using the public endpoint");
-                None
-            }
-        };
+        let (bearer, grant_failure) = self.reddit_bearer().await?;
         let api_origin = self.reddit_auth.api_origin();
         let auth = match (bearer.as_deref(), api_origin.as_deref()) {
             (Some(bearer), Some(api_origin)) => Some(reddit::PostAuth { bearer, api_origin }),
@@ -298,7 +323,7 @@ impl CoreHandle {
                     retry_after_secs = retry_after.map(|d| d.as_secs()),
                     "reddit rate limit hit; enrichment breaker opened"
                 );
-                Err(rate_limited(self.enrich_breaker.open_remaining()))
+                Err(reddit_rate_limited(self.enrich_breaker.open_remaining()))
             }
             Err(EnrichError::Http {
                 status: status @ (401 | 403),
@@ -310,10 +335,8 @@ impl CoreHandle {
                 self.reddit_auth.invalidate();
                 tracing::warn!(article = %id, status, "reddit bearer rejected; token dropped");
                 Err(CoreError::RedditAuth {
-                    detail: format!(
-                        "reddit rejected the stored API credentials (HTTP {status}) — \
-                         check the client id and secret, or re-create the app"
-                    ),
+                    reason: RedditAuthReason::TokenRevoked,
+                    status,
                 })
             }
             Err(EnrichError::Http {
@@ -322,13 +345,29 @@ impl CoreHandle {
             }) => {
                 // Reddit's 2026 lockdown: anonymous .json requests are
                 // 403-blocked outright. Deterministic — no breaker, no
-                // fallback fetch; the guidance IS the answer.
+                // fallback fetch; the guidance IS the answer. Installed
+                // credentials the token endpoint refused are what to fix.
                 tracing::warn!(article = %id, status, "anonymous reddit JSON refused");
-                Err(CoreError::RedditAuth {
-                    detail: format!(
-                        "reddit blocks anonymous full-post requests (HTTP {status}) — \
-                         add your own free Reddit API credentials to load full posts"
-                    ),
+                Err(match grant_failure {
+                    Some(GrantFailure::Refused(grant_status)) => CoreError::RedditAuth {
+                        reason: RedditAuthReason::CredentialsRejected,
+                        status: grant_status,
+                    },
+                    Some(GrantFailure::Unavailable) => CoreError::RedditAuth {
+                        reason: RedditAuthReason::TokenUnavailable,
+                        status,
+                    },
+                    // No grant was attempted. Credentials installed
+                    // meanwhile (a concurrent `set_reddit_api`) are not
+                    // missing — the next attempt uses them.
+                    None if self.reddit_auth.configured() => CoreError::RedditAuth {
+                        reason: RedditAuthReason::TokenUnavailable,
+                        status,
+                    },
+                    None => CoreError::RedditAuth {
+                        reason: RedditAuthReason::CredentialsMissing,
+                        status,
+                    },
                 })
             }
             Err(err) => {
@@ -440,5 +479,27 @@ impl CoreHandle {
     /// Storage errors.
     pub fn unread_counts(&self) -> Result<BTreeMap<Option<FeedId>, u64>, CoreError> {
         Ok(self.storage.unread_counts()?)
+    }
+}
+
+/// Why trading the installed reddit credentials for a bearer failed
+/// (a 429 aside, which is a rate limit).
+#[cfg(feature = "enrich-reddit")]
+#[derive(Debug, Clone, Copy)]
+enum GrantFailure {
+    /// The token endpoint refused the credentials (400/401/403).
+    Refused(u16),
+    /// Any other failure: a 5xx, a transport error or timeout, a
+    /// malformed token payload.
+    Unavailable,
+}
+
+/// The hard stop for a throttled reddit: no request until the breaker's
+/// `remaining` cool-down (a minute when unknown) has passed.
+#[cfg(feature = "enrich-reddit")]
+fn reddit_rate_limited(remaining: Option<std::time::Duration>) -> CoreError {
+    CoreError::RateLimited {
+        host: "reddit.com".to_owned(),
+        retry_after_secs: remaining.map_or(60, |d| d.as_secs().max(1)),
     }
 }

@@ -889,13 +889,68 @@ fn mark_all_read_scopes_to_one_feed() {
     storage.upsert_articles(vec![a1, a2, b1]).unwrap();
 
     // Marking feed A read flips both of its articles; feed B is untouched.
-    assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap(), 2);
+    assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap().len(), 2);
     let counts = storage.unread_counts().unwrap();
     assert_eq!(counts.get(&Some(feed_a.id)), None, "feed A fully read");
     assert_eq!(counts.get(&Some(feed_b.id)), Some(&1), "feed B untouched");
 
     // A second sweep of A changes nothing.
-    assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap(), 0);
+    assert_eq!(storage.mark_all_read(Some(feed_a.id)).unwrap(), Vec::new());
+}
+
+#[test]
+fn mark_all_read_returns_exactly_the_flipped_ids_and_undo_restores_them() {
+    let (_dir, storage) = temp_storage();
+    let feed = add_feed(&storage, "https://undo.example/feed.xml");
+    let mut rows = Vec::new();
+    for key in ["u1", "u2", "u3"] {
+        let mut article = new_article(key, key, "body");
+        article.feed_id = Some(feed.id);
+        rows.push(article);
+    }
+    // A feedless (manually saved) row is only in the library-wide sweep.
+    rows.push(new_article("manual", "Manual", "saved by hand"));
+    storage.upsert_articles(rows).unwrap();
+    let all = storage.list_articles(ListArticles::default()).unwrap();
+    let id_of = |key: &str| {
+        all.iter()
+            .find(|article| article.title == key || article.title == "Manual" && key == "manual")
+            .unwrap()
+            .id
+    };
+    let (u1, u2, u3, manual) = (id_of("u1"), id_of("u2"), id_of("u3"), id_of("manual"));
+    // u2 is already read: it is not part of the sweep, so undo must leave it read.
+    assert!(storage.mark_read(u2, true).unwrap());
+
+    let mut expected = vec![u1, u3, manual];
+    expected.sort_unstable_by_key(|id| id.0);
+    let flipped = storage.mark_all_read(None).unwrap();
+    assert_eq!(
+        flipped, expected,
+        "only the previously-unread ids, ascending"
+    );
+
+    // Undo: exactly the snapshot goes back to unread; u2 stays read.
+    assert_eq!(storage.mark_read_many(&flipped, false).unwrap(), 3);
+    for id in [u1, u3, manual] {
+        assert!(!storage.article_state(id).unwrap().read, "{id:?} restored");
+    }
+    assert!(
+        storage.article_state(u2).unwrap().read,
+        "u2 was read before"
+    );
+
+    // Idempotent: a second undo changes nothing; unknown ids are skipped.
+    assert_eq!(storage.mark_read_many(&flipped, false).unwrap(), 0);
+    assert_eq!(
+        storage
+            .mark_read_many(&[ArticleId(9_999_999), u1], true)
+            .unwrap(),
+        1,
+        "a purged id is skipped, the live one still flips"
+    );
+    assert!(storage.article_state(u1).unwrap().read);
+    assert_eq!(storage.mark_read_many(&[], true).unwrap(), 0);
 }
 
 #[test]
@@ -1226,6 +1281,49 @@ fn feed_health_derives_from_the_latest_fetch_outcome() {
     let recovered = only(&storage);
     assert_eq!(recovered.last_error, None);
     assert_eq!(recovered.last_error_kind, None);
+}
+
+/// Kinds are added without a migration, so a profile a newer build wrote
+/// can carry one this build does not know: it reads as no kind — never as
+/// a corrupt row — and the human error text still comes through.
+#[test]
+fn an_unknown_stored_error_kind_reads_as_none() {
+    let (dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    storage
+        .record_fetch(FetchRecord {
+            feed_id: feed.id,
+            fetched_at: Timestamp::now(),
+            status: FetchStatus::Error,
+            http_status: None,
+            error: Some("something new went wrong".to_owned()),
+            error_kind: Some(FetchErrorKind::Refused),
+            articles_new: 0,
+            duration_ms: None,
+        })
+        .unwrap();
+    side_conn(&dir)
+        .execute(
+            "UPDATE fetch_log SET error_kind = 'kind_from_a_newer_build'",
+            [],
+        )
+        .unwrap();
+
+    let listed = storage.list_feeds().unwrap().pop().unwrap();
+    assert_eq!(listed.last_error_kind, None);
+    assert_eq!(
+        listed.last_error.as_deref(),
+        Some("something new went wrong")
+    );
+    let recent = storage.recent_fetches(feed.id, 1).unwrap();
+    assert_eq!(recent[0].error_kind, None);
+    assert_eq!(recent[0].error.as_deref(), Some("something new went wrong"));
 }
 
 #[test]

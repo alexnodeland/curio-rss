@@ -52,10 +52,12 @@ interface ContractCase<K extends CommandName> {
 const cases: { [K in CommandName]: ContractCase<K> } = {
     discoverFeeds: { args: ['https://example.org'], response: discoveryFixture() },
     addFeed: {
-        args: [{ url: 'https://example.org/feed.xml', title: null, tags: [] }],
+        args: [{ url: 'https://example.org/feed.xml', title: null, tags: [], validate: true }],
         response: feedFixture(),
     },
     removeFeed: { args: [1], response: null },
+    stageFeedRemoval: { args: [1], response: null },
+    unstageFeedRemoval: { args: [1], response: null },
     listFeeds: { args: [], response: [feedFixture()] },
     getFeed: { args: [1], response: feedFixture() },
     getFeedByUrl: { args: ['https://example.org/feed.xml'], response: feedFixture() },
@@ -68,7 +70,9 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     reorderFeeds: { args: [[3, 1, 2]], response: null },
     refreshFeed: { args: [1], response: refreshOutcomeFixture() },
     refreshAll: { args: [], response: [refreshOutcomeFixture()] },
+    cancelRefresh: { args: [], response: true },
     recentFetches: { args: [1, 10], response: [fetchRecordFixture()] },
+    connectivityOnline: { args: [], response: true },
     listArticles: {
         args: [
             {
@@ -98,7 +102,8 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     deleteArticle: { args: [100], response: null },
     searchArticles: { args: ['rust', 20], response: [articleSummaryFixture()] },
     markRead: { args: [100, true], response: true },
-    markAllRead: { args: [1], response: 3 },
+    markAllRead: { args: [1], response: [7, 8, 9] },
+    markReadMany: { args: [[7, 8, 9], false], response: 3 },
     recordOpened: { args: [100, 1500], response: null },
     setArchived: { args: [100, true], response: true },
     setStarred: { args: [100, true], response: true },

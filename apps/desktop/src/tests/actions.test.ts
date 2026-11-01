@@ -10,7 +10,10 @@ import {
     goToNextUnread,
     handleShortcut,
     importFromFile,
+    markViewRead,
     openInBrowser,
+    pageReader,
+    registerReaderBody,
     routeMenuAction,
     selectFolder,
     selectView,
@@ -296,6 +299,164 @@ describe('actions — views and shortcut routing', () => {
         routeMenuAction('quit');
         expect(layoutStore.activeModal).toBeNull();
         expect(harness.calls).toHaveLength(0);
+    });
+});
+
+describe('actions — mark the current view read (Shift+A)', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        resetQueryCache();
+        articlesStore.reset();
+        selectionStore.reset();
+        resetUiStores();
+        searchStore.reset();
+        feedsStore.reset();
+        harness?.teardown();
+        harness = null;
+    });
+
+    function lastToast(): string | undefined {
+        return toastStore.toasts[toastStore.toasts.length - 1]?.message;
+    }
+
+    it('a feed view rides the bulk command for that feed', async () => {
+        harness = installIpcHarness({ mark_all_read: [1, 2, 3, 4] });
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: 3 };
+        await markViewRead();
+        expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: 3 }]);
+        expect(lastToast()).toBe('Marked 4 read');
+    });
+
+    it('a folder view bulk-marks exactly its feeds and sums the count', async () => {
+        harness = installIpcHarness({
+            list_feeds: [
+                feedFixture({ id: 1, tags: ['Tech'] }),
+                feedFixture({ id: 2, url: 'https://b.example/feed', tags: ['Tech/Rust'] }),
+                feedFixture({ id: 3, url: 'https://c.example/feed', tags: ['News'] }),
+            ],
+            get_unread_counts: unreadCountsFixture(),
+            mark_all_read: (args) => (args.feedId === 1 ? [1, 2] : [3, 4, 5, 6, 7]),
+        });
+        feedsStore.prime();
+        await flushIpc();
+        articlesStore.filters = { ...ALL_ARTICLES, feedTag: 'Tech' };
+
+        await markViewRead();
+        expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: 1 }, { feedId: 2 }]);
+        expect(lastToast()).toBe('Marked 7 read');
+    });
+
+    it('a narrowed view (Starred) marks only its own unread rows, paged', async () => {
+        const page = (top: number, count: number) =>
+            Array.from({ length: count }, (_, index) => articleSummaryFixture({ id: top - index }));
+        harness = installIpcHarness({
+            list_articles: (args) => {
+                const params = args.params as ListArticlesDto;
+                return params.before === null ? page(1000, 200) : page(800, 3);
+            },
+            mark_read: (args) => (args.articleId as number) !== 799, // one already read
+        });
+        selectView('starred');
+
+        await markViewRead();
+        const listings = harness
+            .callsFor('list_articles')
+            .map((call) => call.params as ListArticlesDto);
+        expect(listings).toHaveLength(2);
+        expect(listings[0]).toMatchObject({ starred: true, read: false, before: null, limit: 200 });
+        expect(listings[1]).toMatchObject({ starred: true, read: false, before: 801 });
+        expect(harness.callsFor('mark_all_read')).toHaveLength(0);
+        expect(harness.callsFor('mark_read')).toHaveLength(203);
+        expect(lastToast()).toBe('Marked 202 read');
+    });
+
+    it('search results mark exactly the listed rows', async () => {
+        harness = installIpcHarness({ mark_read: true });
+        searchStore.setQuery('rust', 0);
+        searchStore.results = [articleSummaryFixture({ id: 5 }), articleSummaryFixture({ id: 6 })];
+
+        await markViewRead();
+        expect(harness.callsFor('mark_read')).toEqual([
+            { articleId: 5, read: true },
+            { articleId: 6, read: true },
+        ]);
+        expect(harness.callsFor('mark_all_read')).toHaveLength(0);
+    });
+
+    it('a read-only view has nothing to mark', async () => {
+        harness = installIpcHarness({});
+        articlesStore.filters = { ...ALL_ARTICLES, read: true };
+        await markViewRead();
+        expect(harness.calls).toHaveLength(0);
+        expect(lastToast()).toBe('Marked 0 read');
+    });
+
+    it('a failure stops the sweep and toasts the error instead of a count', async () => {
+        harness = installIpcHarness({
+            list_articles: [articleSummaryFixture({ id: 9 }), articleSummaryFixture({ id: 8 })],
+            mark_read: rejectWith(commandErrorFixture({ kind: 'internal', message: 'disk full' })),
+        });
+        selectView('readLater');
+        await markViewRead();
+        expect(harness.callsFor('mark_read')).toHaveLength(1);
+        expect(toastStore.toasts.some((toast) => toast.tone === 'error')).toBe(true);
+        expect(toastStore.toasts.some((toast) => toast.tone === 'success')).toBe(false);
+    });
+});
+
+describe('actions — reader paging (Space / Shift+Space)', () => {
+    let harness: IpcHarness | null = null;
+
+    afterEach(() => {
+        articlesStore.reset();
+        selectionStore.reset();
+        resetUiStores();
+        harness?.teardown();
+        harness = null;
+    });
+
+    it('drops the press while the selected article has no body yet', () => {
+        harness = installIpcHarness({});
+        selectionStore.selectedArticleId = 4;
+        pageReader('down');
+        pageReader('up');
+        expect(harness.calls).toHaveLength(0);
+        expect(selectionStore.selectedArticleId).toBe(4);
+    });
+
+    it('pages a registered body and clamps at the top; unregistering detaches it', () => {
+        harness = installIpcHarness({});
+        selectionStore.selectedArticleId = 4;
+        const body = document.createElement('div');
+        Object.defineProperty(body, 'scrollHeight', { value: 2000 });
+        Object.defineProperty(body, 'clientHeight', { value: 400 });
+        const unregister = registerReaderBody(body);
+
+        pageReader('down');
+        expect(body.scrollTop).toBe(350);
+        pageReader('up');
+        pageReader('up');
+        expect(body.scrollTop).toBe(0);
+
+        unregister();
+        pageReader('down');
+        expect(body.scrollTop).toBe(0);
+    });
+
+    it('a stale unregister never detaches the newer body', () => {
+        harness = installIpcHarness({});
+        selectionStore.selectedArticleId = 4;
+        const older = document.createElement('div');
+        const newer = document.createElement('div');
+        Object.defineProperty(newer, 'scrollHeight', { value: 2000 });
+        Object.defineProperty(newer, 'clientHeight', { value: 400 });
+        const unregisterOlder = registerReaderBody(older);
+        const unregisterNewer = registerReaderBody(newer);
+        unregisterOlder();
+        pageReader('down');
+        expect(newer.scrollTop).toBe(350);
+        unregisterNewer();
     });
 });
 

@@ -21,13 +21,18 @@
 //! / `InvalidTag` / `SchemaTooNew` (`OpenError::TooNew`) are user-tier, as
 //! is a missing destination folder (`ExportError::DestinationMissing`, code
 //! `DESTINATION_MISSING`) and a profile on network or sync-managed storage
-//! (`OpenError::NetworkFs`, code `IO`). A duplicate row
-//! (`StorageError::Duplicate`, code `DUPLICATE_FEED` / `DUPLICATE`), a full
-//! disk (`DISK_FULL`, recoverable) and a read-only profile (`READ_ONLY`) are
-//! user-tier too. A fetch failure is user-tier and recoverable, its code
-//! read off the core's typed [`FetchErrorKind`]. `Sqlite` / `WriterGone` /
-//! `JobPanicked` / `PoolTimeout` / `IntegrityFailed` / other IO / a corrupt
-//! or failed-upgrade database are internal-tier.
+//! (`OpenError::NetworkFs`, code `IO`). A subscribe that collides with an
+//! existing feed is `ALREADY_SUBSCRIBED` — checked before any insert, and
+//! the same code for the insert's own `StorageError::Duplicate` should a
+//! concurrent subscribe win the race; any other duplicate row is
+//! `DUPLICATE`. A full disk (`StorageError::DiskFull`, or a full export
+//! destination — `ExportError::DiskFull`) is `DISK_FULL`, recoverable, and a
+//! read-only profile (`StorageError::ReadOnly`) is `READ_ONLY`. A fetch
+//! failure is user-tier and recoverable, its code read off the core's typed
+//! [`FetchErrorKind`]. `Sqlite` / `DatabaseCorrupt` / `WriterGone` /
+//! `JobPanicked` / `PoolTimeout` / `IntegrityFailed` / an unwritable export
+//! destination (`ExportError::PermissionDenied`, which has no code of its
+//! own yet) / other IO / a failed upgrade are internal-tier.
 //!
 //! Contention with another Curio process on the profile — a busy database
 //! (`StorageError::Busy`, `OpenError::Locked`) or a held events lock
@@ -102,13 +107,18 @@ pub enum ErrorCode {
     RateLimited,
     /// Feed/OPML bytes did not parse.
     Parse,
+    /// Subscribe-time validation: the page answered but neither it nor
+    /// anything it declares (or the probes found) is a feed. The UI offers
+    /// an explicit "subscribe anyway".
+    NoFeed,
+    /// The feed URL (as typed, or as a homepage resolved to) is already a
+    /// subscription.
+    AlreadySubscribed,
     /// The storage layer failed.
     Storage,
     /// The row already exists. Params: `entity` (English, diagnostic).
     Duplicate,
-    /// The feed URL is already subscribed.
-    DuplicateFeed,
-    /// The disk holding the profile is full.
+    /// The disk holding the profile (or an export destination) is full.
     DiskFull,
     /// The profile database or its folder is read-only.
     ReadOnly,
@@ -285,10 +295,11 @@ impl From<StorageError> for CommandError {
             // Another Curio process (a CLI run) is writing to the
             // profile: tell the user why, and that a retry will work.
             StorageError::Busy(_) => Self::profile_busy(&error),
-            // Subscribing to a URL that is already subscribed: the user's
+            // Subscribing to a URL that is already subscribed (a concurrent
+            // subscribe won the race past the up-front check): the user's
             // input, and the same input fails the same way again.
             StorageError::Duplicate { entity: "feed", .. } => {
-                Self::user(ErrorCode::DuplicateFeed, error.to_string(), false)
+                Self::user(ErrorCode::AlreadySubscribed, error.to_string(), false)
             }
             StorageError::Duplicate { entity, .. } => {
                 Self::user(ErrorCode::Duplicate, error.to_string(), false)
@@ -374,10 +385,18 @@ impl From<CoreError> for CommandError {
             CoreError::Export(ExportError::PathsTaken { path }) => {
                 Self::user(ErrorCode::PathsTaken, message, true).with_param("path", path)
             }
+            // The atomic writes left the previous note intact: free some
+            // space and export again.
+            CoreError::Export(ExportError::DiskFull { .. }) => {
+                Self::user(ErrorCode::DiskFull, message, true)
+            }
+            // Includes the typed `ExportError::PermissionDenied`: its
+            // message is the core's English text, so it stays internal until
+            // it has a localized code of its own.
             CoreError::Io { .. } | CoreError::Export(_) | CoreError::Events(_) => {
                 Self::internal(ErrorCode::Io, message)
             }
-            CoreError::Content(_) | CoreError::Settings(_) => {
+            CoreError::Content(_) | CoreError::Settings(_) | CoreError::Panicked { .. } => {
                 Self::internal(ErrorCode::Internal, message)
             }
         }
@@ -453,6 +472,54 @@ mod tests {
     }
 
     #[test]
+    fn a_full_export_destination_is_disk_full_and_a_refused_one_stays_internal() {
+        use std::io::{Error, ErrorKind as IoKind};
+        let full = ExportError::io("/vault/curio/note.md", Error::from(IoKind::StorageFull));
+        assert!(matches!(full, ExportError::DiskFull { .. }), "{full:?}");
+        let error = CommandError::from(CoreError::Export(full));
+        assert_eq!(
+            (error.kind, error.code, error.recoverable),
+            (ErrorKind::User, ErrorCode::DiskFull, true),
+            "{error}"
+        );
+        // No localized code of its own yet: its English text stays out of
+        // the UI.
+        let denied = ExportError::io(
+            "/vault/curio/note.md",
+            Error::from(IoKind::PermissionDenied),
+        );
+        assert!(
+            matches!(denied, ExportError::PermissionDenied { .. }),
+            "{denied:?}"
+        );
+        let error = CommandError::from(CoreError::Export(denied));
+        assert_eq!(
+            (error.kind, error.code),
+            (ErrorKind::Internal, ErrorCode::Io),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn reddit_auth_refusals_are_user_facing_guidance() {
+        use curio_core::RedditAuthReason;
+        for reason in [
+            RedditAuthReason::CredentialsMissing,
+            RedditAuthReason::CredentialsRejected,
+            RedditAuthReason::TokenRevoked,
+            RedditAuthReason::TokenUnavailable,
+        ] {
+            let error = CommandError::from(CoreError::RedditAuth {
+                reason,
+                status: 403,
+            });
+            assert_eq!(error.kind, ErrorKind::User, "{reason:?}");
+            assert_eq!(error.code, ErrorCode::Network, "{reason:?}");
+            assert!(error.message.contains("HTTP 403"), "{reason:?}: {error}");
+        }
+    }
+
+    #[test]
     fn a_busy_profile_is_a_recoverable_user_facing_error() {
         let error = CommandError::from(StorageError::from(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
@@ -465,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_storage_classes_reach_the_user_with_their_own_tier() {
+    fn typed_storage_classes_reach_the_user_with_their_own_localized_codes() {
         let sqlite = |code| {
             StorageError::from(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(code),
@@ -475,7 +542,7 @@ mod tests {
         let duplicate = CommandError::from(sqlite(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE));
         assert_eq!(
             (duplicate.kind, duplicate.code, duplicate.recoverable),
-            (ErrorKind::User, ErrorCode::DuplicateFeed, false)
+            (ErrorKind::User, ErrorCode::AlreadySubscribed, false)
         );
         assert_eq!(duplicate.message, "feed already exists");
         let other = CommandError::from(StorageError::from(rusqlite::Error::SqliteFailure(
@@ -565,6 +632,12 @@ mod tests {
             assert_eq!(error.kind, ErrorKind::Internal);
             assert_eq!(error.code, ErrorCode::Storage);
         }
+        // A panic in a refresh's blocking half is a bug, not user input.
+        let error = CommandError::from(CoreError::Panicked {
+            message: "parser bug".into(),
+        });
+        assert_eq!(error.kind, ErrorKind::Internal);
+        assert_eq!(error.code, ErrorCode::Internal);
     }
 
     #[test]

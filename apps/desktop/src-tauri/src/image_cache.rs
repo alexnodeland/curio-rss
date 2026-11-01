@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use curio_core::fetch::{FetchRequest, PolicedClient};
+use curio_core::fetch::{FetchKind, FetchRequest, PolicedClient};
 use sha2::{Digest as _, Sha256};
 
 use crate::error::{CommandError, ErrorCode};
@@ -62,7 +62,10 @@ impl ImageCache {
 
         let response = self
             .client
-            .fetch(&FetchRequest::new(url))
+            .fetch(&FetchRequest {
+                kind: FetchKind::Image,
+                ..FetchRequest::new(url)
+            })
             .await
             .map_err(|error| {
                 CommandError::user(

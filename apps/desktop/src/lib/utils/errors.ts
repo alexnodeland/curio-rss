@@ -33,9 +33,10 @@ export const ERROR_COPY: Record<ErrorCode, MessageKey> = {
     TOO_LARGE: 'error.tooLarge',
     RATE_LIMITED: 'error.rateLimited',
     PARSE: 'error.parse',
+    NO_FEED: 'addFeed.noneFound',
+    ALREADY_SUBSCRIBED: 'error.alreadySubscribed',
     STORAGE: 'error.storage',
     DUPLICATE: 'error.duplicate',
-    DUPLICATE_FEED: 'error.duplicateFeed',
     DISK_FULL: 'error.diskFull',
     READ_ONLY: 'error.readOnly',
     PROFILE_BUSY: 'app.error.profileBusy',
@@ -71,4 +72,25 @@ export function commandErrorMessage(error: CommandError): string {
     // The host promised a param it did not send: never show a raw
     // `{host}` — English has the engine's message, the rest the generic line.
     return english ? error.message : t('app.error.internal');
+}
+
+/**
+ * The codes a failed fetch carries — the address could not be reached or
+ * read, whichever way it failed (the finer codes split the old `NETWORK`).
+ */
+const UNREACHABLE: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+    'NETWORK',
+    'NETWORK_TIMEOUT',
+    'HOST_NOT_FOUND',
+    'CONNECTION_FAILED',
+    'TLS',
+    'HTTP_STATUS',
+    'BLOCKED_ADDRESS',
+    'TOO_LARGE',
+    'RATE_LIMITED',
+]);
+
+/** Whether `error` is a failed fetch of the address (any network code). */
+export function isUnreachable(error: CommandError): boolean {
+    return UNREACHABLE.has(error.code);
 }

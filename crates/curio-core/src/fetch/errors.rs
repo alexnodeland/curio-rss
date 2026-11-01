@@ -218,9 +218,25 @@ impl std::fmt::Display for TransportKind {
 /// request for url (…)" — the URL again and no cause — so the class and
 /// the message both come from walking its `source()` chain.
 pub(super) fn map_reqwest(url: &Url, err: &reqwest::Error) -> FetchError {
+    if err.is_builder() {
+        // Building the client or request failed (a TLS backend that would
+        // not initialise, say): nothing touched the wire, so no transport
+        // class applies — and the text sniff below must not read "TLS" in
+        // it as a failed handshake.
+        let cause =
+            std::error::Error::source(err).map_or_else(|| err.to_string(), ToString::to_string);
+        return FetchError::Transport {
+            url: url.to_string(),
+            kind: TransportKind::Other,
+            cause,
+        };
+    }
     if err.is_timeout() {
         // A connect error that timed out is the connect timeout; anything
-        // else is the overall request timeout expiring mid-answer.
+        // else is the overall request timeout expiring mid-answer. (A
+        // request timeout shorter than the connect timeout can also fire
+        // mid-connect; that carries no connect error and reads as `Read`.
+        // The defaults — and any sane config — keep connect < request.)
         let phase = if err.is_connect() {
             TimeoutPhase::Connect
         } else {
@@ -512,5 +528,33 @@ mod tests {
             .to_string(),
             "connect timeout fetching \"https://example.com/feed\""
         );
+    }
+
+    #[test]
+    fn a_builder_failure_is_never_sniffed_as_tls() {
+        // A relative URL fails at request build time: nothing reached the
+        // wire, so whatever the text says it is no transport class.
+        let built = reqwest::Client::new()
+            .get("no-scheme/tls/handshake")
+            .build();
+        let Err(err) = built else {
+            panic!("a relative URL must not build");
+        };
+        assert!(err.is_builder());
+        let Ok(url) = Url::parse("https://example.com/feed") else {
+            panic!("a valid URL");
+        };
+        let mapped = map_reqwest(&url, &err);
+        assert!(
+            matches!(
+                mapped,
+                FetchError::Transport {
+                    kind: TransportKind::Other,
+                    ..
+                }
+            ),
+            "{mapped:?}"
+        );
+        assert_eq!(mapped.kind(), crate::model::FetchErrorKind::Transport);
     }
 }

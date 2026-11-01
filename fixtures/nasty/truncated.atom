@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Truncated mid-transfer</title>
+  <id>urn:example:truncated</id>
+  <entry>
+    <title>Complete entry</title>
+    <id>urn:example:truncated-1</id>
+    <link href="https://trunc.example.org/1"/>
+  </entry>
+  <entry>
+    <title>Cut off he

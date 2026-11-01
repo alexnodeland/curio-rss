@@ -7,26 +7,14 @@
 #![allow(clippy::unwrap_used)]
 
 mod common;
+#[path = "common/inert.rs"]
+mod inert;
 
-use curio_core::content::{plain_text, process, sanitize, to_markdown};
+use curio_core::content::{plain_text, process, process_page, sanitize, to_markdown};
 
 fn pipeline(raw_html: &str) -> String {
     let processed = process(raw_html, Some("https://example.com/posts/current"));
     to_markdown(&processed.html).unwrap()
-}
-
-/// Every attribute the sanitize gate may leave on stored HTML.
-const ALLOWED_ATTRIBUTES: &[&str] = &[
-    "href", "rel", "title", "src", "alt", "datetime", "colspan", "rowspan", "id", "dir", "lang",
-    "start", "class",
-];
-
-/// The id/fragment token shape: ASCII alphanumerics and `-_.:`.
-fn is_plain_token(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
 }
 
 /// The stored (sanitized + extracted) HTML for a fixture.
@@ -93,85 +81,17 @@ fn xss_corpus_output_is_inert() {
     let processed = process(&raw, Some("https://example.com/posts/current"));
     let markdown = to_markdown(&processed.html).unwrap();
 
-    // Structural audit of the stored HTML: no forbidden elements, no
-    // event-handler or style attributes, http(s)-only URL attributes
-    // (plus prefixed in-page fragments), and every other surviving
-    // attribute both allowlisted and value-filtered.
-    // (Substring scans would false-positive on inert anchor *text* like
-    // "javascript: link", which sanitization correctly leaves behind.)
-    let stored = scraper::Html::parse_fragment(&processed.html);
-    let all = scraper::Selector::parse("*").unwrap();
-    for element in stored.select(&all) {
-        let name = element.value().name();
-        assert!(
-            ![
-                "script", "svg", "iframe", "frame", "object", "embed", "form", "input", "button",
-                "style", "base", "meta", "link", "audio", "video", "math",
-            ]
-            .contains(&name),
-            "forbidden element <{name}> survived:\n{}",
-            processed.html
-        );
-        for (attr, value) in element.value().attrs() {
-            assert!(
-                !attr.starts_with("on") && attr != "style" && attr != "http-equiv",
-                "forbidden attribute {attr:?} survived on <{name}>"
-            );
-            assert!(
-                ALLOWED_ATTRIBUTES.contains(&attr),
-                "unexpected attribute {attr:?} survived on <{name}>"
-            );
-            if matches!(attr, "href" | "src") {
-                let in_page_fragment = attr == "href"
-                    && value
-                        .strip_prefix("#user-content-")
-                        .is_some_and(is_plain_token);
-                assert!(
-                    value.starts_with("http://")
-                        || value.starts_with("https://")
-                        || in_page_fragment,
-                    "non-http(s) {attr} survived on <{name}>: {value:?}"
-                );
-            }
-            match attr {
-                "id" => assert!(
-                    value
-                        .strip_prefix("user-content-")
-                        .is_some_and(is_plain_token),
-                    "unprefixed or unfiltered id on <{name}>: {value:?}"
-                ),
-                "dir" => assert!(
-                    matches!(value, "ltr" | "rtl" | "auto"),
-                    "unfiltered dir on <{name}>: {value:?}"
-                ),
-                "lang" => assert!(
-                    !value.is_empty()
-                        && value
-                            .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b == b'-'),
-                    "unfiltered lang on <{name}>: {value:?}"
-                ),
-                "start" => assert!(
-                    name == "ol" && value.parse::<i32>().is_ok(),
-                    "unfiltered start on <{name}>: {value:?}"
-                ),
-                "class" => assert!(
-                    matches!(name, "pre" | "code")
-                        && value.strip_prefix("language-").is_some_and(|lang| {
-                            !lang.is_empty()
-                                && lang
-                                    .bytes()
-                                    .all(|b| b.is_ascii_alphanumeric() || b"-_+#.".contains(&b))
-                        }),
-                    "unfiltered class on <{name}>: {value:?}"
-                ),
-                _ => {}
-            }
-        }
-    }
-
-    // The markdown, which is what gets exported, carries no executable
-    // remnants: no scriptable link/image destinations, no raw HTML.
+    // Structural audit of the stored HTML (no forbidden elements, no
+    // handler or style attributes, http(s)-only URLs plus prefixed in-page
+    // fragments, every other attribute allowlisted and value-filtered),
+    // then the exported markdown — common/inert.rs, the shared definition
+    // the nasty corpus, the proptests and the fuzz targets hold every
+    // other input to.
+    inert::audit_html(&processed.html).unwrap();
+    inert::audit_markdown(&markdown).unwrap();
+    // This fixture leaves no trace of its attacks at all — not even as
+    // escaped text or inside a code span, which the markdown audit reads
+    // as inert — and none of them reach the attacker host.
     let lower = markdown.to_lowercase();
     for vector in [
         "](javascript:",
@@ -191,6 +111,53 @@ fn xss_corpus_output_is_inert() {
     // The legitimate content around the attacks survives.
     assert!(markdown.contains("**content**"));
     assert!(markdown.contains("https://example.com/fine"));
+}
+
+/// The `content_pipeline` fuzz target's checks, replayed over every
+/// committed fixture (they are its seed corpus): both pipelines — feed
+/// fragment and full page — store HTML that passes the inertness audit, and
+/// both convert. A fuzz find pinned here as a fixture stays fixed.
+#[test]
+fn every_fixture_passes_the_content_pipeline_fuzz_checks() {
+    const BASE: &str = "https://fuzz.example/posts/current";
+    let dir = common::manifest_dir().join("../../fixtures/html");
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let html = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
+        let name = path.display();
+        let fragment = process(&html, Some(BASE));
+        inert::audit_html(&fragment.html).unwrap_or_else(|v| panic!("{name}: fragment: {v}"));
+        let _ = plain_text(&fragment.html);
+        to_markdown(&fragment.html).unwrap();
+        if let Ok(page) = process_page(&html, BASE) {
+            inert::audit_html(&page.content.html)
+                .unwrap_or_else(|v| panic!("{name}: full page: {v}"));
+            to_markdown(&page.content.html).unwrap();
+        }
+    }
+}
+
+/// The first `content_pipeline` fuzz find, pinned: URLs behind C0
+/// controls, tabs and case are judged by the scheme a browser reads.
+#[test]
+fn c0_led_urls_keep_https_and_drop_scriptable_schemes() {
+    let stored = stored_html("c0-control-urls.html");
+    inert::audit_html(&stored).unwrap();
+    for kept in [
+        "example.com/cat.jpg",
+        "example.com/dog.jpg",
+        "HTTPS://example.com/upper",
+    ] {
+        assert!(stored.contains(kept), "lost {kept:?}:\n{stored}");
+    }
+    let lower = stored.to_lowercase();
+    for gone in ["javascript", "java\tscript", "data:"] {
+        assert!(!lower.contains(gone), "{gone:?} survived:\n{stored}");
+    }
+    assert!(
+        stored.contains("a C0-led script link"),
+        "the link text stays: {stored}"
+    );
 }
 
 #[test]

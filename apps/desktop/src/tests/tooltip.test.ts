@@ -86,4 +86,21 @@ describe('tooltip action', () => {
         expect(tip?.querySelector('.tooltip-kbd')?.textContent).toBe('A');
         destroy();
     });
+
+    it('keeps the whole box on screen for a trigger at the window edge', async () => {
+        // jsdom lays nothing out: give the tooltip a width, and the trigger
+        // (getBoundingClientRect) sits at x = 0 — the offline badge's spot.
+        const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+        render(TooltipHost);
+        const { node, destroy } = trigger();
+        await fireEvent.focus(node);
+        await tick();
+        await tick();
+        const tip = document.getElementById(tooltipStore.id);
+        // Centred at x = 0 half of it would hang off-screen; nudged to the edge
+        // margin (8px) plus half its width.
+        expect(tip?.style.left).toBe('108px');
+        destroy();
+        width.mockRestore();
+    });
 });

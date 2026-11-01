@@ -37,6 +37,7 @@ dom_smoothie = { workspace = true }
 ego-tree = { workspace = true }
 encoding_rs = { workspace = true }
 feed-rs = { workspace = true }
+futures-util = { workspace = true }
 fs4 = { workspace = true }
 htmd = { workspace = true }
 icu_normalizer = { workspace = true }
@@ -46,15 +47,20 @@ quick-xml = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+ryu = { workspace = true }
 same-file = { workspace = true }
+saphyr-parser = { workspace = true }
 scraper = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-# "sync" on top of the workspace's net/time: tokio::sync::Mutex backs the
-# per-feed refresh serialization (see CoreHandle::refresh_feed).
-tokio = { workspace = true, features = ["sync"] }
+# On top of the workspace's net/time: "sync" — tokio::sync::Mutex backs the
+# per-feed refresh serialization (see CoreHandle::refresh_feed), watch and
+# Notify the one-sweep-at-a-time slot and its cancel signal; "rt" —
+# spawn_blocking, which keeps a refresh's parse/ingest/storage half off the
+# async runtime.
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing = { workspace = true }
 url = { workspace = true }
 
@@ -68,6 +74,8 @@ rustix = { workspace = true }
 # Self dev-dependency: the integration tests under tests/ link the library
 # with `test-support` on (see the feature above).
 curio-core = { path = ".", features = ["test-support"] }
+brotli = { workspace = true }
+flate2 = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
 rcgen = { workspace = true }

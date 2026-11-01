@@ -26,7 +26,7 @@
 //! more is fetched and the feeds validated so far are the answer.
 //!
 //! **Validated** means fetched (2xx), sniffed as a feed root and parsed by
-//! [`crate::feeds::parse_feed`] — no candidate is offered that a refresh
+//! [`crate::feeds::parse_fetched_feed`] — no candidate is offered that a refresh
 //! would fail to parse. Candidates are deduped by requested and final URL.
 //!
 //! Favicon precedence: a declared `<link rel="…icon">` (resolved absolute)
@@ -43,7 +43,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 use url::Url;
 
-use crate::feeds::parse_feed;
+use crate::feeds::parse_fetched_feed;
+use crate::fetch::decode::decode_html;
 use crate::fetch::{FetchError, FetchRequest, FetchResponse, PolicedClient};
 
 /// Most declared (`<link rel="alternate">`) candidates validated per page —
@@ -103,8 +104,9 @@ pub struct DiscoverOptions {
     pub deadline: Option<Duration>,
 }
 
-/// Why discovery could not run (finding *no* feed is not an error — it is
-/// an empty [`Discovery::feeds`]).
+/// Why discovery could not run, or why [`resolve`] could not settle on a
+/// feed. Only [`discover`] treats finding *no* feed as success (an empty
+/// [`Discovery::feeds`]); [`resolve`] reports it as [`DiscoverError::NoFeed`].
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoverError {
     /// The input was blank.
@@ -139,6 +141,14 @@ pub enum DiscoverError {
         /// The HTTP status.
         status: u16,
     },
+    /// The page answered, but neither it nor anything it declares or the
+    /// probes found is a feed — only [`resolve`] reports this ([`discover`]
+    /// answers an empty [`Discovery::feeds`] instead).
+    #[error("no feed found at {input}")]
+    NoFeed {
+        /// The input, trimmed.
+        input: String,
+    },
 }
 
 impl DiscoverError {
@@ -148,6 +158,45 @@ impl DiscoverError {
     pub fn is_input_error(&self) -> bool {
         matches!(self, Self::Empty | Self::InvalidUrl { .. })
     }
+}
+
+/// What a subscribe resolves typed input to: the feed URL to subscribe
+/// plus the other validated candidates discovery offered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolution {
+    /// The best validated feed URL — the one to subscribe to.
+    pub url: String,
+    /// The other validated candidates, best first.
+    pub alternates: Vec<String>,
+}
+
+/// Resolves what a user typed to the one feed URL a subscribe should store:
+/// [`discover`], then its best validated candidate. This is the validating
+/// subscribe path every head shares — a URL that resolves here is a feed a
+/// refresh can parse. A head's "subscribe anyway" escape hatch uses
+/// [`normalize_input`] instead.
+///
+/// # Errors
+///
+/// Every [`discover`] error, plus [`DiscoverError::NoFeed`] when the page
+/// answered but no feed validated.
+pub async fn resolve(
+    client: &PolicedClient,
+    input: &str,
+    options: DiscoverOptions,
+) -> Result<Resolution, DiscoverError> {
+    let mut urls = discover(client, input, options)
+        .await?
+        .feeds
+        .into_iter()
+        .map(|feed| feed.url);
+    let url = urls.next().ok_or_else(|| DiscoverError::NoFeed {
+        input: input.trim().to_owned(),
+    })?;
+    Ok(Resolution {
+        url,
+        alternates: urls.collect(),
+    })
 }
 
 /// Normalizes what a user typed into an absolute http(s) URL: trims it,
@@ -250,9 +299,13 @@ pub async fn discover(
     }
     validator.seen.insert(page.clone());
     validator.seen.insert(response.final_url.clone());
-    let extracted = html::extract(&response.body, &response.final_url);
+    let extracted = html::extract(
+        &response.body,
+        response.content_type.as_deref(),
+        &response.final_url,
+    );
     if extracted.is_feed {
-        if let Ok(parsed) = parse_feed(&response.body, Some(&response.final_url)) {
+        if let Ok(parsed) = parse_fetched_feed(&response) {
             return Ok(Discovery {
                 feeds: vec![DiscoveredFeed {
                     url: subscribable_url(&page, &response),
@@ -314,17 +367,35 @@ pub async fn discover(
 }
 
 /// The fetch-free half of discovery, for a body that failed to parse as a
-/// feed: when it sniffs as an HTML page, the feeds that page declares
-/// (its `<link rel="alternate">` feeds, or a synthesized `YouTube` channel
-/// feed — unvalidated, and with no extra request); `None` when it is not
-/// a web page at all. A refresh uses it to say "this is a web page, not a
-/// feed" instead of reporting an XML parse error.
-pub(crate) fn web_page_feeds(body: &[u8], final_url: &str) -> Option<Vec<DiscoveredFeed>> {
-    if !sniff::looks_like_html(&String::from_utf8_lossy(body)) {
+/// feed: when it is an HTML page, the feeds that page declares (its
+/// `<link rel="alternate">` feeds, or a synthesized `YouTube` channel feed
+/// — unvalidated, and with no extra request); `None` when it is not a web
+/// page at all. A refresh uses it to say "this is a web page, not a feed"
+/// instead of reporting an XML parse error.
+///
+/// A web page is a body served as `text/html` / `application/xhtml+xml`,
+/// or one whose sniff window looks like HTML (servers mislabel pages too);
+/// either way, a body that sniffs as a feed is a broken feed, not a page.
+/// Only the sniff window is decoded for the decision; the full body is
+/// decoded once, and only for a page.
+pub(crate) fn web_page_feeds(response: &FetchResponse) -> Option<Vec<DiscoveredFeed>> {
+    let content_type = response.content_type.as_deref();
+    let window = &response.body[..response.body.len().min(sniff::SNIFF_WINDOW)];
+    let head = decode_html(window, content_type);
+    if sniff::looks_like_feed(&head) {
         return None;
     }
-    let extracted = html::extract(body, final_url);
-    Some(extracted.feeds)
+    let served_as_html = content_type
+        .and_then(crate::fetch::decode::mime_essence)
+        .is_some_and(|essence| essence == "text/html" || essence == "application/xhtml+xml");
+    if !served_as_html && !sniff::looks_like_html(&head) {
+        return None;
+    }
+    Some(html::declared_feeds(
+        &response.body,
+        content_type,
+        &response.final_url,
+    ))
 }
 
 /// The URL to subscribe for a fetch of `requested`: the redirect target
@@ -423,12 +494,13 @@ impl Validator<'_> {
         if response.final_url != url && !self.seen.insert(response.final_url.clone()) {
             return (None, spent); // a redirect twin of a feed already found
         }
-        // Only the sniff window is decoded — never a copy of the whole body.
+        // Only the sniff window is decoded — never a copy of the whole body —
+        // by its BOM and HTTP charset, so a UTF-16 feed still sniffs.
         let head = &response.body[..response.body.len().min(sniff::SNIFF_WINDOW)];
-        if !sniff::looks_like_feed(&String::from_utf8_lossy(head)) {
+        if !sniff::looks_like_feed(&decode_html(head, response.content_type.as_deref())) {
             return (None, spent);
         }
-        let Ok(parsed) = parse_feed(&response.body, Some(&response.final_url)) else {
+        let Ok(parsed) = parse_fetched_feed(&response) else {
             return (None, spent);
         };
         let feed = DiscoveredFeed {

@@ -50,7 +50,7 @@ function devStartupFailure(): StartupFailureDto | null {
         message: DEV_STARTUP_MESSAGES[requested],
         profile_dir: hasProfile ? DEV_PROFILE : null,
         backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
-        app_version: '0.4.0',
+        app_version: '0.5.0',
     };
 }
 
@@ -190,6 +190,17 @@ tokens:
                     return structuredClone(byId(args.articleId as number)?.tags ?? []);
                 case 'mark_read':
                     return flip(byId(args.articleId as number), 'read', args.read as boolean);
+                case 'mark_all_read':
+                    // The ids actually flipped (the undo snapshot), ascending.
+                    return articles
+                        .filter((a) => args.feedId == null || a.summary.feed_id === args.feedId)
+                        .filter((a) => flip(a, 'read', true))
+                        .map((a) => a.summary.id)
+                        .sort((x, y) => x - y);
+                case 'mark_read_many':
+                    return (args.articleIds as number[]).filter((id) =>
+                        flip(byId(id), 'read', args.read as boolean),
+                    ).length;
                 case 'set_starred':
                     return flip(byId(args.articleId as number), 'starred', args.starred as boolean);
                 case 'set_read_later':
@@ -303,6 +314,8 @@ tokens:
                         error: null,
                         error_kind: null,
                     };
+                case 'cancel_refresh':
+                    return false;
                 case 'refresh_all':
                     return feeds.map((f) => ({
                         feed_id: f.id,
@@ -313,9 +326,12 @@ tokens:
                         error: null,
                         error_kind: null,
                     }));
+                // `?offline=1` previews the sidebar's "Offline" badge.
+                case 'connectivity_online':
+                    return new URLSearchParams(window.location.search).get('offline') !== '1';
                 case 'get_app_info':
                     return {
-                        version: '0.4.0',
+                        version: '0.5.0',
                         profile_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
                         db_schema_version: 5,
                         schema_supported: true,
@@ -393,6 +409,9 @@ tokens:
                     // normalization, rewrites, probing or validation): a
                     // YouTube @handle resolves to its channel videos feed,
                     // anything else to itself.
+                    if (/nofeed/i.test(query)) {
+                        return { feeds: [], favicon: null };
+                    }
                     // A host under the reserved `.invalid` TLD never resolves:
                     // previews the host's typed fetch failure, which the UI
                     // localizes from its code + params.
@@ -427,9 +446,33 @@ tokens:
                     return String(args.url ?? '');
                 case 'copy_diagnostics_bundle':
                     return { token: 'dev-token', path: '/Users/alex/curio-diagnostics.zip' };
-                case 'add_feed':
+                case 'add_feed': {
+                    // A canned stand-in for subscribe-time validation: a URL
+                    // mentioning `nofeed` has no feed, one mentioning
+                    // `offline` is unreachable — unless `validate: false`
+                    // (the "use this URL directly" escape hatch).
+                    const newFeed = args.newFeed as { url: string; validate: boolean };
+                    if (newFeed.validate && /nofeed/i.test(newFeed.url)) {
+                        throw {
+                            kind: 'user',
+                            code: 'NO_FEED',
+                            message: `no feed found at ${newFeed.url}`,
+                            recoverable: false,
+                        };
+                    }
+                    if (newFeed.validate && /offline/i.test(newFeed.url)) {
+                        throw {
+                            kind: 'user',
+                            code: 'NETWORK',
+                            message: `could not reach ${newFeed.url}: connection refused`,
+                            recoverable: true,
+                        };
+                    }
                     return structuredClone(feeds[0]);
+                }
                 case 'remove_feed':
+                case 'stage_feed_removal':
+                case 'unstage_feed_removal':
                 case 'update_feed_metadata':
                     return null;
                 // Startup recovery: `?startup=<class>` (and `&backup=0` for

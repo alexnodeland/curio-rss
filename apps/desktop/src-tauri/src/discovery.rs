@@ -69,6 +69,7 @@ impl From<DiscoverError> for CommandError {
                     .with_param("host", host_of(&url))
                     .with_param("status", status.to_string())
             }
+            DiscoverError::NoFeed { .. } => Self::user(ErrorCode::NoFeed, message, false),
         }
     }
 }

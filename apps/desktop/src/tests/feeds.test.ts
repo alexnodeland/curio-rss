@@ -60,14 +60,30 @@ describe('feeds store', () => {
         const first = refreshOutcomeFixture({ feed_id: 1, new_articles: 2 });
         const second = refreshOutcomeFixture({ feed_id: 2, status: 'not_modified' });
 
-        await events.refreshProgress.emit({ feed_id: 1, outcome: first });
+        await events.refreshProgress.emit({
+            sweep_id: 1,
+            done: 1,
+            total: 2,
+            feed_id: 1,
+            outcome: first,
+        });
         expect(store.refreshing).toBe(true);
         expect(store.refreshOutcomes).toEqual([first]);
 
-        await events.refreshProgress.emit({ feed_id: 2, outcome: second });
+        await events.refreshProgress.emit({
+            sweep_id: 1,
+            done: 2,
+            total: 2,
+            feed_id: 2,
+            outcome: second,
+        });
         expect(store.refreshOutcomes).toEqual([first, second]);
 
-        await events.refreshFinished.emit({ outcomes: [first, second] });
+        await events.refreshFinished.emit({
+            sweep_id: 1,
+            cancelled: false,
+            outcomes: [first, second],
+        });
         expect(store.refreshing).toBe(false);
         expect(store.refreshOutcomes).toEqual([first, second]);
         unwire();
@@ -135,6 +151,7 @@ describe('feeds store', () => {
             url: 'https://example.org/feed.xml',
             title: null,
             tags: [],
+            validate: true,
         });
         expect(added.status).toBe('ok');
 

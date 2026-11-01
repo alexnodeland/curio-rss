@@ -1,0 +1,10 @@
+# cargo-fuzz working state — never committed. The seed corpora are the
+# committed fixtures (fixtures/feeds, nasty, opml, html), passed to
+# `cargo fuzz run` as extra read-only corpus dirs; corpus/<target> only
+# collects what libFuzzer discovers on top of them.
+target/
+corpus/
+artifacts/
+coverage/
+# Copied from the workspace root before a run (see Cargo.toml).
+Cargo.lock

@@ -38,7 +38,7 @@ export const en = {
     'error.parse': 'Curio couldn’t read that file or feed.',
     'error.storage': 'Curio couldn’t save that change.',
     'error.duplicate': 'That already exists.',
-    'error.duplicateFeed': 'You’re already subscribed to that feed.',
+    'error.alreadySubscribed': 'You’re already subscribed to that feed.',
     'error.diskFull': 'The disk is full. Free some space and try again.',
     'error.readOnly': 'Curio can’t write to its library: the folder or disk is read-only.',
     'error.io': 'Curio couldn’t read or write a file.',
@@ -99,6 +99,9 @@ export const en = {
     'list.row.starred': 'Starred',
 
     'reader.empty': 'Select an article to read',
+    'reader.hint.move': 'to move',
+    'reader.hint.read': 'to read',
+    'reader.hint.help': 'for shortcuts',
     'reader.imagesOff': 'Images are off in this article.',
     'reader.imagesOff.enable': 'Turn on',
     'reader.missing': 'This article no longer exists',
@@ -215,6 +218,7 @@ export const en = {
     'addFeed.candidates': 'Feeds found',
     'addFeed.noneFound': 'No feeds found on that page — try the direct feed URL.',
     'addFeed.useUrl': 'Use this URL directly',
+    'addFeed.unreachable': 'Couldn’t reach that address to check it for a feed.',
     'addFeed.already': 'You are already subscribed to this feed.',
     'addFeed.added': 'Subscribed to {title}',
     'addFeed.saveLink': 'Save to Read Later',
@@ -232,6 +236,11 @@ export const en = {
     'presets.reddit': 'Reddit',
     'presets.youtube': 'YouTube',
     'presets.mastodon': 'Mastodon',
+    'presets.github': 'GitHub releases',
+    'presets.newsletter': 'Newsletter',
+    'presets.newsletter.hint':
+        'Newsletters arrive by email. Create an inbox at Kill the Newsletter, sign up to the newsletter with its address, then paste that address or its feed URL here. Substack newsletters need no inbox — paste their web address.',
+    'presets.newsletter.open': 'Open Kill the Newsletter',
     'presets.hn': 'Hacker News',
     'presets.hn.frontpage': 'Front page',
     'presets.hn.newest': 'Newest',
@@ -461,11 +470,19 @@ export const en = {
     'refresh.announce.done':
         'Refresh complete: {count, plural, one {# new article} other {# new articles}} across {feeds, plural, one {# feed} other {# feeds}}',
     'refresh.inProgress': 'Refreshing… {done} of {total}',
+    'connectivity.offline': 'Offline',
+    'connectivity.offline.hint': 'No network — background refresh is paused',
 
     'pane.sidebar.resize': 'Resize sidebar',
     'pane.list.resize': 'Resize article list',
 
     'toast.dismiss': 'Dismiss',
+    'toast.region': 'Notifications',
+    'toast.undo': 'Undo',
+    'toast.retry': 'Retry',
+    'toast.markReadUndone':
+        '{count, plural, one {Marked # unread again} other {Marked # unread again}}',
+    'updates.openSettings': 'Open Settings',
 
     'shortcut.category.navigation': 'Navigation',
     'shortcut.category.actions': 'Actions',
@@ -491,6 +508,13 @@ export const en = {
     'shortcut.help': 'Keyboard shortcut help',
     'shortcut.addFeed': 'Add a feed',
     'shortcut.settings': 'Open settings',
+    'shortcut.focusReader': 'Read the selected article (focus the reader)',
+    'shortcut.focusList': 'Back to the article list',
+    'shortcut.pageDown': 'Page down; at the end, next unread',
+    'shortcut.pageUp': 'Page up',
+    'shortcut.toggleArchived': 'Archive / unarchive article',
+    'shortcut.markAllRead': 'Mark all read in the current view',
+    'key.space': 'Space',
 
     'recovery.title.corrupt': 'Curio can’t read its database',
     'recovery.title.tooNew': 'This database is from a newer Curio',

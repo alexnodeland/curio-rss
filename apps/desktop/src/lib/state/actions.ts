@@ -6,7 +6,13 @@
  * Toggles read the authoritative flag first (`get_article_state`), then
  * write the flip; core's idempotency `bool` makes double-fires harmless.
  */
-import { events, type CommandError, type ImportSourceDto, commands } from '$lib/bindings';
+import {
+    events,
+    type ArticleSummaryDto,
+    type CommandError,
+    type ImportSourceDto,
+    commands,
+} from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
@@ -19,42 +25,121 @@ import {
     unreadScopeDto,
 } from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
+import { rebuildGlobalOrder } from './feed-dnd.svelte';
+import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import { feedsStore } from './feeds.svelte';
+import { feedInFolder } from './folder-ops';
 import { layoutStore } from './layout.svelte';
 import type { CommandResult } from './query-cache.svelte';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
-import { toastStore } from './toasts.svelte';
+import { type ToastOptions, toastStore } from './toasts.svelte';
 
-/** Surfaces a command failure as an error toast. */
-export function toastCommandError(error: CommandError): void {
-    toastStore.showToast(commandErrorMessage(error), 'error');
+/** Re-runs the action that failed (the error toast's Retry button). */
+export type Retry = () => void;
+
+/**
+ * How a failed action is retried. `run` re-runs the whole user action — the
+ * caller's full flow, with the absolute target it asked for (never a
+ * relative flip, which would mean the opposite once anything changed).
+ * `key` names what the action writes (`refresh:12`, `starred:7`): a repeat
+ * failure under it replaces the showing toast instead of stacking, a
+ * different action's failure never merges into it, and a later success under
+ * it withdraws the toast, whose Retry would replay a stale request over the
+ * newer outcome.
+ */
+export interface RetryPlan {
+    readonly run: Retry;
+    readonly key?: string;
 }
 
-/** Unwraps a command result; failures (including thrown) become toasts. */
-async function run<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | undefined> {
+/** An error toast's options: keyed, with a Retry button when `retry` is set. */
+function errorOptions(plan: RetryPlan | undefined, retry: boolean): ToastOptions {
+    return {
+        key: plan?.key,
+        action:
+            plan !== undefined && retry ? { label: t('toast.retry'), run: plan.run } : undefined,
+    };
+}
+
+/**
+ * Whether retrying the same action can help. The backend's `recoverable`
+ * also covers input the user can fix (an invalid folder name), but a Retry
+ * replays the same input, which fails the same validation every time.
+ */
+function retryable(error: CommandError): boolean {
+    return error.recoverable && error.code !== 'INVALID_INPUT';
+}
+
+/**
+ * Surfaces a command failure as an error toast (sticky until dismissed).
+ * With `retry`, a failure retrying can fix (see {@link retryable}) offers a
+ * Retry button that runs the plan; any other (bad input, a row that's gone)
+ * doesn't.
+ */
+export function toastCommandError(error: CommandError, retry?: RetryPlan): void {
+    toastStore.showToast(
+        commandErrorMessage(error),
+        'error',
+        errorOptions(retry, retryable(error)),
+    );
+}
+
+/**
+ * Unwraps a command result; failures (including thrown) become error toasts.
+ * `retry`, when given, is what the toast's Retry button runs (see
+ * {@link RetryPlan}); a success under its key withdraws a showing failure.
+ */
+async function run<T>(
+    invoke: () => Promise<CommandResult<T>>,
+    retry?: RetryPlan,
+): Promise<T | undefined> {
     let result: CommandResult<T>;
     try {
         result = await invoke();
     } catch {
-        toastStore.showToast(t('app.error.internal'), 'error');
+        // A thrown (non-contract) failure is internal; retrying may help.
+        toastStore.showToast(t('app.error.internal'), 'error', errorOptions(retry, true));
         return undefined;
     }
     if (result.status === 'error') {
-        toastCommandError(result.error);
+        toastCommandError(result.error, retry);
         return undefined;
     }
+    if (retry?.key !== undefined) {
+        toastStore.withdraw(retry.key);
+    }
     return result.data;
+}
+
+/** {@link runCommand}'s options. */
+export interface RunCommandOptions {
+    /** What the command writes (see {@link RetryPlan.key}). */
+    readonly key?: string;
+    /**
+     * The caller's whole flow, for Retry — when it does more than the
+     * command (a follow-up toast). Default: invoke the command again.
+     */
+    readonly retry?: Retry;
 }
 
 /**
  * Public unwrap for fire-and-forget mutation call sites that would otherwise
  * `void` the `CommandResult` and swallow failures (sidebar/folder ops). A
- * failure toasts; success is silent. Route every such mutation through this so
- * no failure is lost and none falsely reports success.
+ * failure toasts with a Retry (the caller's `retry`, or the same `invoke`
+ * again — so an invoke should compute its arguments from current state, or
+ * carry the absolute target the user asked for); success is silent. Route
+ * every such mutation through this so no failure is lost and none falsely
+ * reports success.
  */
-export function runCommand<T>(invoke: () => Promise<CommandResult<T>>): Promise<T | undefined> {
-    return run(invoke);
+export function runCommand<T>(
+    invoke: () => Promise<CommandResult<T>>,
+    options: RunCommandOptions = {},
+): Promise<T | undefined> {
+    return run(invoke, {
+        key: options.key,
+        run: options.retry ?? (() => void runCommand(invoke, options)),
+    });
 }
 
 type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
@@ -70,40 +155,74 @@ type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
 const toggleChain = new Map<string, Promise<unknown>>();
 const toggleDesired = new Map<string, boolean>();
 
-async function toggleFlag(
-    articleId: number,
-    field: ToggleField,
-    write: (id: number, value: boolean) => Promise<CommandResult<boolean>>,
-): Promise<void> {
-    const key = `${field}:${articleId}`;
+type FlagWrite = (id: number, value: boolean) => Promise<CommandResult<boolean>>;
+
+/** Runs `step` after every earlier step on the same flag has settled. */
+async function onFlagChain<T>(key: string, step: () => Promise<T>): Promise<T> {
     const previous = toggleChain.get(key) ?? Promise.resolve();
-    const task = previous.then(async () => {
-        let current: boolean;
-        if (toggleDesired.has(key)) {
-            current = toggleDesired.get(key) as boolean;
-        } else {
-            const state = await run(() => commands.getArticleState(articleId));
-            if (state === undefined) {
-                return; // read failed (a toast fired); nothing to flip
-            }
-            current = state[field];
-        }
-        const target = !current;
-        toggleDesired.set(key, target);
-        const ok = await run(() => write(articleId, target));
-        if (ok === undefined) {
-            // The write failed (toast already fired) — forget the optimistic
-            // value so the next press reads the real backend flag again.
-            toggleDesired.delete(key);
-        }
-    });
+    const task = previous.then(step);
     toggleChain.set(key, task);
-    await task;
+    const outcome = await task;
     // Drain once this press is the tail of the chain, so the maps don't grow.
     if (toggleChain.get(key) === task) {
         toggleChain.delete(key);
         toggleDesired.delete(key);
     }
+    return outcome;
+}
+
+/**
+ * Writes an absolute flag value; the value written, or `undefined` when the
+ * write failed (toasted). A failed write's Retry writes that same value —
+ * never a fresh flip, which would mean the opposite once the flag changed in
+ * between (the toast stays until dismissed) — and a later successful write
+ * of the flag withdraws the failure (same key).
+ */
+async function writeFlag(
+    articleId: number,
+    field: ToggleField,
+    write: FlagWrite,
+    value: boolean,
+): Promise<boolean | undefined> {
+    const key = `${field}:${articleId}`;
+    toggleDesired.set(key, value);
+    const ok = await run(() => write(articleId, value), {
+        key,
+        run: () => void onFlagChain(key, () => writeFlag(articleId, field, write, value)),
+    });
+    if (ok === undefined) {
+        // The write failed (toast already fired) — forget the optimistic
+        // value so the next press reads the real backend flag again.
+        toggleDesired.delete(key);
+        return undefined;
+    }
+    return value;
+}
+
+/** Flips a flag; the value written, or `undefined` when nothing was (toasted). */
+async function toggleFlag(
+    articleId: number,
+    field: ToggleField,
+    write: FlagWrite,
+): Promise<boolean | undefined> {
+    const key = `${field}:${articleId}`;
+    return onFlagChain(key, async (): Promise<boolean | undefined> => {
+        let current: boolean;
+        if (toggleDesired.has(key)) {
+            current = toggleDesired.get(key) as boolean;
+        } else {
+            // A failed read decided nothing, so its Retry is the whole toggle.
+            const state = await run(() => commands.getArticleState(articleId), {
+                key,
+                run: () => void toggleFlag(articleId, field, write),
+            });
+            if (state === undefined) {
+                return undefined; // read failed (a toast fired); nothing to flip
+            }
+            current = state[field];
+        }
+        return writeFlag(articleId, field, write, !current);
+    });
 }
 
 /** Stars / unstars against the current backend flag. */
@@ -116,14 +235,28 @@ export async function toggleReadLater(articleId: number): Promise<void> {
     await toggleFlag(articleId, 'read_later', (id, value) => commands.setReadLater(id, value));
 }
 
-/** Marks read / unread against the current backend flag. */
+/**
+ * Marks read / unread against the current backend flag. The row is held for
+ * the view session first, so marking it read in an unread-only view keeps it
+ * in place (dimmed) instead of yanking it out from under the cursor.
+ */
 export async function toggleRead(articleId: number): Promise<void> {
+    articlesStore.holdRead(articleId);
     await toggleFlag(articleId, 'read', (id, value) => commands.markRead(id, value));
 }
 
-/** Archives / unarchives against the current backend flag. */
+/**
+ * Archives / unarchives against the current backend flag. Archiving takes the
+ * row out of the reading flow, so once the archive is written any session
+ * read-hold on it is let go; a failed write (toasted) leaves the row held.
+ */
 export async function toggleArchived(articleId: number): Promise<void> {
-    await toggleFlag(articleId, 'archived', (id, value) => commands.setArchived(id, value));
+    const archived = await toggleFlag(articleId, 'archived', (id, value) =>
+        commands.setArchived(id, value),
+    );
+    if (archived === true) {
+        articlesStore.releaseHeld(articleId);
+    }
 }
 
 /**
@@ -133,7 +266,13 @@ export async function toggleArchived(articleId: number): Promise<void> {
  * j/k scanning.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
-    await run(() => commands.markRead(articleId, true));
+    // Held first: in an unread-only view the open must not drop the row (and
+    // the selection with it) — it stays until the view changes.
+    articlesStore.holdRead(articleId);
+    await run(() => commands.markRead(articleId, true), {
+        key: `read:${articleId}`,
+        run: () => void markReadOnOpen(articleId),
+    });
 }
 
 /**
@@ -143,6 +282,8 @@ export async function markReadOnOpen(articleId: number): Promise<void> {
  * was already read, so re-scrolling the same rows costs nothing.
  */
 export async function markReadOnScroll(articleId: number): Promise<void> {
+    // Held so the scrolled-past rows don't vanish and shift the list up.
+    articlesStore.holdRead(articleId);
     try {
         await commands.markRead(articleId, true);
     } catch {
@@ -156,20 +297,378 @@ export async function markReadOnScroll(articleId: number): Promise<void> {
  * emitted `ArticlesChanged`. Returns whether it succeeded (for a loading UI).
  */
 export async function loadFullArticle(articleId: number): Promise<boolean> {
-    return (await run(() => commands.loadFullArticle(articleId))) !== undefined;
+    return (
+        (await run(() => commands.loadFullArticle(articleId), {
+            key: `fullArticle:${articleId}`,
+            run: () => void loadFullArticle(articleId),
+        })) !== undefined
+    );
+}
+
+/**
+ * Puts a bulk mark-read back: exactly the snapshot of ids it flipped return
+ * to unread (one `mark_read_many` transaction — ids purged since are
+ * skipped), and the toast says how many came back.
+ */
+export async function undoMarkRead(articleIds: readonly number[]): Promise<void> {
+    const restored = await run(() => commands.markReadMany([...articleIds], false), {
+        run: () => void undoMarkRead(articleIds),
+    });
+    if (restored !== undefined) {
+        toastStore.showToast(t('toast.markReadUndone', { count: restored }), 'info');
+    }
+}
+
+/** The "Marked N read" toast, with Undo when anything changed. */
+function toastMarkedRead(articleIds: readonly number[]): void {
+    const message = t('toast.markAllRead', { count: articleIds.length });
+    if (articleIds.length === 0) {
+        toastStore.showToast(message, 'success');
+        return;
+    }
+    toastStore.showToast(message, 'success', {
+        action: { label: t('toast.undo'), run: () => undoMarkRead(articleIds) },
+    });
 }
 
 /**
  * Marks every unread article in a feed (`feedId`) — or the whole library
- * (`null`) — read, and toasts how many changed. The sidebar badges and the
- * list refresh off the Rust-emitted `ArticlesChanged`.
+ * (`null`) — read, and toasts how many changed, with an Undo that restores
+ * exactly the articles this sweep flipped (the backend returns their ids).
+ * The sidebar badges and the list refresh off the Rust-emitted
+ * `ArticlesChanged`.
  */
 export async function markAllRead(feedId: number | null): Promise<void> {
-    const changed = await run(() => commands.markAllRead(feedId));
-    if (changed === undefined) {
+    const changed = await run(() => commands.markAllRead(feedId), {
+        key: `markAllRead:${feedId ?? 'all'}`,
+        run: () => void markAllRead(feedId),
+    });
+    if (changed !== undefined) {
+        // An explicit sweep: the swept feed's held stragglers go with the rest
+        // (the whole hold for the library-wide sweep); other feeds' stay put.
+        articlesStore.releaseHolds(feedId);
+        toastMarkedRead(changed);
+    }
+}
+
+/**
+ * Marks a whole folder subtree read, all or nothing: a failure part-way rolls
+ * back the feeds already marked (the store does it) and toasts with Retry;
+ * success toasts the count with Undo.
+ */
+export async function markFolderRead(folder: FeedFolder): Promise<void> {
+    const changed = await run(() => feedsStore.markFolderRead(folder), {
+        key: `markFolderRead:${folder.path}`,
+        run: () => void markFolderRead(folder),
+    });
+    if (changed !== undefined) {
+        // Like a feed sweep: the swept feeds' held rows go, others' stay put.
+        for (const feedId of subtreeFeedIds(folder)) {
+            articlesStore.releaseHolds(feedId);
+        }
+        toastMarkedRead(changed);
+    }
+}
+
+/**
+ * Unsubscribes with an undo window instead of a confirm: the feed leaves the
+ * sidebar at once, and the toast's Undo brings it back untouched. The backend
+ * removal (which deletes the subscription row — its id, health and history
+ * can't be recreated) runs only once the toast closes any other way — its
+ * timer, the close button, eviction, or the window unloading — so an undo
+ * never has anything to restore. The removal is also staged backend-side,
+ * which commits it if the app quits inside the window (the webview need not
+ * deliver `pagehide` on a quit).
+ */
+export function unsubscribeWithUndo(feedId: number, name: string): void {
+    const wasSelected = selectionStore.selectedFeedId === feedId;
+    const previous = {
+        filters: articlesStore.filters,
+        articleId: selectionStore.selectedArticleId,
+    };
+    if (wasSelected) {
+        selectView('all'); // don't leave the list showing a feed that's going away
+    }
+    feedsStore.hideFeed(feedId);
+    void stageRemoval(feedId, true);
+    const undo = (): void => {
+        void stageRemoval(feedId, false);
+        feedsStore.unhideFeed(feedId);
+        // Back to the feed, unless the user has moved on from the All view
+        // the unsubscribe switched to.
+        const untouched =
+            activeView(articlesStore.filters) === 'all' &&
+            selectionStore.selectedFeedId === null &&
+            !searchStore.active;
+        if (wasSelected && untouched) {
+            selectionStore.selectedFeedId = feedId;
+            selectionStore.selectedArticleId = previous.articleId;
+            articlesStore.filters = previous.filters;
+        }
+    };
+    toastStore.showToast(t('feed.unsubscribed', { name }), 'info', {
+        action: { label: t('toast.undo'), run: undo },
+        onClose: (reason) => {
+            if (reason !== 'action') {
+                void finishUnsubscribe(feedId);
+            }
+        },
+    });
+}
+
+/**
+ * Stages (or withdraws) an unsubscribe's exit-time commit. Best effort: if
+ * it fails, only that safety net is lost — the toast still commits on close.
+ */
+async function stageRemoval(feedId: number, staged: boolean): Promise<void> {
+    try {
+        await (staged ? commands.stageFeedRemoval(feedId) : commands.unstageFeedRemoval(feedId));
+    } catch {
+        // No IPC (the window is going away): nothing else to do.
+    }
+}
+
+/** The deferred half of {@link unsubscribeWithUndo}: the backend removal. */
+async function finishUnsubscribe(feedId: number): Promise<void> {
+    const removed = await run(() => feedsStore.removeFeed(feedId), {
+        key: `unsubscribe:${feedId}`,
+        run: () => void finishUnsubscribe(feedId),
+    });
+    if (removed === undefined) {
+        // Still subscribed after all: show it again (the error toast has Retry).
+        feedsStore.unhideFeed(feedId);
+    }
+}
+
+// ─── sidebar mutations ──────────────────────────────────────────────────────
+// Each is keyed by what it writes, so a later success withdraws a stale
+// failure's Retry, and each Retry carries the absolute target (or recomputes
+// from current state) rather than replaying a snapshot over newer changes.
+
+/** Retitles a feed (`null` = back to the feed's own title). */
+export function renameFeed(feedId: number, title: string | null): Promise<null | undefined> {
+    return runCommand(() => feedsStore.setFeedTitle(feedId, title), {
+        key: `feed:${feedId}:title`,
+    });
+}
+
+/** Moves a feed into folder `path` (the move reads the feed's current tags). */
+export function moveFeed(feedId: number, path: string): Promise<null | undefined> {
+    return runCommand(() => feedsStore.moveFeedToFolder(feedId, path), {
+        key: `feed:${feedId}:folder`,
+    });
+}
+
+/** Takes a feed out of its folders. */
+export function ungroupFeed(feedId: number): Promise<null | undefined> {
+    return runCommand(() => feedsStore.ungroupFeed(feedId), { key: `feed:${feedId}:folder` });
+}
+
+/** Pauses or resumes a feed's refreshes. */
+export function setFeedPaused(feedId: number, paused: boolean): Promise<null | undefined> {
+    return runCommand(() => feedsStore.setFeedStatus(feedId, paused ? 'paused' : 'active'), {
+        key: `feed:${feedId}:status`,
+    });
+}
+
+/**
+ * Applies a within-group reorder (`group`: the group's ids in their new
+ * order). The global order is rebuilt from the current feed list at invoke
+ * time, so a Retry applies the same group order without dropping feeds added
+ * (or resurrecting ones removed) since the failure.
+ */
+export function reorderFeedGroup(group: readonly number[]): Promise<null | undefined> {
+    return runCommand(
+        () => {
+            const all = feedsStore.feeds.map((candidate) => candidate.id);
+            const present = group.filter((id) => all.includes(id));
+            return feedsStore.reorderFeeds(rebuildGlobalOrder(all, present));
+        },
+        { key: 'feeds:order' },
+    );
+}
+
+/** Renames folder `oldPath` to `newPath` (retagging the feeds in it as they are now). */
+export function renameFolder(oldPath: string, newPath: string): Promise<null | undefined> {
+    return runCommand(() => feedsStore.renameFolder(oldPath, newPath), {
+        key: `folder:${oldPath}`,
+    });
+}
+
+/**
+ * Deletes folder `path` (its feeds move to the parent) and says so — only
+ * once it actually succeeded. A failure's Retry runs this whole flow, so a
+ * retried delete that succeeds announces itself too.
+ */
+export async function deleteFolder(path: string, name: string): Promise<void> {
+    const result = await runCommand(() => feedsStore.deleteFolder(path), {
+        key: `folder:${path}`,
+        retry: () => void deleteFolder(path, name),
+    });
+    if (result !== undefined) {
+        toastStore.showToast(t('folder.deleted', { name }), 'info');
+    }
+}
+
+/** How many unread rows one mark-view-read listing page asks for. */
+const MARK_VIEW_PAGE = 200;
+
+/** Marks each id read, one command apiece; stops at (and toasts) the first failure. */
+async function markEachRead(articleIds: readonly number[]): Promise<number | undefined> {
+    let changed = 0;
+    for (const articleId of articleIds) {
+        const flipped = await run(() => commands.markRead(articleId, true));
+        if (flipped === undefined) {
+            return undefined;
+        }
+        if (flipped) {
+            changed += 1;
+        }
+    }
+    return changed;
+}
+
+/** One page of a view's unread rows strictly below `before`. */
+function unreadPage(
+    filters: ArticleFilters,
+    before: number | null,
+): Promise<ArticleSummaryDto[] | undefined> {
+    return run(() => commands.listArticles(unreadScopeDto(filters, before, MARK_VIEW_PAGE)));
+}
+
+/** Every unread article id in a filtered view, paged backend-side. */
+async function unreadIdsInView(filters: ArticleFilters): Promise<number[] | undefined> {
+    const ids: number[] = [];
+    let before: number | null = null;
+    for (;;) {
+        const page = await unreadPage(filters, before);
+        if (page === undefined) {
+            return undefined;
+        }
+        ids.push(...page.map((article) => article.id));
+        const last = page.at(-1);
+        if (page.length < MARK_VIEW_PAGE || last === undefined) {
+            return ids;
+        }
+        before = last.id;
+    }
+}
+
+/**
+ * Whether the backend's bulk command covers a view: it scopes by feed or the
+ * whole library, so any narrowing flag (starred, read later, a tag, the
+ * Archived view) has no bulk form.
+ */
+function hasBulkScope(filters: ArticleFilters): boolean {
+    return (
+        filters.starred === null &&
+        filters.readLater === null &&
+        filters.tag === null &&
+        filters.archived !== true
+    );
+}
+
+/** Bulk-marks every feed in folder `path` read; the summed count. */
+async function markFolderFeedsRead(path: string): Promise<number | undefined> {
+    let changed = 0;
+    for (const feed of feedsStore.feeds.filter((candidate) => feedInFolder(candidate, path))) {
+        const flipped = await run(() => commands.markAllRead(feed.id));
+        if (flipped === undefined) {
+            return undefined;
+        }
+        changed += flipped.length;
+    }
+    return changed;
+}
+
+/** The count of articles a view-wide mark flipped, or `undefined` on failure. */
+async function markViewReadCount(): Promise<number | undefined> {
+    if (searchStore.active) {
+        // Search results are a fixed FTS window: mark exactly what is listed.
+        return markEachRead(articlesStore.activeItems.map((article) => article.id));
+    }
+    const filters = articlesStore.filters;
+    if (filters.read === true) {
+        return 0; // a read-only view holds nothing unread
+    }
+    if (hasBulkScope(filters) && filters.feedTag === null) {
+        const flipped = await run(() => commands.markAllRead(filters.feedId));
+        return flipped?.length;
+    }
+    if (hasBulkScope(filters) && filters.feedTag !== null && filters.feedId === null) {
+        return markFolderFeedsRead(filters.feedTag);
+    }
+    const ids = await unreadIdsInView(filters);
+    return ids === undefined ? undefined : markEachRead(ids);
+}
+
+/**
+ * Marks everything unread in the current view read (`Shift+A`) and toasts how
+ * many changed. A feed or the whole library rides the backend's bulk
+ * command, a folder its feeds' bulk marks; every narrower view (Starred,
+ * Read later, Archived, a tag, search results) lists its own unread and
+ * marks exactly those. Known gap: the bulk command ignores `archived`, so `A`
+ * from All, a feed or a folder also marks that scope's hidden archived rows
+ * read (#278). Like mark-all-read, the sweep ends the view's read-hold: the
+ * rows read earlier this session go with the rest.
+ */
+export async function markViewRead(): Promise<void> {
+    const changed = await markViewReadCount();
+    if (changed !== undefined) {
+        articlesStore.releaseHolds();
+        toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+    }
+}
+
+/** The reader's scroll body while one is mounted (registered by ReaderPane). */
+let readerBody: HTMLElement | null = null;
+
+/**
+ * Registers the mounted reader scroll body as the Space-paging target.
+ * Returns the unregister (a no-op once a newer body took over).
+ */
+export function registerReaderBody(element: HTMLElement): () => void {
+    readerBody = element;
+    return () => {
+        if (readerBody === element) {
+            readerBody = null;
+        }
+    };
+}
+
+/** A Space page is 7/8 of the viewport — the browser's own step, keeping a line of context. */
+const PAGE_FRACTION = 0.875;
+
+/** Sub-pixel slack when deciding the reader sits at the article's end. */
+const END_SLACK_PX = 2;
+
+/**
+ * Space / Shift+Space: pages the reader body down / up. Space at the end of
+ * the article — or with nothing selected — advances to the next unread
+ * (Reeder / NetNewsWire). While the selected article is still loading there
+ * is no body to page, and the press is dropped rather than skipping an
+ * article the reader never saw.
+ */
+export function pageReader(direction: 'down' | 'up'): void {
+    if (selectionStore.selectedArticleId === null) {
+        if (direction === 'down') {
+            void goToNextUnread();
+        }
         return;
     }
-    toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+    const body = readerBody;
+    if (body === null) {
+        return;
+    }
+    const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - END_SLACK_PX;
+    if (direction === 'down' && atEnd) {
+        void goToNextUnread();
+        return;
+    }
+    const step = Math.round(body.clientHeight * PAGE_FRACTION);
+    // A plain scrollTop write honours the body's CSS `scroll-behavior`
+    // (smooth unless the user asked for reduced motion).
+    body.scrollTop = Math.max(0, body.scrollTop + (direction === 'down' ? step : -step));
 }
 
 /**
@@ -339,7 +838,20 @@ export async function promoteSelected(): Promise<void> {
         layoutStore.openModal('destinations');
         return;
     }
-    const outcome = await run(() => destinationsStore.promote(articleId, target));
+    await promoteArticle(articleId, target);
+}
+
+/**
+ * Promotes one article to the destination named `target` and toasts the
+ * outcome. A failure's Retry promotes that same article to that same
+ * destination — never whatever is selected (or the default) by the time the
+ * sticky toast's Retry is clicked.
+ */
+export async function promoteArticle(articleId: number, target: string): Promise<void> {
+    const outcome = await run(() => destinationsStore.promote(articleId, target), {
+        key: `promote:${articleId}:${target}`,
+        run: () => void promoteArticle(articleId, target),
+    });
     if (outcome === undefined) {
         return;
     }
@@ -353,18 +865,36 @@ function focusSearch(): void {
     searchStore.requestFocus();
 }
 
+/**
+ * Refreshes one feed (the `r` shortcut, the feed's context menu). An explicit
+ * refresh ends that feed's share of the current view's read-hold: its rows
+ * show the backend window again once it reloads. Held rows of other feeds
+ * stay put — refreshing feed B never reshuffles a view of feed A.
+ */
+export function refreshFeed(feedId: number): void {
+    articlesStore.releaseHolds(feedId);
+    void run(() => feedsStore.refreshFeed(feedId), {
+        key: `refresh:${feedId}`,
+        run: () => refreshFeed(feedId),
+    });
+}
+
 /** Refreshes the selected feed, if any (the `r` shortcut). */
 function refreshSelectedFeed(): void {
     const feedId = selectionStore.selectedFeedId;
     if (feedId === null) {
         return;
     }
-    void run(() => feedsStore.refreshFeed(feedId));
+    refreshFeed(feedId);
 }
 
-/** Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar). */
+/**
+ * Kicks off a full refresh sweep (the `Shift+R` shortcut / toolbar); like a
+ * feed refresh, it ends the current view's read-hold.
+ */
 export function refreshAll(): void {
-    void run(() => feedsStore.refreshAll());
+    articlesStore.releaseHolds();
+    void run(() => feedsStore.refreshAll(), { key: 'refresh:all', run: () => refreshAll() });
 }
 
 function openSelected(): void {
@@ -381,6 +911,20 @@ function withSelected(action: (articleId: number) => Promise<void>): void {
     }
 }
 
+/**
+ * Enter / → from the list: hands the keyboard to the reader body. With
+ * nothing selected it selects first (the row j would pick), so the key is
+ * never a dead end.
+ */
+function focusReader(): void {
+    if (selectionStore.selectedArticleId === null) {
+        selectNext();
+    }
+    if (selectionStore.selectedArticleId !== null) {
+        selectionStore.focusReader();
+    }
+}
+
 function toggleHelp(): void {
     if (layoutStore.activeModal === 'help') {
         layoutStore.closeModal();
@@ -392,7 +936,9 @@ function toggleHelp(): void {
 /**
  * Executes one shortcut id. The core set (j/k, o, s, l, m, ?) landed in
  * WP3; WP4 wires the reader-breadth surfaces: `p` promote, `/` search
- * focus, `r`/`Shift+R` refresh, and the `g`-chord view switches.
+ * focus, `r`/`Shift+R` refresh, and the `g`-chord view switches. The pane
+ * keys (listbox ↑/↓/Enter/→, reader ←/Esc) land here too, through the
+ * panes' own handlers.
  */
 export function handleShortcut(id: ShortcutId): void {
     switch (id) {
@@ -405,6 +951,18 @@ export function handleShortcut(id: ShortcutId): void {
         case 'nav.nextUnread':
             void goToNextUnread();
             break;
+        case 'nav.focusReader':
+            focusReader();
+            break;
+        case 'nav.focusList':
+            selectionStore.focusList();
+            break;
+        case 'reader.pageDown':
+            pageReader('down');
+            break;
+        case 'reader.pageUp':
+            pageReader('up');
+            break;
         case 'article.open':
             openSelected();
             break;
@@ -416,6 +974,12 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'article.toggleRead':
             withSelected(toggleRead);
+            break;
+        case 'article.toggleArchived':
+            withSelected(toggleArchived);
+            break;
+        case 'view.markAllRead':
+            void markViewRead();
             break;
         case 'article.promote':
             void promoteSelected();

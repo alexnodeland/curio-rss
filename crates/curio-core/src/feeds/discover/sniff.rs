@@ -1,7 +1,8 @@
 //! The structural feed sniff: do these bytes look like a feed rather than
-//! an HTML page? Content-Type is not exposed by the policed response, so
-//! discovery inspects the bytes — the cheap gate in front of
-//! [`crate::feeds::parse_feed`].
+//! an HTML page? Feeds are too often served under the wrong Content-Type
+//! (`text/html`, `text/plain`, `application/octet-stream`) for the header
+//! to decide, so discovery inspects the decoded bytes — the cheap gate in
+//! front of [`crate::feeds::parse_fetched_feed`].
 
 /// How much of the body the feed sniff looks at. Feeds declare their root
 /// element (or JSON Feed `version`) early; scanning the whole body would
@@ -30,15 +31,57 @@ pub(super) fn looks_like_feed(text: &str) -> bool {
 }
 
 /// A quick structural sniff: is the body an HTML page? Past any BOM,
-/// whitespace, prolog, comments and `<!DOCTYPE html>`, the root element is
-/// `html` (or, for markup that omits it, `head`/`body`), ASCII
-/// case-insensitive.
+/// whitespace, prolog and comments, either the doctype names `html`
+/// (`<!DOCTYPE html>`, an XHTML `<!DOCTYPE html PUBLIC …>`) — HTML5 lets a
+/// page omit its `<html>`, `<head>` and `<body>` tags, so the doctype alone
+/// marks one — or the root element is `html` (or, for markup that omits
+/// it, `head`/`body`). ASCII case-insensitive throughout.
 pub(super) fn looks_like_html(text: &str) -> bool {
-    root_element_name(sniff_head(text)).is_some_and(|name| {
-        ["html", "head", "body"]
-            .iter()
-            .any(|root| name.eq_ignore_ascii_case(root))
-    })
+    let head = sniff_head(text);
+    declares_html_doctype(head)
+        || root_element_name(head).is_some_and(|name| {
+            ["html", "head", "body"]
+                .iter()
+                .any(|root| name.eq_ignore_ascii_case(root))
+        })
+}
+
+/// Whether the first declaration past any prolog, processing instructions
+/// and comments is a doctype naming `html`.
+fn declares_html_doctype(head: &str) -> bool {
+    const DOCTYPE: &str = "<!doctype";
+    let mut rest = head;
+    loop {
+        rest = rest.trim_start();
+        let skipped = if let Some(after) = rest.strip_prefix("<?") {
+            after.find("?>").map(|end| &after[end + "?>".len()..])
+        } else if let Some(after) = rest.strip_prefix("<!--") {
+            after.find("-->").map(|end| &after[end + "-->".len()..])
+        } else {
+            break;
+        };
+        match skipped {
+            Some(after) => rest = after,
+            None => return false,
+        }
+    }
+    let Some(keyword) = rest.get(..DOCTYPE.len()) else {
+        return false;
+    };
+    if !keyword.eq_ignore_ascii_case(DOCTYPE) {
+        return false;
+    }
+    let after = &rest[DOCTYPE.len()..];
+    let name = after.trim_start();
+    if name.len() == after.len() {
+        return false; // `<!doctypehtml>`: no separator, not a doctype
+    }
+    name.get(.."html".len())
+        .is_some_and(|word| word.eq_ignore_ascii_case("html"))
+        && name["html".len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| c.is_whitespace() || c == '>')
 }
 
 /// The first [`SNIFF_WINDOW`] bytes of `text`, past a BOM and whitespace.
@@ -160,6 +203,11 @@ mod tests {
             r#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"/>"#,
             "<head><title>no html tag</title></head>",
             "<body>just a body</body>",
+            // HTML5 omits <html>/<head>/<body>: the doctype alone marks it.
+            "<!DOCTYPE html><meta charset=utf-8><title>tagless</title>",
+            "<!doctype HTML>\n<link rel=stylesheet href=s.css>",
+            "<!-- banner -->\n<!DOCTYPE html>\n<script>1</script>",
+            r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "x.dtd"><meta/>"#,
         ];
         for page in pages {
             assert!(looks_like_html(page), "expected a web page: {page:?}");
@@ -171,6 +219,13 @@ mod tests {
             r#"{"version":"https://jsonfeed.org/version/1.1"}"#,
             "plain text <html>",
             "",
+            // A doctype naming anything but `html` is not an HTML page.
+            r#"<!DOCTYPE rss PUBLIC "-//Netscape//DTD RSS 0.91//EN" "x.dtd"><rss/>"#,
+            "<!DOCTYPE htmlish><meta>",
+            "<!DOCTYPEhtml><meta>",
+            "<!-- unterminated <!DOCTYPE html>",
+            "<?xml version=\"1.0\"",
+            "<!DOCTYPE",
         ];
         for body in not_pages {
             assert!(!looks_like_html(body), "expected not a web page: {body:?}");

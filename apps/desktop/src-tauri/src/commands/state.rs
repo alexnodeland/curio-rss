@@ -33,19 +33,43 @@ pub async fn mark_read(
 }
 
 /// Marks every unread article read — one feed (`Some`) or the whole
-/// library (`None`). Returns how many changed; invalidates only if something
-/// did (the `ArticlesChanged` refresh also updates the unread badges).
+/// library (`None`). Returns the ids that changed (ascending; the length is
+/// the count), which the UI keeps for an exact undo via [`mark_read_many`].
+/// Invalidates only if something changed (the `ArticlesChanged` refresh also
+/// updates the unread badges).
 #[tauri::command]
 #[specta::specta]
 pub async fn mark_all_read(
     app: AppHandle,
     core: State<'_, SharedCore>,
     feed_id: Option<i64>,
-) -> Result<u64, CommandError> {
+) -> Result<Vec<i64>, CommandError> {
     let core = Arc::clone(core.inner());
     let changed = run_blocking("mark_all_read", move || mark_all_read_impl(&core, feed_id)).await?;
-    if changed > 0 {
+    if !changed.is_empty() {
         emit_or_log(&app, &ArticlesChanged { feed_id });
+    }
+    Ok(changed)
+}
+
+/// Marks many articles read/unread in one transaction — undo for a
+/// mark-all-read, and the batch for bulk actions. Ids that no longer exist
+/// are skipped. Returns how many changed; invalidates only if any did.
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_read_many(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    article_ids: Vec<i64>,
+    read: bool,
+) -> Result<u64, CommandError> {
+    let core = Arc::clone(core.inner());
+    let changed = run_blocking("mark_read_many", move || {
+        mark_read_many_impl(&core, &article_ids, read)
+    })
+    .await?;
+    if changed > 0 {
+        emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
     Ok(changed)
 }
@@ -133,8 +157,18 @@ fn mark_read_impl(core: &CoreHandle, article_id: i64, read: bool) -> Result<bool
     Ok(core.mark_read(ArticleId(article_id), read)?)
 }
 
-fn mark_all_read_impl(core: &CoreHandle, feed_id: Option<i64>) -> Result<u64, CommandError> {
-    Ok(core.mark_all_read(feed_id.map(FeedId))?)
+fn mark_all_read_impl(core: &CoreHandle, feed_id: Option<i64>) -> Result<Vec<i64>, CommandError> {
+    let changed = core.mark_all_read(feed_id.map(FeedId))?;
+    Ok(changed.into_iter().map(|id| id.0).collect())
+}
+
+fn mark_read_many_impl(
+    core: &CoreHandle,
+    article_ids: &[i64],
+    read: bool,
+) -> Result<u64, CommandError> {
+    let ids: Vec<ArticleId> = article_ids.iter().copied().map(ArticleId).collect();
+    Ok(core.mark_read_many(&ids, read)?)
 }
 
 fn record_opened_impl(
@@ -212,14 +246,33 @@ mod tests {
 
         assert_eq!(
             mark_all_read_impl(&core, None).unwrap(),
-            1,
-            "only the still-unread article is counted"
+            vec![b],
+            "only the still-unread article is returned"
         );
         assert!(article_state_of(&core, a).read);
         assert!(article_state_of(&core, b).read);
 
         // Nothing left unread → a second sweep changes nothing.
-        assert_eq!(mark_all_read_impl(&core, None).unwrap(), 0);
+        assert_eq!(mark_all_read_impl(&core, None).unwrap(), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn mark_read_many_undoes_exactly_the_mark_all_read_snapshot() {
+        let (_dir, core) = temp_core();
+        let a = seed_article(&core, "read-before");
+        let b = seed_article(&core, "unread-one");
+        let c = seed_article(&core, "unread-two");
+        assert!(mark_read_impl(&core, a, true).unwrap());
+
+        let snapshot = mark_all_read_impl(&core, None).unwrap();
+        assert_eq!(mark_read_many_impl(&core, &snapshot, false).unwrap(), 2);
+        assert!(article_state_of(&core, a).read, "was read before the sweep");
+        assert!(!article_state_of(&core, b).read);
+        assert!(!article_state_of(&core, c).read);
+
+        // Unknown ids are skipped rather than failing the whole batch.
+        assert_eq!(mark_read_many_impl(&core, &[424_242, b], true).unwrap(), 1);
+        assert!(article_state_of(&core, b).read);
     }
 
     #[test]

@@ -2,20 +2,31 @@
 /**
  * The single mount point for the app's one-at-a-time tooltip (driven by the
  * `tooltip` action via `tooltipStore`). Positions above the trigger by
- * default, flipping below when there is no room; centred and clamped to the
- * viewport. `pointer-events: none` so it never blocks the control under it.
+ * default, flipping below when there is no room; centred on the trigger,
+ * then nudged so the whole box stays on screen (a trigger hugging the window
+ * edge — the sidebar's offline badge — would otherwise push half of it off).
+ * `pointer-events: none` so it never blocks the control under it.
  */
 import { tooltipStore } from '$lib/state/tooltip.svelte';
 
 const ABOVE_MIN_TOP = 44;
 const GAP = 6;
+/** Minimum distance between the tooltip box and the viewport edge. */
+const EDGE = 8;
+
+/** The rendered tooltip's width (0 until first laid out). */
+let width = $state(0);
 
 const placement = $derived.by(() => {
     const active = tooltipStore.current;
     if (active === null) return null;
     const { rect } = active;
     const above = rect.top >= ABOVE_MIN_TOP;
-    const centerX = Math.min(window.innerWidth - 8, Math.max(8, rect.left + rect.width / 2));
+    const half = width / 2;
+    const centerX = Math.min(
+        window.innerWidth - EDGE - half,
+        Math.max(EDGE + half, rect.left + rect.width / 2),
+    );
     return {
         left: centerX,
         top: above ? rect.top - GAP : rect.bottom + GAP,
@@ -36,6 +47,7 @@ function onScroll(): void {
         class="tooltip"
         class:above={placement.above}
         role="tooltip"
+        bind:offsetWidth={width}
         style="left: {placement.left}px; top: {placement.top}px;"
     >
         <span class="tooltip-text">{tooltipStore.current.text}</span>

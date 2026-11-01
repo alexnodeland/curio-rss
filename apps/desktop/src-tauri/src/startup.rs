@@ -279,8 +279,9 @@ pub fn install(app: &AppHandle, core: CoreHandle) -> Result<(), StartupFailure> 
         PolicedClient::new(FetchConfig::default()),
     ));
     // Background refresh: keep the reader current without a click. The
-    // scheduler is shared so a manual `refresh_all` resets its timer.
-    let scheduler = Arc::new(refresh_scheduler::RefreshScheduler::new());
+    // scheduler is shared so a manual `refresh_all` resets its timer; its
+    // interval clock resumes from the last refresh persisted in settings.
+    let scheduler = Arc::new(refresh_scheduler::RefreshScheduler::load(&core));
     app.manage(Arc::clone(&scheduler));
     refresh_scheduler::spawn(app.clone(), Arc::clone(&core), scheduler);
     // Optional Reddit API credentials from the OS keychain (D15) —

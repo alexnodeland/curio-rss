@@ -20,8 +20,9 @@
 //! on a timer) or the next open drains the backlog.
 //!
 //! The operation surface is one `impl CoreHandle` block per concern:
-//! `feeds`, `refresh`, `articles`, `state`, `destinations`, `imports`,
-//! `settings` and `maintenance`. This file holds the shared types, `open` /
+//! `feeds`, `refresh` (one feed), `sweep` (many feeds), `articles`,
+//! `state`, `destinations`, `imports`, `settings` and `maintenance`. This
+//! file holds the shared types, `open` /
 //! `open_with`, the accessors (`version`, `profile_dir`), the
 //! `enrich-reddit` API-credential setters (`set_reddit_api`,
 //! `reddit_api_client_id`), and the emission helpers every mutation ends
@@ -40,10 +41,15 @@ mod destinations;
 mod feeds;
 mod imports;
 mod maintenance;
+mod reddit_auth;
 mod refresh;
 mod settings;
 mod sink;
 mod state;
+mod sweep;
+
+pub use reddit_auth::RedditAuthReason;
+pub use sweep::{DEFAULT_REFRESH_CONCURRENCY, RefreshOptions, SweepProgress, SweepReport};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -63,6 +69,7 @@ use crate::fetch::{FetchConfig, FetchError, PolicedClient};
 use crate::import::{ImportError, ImportKind, Rejected};
 use crate::model::{Article, FeedId, FetchErrorKind, FetchStatus};
 use crate::storage::{OpenError, Storage, StorageError};
+use reddit_auth::reddit_auth_message;
 
 /// Facade-level errors: every engine subsystem, plus facade concerns.
 #[derive(Debug, thiserror::Error)]
@@ -141,13 +148,26 @@ pub enum CoreError {
         /// Seconds until the breaker re-tries.
         retry_after_secs: u64,
     },
-    /// Reddit refused the request for auth reasons (missing, rejected,
-    /// or revoked credentials) — actionable by the user, so the detail
-    /// is surfaced verbatim.
-    #[error("{detail}")]
+    /// Reddit refused the request for auth reasons — actionable by the
+    /// user, and `reason` says which action: add credentials, fix them,
+    /// or re-authorize the app.
+    #[error("{}", reddit_auth_message(*reason, *status))]
     RedditAuth {
-        /// The user-facing guidance.
-        detail: String,
+        /// Why reddit refused.
+        reason: RedditAuthReason,
+        /// The HTTP status of the refusal (of the token grant for
+        /// [`RedditAuthReason::CredentialsRejected`], of the post request
+        /// otherwise — for [`RedditAuthReason::TokenUnavailable`], the
+        /// anonymous fallback's).
+        status: u16,
+    },
+    /// A blocking engine task (a refresh's parse/ingest/storage half)
+    /// panicked — a bug. The panic is contained: only this operation
+    /// failed, and a sweep reports it as that feed's outcome.
+    #[error("an engine task panicked: {message}")]
+    Panicked {
+        /// The panic message.
+        message: String,
     },
 }
 
@@ -314,6 +334,9 @@ pub struct CoreHandle {
     /// How long a refresh waits for another process to finish refreshing
     /// the same feed (derived from the fetch timeouts at open).
     refresh_lock_wait: Duration,
+    /// The one refresh sweep allowed in flight (see
+    /// [`CoreHandle::refresh_many`]): a second request joins it.
+    sweep: sweep::SweepSlot,
     /// Circuit breaker over enrichment calls (D8/D14): repeated provider
     /// failures skip enrichment for a cool-down instead of stalling
     /// every hydrate.
@@ -405,6 +428,7 @@ impl CoreHandle {
             client: PolicedClient::new(options.fetch),
             refresh_locks: Mutex::new(HashMap::new()),
             refresh_lock_wait,
+            sweep: sweep::SweepSlot::default(),
             #[cfg(feature = "enrich-reddit")]
             enrich_breaker: crate::enrich::Breaker::default(),
             #[cfg(feature = "enrich-reddit")]

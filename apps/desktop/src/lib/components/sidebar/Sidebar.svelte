@@ -9,16 +9,19 @@ import Icon, { type IconName } from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import { type MessageKey, t } from '$lib/i18n';
+import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     activeView,
     importFromFile,
     refreshAll,
-    runCommand,
+    reorderFeedGroup,
     selectView,
+    ungroupFeed,
     type ViewId,
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
-import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { feedDnd, moveWithinGroup } from '$lib/state/feed-dnd.svelte';
+import { connectivityStore } from '$lib/state/connectivity.svelte';
 import { buildFeedTree, flattenVisibleTree, type VisibleRow } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { folderPathsForTags } from '$lib/state/folder-ops';
@@ -127,12 +130,7 @@ function reorderFeedRow(index: number, direction: 1 | -1): boolean {
     if (target === undefined) {
         return false;
     }
-    const newGroup = moveWithinGroup(group, row.id, target);
-    const globalOrder = rebuildGlobalOrder(
-        feedsStore.feeds.map((candidate) => candidate.id),
-        newGroup,
-    );
-    void runCommand(() => feedsStore.reorderFeeds(globalOrder));
+    void reorderFeedGroup(moveWithinGroup(group, row.id, target));
     return true;
 }
 
@@ -204,7 +202,7 @@ function onUngroupDrop(event: DragEvent): void {
         return;
     }
     event.preventDefault();
-    void runCommand(() => feedsStore.ungroupFeed(dragged));
+    void ungroupFeed(dragged);
     feedDnd.clear();
 }
 
@@ -243,23 +241,48 @@ function newFolder(): void {
 
 <nav class="sidebar" aria-label={t('sidebar.label')}>
     <div class="sidebar-brand">
-        <div class="brand">
+        <div class="brand" class:offline={connectivityStore.offline}>
             <span class="brand-mark" aria-hidden="true"><Icon name="sparkle" size={16} /></span>
             <span class="brand-name">Curio</span>
+            <!-- Offline (#123). In a narrow header the badge is a tile that takes
+                 the brand mark's place (same footprint, so nothing reflows); with
+                 room to spare it is a labelled pill after the name. It is a tab
+                 stop so keyboard users can reveal the hint tooltip (focus shows
+                 it and wires aria-describedby); svelte's a11y table counts an
+                 img as non-interactive, hence the targeted ignore. -->
+            {#if connectivityStore.offline}
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                <span
+                    class="offline-badge"
+                    role="img"
+                    aria-label={t('connectivity.offline')}
+                    tabindex="0"
+                    use:tooltip={t('connectivity.offline.hint')}
+                    ><Icon name="wifi-off" size={15} strokeWidth={2} /><span class="offline-label"
+                        >{t('connectivity.offline')}</span
+                    ></span
+                >
+            {/if}
+            <!-- Always mounted, so screen readers hear the badge appear. -->
+            <span class="sr-only" role="status"
+                >{#if connectivityStore.offline}{t('connectivity.offline')}. {t(
+                        'connectivity.offline.hint',
+                    )}{/if}</span
+            >
         </div>
         <div class="sidebar-toolbar" role="toolbar" aria-label={t('sidebar.label')}>
             <button
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.addFeed')}
-                use:tooltip={{ text: t('toolbar.addFeed'), kbd: 'A' }}
+                use:tooltip={{ text: t('toolbar.addFeed'), kbd: shortcutKbd('app.addFeed') }}
                 onclick={() => layoutStore.openModal('add-feed')}><Icon name="plus" /></button
             >
             <button
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.refreshAll')}
-                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: 'R' }}
+                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: shortcutKbd('app.refreshAll') }}
                 aria-busy={feedsStore.refreshing}
                 disabled={feedsStore.refreshing}
                 onclick={() => refreshAll()}><Icon name="refresh" /></button
@@ -268,7 +291,7 @@ function newFolder(): void {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.settings')}
-                use:tooltip={{ text: t('toolbar.settings'), kbd: ',' }}
+                use:tooltip={{ text: t('toolbar.settings'), kbd: shortcutKbd('app.settings') }}
                 onclick={() => layoutStore.openModal('settings')}><Icon name="settings" /></button
             >
         </div>
@@ -436,6 +459,7 @@ function newFolder(): void {
         height: var(--header-height);
         padding: 0 var(--space-2) 0 var(--space-4);
         border-bottom: 1px solid var(--hairline);
+        container: sidebar-brand / inline-size;
     }
 
     .brand {
@@ -461,6 +485,50 @@ function newFolder(): void {
         font-weight: 660;
         letter-spacing: var(--tracking-tight);
         color: var(--fg);
+    }
+
+    .offline-badge {
+        /* Narrow: in the brand mark's slot, ahead of the name. */
+        order: -1;
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-1);
+        min-width: 26px;
+        height: 26px;
+        border-radius: var(--radius-md);
+        color: var(--warning-text);
+        background: color-mix(in srgb, var(--warning), transparent 86%);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning), transparent 58%);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: default;
+    }
+
+    .brand.offline .brand-mark,
+    .offline-label {
+        display: none;
+    }
+
+    /* Room for the word: the brand mark comes back and the tile becomes a
+       labelled pill after the name. */
+    @container sidebar-brand (min-width: 300px) {
+        .brand.offline .brand-mark {
+            display: grid;
+        }
+
+        .offline-badge {
+            order: 0;
+            height: 22px;
+            padding: 0 var(--space-2) 0 6px;
+            border-radius: var(--radius-pill);
+        }
+
+        .offline-label {
+            display: inline;
+        }
     }
 
     .sidebar-toolbar {

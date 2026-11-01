@@ -39,12 +39,17 @@
 //! this module reports the [`ExportDisposition`] the facade maps onto
 //! the contract events.
 
+#[cfg(test)]
+mod golden_tests;
 mod lock;
 mod manifest;
 mod note;
+#[cfg(test)]
+mod roundtrip_tests;
 mod slug;
 mod target;
 mod write;
+pub mod yaml;
 
 pub use manifest::{load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
@@ -114,9 +119,16 @@ pub struct ExportOutcome {
 }
 
 /// Export failures.
+///
+/// Filesystem failures are sorted by what the user can do about them:
+/// [`ExportError::PermissionDenied`] (fix the folder's permissions, or the
+/// read-only volume), [`ExportError::DiskFull`] (free some space) and
+/// [`ExportError::DestinationMissing`] (reconnect the vault); anything else
+/// is [`ExportError::Io`]. [`ExportError::io`] does the sorting, and every
+/// filesystem call site builds its error through it.
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
-    /// Filesystem failure.
+    /// Filesystem failure of no more specific class.
     #[error("export io at {path}: {source}")]
     Io {
         /// The path being touched.
@@ -124,9 +136,37 @@ pub enum ExportError {
         /// The underlying error.
         source: std::io::Error,
     },
+    /// The destination (or a folder or file inside it) cannot be read or
+    /// written: its permissions refuse Curio (`EACCES`/`EPERM`, Windows
+    /// "access denied"), or a write hit a read-only volume (`EROFS`). Both
+    /// directions land here — an export reads existing notes and the
+    /// manifest as well as writing them — so the message names neither.
+    /// Exporting again succeeds once the permissions are fixed.
+    #[error(
+        "cannot access {path}: permission denied or read-only — check that Curio may \
+         read and write the destination folder and its notes, and that its volume is \
+         not mounted read-only"
+    )]
+    PermissionDenied {
+        /// The path that refused the access.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+    /// The disk (or the user's quota) holding the destination is full
+    /// (`ENOSPC`/`EDQUOT`, Windows `ERROR_DISK_FULL`). The atomic writes
+    /// leave the previous note intact; exporting again succeeds once space
+    /// is freed.
+    #[error("the disk holding {path} is full — free some space and export again")]
+    DiskFull {
+        /// The path whose write ran out of space.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
     /// Frontmatter (de)serialization failed.
     #[error("frontmatter yaml: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] yaml::Error),
     /// The manifest failed to parse — refusing to guess and clobber it.
     #[error("manifest parse at {path}: {message}")]
     ManifestParse {
@@ -172,6 +212,25 @@ pub enum ExportError {
         /// The last candidate tried (relative to the destination root).
         path: String,
     },
+}
+
+impl ExportError {
+    /// Sorts a filesystem failure at `path` into its class:
+    /// [`ExportError::PermissionDenied`] for a permission refusal or a
+    /// read-only filesystem, [`ExportError::DiskFull`] for an exhausted
+    /// disk or quota, [`ExportError::Io`] for anything else.
+    #[must_use]
+    pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        use std::io::ErrorKind;
+        let path = path.into();
+        match source.kind() {
+            ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => {
+                Self::PermissionDenied { path, source }
+            }
+            ErrorKind::StorageFull | ErrorKind::QuotaExceeded => Self::DiskFull { path, source },
+            _ => Self::Io { path, source },
+        }
+    }
 }
 
 /// A note whose bytes are already durably on disk but whose manifest
@@ -223,7 +282,8 @@ impl StagedExport {
     ///
     /// # Errors
     ///
-    /// [`ExportError::Io`] on manifest write failures.
+    /// A filesystem error (sorted by [`ExportError::io`]) on manifest
+    /// write failures.
     pub fn commit(self) -> Result<ExportOutcome, ExportError> {
         if let Some(pending) = self.pending {
             write_manifest(&pending.root, &pending.manifest)?;

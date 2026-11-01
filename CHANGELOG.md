@@ -7,6 +7,133 @@ All notable changes to the Curio app. The format follows
 (The versioned Curio↔notes **contract** schemas have their own changelog at
 [`schemas/CHANGELOG.md`](schemas/CHANGELOG.md).)
 
+## [0.5.0] — 2026-11-01
+
+The data-safety release: a sweep through everything that could lose, revert,
+or corrupt your reading — notes, full text, events, and the library itself.
+Exports never clobber a note and land durably, upgrades back up first and
+recover instead of crashing, and the CLI and the app now share one profile
+safely. It also patches the RUSTSEC advisories in the HTML sanitizer and the
+TLS stack, and hardens the release pipeline.
+
+### Added
+
+- **Startup recovery screen** — if your library can't be opened (a corrupt
+  or too-new database, a busy profile, a failed upgrade), the app now opens
+  to a plain-words recovery screen instead of quitting silently. It offers
+  the most useful next step — restore the pre-upgrade backup, try again,
+  check for updates, or start fresh — plus Show profile folder, Copy error,
+  and Quit. Recovery never deletes anything: a replaced database is moved to
+  `<profile>/set-aside/<timestamp>/`, and a healthy one is never moved.
+- **Pre-migration backups** — before upgrading an existing library, Curio
+  snapshots it to `curio.db.pre-vN.bak` (the two newest are kept). No
+  backup, no upgrade. docs/cli.md explains how to roll back by hand.
+- **Network-filesystem guard** — a profile on NFS, SMB, AFP, WebDAV,
+  iCloud Drive, Dropbox, or Syncthing storage is refused up front (SQLite is
+  not safe there) instead of risking corruption. Override with
+  `--allow-network-fs` or `CURIO_ALLOW_NETWORK_FS` if you know better.
+- **`curio doctor` checks** for a left-behind pre-0.5 profile, whether you
+  are on the shared default profile, and for undecodable staged events.
+- **CLI exit status 75** when another Curio process keeps the profile busy,
+  so cron wrappers can retry instead of alerting.
+- **Smarter feed discovery** — adding a site finds its feed more often and
+  only offers feeds that actually parse: scheme-less and `feed:` input,
+  direct rewrites for Reddit, GitHub releases, YouTube channels and
+  playlists, Mastodon, and Substack, and a small same-origin probe (at most
+  six requests) when a page doesn't advertise a feed.
+
+### Changed
+
+- **`curio feed add` validates what you typed** — a site or page subscribes
+  to its discovered feed, and a page with no feed is refused with a hint
+  instead of subscribing a URL that fails on every refresh. `--no-validate`
+  keeps the old behaviour.
+
+- **One shared profile for the CLI and the app** — on macOS and Windows the
+  CLI used a different default location, so `curio clip` never reached the
+  app's library. Both now use the same profile; an old CLI-only or
+  Roaming-AppData profile is moved over once on upgrade (never merged into an
+  existing library, never moved while open). Only `curio init` creates a
+  profile now, so a mistyped `--profile` no longer shows an empty library.
+- **Safe multi-process profiles** — the app and a CLI cron job can work on
+  the same profile at once: event emission is serialized by a profile lock,
+  refreshes of one feed take turns across processes, and destinations have a
+  single source of truth (`curio.toml` seeds them; it no longer undoes a
+  removal made in the app). A busy profile is reported as a retryable,
+  localized message instead of a raw SQLite error.
+- **Durable storage commits** — the database now fsyncs every commit, so a
+  power loss can no longer forget a change the event log already recorded.
+- **Upgrades are all or nothing** — every pending migration runs in one
+  transaction, so a failing step leaves the library at its old version
+  instead of half-way.
+- **Reddit credentials are per profile** — each profile keeps its own
+  keychain item; existing credentials are copied over on first use.
+- Internal: the storage, handle, export, and desktop UI stores were split
+  into smaller modules with no behaviour change.
+
+### Fixed
+
+- **Full text no longer reverts on refresh** — an article hydrated with
+  **Load full article** / **Load full post**, per-feed full text, or Reddit
+  enrichment used to fall back to the feed's excerpt on the next refresh (and
+  the next export pushed that excerpt to your notes). Hydrated bodies now
+  stay, and unchanged
+  entries are no longer rewritten at all.
+- **Export never overwrites another article's note** — a note is only
+  rewritten when its own `curio_id` matches; a path held by another article
+  or by a non-Curio file gets the next free filename. Concurrent exports to
+  one destination no longer drop each other's manifest entries.
+- **Durable note writes** — exported notes are fsynced before and after the
+  atomic rename, so a crash can't leave a blank note; an empty or
+  NUL-filled note on disk is repaired on the next export.
+- **Filenames that are safe on every OS** — titles are Unicode-normalized,
+  stems capped by bytes so the longest dedupe suffix still fits, and Windows
+  device names (`con`, `nul`, `com1`, …) are suffixed.
+- **Durable event emission** — a write that fails part-way (disk full, I/O
+  error) is rolled back so a retry never extends a torn line; a failed event
+  flush no longer reports an already-saved change as failed (the event stays
+  staged and is retried on the next tick); and one undecodable staged event
+  is quarantined instead of stopping the whole profile from opening.
+- **An unusable events folder no longer blocks opening the library** — the
+  event log attaches lazily and catches up once it can.
+- **Adding a feed no longer crashes on non-ASCII pages** — feed discovery
+  panicked when its sniff window ended inside a multi-byte character (CJK,
+  accents, emoji); it now cuts on a character boundary and recognizes feeds
+  by their root element.
+- **The sanitizer keeps more of the article** — lazy-loaded images,
+  footnotes (exported as markdown `[^n]` footnotes), right-to-left text,
+  code-fence languages, and embeds from Spotify, SoundCloud, CodePen,
+  Bluesky, and Mastodon (kept as links) now survive ingest.
+- **Messy OPML and CSV imports** — HTML entities, Latin-1 and UTF-16
+  files, `feed://` and padded URLs now import; a bad row is skipped and
+  reported instead of failing the whole file, and OPML and theme exports
+  replace the target file atomically.
+- **Main-content extraction no longer drops feed-item text** — intros, split
+  sections, and quoted asides are kept.
+- **Sloppy feed entries** — updated-only Atom entries get a date, a guid
+  reused across links no longer collapses distinct items, future dates are
+  clamped, relative lead images resolve, and a link-less entry is never
+  "full-texted" against its feed's URL.
+
+### Security
+
+- **Patched RUSTSEC advisories**, most importantly in **ammonia**, the HTML
+  sanitizer every feed and page passes through (4.1.3 → 4.2.4:
+  RUSTSEC-2021-0157/0158, RUSTSEC-2026-0213/0373 — CSS `url()` escaping and
+  SVG animation-tag XSS). Also h2, rustls, rustls-webpki, webpki-roots,
+  tokio, and zip (via the updater plugin and tauri 2.12).
+- **Reddit secrets are redacted** from debug output and logs — the client
+  secret and live bearer token print as `<redacted>`.
+- **Release hardening** — a tag only drafts a release after the full CI
+  suite passes on the tagged commit; the updater signing key is isolated in a
+  single step of a tag-restricted, reviewer-gated environment; every
+  workflow action is SHA-pinned; and releases now ship `SHA256SUMS`,
+  CycloneDX SBOMs, and a build-provenance attestation.
+- **CI hardening** — cross-OS core tests, a CI-enforced MSRV (1.88), a
+  nightly bundle and five-scenario Linux/Windows smoke as hard gates, a
+  parseable cold-start bench, and macOS jobs moved off the retired
+  `macos-14` image.
+
 ## [0.4.0] — 2026-07-13
 
 The read-later release: Curio grows from an RSS reader into a full
@@ -208,5 +335,8 @@ First public release — a complete, local-first desktop reader.
   are built nightly and available as artifacts, but are not yet a shipped
   channel.
 
+[0.5.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.5.0
+[0.4.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.4.0
+[0.3.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.2.0
 [0.1.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.1.0

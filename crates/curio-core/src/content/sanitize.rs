@@ -16,6 +16,9 @@
 //!   absolutized into a link back to the source site;
 //! - `dir` (`ltr`/`rtl`/`auto`) and `lang` (a language tag) for RTL and
 //!   mixed-language feeds; `ol[start]` (an integer);
+//! - `img[width]` / `img[height]`, kept only as plain pixel integers
+//!   (`1..=`[`MAX_IMAGE_DIMENSION`]) so the reader can reserve the image's
+//!   aspect ratio before it loads instead of jumping the text;
 //! - `class` on `pre`/`code`, reduced to its single `language-*` token —
 //!   the fence language htmd writes into exported markdown.
 //!
@@ -52,6 +55,10 @@ pub(crate) const ID_PREFIX: &str = "user-content-";
 
 /// Longest `id` / fragment token kept (real footnote ids are short).
 const MAX_ID_LEN: usize = 128;
+
+/// Largest `img` `width`/`height` kept, in CSS pixels; anything larger is
+/// not a real intrinsic size and is dropped.
+const MAX_IMAGE_DIMENSION: u32 = 20_000;
 
 /// Tags whose entire content is dropped (not just the tag).
 const CLEAN_CONTENT_TAGS: &[&str] = &[
@@ -204,9 +211,24 @@ fn filter_attribute<'a>(element: &str, attribute: &str, value: &'a str) -> Optio
             .ok()
             .map(|start| Cow::Owned(start.to_string())),
         "class" if matches!(element, "pre" | "code") => language_class(value).map(Cow::Owned),
+        "width" | "height" if element == "img" => image_dimension(value).map(Cow::Owned),
         "class" | "start" => None,
         _ => Some(Cow::Borrowed(value)),
     }
+}
+
+/// An `img` `width`/`height` as a plain pixel integer (`600`, or the common
+/// `600px` slip), within `1..=`[`MAX_IMAGE_DIMENSION`]. Percentages, `auto`,
+/// zero and garbage are dropped — the reader only uses the pair to reserve
+/// an aspect ratio, so an unusable value is better gone.
+fn image_dimension(value: &str) -> Option<String> {
+    let value = value.trim();
+    let digits = value.strip_suffix("px").unwrap_or(value);
+    let pixels = digits
+        .parse::<u32>()
+        .ok()
+        .filter(|pixels| (1..=MAX_IMAGE_DIMENSION).contains(pixels))?;
+    Some(pixels.to_string())
 }
 
 /// `raw` as a prefixed id: a non-empty token of ASCII letters, digits and
@@ -269,7 +291,12 @@ pub(super) fn escape_attr(value: &str) -> String {
 fn tag_attributes() -> HashMap<&'static str, HashSet<&'static str>> {
     let mut attrs: HashMap<&'static str, HashSet<&'static str>> = HashMap::new();
     attrs.insert("a", ["href", "title"].into_iter().collect());
-    attrs.insert("img", ["src", "alt", "title"].into_iter().collect());
+    attrs.insert(
+        "img",
+        ["src", "alt", "title", "width", "height"]
+            .into_iter()
+            .collect(),
+    );
     attrs.insert("time", ["datetime"].into_iter().collect());
     attrs.insert("td", ["colspan", "rowspan"].into_iter().collect());
     attrs.insert("th", ["colspan", "rowspan"].into_iter().collect());
@@ -408,6 +435,31 @@ mod tests {
         let out = sanitize("<img src=\"/images/x.png\" alt=\"kept\">", None);
         assert!(!out.contains("src"));
         assert!(out.contains("alt=\"kept\""));
+    }
+
+    #[test]
+    fn image_dimensions_survive_as_plain_pixel_integers() {
+        let out = sanitize(
+            "<img src=\"https://e.com/a.png\" width=\"640\" height=\" 360px \">\
+             <img src=\"https://e.com/b.png\" width=\"50%\" height=\"0\">\
+             <img src=\"https://e.com/c.png\" width=\"99999\" height=\"1e3\">\
+             <p width=\"10\">p</p>",
+            None,
+        );
+        assert!(out.contains("width=\"640\""), "{out}");
+        assert!(out.contains("height=\"360\""), "{out}");
+        assert_eq!(out.matches("width=").count(), 1, "{out}");
+        assert_eq!(out.matches("height=").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn image_dimensions_never_reach_exported_markdown() {
+        let html = sanitize(
+            "<p><img src=\"https://e.com/a.png\" alt=\"a\" width=\"640\" height=\"360\"></p>",
+            None,
+        );
+        let markdown = super::super::markdown::to_markdown(&html);
+        assert_eq!(markdown.ok().as_deref(), Some("![a](https://e.com/a.png)"));
     }
 
     #[test]

@@ -9,6 +9,7 @@ import Icon, { type IconName } from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import { type MessageKey, t } from '$lib/i18n';
+import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     activeView,
     importFromFile,
@@ -278,14 +279,14 @@ function newFolder(): void {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.addFeed')}
-                use:tooltip={{ text: t('toolbar.addFeed'), kbd: 'A' }}
+                use:tooltip={{ text: t('toolbar.addFeed'), kbd: shortcutKbd('app.addFeed') }}
                 onclick={() => layoutStore.openModal('add-feed')}><Icon name="plus" /></button
             >
             <button
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.refreshAll')}
-                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: 'R' }}
+                use:tooltip={{ text: t('toolbar.refreshAll'), kbd: shortcutKbd('app.refreshAll') }}
                 aria-busy={feedsStore.refreshing}
                 disabled={feedsStore.refreshing}
                 onclick={() => refreshAll()}><Icon name="refresh" /></button
@@ -294,7 +295,7 @@ function newFolder(): void {
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.settings')}
-                use:tooltip={{ text: t('toolbar.settings'), kbd: ',' }}
+                use:tooltip={{ text: t('toolbar.settings'), kbd: shortcutKbd('app.settings') }}
                 onclick={() => layoutStore.openModal('settings')}><Icon name="settings" /></button
             >
         </div>

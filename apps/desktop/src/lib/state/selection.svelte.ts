@@ -37,6 +37,13 @@ export class SelectionStore {
      */
     sidebarFocusNonce: number = $state(0);
 
+    /**
+     * Bumped to hand the keyboard to the reader body (Enter / → in the list).
+     * The reader focuses its scroll body on this signal — once the selected
+     * article has rendered, if it hasn't yet — so ↑/↓/Page keys scroll it.
+     */
+    readerFocusNonce: number = $state(0);
+
     /** Selected feed; `null` = the all-feeds views. */
     selectedFeedId: number | null = $state(null);
 
@@ -147,6 +154,12 @@ export class SelectionStore {
         this.listFocusNonce += 1;
     }
 
+    /** Asks the reader to take DOM focus on its scroll body (Enter / →). */
+    focusReader(): void {
+        this.focus = 'list';
+        this.readerFocusNonce += 1;
+    }
+
     /** Hands the keyboard to the sidebar tree (`g f`). */
     focusSidebar(): void {
         this.focus = 'sidebar';
@@ -167,6 +180,7 @@ export class SelectionStore {
         this.focus = 'list';
         this.listFocusNonce = 0;
         this.sidebarFocusNonce = 0;
+        this.readerFocusNonce = 0;
         this.selectedFeedId = null;
         this.selectedArticleId = null;
         this.lastPresentIndex = 0;

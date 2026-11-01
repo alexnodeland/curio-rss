@@ -24,7 +24,8 @@ export const ROW_HEIGHT = ROW_HEIGHTS.comfortable;
  */
 import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
-import { markReadOnScroll } from '$lib/state/actions';
+import { paneShortcut } from '$lib/keyboard/registry';
+import { handleShortcut, markReadOnScroll } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
@@ -90,9 +91,22 @@ function openSelectedMenu(): void {
 }
 
 /**
- * Jump navigation while the listbox holds focus (row-by-row movement is
- * `j`/`k`): Page keys move a page; Home/End jump to the ends of the loaded
- * window.
+ * The listbox's ARIA keys, straight from the shortcut registry: ↑/↓ run the
+ * very actions k/j run (scroll-into-view, load-more at the edge), Enter/→
+ * hand the keyboard to the reader body.
+ */
+function onPaneKey(key: string): boolean {
+    const id = paneShortcut('list', key);
+    if (id === null) {
+        return false;
+    }
+    handleShortcut(id);
+    return true;
+}
+
+/**
+ * Jump navigation while the listbox holds focus: Page keys move a page;
+ * Home/End jump to the ends of the loaded window.
  */
 function moveSelection(to: 'first' | 'last' | 'pageDown' | 'pageUp'): void {
     const items = list.items;
@@ -201,6 +215,7 @@ function onScrollPast(firstVisibleIndex: number): void {
             onnearend={() => void list.loadMore()}
             onscrollpast={onScrollPast}
             onmove={moveSelection}
+            onpanekey={onPaneKey}
             onmenukey={openSelectedMenu}
         >
             {#snippet row(article, index)}

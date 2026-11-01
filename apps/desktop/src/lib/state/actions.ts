@@ -6,7 +6,13 @@
  * Toggles read the authoritative flag first (`get_article_state`), then
  * write the flip; core's idempotency `bool` makes double-fires harmless.
  */
-import { events, type CommandError, type ImportSourceDto, commands } from '$lib/bindings';
+import {
+    events,
+    type ArticleSummaryDto,
+    type CommandError,
+    type ImportSourceDto,
+    commands,
+} from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { commandErrorMessage } from '$lib/utils/errors';
@@ -20,6 +26,7 @@ import {
 } from './articles.svelte';
 import { destinationsStore } from './destinations.svelte';
 import { feedsStore } from './feeds.svelte';
+import { feedInFolder } from './folder-ops';
 import { layoutStore } from './layout.svelte';
 import type { CommandResult } from './query-cache.svelte';
 import { searchStore } from './search.svelte';
@@ -170,6 +177,164 @@ export async function markAllRead(feedId: number | null): Promise<void> {
         return;
     }
     toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+}
+
+/** How many unread rows one mark-view-read listing page asks for. */
+const MARK_VIEW_PAGE = 200;
+
+/** Marks each id read, one command apiece; stops at (and toasts) the first failure. */
+async function markEachRead(articleIds: readonly number[]): Promise<number | undefined> {
+    let changed = 0;
+    for (const articleId of articleIds) {
+        const flipped = await run(() => commands.markRead(articleId, true));
+        if (flipped === undefined) {
+            return undefined;
+        }
+        if (flipped) {
+            changed += 1;
+        }
+    }
+    return changed;
+}
+
+/** One page of a view's unread rows strictly below `before`. */
+function unreadPage(
+    filters: ArticleFilters,
+    before: number | null,
+): Promise<ArticleSummaryDto[] | undefined> {
+    return run(() => commands.listArticles(unreadScopeDto(filters, before, MARK_VIEW_PAGE)));
+}
+
+/** Every unread article id in a filtered view, paged backend-side. */
+async function unreadIdsInView(filters: ArticleFilters): Promise<number[] | undefined> {
+    const ids: number[] = [];
+    let before: number | null = null;
+    for (;;) {
+        const page = await unreadPage(filters, before);
+        if (page === undefined) {
+            return undefined;
+        }
+        ids.push(...page.map((article) => article.id));
+        const last = page.at(-1);
+        if (page.length < MARK_VIEW_PAGE || last === undefined) {
+            return ids;
+        }
+        before = last.id;
+    }
+}
+
+/**
+ * Whether the backend's bulk command covers a view: it scopes by feed or the
+ * whole library, so any narrowing flag (starred, read later, a tag, the
+ * Archived view) has no bulk form.
+ */
+function hasBulkScope(filters: ArticleFilters): boolean {
+    return (
+        filters.starred === null &&
+        filters.readLater === null &&
+        filters.tag === null &&
+        filters.archived !== true
+    );
+}
+
+/** Bulk-marks every feed in folder `path` read; the summed count. */
+async function markFolderFeedsRead(path: string): Promise<number | undefined> {
+    let changed = 0;
+    for (const feed of feedsStore.feeds.filter((candidate) => feedInFolder(candidate, path))) {
+        const flipped = await run(() => commands.markAllRead(feed.id));
+        if (flipped === undefined) {
+            return undefined;
+        }
+        changed += flipped;
+    }
+    return changed;
+}
+
+/** The count of articles a view-wide mark flipped, or `undefined` on failure. */
+async function markViewReadCount(): Promise<number | undefined> {
+    if (searchStore.active) {
+        // Search results are a fixed FTS window: mark exactly what is listed.
+        return markEachRead(articlesStore.activeItems.map((article) => article.id));
+    }
+    const filters = articlesStore.filters;
+    if (filters.read === true) {
+        return 0; // a read-only view holds nothing unread
+    }
+    if (hasBulkScope(filters) && filters.feedTag === null) {
+        return run(() => commands.markAllRead(filters.feedId));
+    }
+    if (hasBulkScope(filters) && filters.feedTag !== null && filters.feedId === null) {
+        return markFolderFeedsRead(filters.feedTag);
+    }
+    const ids = await unreadIdsInView(filters);
+    return ids === undefined ? undefined : markEachRead(ids);
+}
+
+/**
+ * Marks everything unread in the current view read (`Shift+A`) and toasts how
+ * many changed. A feed or the whole library rides the backend's bulk
+ * command, a folder its feeds' bulk marks; every narrower view (Starred,
+ * Read later, Archived, a tag, search results) lists its own unread and
+ * marks exactly those. Known gap: the bulk command ignores `archived`, so `A`
+ * from All, a feed or a folder also marks that scope's hidden archived rows
+ * read (#278).
+ */
+export async function markViewRead(): Promise<void> {
+    const changed = await markViewReadCount();
+    if (changed !== undefined) {
+        toastStore.showToast(t('toast.markAllRead', { count: changed }), 'success');
+    }
+}
+
+/** The reader's scroll body while one is mounted (registered by ReaderPane). */
+let readerBody: HTMLElement | null = null;
+
+/**
+ * Registers the mounted reader scroll body as the Space-paging target.
+ * Returns the unregister (a no-op once a newer body took over).
+ */
+export function registerReaderBody(element: HTMLElement): () => void {
+    readerBody = element;
+    return () => {
+        if (readerBody === element) {
+            readerBody = null;
+        }
+    };
+}
+
+/** A Space page is 7/8 of the viewport — the browser's own step, keeping a line of context. */
+const PAGE_FRACTION = 0.875;
+
+/** Sub-pixel slack when deciding the reader sits at the article's end. */
+const END_SLACK_PX = 2;
+
+/**
+ * Space / Shift+Space: pages the reader body down / up. Space at the end of
+ * the article — or with nothing selected — advances to the next unread
+ * (Reeder / NetNewsWire). While the selected article is still loading there
+ * is no body to page, and the press is dropped rather than skipping an
+ * article the reader never saw.
+ */
+export function pageReader(direction: 'down' | 'up'): void {
+    if (selectionStore.selectedArticleId === null) {
+        if (direction === 'down') {
+            void goToNextUnread();
+        }
+        return;
+    }
+    const body = readerBody;
+    if (body === null) {
+        return;
+    }
+    const atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - END_SLACK_PX;
+    if (direction === 'down' && atEnd) {
+        void goToNextUnread();
+        return;
+    }
+    const step = Math.round(body.clientHeight * PAGE_FRACTION);
+    // A plain scrollTop write honours the body's CSS `scroll-behavior`
+    // (smooth unless the user asked for reduced motion).
+    body.scrollTop = Math.max(0, body.scrollTop + (direction === 'down' ? step : -step));
 }
 
 /**
@@ -381,6 +546,20 @@ function withSelected(action: (articleId: number) => Promise<void>): void {
     }
 }
 
+/**
+ * Enter / → from the list: hands the keyboard to the reader body. With
+ * nothing selected it selects first (the row j would pick), so the key is
+ * never a dead end.
+ */
+function focusReader(): void {
+    if (selectionStore.selectedArticleId === null) {
+        selectNext();
+    }
+    if (selectionStore.selectedArticleId !== null) {
+        selectionStore.focusReader();
+    }
+}
+
 function toggleHelp(): void {
     if (layoutStore.activeModal === 'help') {
         layoutStore.closeModal();
@@ -392,7 +571,9 @@ function toggleHelp(): void {
 /**
  * Executes one shortcut id. The core set (j/k, o, s, l, m, ?) landed in
  * WP3; WP4 wires the reader-breadth surfaces: `p` promote, `/` search
- * focus, `r`/`Shift+R` refresh, and the `g`-chord view switches.
+ * focus, `r`/`Shift+R` refresh, and the `g`-chord view switches. The pane
+ * keys (listbox ↑/↓/Enter/→, reader ←/Esc) land here too, through the
+ * panes' own handlers.
  */
 export function handleShortcut(id: ShortcutId): void {
     switch (id) {
@@ -405,6 +586,18 @@ export function handleShortcut(id: ShortcutId): void {
         case 'nav.nextUnread':
             void goToNextUnread();
             break;
+        case 'nav.focusReader':
+            focusReader();
+            break;
+        case 'nav.focusList':
+            selectionStore.focusList();
+            break;
+        case 'reader.pageDown':
+            pageReader('down');
+            break;
+        case 'reader.pageUp':
+            pageReader('up');
+            break;
         case 'article.open':
             openSelected();
             break;
@@ -416,6 +609,12 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'article.toggleRead':
             withSelected(toggleRead);
+            break;
+        case 'article.toggleArchived':
+            withSelected(toggleArchived);
+            break;
+        case 'view.markAllRead':
+            void markViewRead();
             break;
         case 'article.promote':
             void promoteSelected();

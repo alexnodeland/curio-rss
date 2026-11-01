@@ -31,6 +31,18 @@ impl CoreHandle {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
+        // Its refresh lock file goes too, best effort. Safe even while
+        // another process holds it: a lock file deleted under a holder is
+        // re-created, not trusted (see `crate::lock`). A refresh of this
+        // feed already under way in another process can re-create it
+        // after this delete (it only finds the feed gone once it holds
+        // the lock), leaving one empty, gitignored lock file behind.
+        let lock_file = super::refresh::feed_lock_path(&self.profile_dir, id);
+        if let Err(err) = std::fs::remove_file(&lock_file)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %lock_file.display(), %err, "could not delete a feed's refresh lock file");
+        }
         self.emit();
         Ok(())
     }

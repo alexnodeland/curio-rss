@@ -24,6 +24,8 @@ mod settings;
 mod state;
 mod tags;
 
+pub(crate) use settings::SettingsTx;
+
 use curio_types::EventEnvelope;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 

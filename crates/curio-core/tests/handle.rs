@@ -79,6 +79,15 @@ fn manual_article(key: &str, title: &str) -> NewArticle {
     }
 }
 
+/// Reconciles a one-destination head configuration.
+fn reconcile(
+    core: &CoreHandle,
+    name: &DestinationName,
+    root: &std::path::Path,
+) -> Result<(), curio_core::CoreError> {
+    core.reconcile_destinations([(name.clone(), root.to_path_buf())].into())
+}
+
 /// Subscribes to the mock feed with the W1 exemption set (the fixture
 /// lives on 127.0.0.1 — this is also the proof the exemption works).
 fn subscribe(core: &CoreHandle, url: &str) -> curio_core::model::Feed {
@@ -289,6 +298,74 @@ async fn concurrent_refreshes_of_one_feed_cannot_clobber_validators() {
         .get("if-none-match")
         .map(|v| v.to_str().unwrap().to_owned());
     assert_eq!(last_inm.as_deref(), Some("\"v2\""));
+}
+
+/// The same race across processes (#114 / #234): the desktop app and a
+/// CLI `curio fetch` are two handles on one profile, with separate
+/// in-process locks — only the per-feed lock file serializes them. Two
+/// handles in one process stand in for the two processes: file locks are
+/// per open file, so they exclude each other exactly as across processes.
+#[tokio::test]
+async fn concurrent_refreshes_from_two_handles_cannot_clobber_validators() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Request 1 (setup): 200 + etag v1. Request 2: 200 + etag v2.
+    /// Request 3: a slow 500 — the error path whose validator preserve
+    /// would clobber.
+    struct Script(AtomicUsize);
+    impl wiremock::Respond for Script {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 => ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v1\"")
+                    .set_body_raw(RSS, "application/rss+xml"),
+                1 => ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v2\"")
+                    .set_body_raw(RSS, "application/rss+xml"),
+                _ => ResponseTemplate::new(500).set_delay(Duration::from_millis(150)),
+            }
+        }
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(Script(AtomicUsize::new(0)))
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let desktop = open_core(profile.path());
+    let cli = open_core(profile.path());
+    let feed = subscribe(&desktop, &format!("{}/feed.xml", server.uri()));
+    let setup = desktop.refresh_feed(feed.id).await.unwrap();
+    assert_eq!(setup.status, FetchStatus::Ok);
+
+    let (a, b) = tokio::join!(desktop.refresh_feed(feed.id), cli.refresh_feed(feed.id));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert!(
+        (a.status == FetchStatus::Ok) ^ (b.status == FetchStatus::Ok),
+        "exactly one refresh succeeds: {a:?} / {b:?}"
+    );
+
+    // The fresher validators won, whichever handle reads them.
+    for core in [&desktop, &cli] {
+        let stored = core.get_feed(feed.id).unwrap().unwrap();
+        assert_eq!(stored.etag.as_deref(), Some("\"v2\""));
+    }
+    // Serialization proof: the queued refresh read the feed only once it
+    // held the lock, so its conditional GET already carried the new etag.
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 3);
+    let last_inm = requests[2]
+        .headers
+        .get("if-none-match")
+        .map(|v| v.to_str().unwrap().to_owned());
+    assert_eq!(last_inm.as_deref(), Some("\"v2\""));
+    // The lock files live under .curio/locks/, which is gitignored.
+    assert!(profile.path().join(".curio/locks").is_dir());
+    let gitignore = std::fs::read_to_string(profile.path().join(".curio/.gitignore")).unwrap();
+    assert!(gitignore.lines().any(|line| line == "locks/"));
 }
 
 #[tokio::test]
@@ -728,7 +805,11 @@ fn concurrent_destination_registrations_all_persist() {
         }
     }
     let core = open_core(profile.path());
-    assert_eq!(core.destinations().len(), 8, "every registration persisted");
+    assert_eq!(
+        core.destinations().unwrap().len(),
+        8,
+        "every registration persisted"
+    );
 }
 
 #[tokio::test]
@@ -748,7 +829,7 @@ async fn reopening_a_profile_restores_destinations_and_state() {
         .unwrap();
     }
     let core = open_core(profile.path());
-    let destinations = core.destinations();
+    let destinations = core.destinations().unwrap();
     assert_eq!(destinations.len(), 1);
     assert_eq!(destinations[0].name, dest);
     assert_eq!(core.list_feeds().unwrap().len(), 1);
@@ -775,7 +856,10 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
         let saved = core.save_to_destination(article, &dest).unwrap();
 
         core.remove_destination(&dest).unwrap();
-        assert_eq!(core.destinations(), [] as [curio_types::Destination; 0]);
+        assert_eq!(
+            core.destinations().unwrap(),
+            [] as [curio_types::Destination; 0]
+        );
         // The name is gone from the operation surface…
         let err = core.save_to_destination(article, &dest).unwrap_err();
         assert!(matches!(
@@ -792,7 +876,10 @@ fn remove_destination_forgets_the_name_but_keeps_notes() {
     // The exported note survives, and the removal persisted.
     assert!(vault.path().join(&note_path).is_file());
     let core = open_core(profile.path());
-    assert!(core.destinations().is_empty(), "removal survives reopen");
+    assert!(
+        core.destinations().unwrap().is_empty(),
+        "removal survives reopen"
+    );
 }
 
 /// #116: once a destination has exported, a vault that moved or was
@@ -857,7 +944,7 @@ fn an_exported_destination_that_vanished_is_destination_missing() {
 }
 
 /// A head re-applying its own configuration (the CLI's curio.toml, on
-/// every invocation) through `reconcile_destination` never undoes the
+/// every invocation) through `reconcile_destinations` never undoes the
 /// missing-destination check: an unchanged, exported destination is left
 /// alone — root not recreated, flag kept — while a new name, a new root or
 /// a not-yet-exported destination registers as `add_destination` does.
@@ -869,8 +956,7 @@ fn reconciling_an_exported_destination_never_recreates_it() {
     let dest: DestinationName = "vault".parse().unwrap();
     let core = open_core(profile.path());
     // Not registered yet: reconciling registers it and creates the root.
-    core.reconcile_destination(dest.clone(), root.clone())
-        .unwrap();
+    reconcile(&core, &dest, &root).unwrap();
     assert!(root.is_dir());
     core.storage()
         .upsert_articles(vec![
@@ -889,8 +975,7 @@ fn reconciling_an_exported_destination_never_recreates_it() {
     std::fs::remove_dir_all(&root).unwrap();
     drop(core);
     let core = open_core(profile.path());
-    core.reconcile_destination(dest.clone(), root.clone())
-        .unwrap();
+    reconcile(&core, &dest, &root).unwrap();
     assert!(!root.exists(), "reconciling must not recreate the root");
     assert!(matches!(
         core.save_to_destination(ids[1], &dest).unwrap_err(),
@@ -899,11 +984,35 @@ fn reconciling_an_exported_destination_never_recreates_it() {
 
     // A changed root is a new destination: registered and started afresh.
     let moved = parent.path().join("moved");
-    core.reconcile_destination(dest.clone(), moved.clone())
-        .unwrap();
-    assert_eq!(core.destinations()[0].root, moved);
+    reconcile(&core, &dest, &moved).unwrap();
+    assert_eq!(core.destinations().unwrap()[0].root, moved);
     let saved = core.save_to_destination(ids[1], &dest).unwrap();
     assert!(moved.join(&saved.path).is_file());
+}
+
+/// A declared root that cannot be created fails the reconcile before
+/// anything is registered or recorded as seeded (roots are created ahead
+/// of the settings transaction, as `add_destination` does): fixing the
+/// path and running again applies it as new.
+#[test]
+fn a_root_that_cannot_be_created_registers_nothing() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let blocker = parent.path().join("not-a-dir");
+    std::fs::write(&blocker, "a file, not a directory").unwrap();
+    let dest: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+
+    let err = reconcile(&core, &dest, &blocker.join("vault")).unwrap_err();
+    assert!(matches!(err, curio_core::CoreError::Io { .. }), "{err:?}");
+    assert_eq!(core.destinations().unwrap(), [] as [Destination; 0]);
+
+    // Not recorded as seeded either: the same declaration, once its path
+    // can be created, registers.
+    std::fs::remove_file(&blocker).unwrap();
+    reconcile(&core, &dest, &blocker.join("vault")).unwrap();
+    assert!(blocker.join("vault").is_dir());
+    assert_eq!(core.destinations().unwrap()[0].root, blocker.join("vault"));
 }
 
 /// Removing a destination clears its exported flag too: a destination
@@ -924,10 +1033,158 @@ fn a_removed_then_re_added_destination_starts_afresh() {
 
     core.remove_destination(&dest).unwrap();
     std::fs::remove_dir_all(&root).unwrap();
-    core.reconcile_destination(dest.clone(), root.clone())
-        .unwrap();
+    reconcile(&core, &dest, &root).unwrap();
     assert!(root.is_dir(), "a fresh registration creates its root");
     core.save_to_destination(id, &dest).unwrap();
+}
+
+/// #114 / #234: curio.toml seeds a destination, it does not own it. A
+/// destination the desktop app removed (another handle on the profile)
+/// stays removed through every later CLI run (a fresh handle reconciling
+/// the same curio.toml), and a re-root made elsewhere stands too.
+#[test]
+fn a_destination_removed_by_another_head_stays_removed_after_a_cli_run() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let vault = parent.path().join("vault");
+    let notes = parent.path().join("notes");
+    let declared: std::collections::BTreeMap<DestinationName, std::path::PathBuf> = [
+        ("vault".parse().unwrap(), vault.clone()),
+        ("notes".parse().unwrap(), notes.clone()),
+    ]
+    .into();
+    let names = |core: &CoreHandle| -> Vec<(String, std::path::PathBuf)> {
+        core.destinations()
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.name.to_string(), d.root))
+            .collect()
+    };
+
+    let desktop = open_core(profile.path());
+    {
+        let cli = open_core(profile.path());
+        cli.reconcile_destinations(declared.clone()).unwrap();
+    }
+    // The desktop sees what the CLI seeded without reopening.
+    assert_eq!(
+        names(&desktop),
+        [
+            ("notes".to_owned(), notes.clone()),
+            ("vault".to_owned(), vault.clone())
+        ]
+    );
+
+    // The desktop removes one destination and re-roots the other.
+    let elsewhere = parent.path().join("elsewhere");
+    desktop
+        .remove_destination(&"vault".parse().unwrap())
+        .unwrap();
+    desktop
+        .add_destination("notes".parse().unwrap(), elsewhere.clone())
+        .unwrap();
+
+    // Two more CLI runs with the unchanged curio.toml change nothing.
+    for _ in 0..2 {
+        let cli = open_core(profile.path());
+        cli.reconcile_destinations(declared.clone()).unwrap();
+        assert_eq!(names(&cli), [("notes".to_owned(), elsewhere.clone())]);
+    }
+    assert_eq!(names(&desktop), [("notes".to_owned(), elsewhere.clone())]);
+
+    // Editing curio.toml is a new declaration: a changed root applies.
+    let moved = parent.path().join("vault-moved");
+    let mut edited = declared.clone();
+    edited.insert("vault".parse().unwrap(), moved.clone());
+    open_core(profile.path())
+        .reconcile_destinations(edited)
+        .unwrap();
+    assert!(names(&desktop).contains(&("vault".to_owned(), moved)));
+
+    // Dropping a name from curio.toml and declaring it again later
+    // applies it afresh.
+    desktop
+        .remove_destination(&"notes".parse().unwrap())
+        .unwrap();
+    open_core(profile.path())
+        .reconcile_destinations(std::collections::BTreeMap::new())
+        .unwrap();
+    open_core(profile.path())
+        .reconcile_destinations(declared)
+        .unwrap();
+    assert!(names(&desktop).contains(&("notes".to_owned(), notes)));
+}
+
+/// #234: no handle writes back a stale copy of the registry. Changes made
+/// through one handle while another is open survive every later change
+/// the other one makes, and the other one sees them at once.
+#[test]
+fn a_destination_added_through_another_handle_is_never_erased() {
+    let profile = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let first = open_core(profile.path());
+    let second = open_core(profile.path());
+    let names = |core: &CoreHandle| -> Vec<String> {
+        core.destinations()
+            .unwrap()
+            .into_iter()
+            .map(|d| d.name.to_string())
+            .collect()
+    };
+
+    first
+        .add_destination("x".parse().unwrap(), parent.path().join("x"))
+        .unwrap();
+    second
+        .add_destination("y".parse().unwrap(), parent.path().join("y"))
+        .unwrap();
+    assert_eq!(names(&first), ["x", "y"]);
+    second.remove_destination(&"y".parse().unwrap()).unwrap();
+    first
+        .add_destination("z".parse().unwrap(), parent.path().join("z"))
+        .unwrap();
+    assert_eq!(names(&second), ["x", "z"]);
+    // A name another handle added is known to this one's operations too.
+    second.remove_destination(&"z".parse().unwrap()).unwrap();
+    drop((first, second));
+    assert_eq!(names(&open_core(profile.path())), ["x"]);
+}
+
+/// The registrations of several handles racing on one profile (several
+/// processes, as far as the registry can tell) all persist.
+#[test]
+fn concurrent_registrations_through_separate_handles_all_persist() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    std::thread::scope(|scope| {
+        for handle in 0..4 {
+            let core = open_core(profile.path());
+            let vault = vault.path();
+            scope.spawn(move || {
+                for i in 0..4 {
+                    let name = format!("h{handle}-{i}");
+                    core.add_destination(name.parse().unwrap(), vault.join(&name))
+                        .unwrap();
+                }
+            });
+        }
+    });
+    assert_eq!(open_core(profile.path()).destinations().unwrap().len(), 16);
+}
+
+/// The seeded-destinations record is facade-owned like the registry.
+#[test]
+fn the_facade_refuses_its_reserved_seeded_destinations_setting() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    assert!(matches!(
+        core.set_setting("destinations.seeded", "{}"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
+    assert!(matches!(
+        core.get_setting("destinations.seeded"),
+        Err(curio_core::CoreError::ReservedSettingKey { .. })
+    ));
 }
 
 /// The exported-destinations record is facade-owned like the registry.
@@ -2046,11 +2303,11 @@ fn the_facade_refuses_its_reserved_destinations_setting_both_ways() {
             Err(curio_core::CoreError::ReservedSettingKey { .. })
         ));
         // The registry the refused write would have clobbered is intact.
-        assert_eq!(core.destinations().len(), 1);
+        assert_eq!(core.destinations().unwrap().len(), 1);
     }
     // ... and still intact on disk after a reopen.
     let core = open_core(profile.path());
-    let registered = core.destinations();
+    let registered = core.destinations().unwrap();
     assert_eq!(registered.len(), 1);
     assert_eq!(registered[0].name, name);
 }

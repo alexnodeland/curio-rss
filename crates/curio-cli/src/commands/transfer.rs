@@ -156,6 +156,9 @@ pub(crate) fn dest(app: &mut App, command: DestCommand) -> anyhow::Result<ExitCo
                 .destinations
                 .insert(name.to_string(), root.clone());
             app.save_config()?;
+            // curio.toml now declares it: record it as seeded, so the
+            // next run does not re-add it should another head remove it.
+            crate::app::reconcile(&app.core, &app.config)?;
             if app.json {
                 emit_json(&DestView {
                     name: name.to_string(),
@@ -168,7 +171,7 @@ pub(crate) fn dest(app: &mut App, command: DestCommand) -> anyhow::Result<ExitCo
         DestCommand::List => {
             let views: Vec<DestView> = app
                 .core
-                .destinations()
+                .destinations()?
                 .iter()
                 .map(|d| DestView {
                     name: d.name.to_string(),

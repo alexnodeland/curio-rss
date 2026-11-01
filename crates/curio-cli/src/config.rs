@@ -1,16 +1,16 @@
 //! `curio.toml` — the human-editable profile configuration.
 //!
-//! Ownership split: feeds, articles, and state live in `curio.db` (the
-//! engine's domain); this file owns what a human should be able to edit
-//! with a text editor — named destinations, settings, and per-feed
-//! overrides. Contract W1 lives here on purpose: `allow_private_network`
+//! Ownership split: feeds, articles, state and the destination registry
+//! live in `curio.db` (the engine's domain); this file holds what a human
+//! should be able to edit with a text editor — settings, per-feed
+//! overrides, and the named destinations to seed. Contract W1 lives here on purpose: `allow_private_network`
 //! requires an explicit config edit (this file, or the `feed add
 //! --allow-private-network` flag that writes it) and is never settable
 //! from feed content.
 //!
 //! On every run the CLI reconciles this file *into* the engine:
-//! destinations are (re-)registered and W1 flags are applied to matching
-//! subscriptions. The full format is documented in `docs/cli.md`.
+//! each destination pair is seeded once (`CoreHandle::reconcile_destinations`,
+//! D16) and W1 flags are applied to matching subscriptions. The full format is documented in `docs/cli.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -26,8 +26,10 @@ pub(crate) const CONFIG_FILE: &str = "curio.toml";
 const HEADER: &str = "\
 # curio.toml — profile configuration for the `curio` CLI (docs/cli.md).
 #
-# Feeds, articles, and reading state live in curio.db next to this file;
-# curio.toml owns destinations, settings, and per-feed overrides.
+# Feeds, articles, reading state and destinations live in curio.db next to
+# this file; curio.toml holds settings and per-feed overrides, and seeds
+# destinations: each [destinations] line is applied once, and a destination
+# later removed or moved in the desktop app stays that way.
 # Contract W1: [feeds.\"<url>\"] allow_private_network = true exempts one
 # feed from the SSRF private-network guard — an explicit config edit,
 # never settable from feed content.

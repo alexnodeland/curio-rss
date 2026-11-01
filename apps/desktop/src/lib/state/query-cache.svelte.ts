@@ -136,8 +136,21 @@ export function ensureQuery<T>(
     });
 }
 
-/** Drops one entry (e.g. when a filter combination goes out of use). */
-export function dropQuery(key: string): void {
+/** Whether an entry exists under `key` (read untracked by callers that only
+ *  need bookkeeping, e.g. the reader's neighbour prefetch). */
+export function hasQuery(key: string): boolean {
+    return registry.has(key);
+}
+
+/**
+ * Drops one entry (e.g. when a filter combination goes out of use). With
+ * `only`, drops it only while the entry is still that exact instance — so an
+ * owner evicting what it created never drops a successor someone else made.
+ */
+export function dropQuery(key: string, only?: Query<unknown>): void {
+    if (only !== undefined && registry.get(key) !== only) {
+        return;
+    }
     registry.delete(key);
 }
 

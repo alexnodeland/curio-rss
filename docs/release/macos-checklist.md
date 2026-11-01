@@ -62,6 +62,13 @@ directory, never your real one.
 - [ ] **Show profile folder / Copy error / Quit** — Finder opens on `curio.db`; the clipboard holds the error report; Quit exits.
 - [ ] **Keychain off the launch path** — with Reddit credentials stored, an unsigned build's keychain access prompt (if any) appears *after* the window is up and does not block it.
 
+## Language and diagnostics (do each on the built .app)
+
+- [ ] **Menu follows the language** — Settings → Language → Deutsch: the menu bar relabels at once (Ablage, Bearbeiten, Darstellung, Gehe zu, Hilfe; "Curio beenden" in the app menu) with no relaunch, the shortcuts still work, and it is still German after a relaunch. Back to English relabels it again.
+- [ ] **Notification in the language** — with German chosen and notifications on, put Curio in the background and let a scheduled refresh find new articles: the notification body reads "… neue Artikel".
+- [ ] **German error toast** — with German chosen, Add Feed → `http://127.0.0.1:9/` → Find feeds: the error toast is German and names `127.0.0.1` (no English engine text).
+- [ ] **Internal errors are logged once** — with the app running, overwrite the database underneath it (`printf garbage > "$CURIO_PROFILE/curio.db"`), then run the integrity check from the doctor panel (Settings › Advanced): the toast is the generic "Something went wrong" line, and `logs/curio.log.*` gains exactly one `ERROR … command failed` line naming `integrity_check`.
+
 ## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
 
 - [ ] **iCloud Drive refused (CLI)** — `curio --profile ~/Library/Mobile\ Documents/com~apple~CloudDocs/curio-test init` fails with "is on iCloud Drive" and creates nothing. With `--allow-network-fs` (or `CURIO_ALLOW_NETWORK_FS=1`) it opens.

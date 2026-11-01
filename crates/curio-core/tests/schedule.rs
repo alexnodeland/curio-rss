@@ -71,15 +71,6 @@ fn scheduled_wait(feed: &Feed) -> Duration {
     Duration::from_millis(u64::try_from(next - fetched).unwrap())
 }
 
-/// Sleeps until the feed's next attempt is due.
-async fn wait_until_due(feed: &Feed) {
-    let next = feed.next_attempt_at.unwrap().unix_millis();
-    let left = next - Timestamp::now().unix_millis();
-    if let Ok(left) = u64::try_from(left) {
-        tokio::time::sleep(Duration::from_millis(left + 5)).await;
-    }
-}
-
 /// A 429's `Retry-After` — either form — holds every later fetch of the
 /// feed until the deadline: sweeps skip it and so does a manual refresh.
 #[tokio::test]
@@ -155,14 +146,17 @@ async fn a_429_with_retry_after_is_not_refetched_before_the_deadline() {
     );
 }
 
-/// Five 5xx in a row: each one doubles the wait, and until it has passed
-/// a sweep leaves the feed alone. A success ends the run.
+/// Five 5xx in a row: each one doubles the wait, and while it runs a
+/// sweep leaves the feed alone. A success ends the run.
+///
+/// The backoff is a minute, so no runner is slow enough for a sweep to
+/// reach the end of a window by accident; the failures after the first
+/// are manual retries (which ignore the backoff, and back off the same
+/// way). `n_failures_in_a_row_auto_pause_the_feed_until_resumed` covers
+/// sweeps fetching a feed again once it is due.
 #[tokio::test]
 async fn five_straight_5xx_back_off_exponentially() {
-    // Long enough that the immediate second sweep below starts well inside
-    // the first backoff even on a slow CI runner; the test sleeps out
-    // 250 + 500 + 1000 + 2000 ms in all.
-    let base = Duration::from_millis(250);
+    let base = Duration::from_secs(60);
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(503))
@@ -187,9 +181,14 @@ async fn five_straight_5xx_back_off_exponentially() {
 
     let mut expected = base;
     for failures in 1..=5 {
-        let swept = core.refresh_all().await.unwrap();
-        assert_eq!(swept.len(), 1, "failure {failures} is fetched");
-        assert_eq!(swept[0].http_status, Some(503));
+        let outcome = if failures == 1 {
+            let swept = core.refresh_all().await.unwrap();
+            assert_eq!(swept.len(), 1, "a healthy feed is due");
+            swept[0].clone()
+        } else {
+            core.refresh_feed(id).await.unwrap()
+        };
+        assert_eq!(outcome.http_status, Some(503), "failure {failures}");
         assert_eq!(
             core.refresh_all().await.unwrap(),
             NOTHING,
@@ -204,16 +203,19 @@ async fn five_straight_5xx_back_off_exponentially() {
             "failure {failures}: waited {waited:?}, expected about {expected:?}"
         );
         expected *= 2;
-        wait_until_due(&state).await;
     }
 
-    let recovered = core.refresh_all().await.unwrap();
-    assert_eq!(recovered[0].status, FetchStatus::NotModified);
+    let recovered = core.refresh_feed(id).await.unwrap();
+    assert_eq!(recovered.status, FetchStatus::NotModified);
     let state = feed(&core, id);
     assert_eq!(state.consecutive_failures, 0);
     assert_eq!(state.next_attempt_at, None);
     assert_eq!(state.last_error_kind, None);
     assert_eq!(state.failing_since, None);
+    assert!(
+        state.is_due(Timestamp::now()),
+        "due on the next sweep again"
+    );
 }
 
 /// N failures in a row (here 3, over no minimum span) pause the feed by

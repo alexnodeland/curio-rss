@@ -7,12 +7,12 @@
 //! harness `trusted_addrs` escape hatch, so redirects *out* of it hit the
 //! live deny-private policy.
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{Read, Write};
 use std::net::{IpAddr, TcpListener};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use curio_core::fetch::{
@@ -788,10 +788,15 @@ async fn a_hung_dns_lookup_is_bounded_by_the_connect_timeout() {
     config.connect_timeout = Duration::from_millis(150);
     let client = PolicedClient::with_lookup(config, Arc::new(HungLookup));
     let started = Instant::now();
-    let err = client
-        .fetch(&FetchRequest::new("http://hang.test/feed.xml"))
-        .await
-        .unwrap_err();
+    // The outer bound turns a regression (an unbounded lookup) into a fast,
+    // named failure instead of a hang until the CI job times out.
+    let err = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.fetch(&FetchRequest::new("http://hang.test/feed.xml")),
+    )
+    .await
+    .expect("the fetch must not outlive its DNS timeout")
+    .unwrap_err();
     assert!(
         matches!(
             err,
@@ -803,5 +808,63 @@ async fn a_hung_dns_lookup_is_bounded_by_the_connect_timeout() {
         started.elapsed() < Duration::from_secs(5),
         "the lookup must give up at the configured timeout, took {:?}",
         started.elapsed()
+    );
+}
+
+/// A DNS seam that answers each name's first lookup with loopback and every
+/// later lookup of that name with an address the screen never saw — the
+/// rebinding shape — recording every name it is asked for.
+#[derive(Debug, Default)]
+struct RebindingLookup(Mutex<Vec<String>>);
+
+impl DnsLookup for RebindingLookup {
+    fn lookup(&self, host: &str) -> LookupFuture {
+        let mut asked = self.0.lock().unwrap();
+        let seen = asked.iter().any(|name| name == host);
+        asked.push(host.to_owned());
+        let addr = if seen {
+            ip("192.0.2.1")
+        } else {
+            ip("127.0.0.1")
+        };
+        Box::pin(async move { Ok(vec![addr]) })
+    }
+}
+
+#[tokio::test]
+async fn every_connection_dials_the_pin_its_own_screen_set() {
+    // The pinning resolver falls back to an unscreened lookup for a name it
+    // holds no pin for (only ever the user's own proxy host). That is safe
+    // only while hyper asks it for exactly the name the screen pinned, for
+    // every spelling a URL can carry: mixed case, a trailing dot, an IDN.
+    // Each spelling is its own hyper pool key, so each fetch opens a
+    // connection and consults the resolver; a missed pin would show up as
+    // a second lookup of that name (and a dial to the rebound address).
+    let (port, accepted) = counting_server();
+    let mut config = fast_config();
+    config.trusted_addrs.insert(ip("127.0.0.1"));
+    config.connect_timeout = Duration::from_secs(2);
+    let lookup = Arc::new(RebindingLookup::default());
+    let client = PolicedClient::with_lookup(config, Arc::clone(&lookup) as Arc<dyn DnsLookup>);
+
+    for host in ["Fixture.Test", "fixture.test.", "b\u{fc}cher.test"] {
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.fetch(&FetchRequest::new(format!("http://{host}:{port}/feed.xml"))),
+        )
+        .await
+        .expect("a pinned fetch must not stall")
+        .unwrap();
+        assert_eq!(response.body, b"ok", "{host}");
+    }
+    assert_eq!(
+        *lookup.0.lock().unwrap(),
+        ["fixture.test", "fixture.test.", "xn--bcher-kva.test"],
+        "exactly one (pre-flight) lookup per name, none from the connector"
+    );
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        3,
+        "one connection per spelling"
     );
 }

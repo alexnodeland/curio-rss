@@ -2,23 +2,26 @@
 //! manual redirect handling, size caps and politeness built in. rustls is the
 //! default TLS stack; a per-host override may opt into the platform-native
 //! stack (reddit.com, whose CDN fingerprint-blocks rustls).
-//! Connections are pooled (see `pool.rs`): one reqwest client per (TLS
-//! backend, SSRF policy) for the life of the [`PolicedClient`].
+//!
+//! Connections are pooled (see `pool.rs`, which also owns the SSRF screen):
+//! one reqwest client per (TLS backend, SSRF policy) for the life of the
+//! [`PolicedClient`].
 
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use reqwest::Method;
 use reqwest::header::{
     ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION,
     RETRY_AFTER, USER_AGENT,
 };
-use url::{Host, Url};
+use url::Url;
 
 use super::pool::Pools;
-use super::resolve::{self, DnsLookup, SystemLookup};
-use super::{FetchError, FetchRequest, FetchResponse, policy};
+use super::resolve::{DnsLookup, SystemLookup};
+use super::{FetchError, FetchRequest, FetchResponse};
 
 /// Default streaming response-body cap: 10 MB.
 pub const DEFAULT_MAX_BODY_BYTES: u64 = 10 * 1024 * 1024;
@@ -152,7 +155,7 @@ pub struct PolicedClient {
     config: FetchConfig,
     /// Per-host next-allowed-request instants (politeness reservations).
     next_allowed: Mutex<HashMap<String, Instant>>,
-    /// The pooled reqwest clients and the DNS seam, built on first use.
+    /// The SSRF screen and the pooled reqwest clients behind it.
     pools: Pools,
 }
 
@@ -176,7 +179,12 @@ impl PolicedClient {
     /// identical: every address `lookup` returns is screened.
     #[must_use]
     pub fn with_lookup(config: FetchConfig, lookup: Arc<dyn DnsLookup>) -> Self {
-        let pools = Pools::new(lookup, config.connect_timeout, config.request_timeout);
+        let pools = Pools::new(
+            lookup,
+            config.trusted_addrs.clone(),
+            config.connect_timeout,
+            config.request_timeout,
+        );
         Self {
             config,
             next_allowed: Mutex::new(HashMap::new()),
@@ -228,7 +236,8 @@ impl PolicedClient {
 
         loop {
             let screened = self
-                .resolve_and_check(&url, request.allow_private_network)
+                .pools
+                .screen(&url, request.allow_private_network)
                 .await?;
             let host_override = self.override_for(&url);
             self.be_polite(&url, host_override).await;
@@ -237,11 +246,9 @@ impl PolicedClient {
                 .and_then(|entry| entry.user_agent.as_deref())
                 .unwrap_or(self.config.user_agent.as_str());
             let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
-            let client =
-                self.pools
-                    .client(&url, native_tls, request.allow_private_network, screened)?;
-            let mut req = client
-                .get(url.clone())
+            let mut req = self
+                .pools
+                .request(screened, native_tls, Method::GET)?
                 .header(USER_AGENT, user_agent)
                 .header(ACCEPT, self.config.accept.as_str());
             if let Some(host_override) = host_override {
@@ -340,7 +347,7 @@ impl PolicedClient {
         form: &[(&str, &str)],
     ) -> Result<FetchResponse, FetchError> {
         let url = screen_url(raw_url)?;
-        let screened = self.resolve_and_check(&url, false).await?;
+        let screened = self.pools.screen(&url, false).await?;
         let host_override = self.override_for(&url);
         self.be_polite(&url, host_override).await;
 
@@ -348,9 +355,9 @@ impl PolicedClient {
             .and_then(|entry| entry.user_agent.as_deref())
             .unwrap_or(self.config.user_agent.as_str());
         let native_tls = host_override.is_some_and(|entry| entry.use_native_tls);
-        let client = self.pools.client(&url, native_tls, false, screened)?;
-        let mut req = client
-            .post(url.clone())
+        let mut req = self
+            .pools
+            .request(screened, native_tls, Method::POST)?
             .header(USER_AGENT, user_agent)
             .basic_auth(basic_auth.0, Some(basic_auth.1))
             .form(form);
@@ -384,57 +391,6 @@ impl PolicedClient {
             last_modified: None,
             retry_after,
             body,
-        })
-    }
-
-    /// Resolves the URL's host (one lookup, bounded by
-    /// [`FetchConfig::connect_timeout`], for domain names) and applies the
-    /// address policy to *every* resolved address — one private record
-    /// poisons the lot, so split-horizon/rebinding games with mixed record
-    /// sets cannot slip through. Returns the screened set for domain-name
-    /// hosts, to pin the connection to.
-    async fn resolve_and_check(
-        &self,
-        url: &Url,
-        allow_private: bool,
-    ) -> Result<Option<Vec<IpAddr>>, FetchError> {
-        let host = url.host().ok_or_else(|| FetchError::NoHost {
-            url: url.to_string(),
-        })?;
-        match host {
-            Host::Ipv4(v4) => {
-                self.check_addr(url, IpAddr::V4(v4), allow_private)?;
-                Ok(None)
-            }
-            Host::Ipv6(v6) => {
-                self.check_addr(url, IpAddr::V6(v6), allow_private)?;
-                Ok(None)
-            }
-            Host::Domain(domain) => {
-                let addrs = resolve::bounded_lookup(
-                    self.pools.lookup(),
-                    domain,
-                    self.config.connect_timeout,
-                )
-                .await?;
-                for addr in &addrs {
-                    self.check_addr(url, *addr, allow_private)?;
-                }
-                Ok(Some(addrs))
-            }
-        }
-    }
-
-    fn check_addr(&self, url: &Url, addr: IpAddr, allow_private: bool) -> Result<(), FetchError> {
-        if allow_private || self.config.trusted_addrs.contains(&addr) {
-            return Ok(());
-        }
-        if policy::is_public_address(addr) {
-            return Ok(());
-        }
-        Err(FetchError::PrivateAddress {
-            host: url.host_str().unwrap_or_default().to_owned(),
-            addr,
         })
     }
 

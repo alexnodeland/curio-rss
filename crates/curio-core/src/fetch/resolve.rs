@@ -3,7 +3,7 @@
 //! reqwest clients connect through.
 //!
 //! The SSRF screen runs on the result of one bounded lookup per hop
-//! ([`super::PolicedClient`]'s pre-flight); the screened address set is then
+//! (`Pools::screen` in `pool.rs`); the screened address set is then
 //! *pinned* into the [`PinningResolver`] of the client that sends the
 //! request. When that client opens a new connection, reqwest asks the
 //! resolver, which answers with exactly the pinned set — every address, in
@@ -19,7 +19,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
@@ -90,47 +90,86 @@ pub(super) async fn bounded_lookup(
     Ok(addrs)
 }
 
+/// Below this many pins the resolver never sweeps: a sweep is a linear scan,
+/// and a few hundred small entries are not worth one.
+const SWEEP_FLOOR: usize = 256;
+
 /// The resolver installed in every pooled reqwest client. Answers a pinned
 /// name with its screened address set; anything else gets a bounded lookup.
 ///
 /// Pins are per client, and clients are keyed by SSRF policy (see
-/// `PolicedClient`), so a deny-private client only ever holds addresses that
+/// `pool.rs`), so a deny-private client only ever holds addresses that
 /// passed the deny-private screen — and never shares a pooled connection
 /// with an `allow_private_network` request.
 #[derive(Debug)]
 pub(super) struct PinningResolver {
-    /// Domain → the address set the most recent pre-flight screened.
-    pins: Mutex<HashMap<String, Arc<[IpAddr]>>>,
+    pins: Mutex<Pins>,
     lookup: Arc<dyn DnsLookup>,
     timeout: Duration,
+    /// How long a pin must survive (see `pool.rs`'s `pin_ttl`): older pins
+    /// are swept once the map outgrows [`Pins::sweep_at`].
+    ttl: Duration,
+}
+
+/// The pin map, bounded by sweeping pins older than the resolver's TTL.
+#[derive(Debug)]
+struct Pins {
+    /// Domain → the address set the most recent pre-flight screened, and
+    /// when it was pinned.
+    by_domain: HashMap<String, (Arc<[IpAddr]>, Instant)>,
+    /// Sweep when the map reaches this size; reset to twice the survivors
+    /// after each sweep, so the scan stays amortised O(1) per pin.
+    sweep_at: usize,
 }
 
 impl PinningResolver {
-    pub(super) fn new(lookup: Arc<dyn DnsLookup>, timeout: Duration) -> Self {
+    pub(super) fn new(lookup: Arc<dyn DnsLookup>, timeout: Duration, ttl: Duration) -> Self {
         Self {
-            pins: Mutex::new(HashMap::new()),
+            pins: Mutex::new(Pins {
+                by_domain: HashMap::new(),
+                sweep_at: SWEEP_FLOOR,
+            }),
             lookup,
             timeout,
+            ttl,
         }
     }
 
     /// Pins `domain` to `addrs`, which the caller has already screened
-    /// under this client's policy. Replaces any earlier pin: every request
-    /// pre-flights (and re-pins) its host before it is sent, so the pin a
-    /// new connection reads is always the one its own request screened.
+    /// under this client's policy, replacing any earlier pin. Every request
+    /// re-pins its host just before it is sent, but concurrent requests to
+    /// one host on one pool race: the last pin wins, so a new connection
+    /// may dial the set another in-flight request screened. That is
+    /// harmless — both sets passed the same policy, because the pool is
+    /// keyed by `allow_private` and the trusted addresses are config-wide.
     pub(super) fn pin(&self, domain: &str, addrs: Vec<IpAddr>) {
-        self.pins
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(domain.to_owned(), addrs.into());
+        let mut pins = self.pins.lock().unwrap_or_else(PoisonError::into_inner);
+        pins.by_domain
+            .insert(domain.to_owned(), (addrs.into(), Instant::now()));
+        if pins.by_domain.len() >= pins.sweep_at {
+            let ttl = self.ttl;
+            pins.by_domain
+                .retain(|_, (_, pinned_at)| pinned_at.elapsed() < ttl);
+            pins.sweep_at = pins.by_domain.len().saturating_mul(2).max(SWEEP_FLOOR);
+        }
     }
 
     fn pinned(&self, domain: &str) -> Option<Arc<[IpAddr]>> {
         self.pins
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .by_domain
             .get(domain)
-            .cloned()
+            .map(|(addrs, _)| Arc::clone(addrs))
+    }
+
+    #[cfg(test)]
+    fn pin_count(&self) -> usize {
+        self.pins
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .by_domain
+            .len()
     }
 }
 
@@ -148,10 +187,13 @@ impl Resolve for PinningResolver {
             let resolved = to_addrs(&addrs);
             return Box::pin(async move { Ok(resolved) });
         }
-        // Unpinned: every request target is pinned before it is sent, so
-        // this is only ever the HTTP(S)_PROXY host from the user's own
-        // environment — user configuration, resolved (bounded) like the
-        // system resolver did before pooling, not screened as feed content.
+        // Unpinned: the only way to a pooled request is `Pools::request`,
+        // which pins the screened host first (the `Screened` type enforces
+        // it, and the fetch tests pin that hyper asks for the very name we
+        // pinned), so this is only ever the HTTP(S)_PROXY host from the
+        // user's own environment — user configuration, resolved (bounded)
+        // like the system resolver did before pooling, not screened as feed
+        // content: a proxy on a private address is a normal setup.
         let lookup = Arc::clone(&self.lookup);
         let timeout = self.timeout;
         let host = name.as_str().to_owned();
@@ -235,6 +277,7 @@ mod tests {
         let resolver = PinningResolver::new(
             Arc::new(Table(vec![ip("10.0.0.1")])),
             Duration::from_secs(1),
+            Duration::from_secs(60),
         );
         resolver.pin("feed.test", vec![ip("2001:db8::1"), ip("192.0.2.1")]);
         let addrs: Vec<SocketAddr> = resolver
@@ -265,6 +308,7 @@ mod tests {
         let resolver = PinningResolver::new(
             Arc::new(Table(vec![ip("192.0.2.7")])),
             Duration::from_secs(1),
+            Duration::from_secs(60),
         );
         let addrs: Vec<SocketAddr> = resolver
             .resolve(Name::from_str("proxy.test").unwrap())
@@ -273,12 +317,60 @@ mod tests {
             .collect();
         assert_eq!(addrs, vec![SocketAddr::new(ip("192.0.2.7"), 0)]);
 
-        let hung = PinningResolver::new(Arc::new(Hangs), Duration::from_millis(20));
+        let hung = PinningResolver::new(
+            Arc::new(Hangs),
+            Duration::from_millis(20),
+            Duration::from_secs(60),
+        );
         let err = hung
             .resolve(Name::from_str("proxy.test").unwrap())
             .await
             .err()
             .unwrap();
         assert!(err.to_string().contains("timed out"), "got {err}");
+    }
+
+    fn numbered(n: usize) -> String {
+        format!("host-{n}.test")
+    }
+
+    #[test]
+    fn live_pins_survive_a_sweep() {
+        // A TTL no test outlives: nothing is old enough to sweep, so the
+        // map holds every pin and the next sweep backs off to twice that.
+        let resolver = PinningResolver::new(
+            Arc::new(Table(Vec::new())),
+            Duration::from_secs(1),
+            Duration::from_secs(3600),
+        );
+        for n in 0..SWEEP_FLOOR + 10 {
+            resolver.pin(&numbered(n), vec![ip("192.0.2.1")]);
+        }
+        assert_eq!(resolver.pin_count(), SWEEP_FLOOR + 10);
+        assert_eq!(
+            resolver.pins.lock().unwrap().sweep_at,
+            SWEEP_FLOOR * 2,
+            "the sweep at the floor kept all {SWEEP_FLOOR} pins and backed off"
+        );
+        assert!(resolver.pinned(&numbered(0)).is_some());
+    }
+
+    #[test]
+    fn expired_pins_are_swept_once_the_map_outgrows_the_floor() {
+        let resolver = PinningResolver::new(
+            Arc::new(Table(Vec::new())),
+            Duration::from_secs(1),
+            Duration::ZERO,
+        );
+        for n in 0..SWEEP_FLOOR - 1 {
+            resolver.pin(&numbered(n), vec![ip("192.0.2.1")]);
+        }
+        // Under the floor nothing is swept, however old.
+        assert_eq!(resolver.pin_count(), SWEEP_FLOOR - 1);
+        // Reaching it sweeps every expired pin — with a zero TTL, all of
+        // them, the one just pinned included.
+        resolver.pin("last.test", vec![ip("192.0.2.2")]);
+        assert_eq!(resolver.pin_count(), 0);
+        assert_eq!(resolver.pins.lock().unwrap().sweep_at, SWEEP_FLOOR);
     }
 }

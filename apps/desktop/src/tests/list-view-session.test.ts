@@ -71,7 +71,7 @@ function harnessFor(read: Set<number>): IpcHarness {
             return true;
         },
         set_archived: true,
-        mark_all_read: 0,
+        mark_all_read: [],
         refresh_all: [refreshOutcomeFixture()],
         refresh_feed: refreshOutcomeFixture(),
     });

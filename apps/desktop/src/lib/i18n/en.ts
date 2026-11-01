@@ -447,6 +447,12 @@ export const en = {
     'pane.list.resize': 'Resize article list',
 
     'toast.dismiss': 'Dismiss',
+    'toast.region': 'Notifications',
+    'toast.undo': 'Undo',
+    'toast.retry': 'Retry',
+    'toast.markReadUndone':
+        '{count, plural, one {Marked # unread again} other {Marked # unread again}}',
+    'updates.openSettings': 'Open Settings',
 
     'shortcut.category.navigation': 'Navigation',
     'shortcut.category.actions': 'Actions',

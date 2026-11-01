@@ -114,7 +114,7 @@ async function importTheme(): Promise<void> {
         }
         const parsed = parseTheme(read.data);
         if (!parsed.ok) {
-            toastStore.showToast(t('theme.importFailed', { error: parsed.error }), 'error', 6000);
+            toastStore.showToast(t('theme.importFailed', { error: parsed.error }), 'error');
             return;
         }
         let theme = parsed.theme;

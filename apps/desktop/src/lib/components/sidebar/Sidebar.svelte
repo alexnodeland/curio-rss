@@ -14,12 +14,13 @@ import {
     activeView,
     importFromFile,
     refreshAll,
-    runCommand,
+    reorderFeedGroup,
     selectView,
+    ungroupFeed,
     type ViewId,
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
-import { feedDnd, moveWithinGroup, rebuildGlobalOrder } from '$lib/state/feed-dnd.svelte';
+import { feedDnd, moveWithinGroup } from '$lib/state/feed-dnd.svelte';
 import { connectivityStore } from '$lib/state/connectivity.svelte';
 import { buildFeedTree, flattenVisibleTree, type VisibleRow } from '$lib/state/feed-tree';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -129,12 +130,7 @@ function reorderFeedRow(index: number, direction: 1 | -1): boolean {
     if (target === undefined) {
         return false;
     }
-    const newGroup = moveWithinGroup(group, row.id, target);
-    const globalOrder = rebuildGlobalOrder(
-        feedsStore.feeds.map((candidate) => candidate.id),
-        newGroup,
-    );
-    void runCommand(() => feedsStore.reorderFeeds(globalOrder));
+    void reorderFeedGroup(moveWithinGroup(group, row.id, target));
     return true;
 }
 
@@ -206,7 +202,7 @@ function onUngroupDrop(event: DragEvent): void {
         return;
     }
     event.preventDefault();
-    void runCommand(() => feedsStore.ungroupFeed(dragged));
+    void ungroupFeed(dragged);
     feedDnd.clear();
 }
 

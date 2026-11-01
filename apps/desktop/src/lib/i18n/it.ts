@@ -429,6 +429,12 @@ export const it: Partial<Record<MessageKey, string>> = {
     'pane.sidebar.resize': 'Ridimensiona barra laterale',
     'pane.list.resize': 'Ridimensiona elenco articoli',
     'toast.dismiss': 'Chiudi',
+    'toast.region': 'Notifiche',
+    'toast.undo': 'Annulla',
+    'toast.retry': 'Riprova',
+    'toast.markReadUndone':
+        '{count, plural, one {# segnato di nuovo come non letto} other {# segnati di nuovo come non letti}}',
+    'updates.openSettings': 'Apri Impostazioni',
     'shortcut.category.navigation': 'Navigazione',
     'shortcut.category.actions': 'Azioni',
     'shortcut.category.views': 'Viste',

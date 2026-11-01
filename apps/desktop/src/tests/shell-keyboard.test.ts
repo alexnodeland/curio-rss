@@ -72,7 +72,7 @@ function shellResponders(): Record<string, Responder> {
         set_starred: true,
         set_read_later: true,
         set_archived: true,
-        mark_all_read: 7,
+        mark_all_read: [1, 2, 3, 4, 5, 6, 7],
         set_setting: null,
         record_opened: null,
         'plugin:opener|open_url': null,
@@ -387,11 +387,12 @@ describe('shell keyboard wiring', () => {
 
     it('Shift+A marks the current view read (the whole library from All)', async () => {
         harness = installIpcHarness(shellResponders());
-        const { findByText } = await mountShell();
+        const { findAllByText } = await mountShell();
         await fireEvent.keyDown(window, { key: 'A', shiftKey: true });
         await flushIpc();
         expect(harness.callsFor('mark_all_read')).toEqual([{ feedId: null }]);
-        expect(await findByText('Marked 7 read')).toBeTruthy();
+        // Once on the toast, once in the polite live region that announces it.
+        expect(await findAllByText('Marked 7 read')).toHaveLength(2);
         // `a` (unshifted) is still Add feed.
         expect(layoutStore.activeModal).toBeNull();
     });

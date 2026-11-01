@@ -92,7 +92,9 @@ onMount(() => {
     })();
 
     // A deferred commit still in its undo window (an unsubscribe) goes ahead
-    // when the window goes away, rather than being silently lost.
+    // when the page goes away (a reload). A quit need not deliver `pagehide`
+    // (WKWebView on ⌘Q): the unsubscribe is also staged in the Rust app,
+    // which commits it as the event loop exits.
     const settle = (): void => toastStore.settleAll();
     window.addEventListener('pagehide', settle);
     teardowns.push(() => window.removeEventListener('pagehide', settle));

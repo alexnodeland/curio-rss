@@ -452,6 +452,8 @@ tokens:
                     return structuredClone(feeds[0]);
                 }
                 case 'remove_feed':
+                case 'stage_feed_removal':
+                case 'unstage_feed_removal':
                 case 'update_feed_metadata':
                     return null;
                 // Startup recovery: `?startup=<class>` (and `&backup=0` for

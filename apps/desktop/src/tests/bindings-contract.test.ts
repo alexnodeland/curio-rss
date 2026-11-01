@@ -56,6 +56,8 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
         response: feedFixture(),
     },
     removeFeed: { args: [1], response: null },
+    stageFeedRemoval: { args: [1], response: null },
+    unstageFeedRemoval: { args: [1], response: null },
     listFeeds: { args: [], response: [feedFixture()] },
     getFeed: { args: [1], response: feedFixture() },
     getFeedByUrl: { args: ['https://example.org/feed.xml'], response: feedFixture() },

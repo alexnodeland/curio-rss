@@ -26,8 +26,20 @@ export const commands = {
 	 *  — including one a homepage resolved to — is `ALREADY_SUBSCRIBED`.
 	 */
 	addFeed: (newFeed: NewFeedDto) => typedError<FeedDto, CommandError>(__TAURI_INVOKE("add_feed", { newFeed })),
-	/**  Unsubscribes. Stored articles survive (they lose their `feed_id`). */
+	/**
+	 *  Unsubscribes. Stored articles survive (they lose their `feed_id`).
+	 *  Settles any staged removal of the feed either way: a success needs no
+	 *  exit flush, and a failure leaves the feed subscribed (the UI shows it
+	 *  again), so quitting must not remove it behind the user's back.
+	 */
 	removeFeed: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("remove_feed", { feedId })),
+	/**
+	 *  Stages an unsubscribe that is waiting out its undo window, so it still
+	 *  happens if the app quits first (see [`PendingRemovals`]).
+	 */
+	stageFeedRemoval: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("stage_feed_removal", { feedId })),
+	/**  Withdraws a staged unsubscribe — the undo toast's Undo. */
+	unstageFeedRemoval: (feedId: number) => typedError<null, CommandError>(__TAURI_INVOKE("unstage_feed_removal", { feedId })),
 	/**  Every subscription. */
 	listFeeds: () => typedError<FeedDto[], CommandError>(__TAURI_INVOKE("list_feeds")),
 	/**  One subscription, if it exists. */

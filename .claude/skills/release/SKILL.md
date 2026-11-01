@@ -35,7 +35,11 @@ exactly this:
 6. **Tag**: annotated tag `vX.Y.Z` on the release commit (the squash-merge
    of the bump PR, green on CI). Agents may create **and push** the tag
    (`git push origin vX.Y.Z`; maintainer decision, 2026-11-01), then watch
-   the release run to its draft. A pushed tag is never moved or deleted;
+   the release run to its draft — where the git transport allows it: the
+   Claude Code cloud-session git proxy accepts branch pushes but refuses
+   tag pushes (HTTP 403), so there the agent creates the annotated tag and
+   hands the maintainer the exact `git tag`/`git push` commands instead of
+   retrying or routing around the refusal. A pushed tag is never moved or deleted;
    a broken release ships as the next patch version. Approving the `sign`
    job's `updater-signing` deployment and publishing the draft stay with
    the maintainer.

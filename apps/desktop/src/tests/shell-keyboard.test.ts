@@ -117,7 +117,13 @@ describe('shell keyboard wiring', () => {
 
         await fireEvent.keyDown(window, { key: 'j' });
         await flushIpc();
-        expect(harness.callsFor('get_article')).toEqual([{ articleId: 500 }]);
+        // The selected body first, then the reader's neighbour prefetch (the
+        // top row has no previous neighbour) — and only the selection is marked.
+        expect(harness.callsFor('get_article')).toEqual([
+            { articleId: 500 },
+            { articleId: 499 },
+            { articleId: 498 },
+        ]);
         expect(harness.callsFor('mark_read')).toEqual([{ articleId: 500, read: true }]);
         expect(getByRole('button', { name: 'Open in browser' })).toBeTruthy();
     });

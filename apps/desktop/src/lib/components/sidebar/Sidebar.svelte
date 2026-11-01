@@ -23,7 +23,7 @@ import { articlesStore } from '$lib/state/articles.svelte';
 import { feedDnd, moveWithinGroup } from '$lib/state/feed-dnd.svelte';
 import { connectivityStore } from '$lib/state/connectivity.svelte';
 import { buildFeedTree, flattenVisibleTree, type VisibleRow } from '$lib/state/feed-tree';
-import { feedsStore } from '$lib/state/feeds.svelte';
+import { REFRESH_CONTROL_ID, feedsStore } from '$lib/state/feeds.svelte';
 import { folderPathsForTags } from '$lib/state/folder-ops';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
@@ -279,6 +279,7 @@ function newFolder(): void {
                 onclick={() => layoutStore.openModal('add-feed')}><Icon name="plus" /></button
             >
             <button
+                id={REFRESH_CONTROL_ID}
                 class="chrome-button"
                 type="button"
                 aria-label={t('toolbar.refreshAll')}

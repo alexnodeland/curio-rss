@@ -1092,21 +1092,28 @@ export type RefreshOutcomeDto = {
 };
 
 /**
- *  One feed finished during a `refresh_all` sweep — drive the progress UI
- *  ("12/300"). Feeds refresh concurrently, so progress arrives in
- *  completion order.
+ *  A feed or a full-text page finished during a `refresh_all` sweep —
+ *  drive the progress UI ("12/300", then "Loading full text… 3/12").
+ *  Feeds refresh concurrently, so progress arrives in completion order. A
+ *  full-text feed's pages load after the feed, so a sweep can run on past
+ *  its last feed: each page that finishes reports too, keeping the sweep
+ *  visibly alive.
  */
 export type RefreshProgress = {
 	/**  The sweep this progress belongs to (counts up per app run). */
 	sweep_id: number,
-	/**  Feeds finished so far, this one included. */
+	/**  Feeds finished so far. */
 	done: number,
 	/**  Feeds the sweep set out to refresh. */
 	total: number,
-	/**  The feed that finished. */
-	feed_id: number,
-	/**  Its outcome. */
-	outcome: RefreshOutcomeDto,
+	/**  Full-text pages finished so far (loaded, failed or dropped). */
+	pages_done: number,
+	/**  Full-text pages queued so far — final once `done` reaches `total`. */
+	pages_total: number,
+	/**  The feed that finished; none when a page did. */
+	feed_id: number | null,
+	/**  Its outcome; none when a page did. */
+	outcome: RefreshOutcomeDto | null,
 };
 
 /**  Mirror of [`SaveOutcome`] — what a promote wrote. */

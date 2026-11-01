@@ -12,6 +12,40 @@ export const it: Partial<Record<MessageKey, string>> = {
     'app.error.internal': 'Qualcosa è andato storto. Riprovare potrebbe aiutare.',
     'app.error.profileBusy':
         'Un altro processo di Curio (ad esempio un comando da terminale) sta usando questo profilo in questo momento. Riprova tra poco.',
+    'error.notFound': 'Questo elemento non esiste più.',
+    'error.invalidInput': 'Questo valore non è valido. Controllalo e riprova.',
+    'error.invalidUrl': '«{input}» non è un indirizzo web che Curio può aprire.',
+    'error.pathTokenExpired':
+        'La scelta del file è scaduta. Scegli di nuovo il file o la cartella.',
+    'error.unknownDestination':
+        'Questa destinazione non è più configurata. Aggiungila di nuovo nelle Impostazioni.',
+    'error.destinationMissing':
+        'La cartella di destinazione {root} non c’è più. Ricollegala o aggiungi di nuovo la destinazione.',
+    'error.pathsTaken':
+        'Altri file usano già tutti i nomi possibili per questa nota (ultimo tentativo: {path}). Rinominali o spostali, poi riprova.',
+    'error.schemaTooNew':
+        'Questa libreria è stata salvata da una versione più recente di Curio. Aggiorna Curio per aprirla.',
+    'error.network':
+        'Curio non è riuscito a raggiungere il server. Controlla la connessione e riprova.',
+    'error.networkTimeout': '{host} ha impiegato troppo a rispondere. Riprova tra poco.',
+    'error.hostNotFound': 'Curio non ha trovato {host}. Controlla l’indirizzo e la connessione.',
+    'error.connectionFailed':
+        'Curio non è riuscito a connettersi a {host}. Controlla la connessione e riprova.',
+    'error.tls': 'Curio non è riuscito ad aprire una connessione sicura con {host}.',
+    'error.httpStatus': '{host} ha risposto con un errore (HTTP {status}).',
+    'error.blockedAddress':
+        '{host} punta a un indirizzo di rete privato, che Curio non scarica per impostazione predefinita.',
+    'error.tooLarge': 'La pagina di {host} è troppo grande da caricare.',
+    'error.rateLimited': '{host} sta limitando le richieste. Riprova tra circa {minutes} min.',
+    'error.parse': 'Curio non è riuscito a leggere questo file o feed.',
+    'error.storage': 'Curio non è riuscito a salvare questa modifica.',
+    'error.duplicate': 'Esiste già.',
+    'error.duplicateFeed': 'Sei già iscritto a questo feed.',
+    'error.diskFull': 'Il disco è pieno. Libera spazio e riprova.',
+    'error.readOnly':
+        'Curio non può scrivere nella sua libreria: la cartella o il disco è di sola lettura.',
+    'error.io': 'Curio non è riuscito a leggere o scrivere un file.',
+
     'a11y.skipToContent': 'Vai al contenuto',
     'shell.feeds.loading': 'Caricamento iscrizioni…',
     'shell.feeds.empty': 'Nessuna iscrizione',

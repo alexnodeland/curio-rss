@@ -301,7 +301,10 @@ export const commands = {
 	getRedditApiStatus: () => typedError<RedditApiStatusDto, CommandError>(__TAURI_INVOKE("get_reddit_api_status")),
 	/**  Reads a setting. */
 	getSetting: (key: string) => typedError<string | null, CommandError>(__TAURI_INVOKE("get_setting", { key })),
-	/**  Writes a setting. */
+	/**
+	 *  Writes a setting. A new `ui.locale` also rebuilds the native menu in
+	 *  that language (the notification body reads it fresh each time).
+	 */
 	setSetting: (key: string, value: string) => typedError<null, CommandError>(__TAURI_INVOKE("set_setting", { key, value })),
 	/**  Version / profile / schema facts for the about box and doctor panel. */
 	getAppInfo: () => typedError<AppInfoDto, CommandError>(__TAURI_INVOKE("get_app_info")),
@@ -560,9 +563,17 @@ export type BulkSaveOutcomeDto = {
 export type CommandError = {
 	/**  User-actionable vs internal. */
 	kind: ErrorKind,
-	/**  Machine-readable code. */
+	/**  Machine-readable code — what the frontend localizes. */
 	code: ErrorCode,
-	/**  Human-readable description (shown verbatim for `kind: user`). */
+	/**
+	 *  Values for the `{placeholders}` of the code's localized copy (a
+	 *  host, an HTTP status, a folder). Empty for most codes.
+	 */
+	params: { [key in string]: string },
+	/**
+	 *  English description: the fallback when the UI has no copy of its
+	 *  own, and the diagnostic detail (logged for internal errors).
+	 */
 	message: string,
 	/**  Whether retrying the same action can plausibly succeed. */
 	recoverable: boolean,
@@ -609,27 +620,82 @@ export type DiscoveryDto = {
 	favicon: string | null,
 };
 
-/**  Stable machine-readable code the frontend can branch on. */
+/**
+ *  Stable machine-readable code the frontend branches on and localizes.
+ *  A code's doc names the [`CommandError::params`] its copy fills in.
+ */
 export type ErrorCode = 
 /**  The referenced feed/article/row does not exist. */
 "NOT_FOUND" | 
 /**  The input failed validation (bad tag, bad name, bad token…). */
 "INVALID_INPUT" | 
+/**  The input is not an http(s) URL Curio can fetch. Params: `input`. */
+"INVALID_URL" | 
+/**
+ *  A picked-path token is unknown or already used — the user picks the
+ *  file or folder again.
+ */
+"PATH_TOKEN_EXPIRED" | 
 /**  No destination is registered under that name. */
 "UNKNOWN_DESTINATION" | 
+/**
+ *  A registered destination's folder is gone (moved, renamed,
+ *  unmounted). Params: `root`.
+ */
+"DESTINATION_MISSING" | 
+/**
+ *  Every candidate path for a note is taken by other files. Params:
+ *  `path`.
+ */
+"PATHS_TAKEN" | 
 /**  The database was written by a newer build of Curio. */
 "SCHEMA_TOO_NEW" | 
-/**  An outbound fetch failed (policed client). */
+/**
+ *  An outbound fetch failed in a way no finer code names (a refused
+ *  redirect, Reddit auth).
+ */
 "NETWORK" | 
+/**  Connecting, or the answer, took too long. Params: `host`. */
+"NETWORK_TIMEOUT" | 
+/**  The host name did not resolve. Params: `host`. */
+"HOST_NOT_FOUND" | 
+/**
+ *  The connection was refused, reset or failed on the wire. Params:
+ *  `host`.
+ */
+"CONNECTION_FAILED" | 
+/**  The TLS certificate or handshake was rejected. Params: `host`. */
+"TLS" | 
+/**
+ *  The server answered with a non-success HTTP status. Params: `host`,
+ *  `status`.
+ */
+"HTTP_STATUS" | 
+/**
+ *  The SSRF guard refused a private / non-public address. Params:
+ *  `host`.
+ */
+"BLOCKED_ADDRESS" | 
+/**  The response exceeded the size cap. Params: `host`. */
+"TOO_LARGE" | 
+/**  The host is rate-limiting Curio. Params: `host`, `minutes`. */
+"RATE_LIMITED" | 
 /**  Feed/OPML bytes did not parse. */
 "PARSE" | 
 /**  The storage layer failed. */
 "STORAGE" | 
+/**  The row already exists. Params: `entity` (English, diagnostic). */
+"DUPLICATE" | 
+/**  The feed URL is already subscribed. */
+"DUPLICATE_FEED" | 
+/**  The disk holding the profile is full. */
+"DISK_FULL" | 
+/**  The profile database or its folder is read-only. */
+"READ_ONLY" | 
 /**
  *  Another Curio process (a CLI run, a cron job) holds the profile —
  *  its database stayed busy or its events lock stayed held. Retrying
- *  once it finishes succeeds. The UI shows its own localized message
- *  for this code; `message` is the English diagnostic.
+ *  once it finishes succeeds.
  */
 "PROFILE_BUSY" | 
 /**  Filesystem IO failed. */
@@ -639,7 +705,7 @@ export type ErrorCode =
 
 /**  Which tier of the UI handles the error. */
 export type ErrorKind = 
-/**  Actionable by the user — surface `message` verbatim. */
+/**  Actionable by the user — surface the localized copy for `code`. */
 "user" | 
 /**  Not actionable by the user — show a generic failure. */
 "internal";

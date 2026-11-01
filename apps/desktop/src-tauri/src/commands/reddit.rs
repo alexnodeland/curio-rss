@@ -25,7 +25,10 @@ pub async fn set_reddit_api(
     client_secret: String,
 ) -> Result<RedditApiStatusDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_reddit_api_impl(&core, &client_id, &client_secret)).await
+    run_blocking("set_reddit_api", move || {
+        set_reddit_api_impl(&core, &client_id, &client_secret)
+    })
+    .await
 }
 
 /// Removes the stored credentials and returns to the unauthenticated
@@ -36,7 +39,7 @@ pub async fn clear_reddit_api(
     core: State<'_, SharedCore>,
 ) -> Result<RedditApiStatusDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || clear_reddit_api_impl(&core)).await
+    run_blocking("clear_reddit_api", move || clear_reddit_api_impl(&core)).await
 }
 
 /// Whether credentials are installed, and under which client id — never
@@ -47,7 +50,7 @@ pub async fn get_reddit_api_status(
     core: State<'_, SharedCore>,
 ) -> Result<RedditApiStatusDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || Ok(status_of(&core))).await
+    run_blocking("get_reddit_api_status", move || Ok(status_of(&core))).await
 }
 
 /// Startup: pull the profile's keychain item (if any) into the running

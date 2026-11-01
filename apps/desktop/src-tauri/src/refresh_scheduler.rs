@@ -28,7 +28,7 @@ use curio_core::CoreHandle;
 use tauri::AppHandle;
 
 use crate::commands::feeds::refresh_all_and_emit;
-use crate::commands::{SharedCore, run_blocking};
+use crate::commands::{SharedCore, blocking};
 
 const INTERVAL_KEY: &str = "ui.refresh.interval-minutes";
 const ON_LAUNCH_KEY: &str = "ui.refresh.on-launch";
@@ -142,7 +142,7 @@ async fn retry_pending_events(core: &SharedCore) {
         return;
     }
     let core = std::sync::Arc::clone(core);
-    if let Err(error) = run_blocking(move || Ok(flush_pending_events_impl(&core))).await {
+    if let Err(error) = blocking(move || Ok(flush_pending_events_impl(&core))).await {
         tracing::warn!(%error, "pending-events retry did not run");
     }
 }

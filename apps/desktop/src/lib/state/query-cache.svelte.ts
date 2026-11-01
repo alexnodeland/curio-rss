@@ -87,6 +87,7 @@ export class Query<T> {
                 error: {
                     kind: 'internal',
                     code: 'INTERNAL',
+                    params: {},
                     message: thrown instanceof Error ? thrown.message : String(thrown),
                     recoverable: false,
                 },

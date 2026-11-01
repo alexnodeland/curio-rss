@@ -31,7 +31,7 @@ pub async fn import_opml(
 ) -> Result<OpmlImportOutcomeDto, CommandError> {
     let path = registry.redeem(&path_token, PathIntent::ImportFile)?;
     let core = Arc::clone(core.inner());
-    let outcome = run_blocking(move || import_opml_impl(&core, &path)).await?;
+    let outcome = run_blocking("import_opml", move || import_opml_impl(&core, &path)).await?;
     if outcome.added > 0 {
         emit_or_log(&app, &FeedsChanged);
     }
@@ -53,7 +53,10 @@ pub async fn import_file(
 ) -> Result<ImportOutcomeDto, CommandError> {
     let path = registry.redeem(&path_token, PathIntent::ImportFile)?;
     let core = Arc::clone(core.inner());
-    let outcome = run_blocking(move || import_file_impl(&core, &path, source.into())).await?;
+    let outcome = run_blocking("import_file", move || {
+        import_file_impl(&core, &path, source.into())
+    })
+    .await?;
     if outcome.feeds_added > 0 {
         emit_or_log(&app, &FeedsChanged);
     }
@@ -73,7 +76,7 @@ pub async fn export_opml(
 ) -> Result<(), CommandError> {
     let path = registry.redeem(&path_token, PathIntent::ExportFile)?;
     let core = Arc::clone(core.inner());
-    run_blocking(move || export_opml_impl(&core, &path)).await
+    run_blocking("export_opml", move || export_opml_impl(&core, &path)).await
 }
 
 // ------------------------------------------------------------------ impls

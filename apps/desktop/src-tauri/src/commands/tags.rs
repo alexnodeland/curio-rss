@@ -22,7 +22,10 @@ pub async fn tag_article(
     tag: String,
 ) -> Result<bool, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || tag_article_impl(&core, article_id, &tag)).await?;
+    let changed = run_blocking("tag_article", move || {
+        tag_article_impl(&core, article_id, &tag)
+    })
+    .await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
@@ -39,7 +42,10 @@ pub async fn untag_article(
     tag: String,
 ) -> Result<bool, CommandError> {
     let core = Arc::clone(core.inner());
-    let changed = run_blocking(move || untag_article_impl(&core, article_id, &tag)).await?;
+    let changed = run_blocking("untag_article", move || {
+        untag_article_impl(&core, article_id, &tag)
+    })
+    .await?;
     if changed {
         emit_or_log(&app, &ArticlesChanged { feed_id: None });
     }
@@ -51,7 +57,7 @@ pub async fn untag_article(
 #[specta::specta]
 pub async fn list_tags(core: State<'_, SharedCore>) -> Result<Vec<String>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || list_tags_impl(&core)).await
+    run_blocking("list_tags", move || list_tags_impl(&core)).await
 }
 
 // ------------------------------------------------------------------ impls

@@ -21,7 +21,10 @@ pub async fn export_text_file(
     contents: String,
 ) -> Result<(), CommandError> {
     let path = registry.redeem(&path_token, PathIntent::ExportFile)?;
-    run_blocking(move || write_text_impl(&path, &contents)).await
+    run_blocking("export_text_file", move || {
+        write_text_impl(&path, &contents)
+    })
+    .await
 }
 
 /// Reads a dialog-picked text file (theme YAML import) and returns its
@@ -33,7 +36,7 @@ pub async fn read_text_file(
     path_token: String,
 ) -> Result<String, CommandError> {
     let path = registry.redeem(&path_token, PathIntent::ImportFile)?;
-    run_blocking(move || read_text_impl(&path)).await
+    run_blocking("read_text_file", move || read_text_impl(&path)).await
 }
 
 // ------------------------------------------------------------------ impls

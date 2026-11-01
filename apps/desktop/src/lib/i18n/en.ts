@@ -13,6 +13,36 @@ export const en = {
     'app.error.profileBusy':
         'Another Curio process (such as a command-line run) is using this profile right now. Try again in a moment.',
 
+    'error.notFound': 'That item no longer exists.',
+    'error.invalidInput': 'That input isn’t valid. Check it and try again.',
+    'error.invalidUrl': '“{input}” isn’t a web address Curio can open.',
+    'error.pathTokenExpired': 'That file choice has expired. Pick the file or folder again.',
+    'error.unknownDestination': 'That destination isn’t set up any more. Add it again in Settings.',
+    'error.destinationMissing':
+        'The destination folder {root} is missing. Reconnect it, or add the destination again.',
+    'error.pathsTaken':
+        'Other files already use every name for this note (last tried: {path}). Rename or move them, then try again.',
+    'error.schemaTooNew':
+        'This library was saved by a newer version of Curio. Update Curio to open it.',
+    'error.network': 'Curio couldn’t reach the server. Check your connection and try again.',
+    'error.networkTimeout': '{host} took too long to answer. Try again in a moment.',
+    'error.hostNotFound': 'Curio couldn’t find {host}. Check the address and your connection.',
+    'error.connectionFailed':
+        'Curio couldn’t connect to {host}. Check your connection and try again.',
+    'error.tls': 'Curio couldn’t open a secure connection to {host}.',
+    'error.httpStatus': '{host} answered with an error (HTTP {status}).',
+    'error.blockedAddress':
+        '{host} points to a private network address, which Curio doesn’t fetch by default.',
+    'error.tooLarge': 'The page from {host} is too large to load.',
+    'error.rateLimited': '{host} is limiting requests. Try again in about {minutes} min.',
+    'error.parse': 'Curio couldn’t read that file or feed.',
+    'error.storage': 'Curio couldn’t save that change.',
+    'error.duplicate': 'That already exists.',
+    'error.duplicateFeed': 'You’re already subscribed to that feed.',
+    'error.diskFull': 'The disk is full. Free some space and try again.',
+    'error.readOnly': 'Curio can’t write to its library: the folder or disk is read-only.',
+    'error.io': 'Curio couldn’t read or write a file.',
+
     'a11y.skipToContent': 'Skip to content',
 
     'shell.feeds.loading': 'Loading subscriptions…',

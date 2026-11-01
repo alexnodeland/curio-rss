@@ -6,7 +6,12 @@
  * `import.meta.env.DEV` + a no-real-Tauri check and dynamic-imported, so it is
  * absent from the production bundle and never runs inside the packaged app.
  */
-import type { ArticleStateDto, StartupFailureClass, StartupFailureDto } from '$lib/bindings';
+import type {
+    ArticleStateDto,
+    CommandError,
+    StartupFailureClass,
+    StartupFailureDto,
+} from '$lib/bindings';
 
 let installed = false;
 
@@ -388,6 +393,20 @@ tokens:
                     // normalization, rewrites, probing or validation): a
                     // YouTube @handle resolves to its channel videos feed,
                     // anything else to itself.
+                    // A host under the reserved `.invalid` TLD never resolves:
+                    // previews the host's typed fetch failure, which the UI
+                    // localizes from its code + params.
+                    const host = /^[a-z]+:\/\/([^/:?#]+)/i.exec(query)?.[1] ?? '';
+                    if (host.endsWith('.invalid')) {
+                        const failure: CommandError = {
+                            kind: 'user',
+                            code: 'HOST_NOT_FOUND',
+                            params: { host },
+                            message: `could not reach ${query}: dns resolution failed for "${host}": no such host`,
+                            recoverable: true,
+                        };
+                        return Promise.reject(failure);
+                    }
                     if (/youtube\.com\/@/.test(query)) {
                         return {
                             feeds: [

@@ -5,6 +5,7 @@
  * unwrap through the generated `CommandError` shape.
  */
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
+import { localeStore } from '$lib/i18n';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -157,6 +158,41 @@ describe('AddFeedModal', () => {
         await flushIpc();
 
         expect(toastStore.toasts.at(-1)?.message).toBe('host unreachable');
+        expect(toastStore.toasts.at(-1)?.tone).toBe('error');
+    });
+
+    it('shows a network failure in the active locale, naming the host', async () => {
+        harness = installIpcHarness(
+            base({
+                discover_feeds: rejectWith(
+                    commandErrorFixture({
+                        kind: 'user',
+                        code: 'CONNECTION_FAILED',
+                        params: { host: 'nope.test' },
+                        message:
+                            'could not reach https://nope.test/: connection refused fetching "https://nope.test/": Connection refused (os error 111)',
+                        recoverable: true,
+                    }),
+                ),
+            }),
+        );
+        const { getByText, getByPlaceholderText } = render(AddFeedModal, { onclose: vi.fn() });
+        const find = getByText('Find feeds');
+        await fireEvent.input(getByPlaceholderText('https://example.com'), {
+            target: { value: 'https://nope.test' },
+        });
+
+        localeStore.active = 'de';
+        try {
+            await fireEvent.click(find);
+            await flushIpc();
+        } finally {
+            localeStore.reset();
+        }
+
+        expect(toastStore.toasts.at(-1)?.message).toBe(
+            'Curio konnte keine Verbindung zu nope.test herstellen. Bitte Verbindung prüfen und erneut versuchen.',
+        );
         expect(toastStore.toasts.at(-1)?.tone).toBe('error');
     });
 

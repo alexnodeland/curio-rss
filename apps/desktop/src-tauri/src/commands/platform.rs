@@ -11,7 +11,7 @@ use curio_core::storage::Storage;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt as _;
 
-use super::{SharedCore, run_blocking};
+use super::{SharedCore, logged, run_blocking};
 use crate::dto::PathTokenDto;
 use crate::error::{CommandError, ErrorCode};
 use crate::image_cache::ImageCache;
@@ -26,7 +26,7 @@ pub async fn get_cached_image(
     cache: State<'_, ImageCache>,
     url: String,
 ) -> Result<String, CommandError> {
-    let path = cache.get(&url).await?;
+    let path = logged("get_cached_image", cache.get(&url).await)?;
     Ok(path.display().to_string())
 }
 
@@ -40,8 +40,10 @@ pub async fn copy_diagnostics_bundle(
     registry: State<'_, PathRegistry>,
 ) -> Result<PathTokenDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let bundle_root = crate::paths::diagnostics_dir()?;
-    let bundle = run_blocking(move || build_diagnostics_bundle(&core, &bundle_root)).await?;
+    let bundle = run_blocking("copy_diagnostics_bundle", move || {
+        build_diagnostics_bundle(&core, &crate::paths::diagnostics_dir()?)
+    })
+    .await?;
     registry.mint(&bundle, PathIntent::Reveal)
 }
 
@@ -53,7 +55,7 @@ pub async fn pick_import_file(
     app: AppHandle,
     registry: State<'_, PathRegistry>,
 ) -> Result<Option<PathTokenDto>, CommandError> {
-    let picked = run_blocking(move || {
+    let picked = run_blocking("pick_import_file", move || {
         Ok(app
             .dialog()
             .file()
@@ -76,7 +78,7 @@ pub async fn pick_export_path(
     app: AppHandle,
     registry: State<'_, PathRegistry>,
 ) -> Result<Option<PathTokenDto>, CommandError> {
-    let picked = run_blocking(move || {
+    let picked = run_blocking("pick_export_path", move || {
         Ok(app
             .dialog()
             .file()
@@ -98,7 +100,7 @@ pub async fn pick_theme_export_path(
     app: AppHandle,
     registry: State<'_, PathRegistry>,
 ) -> Result<Option<PathTokenDto>, CommandError> {
-    let picked = run_blocking(move || {
+    let picked = run_blocking("pick_theme_export_path", move || {
         Ok(app
             .dialog()
             .file()
@@ -121,7 +123,7 @@ pub async fn pick_theme_import_file(
     app: AppHandle,
     registry: State<'_, PathRegistry>,
 ) -> Result<Option<PathTokenDto>, CommandError> {
-    let picked = run_blocking(move || {
+    let picked = run_blocking("pick_theme_import_file", move || {
         Ok(app
             .dialog()
             .file()
@@ -143,7 +145,10 @@ pub async fn pick_destination_root(
     app: AppHandle,
     registry: State<'_, PathRegistry>,
 ) -> Result<Option<PathTokenDto>, CommandError> {
-    let picked = run_blocking(move || Ok(app.dialog().file().blocking_pick_folder())).await?;
+    let picked = run_blocking("pick_destination_root", move || {
+        Ok(app.dialog().file().blocking_pick_folder())
+    })
+    .await?;
     let Some(path) = picked.map(file_path_to_path).transpose()? else {
         return Ok(None);
     };

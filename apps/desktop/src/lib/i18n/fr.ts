@@ -13,6 +13,39 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'app.error.internal': 'Une erreur est survenue. Réessayer peut aider.',
     'app.error.profileBusy':
         'Un autre processus Curio (une commande lancée dans le terminal, par exemple) utilise ce profil en ce moment. Réessayer dans un instant.',
+    'error.notFound': 'Cet élément n’existe plus.',
+    'error.invalidInput': 'Cette saisie n’est pas valide. Vérifier et réessayer.',
+    'error.invalidUrl': '« {input} » n’est pas une adresse web que Curio peut ouvrir.',
+    'error.pathTokenExpired':
+        'Ce choix de fichier a expiré. Choisir de nouveau le fichier ou le dossier.',
+    'error.unknownDestination':
+        'Cette destination n’est plus configurée. L’ajouter de nouveau dans les Paramètres.',
+    'error.destinationMissing':
+        'Le dossier de destination {root} est introuvable. Le reconnecter, ou ajouter de nouveau la destination.',
+    'error.pathsTaken':
+        'D’autres fichiers utilisent déjà tous les noms possibles pour cette note (dernier essai : {path}). Les renommer ou les déplacer, puis réessayer.',
+    'error.schemaTooNew':
+        'Cette bibliothèque a été enregistrée par une version plus récente de Curio. Mettre Curio à jour pour l’ouvrir.',
+    'error.network': 'Curio n’a pas pu joindre le serveur. Vérifier la connexion et réessayer.',
+    'error.networkTimeout': '{host} a mis trop de temps à répondre. Réessayer dans un instant.',
+    'error.hostNotFound': 'Curio n’a pas trouvé {host}. Vérifier l’adresse et la connexion.',
+    'error.connectionFailed':
+        'Curio n’a pas pu se connecter à {host}. Vérifier la connexion et réessayer.',
+    'error.tls': 'Curio n’a pas pu établir une connexion sécurisée avec {host}.',
+    'error.httpStatus': '{host} a répondu par une erreur (HTTP {status}).',
+    'error.blockedAddress':
+        '{host} pointe vers une adresse de réseau privé, que Curio ne consulte pas par défaut.',
+    'error.tooLarge': 'La page de {host} est trop volumineuse pour être chargée.',
+    'error.rateLimited': '{host} limite les requêtes. Réessayer dans environ {minutes} min.',
+    'error.parse': 'Curio n’a pas pu lire ce fichier ou ce flux.',
+    'error.storage': 'Curio n’a pas pu enregistrer cette modification.',
+    'error.duplicate': 'Cet élément existe déjà.',
+    'error.duplicateFeed': 'Ce flux fait déjà partie des abonnements.',
+    'error.diskFull': 'Le disque est plein. Libérer de l’espace et réessayer.',
+    'error.readOnly':
+        'Curio ne peut pas écrire dans sa bibliothèque : le dossier ou le disque est en lecture seule.',
+    'error.io': 'Curio n’a pas pu lire ou écrire un fichier.',
+
     'a11y.skipToContent': 'Aller au contenu',
     'shell.feeds.loading': 'Chargement des abonnements…',
     'shell.feeds.empty': 'Aucun abonnement pour l’instant',

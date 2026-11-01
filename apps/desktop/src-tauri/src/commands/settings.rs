@@ -24,7 +24,7 @@ pub async fn get_setting(
     key: String,
 ) -> Result<Option<String>, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_setting_impl(&core, &key)).await
+    run_blocking("get_setting", move || get_setting_impl(&core, &key)).await
 }
 
 /// Writes a setting.
@@ -36,7 +36,7 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || set_setting_impl(&core, &key, &value)).await
+    run_blocking("set_setting", move || set_setting_impl(&core, &key, &value)).await
 }
 
 /// Version / profile / schema facts for the about box and doctor panel.
@@ -44,7 +44,7 @@ pub async fn set_setting(
 #[specta::specta]
 pub async fn get_app_info(core: State<'_, SharedCore>) -> Result<AppInfoDto, CommandError> {
     let core = Arc::clone(core.inner());
-    run_blocking(move || get_app_info_impl(&core)).await
+    run_blocking("get_app_info", move || get_app_info_impl(&core)).await
 }
 
 // ------------------------------------------------------------------ impls

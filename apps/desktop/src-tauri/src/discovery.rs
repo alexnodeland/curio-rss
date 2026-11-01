@@ -12,7 +12,7 @@ use curio_core::CoreHandle;
 use curio_core::feeds::{DiscoverError, DiscoverOptions, DiscoveredFeed, Discovery};
 use serde::{Deserialize, Serialize};
 
-use crate::error::{CommandError, ErrorCode};
+use crate::error::{CommandError, ErrorCode, host_of};
 
 /// One discovered — and validated — feed candidate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -55,10 +55,20 @@ impl From<Discovery> for DiscoveryDto {
 
 impl From<DiscoverError> for CommandError {
     fn from(error: DiscoverError) -> Self {
-        if error.is_input_error() {
-            Self::invalid_input(error.to_string())
-        } else {
-            Self::user(ErrorCode::Network, error.to_string(), true)
+        let message = error.to_string();
+        match error {
+            DiscoverError::Empty => Self::invalid_input(message),
+            DiscoverError::InvalidUrl { input } => {
+                Self::user(ErrorCode::InvalidUrl, message, true).with_param("input", input)
+            }
+            DiscoverError::Fetch { source, .. } => Self::fetch(&source, message),
+            DiscoverError::TimedOut { url } => Self::user(ErrorCode::NetworkTimeout, message, true)
+                .with_param("host", host_of(&url)),
+            DiscoverError::Status { url, status } => {
+                Self::user(ErrorCode::HttpStatus, message, true)
+                    .with_param("host", host_of(&url))
+                    .with_param("status", status.to_string())
+            }
         }
     }
 }
@@ -147,7 +157,12 @@ mod tests {
         let error = discover(&core, &format!("{}/", server.uri()))
             .await
             .unwrap_err();
-        assert_eq!(error.code, ErrorCode::Network);
+        assert_eq!(error.code, ErrorCode::HttpStatus);
         assert!(error.recoverable);
+        assert_eq!(error.params.get("status").map(String::as_str), Some("500"));
+        assert_eq!(
+            error.params.get("host").map(String::as_str),
+            Some("127.0.0.1")
+        );
     }
 }

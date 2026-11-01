@@ -22,7 +22,7 @@ use tauri::{AppHandle, Manager as _};
 use tauri_plugin_notification::{NotificationExt as _, PermissionState};
 
 use crate::dto::{FetchStatusDto, RefreshOutcomeDto};
-use crate::error::{CommandError, ErrorCode};
+use crate::error::{CommandError, ErrorCode, logged};
 
 const ENABLED_KEY: &str = "ui.notify.enabled";
 const NEW_ARTICLES_KEY: &str = "ui.notify.new-articles";
@@ -196,10 +196,12 @@ pub fn notify_refresh(handle: &AppHandle, core: &CoreHandle, outcomes: &[Refresh
 #[tauri::command]
 #[specta::specta]
 pub async fn request_notification_permission(app: AppHandle) -> Result<bool, CommandError> {
-    let state = app
-        .notification()
-        .request_permission()
-        .map_err(|error| CommandError::internal(ErrorCode::Internal, error.to_string()))?;
+    let state = logged(
+        "request_notification_permission",
+        app.notification()
+            .request_permission()
+            .map_err(|error| CommandError::internal(ErrorCode::Internal, error.to_string())),
+    )?;
     Ok(state == PermissionState::Granted)
 }
 

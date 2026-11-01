@@ -45,8 +45,9 @@ clap = { version = "4", features = ["derive", "env"] }
 csv = "1.3"
 directories = "6"
 dom_smoothie = "0.18"
-# Import-file decoding (Latin-1 OPML, UTF-16 CSV). Already in the graph via
-# quick-xml and reqwest.
+# WHATWG character encodings: import-file decoding (Latin-1 OPML, UTF-16 CSV)
+# and fetched pages and feeds (BOM, HTTP charset, <meta charset>, XML
+# declaration). Already in the graph via quick-xml and reqwest.
 encoding_rs = "0.8"
 ego-tree = "0.11"
 feed-rs = "2"
@@ -70,7 +71,11 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 markup5ever_rcdom = "0.38"
 quick-xml = "0.41"
 regex = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored"] }
+# gzip/brotli/deflate: transparent response decompression (feeds compress
+# 5-10x, and a server that sends `Content-Encoding: gzip` unasked would
+# otherwise hand back an unparseable body). The policed client's body cap
+# counts decoded bytes, so a compression bomb still trips it.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored", "gzip", "brotli", "deflate"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
 # Safe statfs(2) (Unix) for the network-filesystem guard. Already in the tree
 # via fs4 and tempfile.
@@ -114,10 +119,14 @@ uuid = { version = "1", features = ["v7"] }
 # dev-only
 assert_cmd = "2"
 axum = "0.8"
+# Compressing hermetic fixture responses (the gzip/brotli fetch tests);
+# both already in the tree under reqwest's decompression features.
+brotli = "9"
 # Cold-start bench harness (curio-fixtures/benches). Trimmed to the
 # cargo-bench runner only — no plotters/html_reports — to keep the license
 # surface small; github-action-benchmark reads the JSON estimates regardless.
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+flate2 = "1"
 insta = { version = "1", features = ["glob"] }
 jsonschema = { version = "0.33", default-features = false }
 predicates = "3"

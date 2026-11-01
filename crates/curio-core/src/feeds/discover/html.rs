@@ -5,6 +5,8 @@
 //! module stays `Send` for a head's `spawn`.
 
 use scraper::{Html, Selector};
+
+use crate::fetch::decode::decode_html;
 use url::Url;
 
 use super::DiscoveredFeed;
@@ -28,9 +30,11 @@ pub(super) struct Extracted {
 }
 
 /// Pulls feed candidates + favicon out of one fetched document, resolving
-/// every relative URL against `final_url`.
-pub(super) fn extract(body: &[u8], final_url: &str) -> Extracted {
-    let text = String::from_utf8_lossy(body);
+/// every relative URL against `final_url`. The body is decoded by its
+/// BOM, the response `content_type` charset, then `<meta charset>` — a
+/// legacy-encoded page keeps its feed titles intact.
+pub(super) fn extract(body: &[u8], content_type: Option<&str>, final_url: &str) -> Extracted {
+    let text = decode_html(body, content_type);
     let base = Url::parse(final_url).ok();
 
     if looks_like_feed(&text) {
@@ -311,6 +315,23 @@ mod tests {
     }
 
     #[test]
+    fn a_legacy_encoded_page_keeps_its_feed_titles() {
+        let html = r#"<html><head>
+            <link rel="alternate" type="application/rss+xml" title="Лента новостей" href="/rss">
+        </head></html>"#;
+        let body = encoding_rs::WINDOWS_1251.encode(html).0;
+        let out = extract(
+            &body,
+            Some("text/html; charset=windows-1251"),
+            "https://blog.test/",
+        );
+        assert_eq!(
+            out.feeds,
+            vec![feed("https://blog.test/rss", Some("Лента новостей"))]
+        );
+    }
+
+    #[test]
     fn extracts_alternate_feed_links_and_resolves_relative_hrefs() {
         let html = r#"<html><head>
             <link rel="alternate" type="application/rss+xml" title="RSS" href="/feed.xml">
@@ -318,7 +339,7 @@ mod tests {
             <link rel="stylesheet" href="/style.css">
             <link rel="icon" href="/static/favicon.png">
         </head><body>hi</body></html>"#;
-        let out = extract(html.as_bytes(), "https://blog.test/index.html");
+        let out = extract(html.as_bytes(), None, "https://blog.test/index.html");
         assert!(!out.is_feed);
         assert_eq!(
             out.feeds,
@@ -336,7 +357,7 @@ mod tests {
     #[test]
     fn a_url_that_is_already_a_feed_returns_itself_with_ico_favicon() {
         let body = r#"<?xml version="1.0"?><rss version="2.0"><channel></channel></rss>"#;
-        let out = extract(body.as_bytes(), "https://blog.test/feed.xml");
+        let out = extract(body.as_bytes(), None, "https://blog.test/feed.xml");
         assert!(out.is_feed);
         assert_eq!(out.feeds, vec![feed("https://blog.test/feed.xml", None)]);
         assert_eq!(
@@ -348,7 +369,7 @@ mod tests {
     #[test]
     fn a_plain_page_with_no_links_falls_back_to_the_origin_favicon() {
         let html = "<html><head><title>Nothing here</title></head><body></body></html>";
-        let out = extract(html.as_bytes(), "https://blog.test/some/deep/page");
+        let out = extract(html.as_bytes(), None, "https://blog.test/some/deep/page");
         assert_eq!(out.feeds.len(), 0);
         assert_eq!(
             out.favicon.as_deref(),
@@ -360,7 +381,7 @@ mod tests {
     fn non_http_feed_hrefs_are_dropped() {
         let html = r#"<link rel="alternate" type="application/rss+xml" href="javascript:alert(1)">
                       <link rel="alternate" type="application/rss+xml" href="feed://blog.test/x">"#;
-        let out = extract(html.as_bytes(), "https://blog.test/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/");
         assert!(out.feeds.is_empty(), "only http(s) feed URLs survive");
     }
 
@@ -372,7 +393,11 @@ mod tests {
             <link rel="canonical" href="https://www.youtube.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">
             <meta property="og:title" content="Linus Tech Tips">
         </head><body></body></html>"#;
-        let out = extract(html.as_bytes(), "https://www.youtube.com/@linustechtips");
+        let out = extract(
+            html.as_bytes(),
+            None,
+            "https://www.youtube.com/@linustechtips",
+        );
         assert_eq!(
             out.feeds,
             vec![feed(
@@ -389,7 +414,11 @@ mod tests {
             <link rel="alternate" type="application/rss+xml" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCXuqSBlHAE6Xw-yeJA0Tunw">
             <link rel="canonical" href="https://www.youtube.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">
         </head><body></body></html>"#;
-        let out = extract(html.as_bytes(), "https://www.youtube.com/@linustechtips");
+        let out = extract(
+            html.as_bytes(),
+            None,
+            "https://www.youtube.com/@linustechtips",
+        );
         assert_eq!(out.feeds.len(), 1, "the declared feed is not duplicated");
     }
 
@@ -398,14 +427,14 @@ mod tests {
         // The /channel/ synthesis is YouTube-host-scoped.
         let html =
             r#"<link rel="canonical" href="https://example.com/channel/UCXuqSBlHAE6Xw-yeJA0Tunw">"#;
-        let out = extract(html.as_bytes(), "https://example.com/some/page");
+        let out = extract(html.as_bytes(), None, "https://example.com/some/page");
         assert_eq!(out.feeds.len(), 0);
     }
 
     #[test]
     fn xhtml_alternates_are_not_mistaken_for_feeds() {
         let html = r#"<link rel="alternate" type="application/xhtml+xml" href="/amp">"#;
-        let out = extract(html.as_bytes(), "https://blog.test/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/");
         assert_eq!(out.feeds.len(), 0);
     }
 
@@ -416,6 +445,7 @@ mod tests {
         // two oEmbed alternates. Only the site feed is a subscription.
         let out = extract(
             &fixture("wordpress-post.html"),
+            None,
             "https://blog.example/2026/10/hello-world/",
         );
         assert_eq!(
@@ -468,7 +498,7 @@ mod tests {
     #[test]
     fn a_page_declaring_only_comment_feeds_keeps_them() {
         let html = r#"<link rel="alternate" type="application/rss+xml" title="Comments Feed" href="/comments/feed/">"#;
-        let out = extract(html.as_bytes(), "https://blog.test/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/");
         assert_eq!(
             out.feeds.len(),
             1,
@@ -480,7 +510,7 @@ mod tests {
     fn duplicate_alternates_collapse_to_one_candidate() {
         let html = r#"<link rel="alternate" type="application/rss+xml" title="A" href="/feed.xml">
                       <link rel="alternate" type="application/rss+xml" title="B" href="https://blog.test/feed.xml">"#;
-        let out = extract(html.as_bytes(), "https://blog.test/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/");
         assert_eq!(
             out.feeds,
             vec![feed("https://blog.test/feed.xml", Some("A"))]
@@ -498,7 +528,7 @@ mod tests {
             <a href="/posts/feed/">Posts feed</a>
             <a href="/">home</a>
         </body>"#;
-        let out = extract(html.as_bytes(), "https://blog.test/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/");
         assert_eq!(
             out.anchors,
             vec!["https://blog.test/rss.xml", "https://blog.test/posts/feed/"]
@@ -525,7 +555,7 @@ mod tests {
             "fixture precondition: the cut falls inside a char"
         );
         assert!(!looks_like_feed(&html));
-        let out = extract(html.as_bytes(), "https://blog.test/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/");
         assert_eq!(out.feeds, vec![feed("https://blog.test/feed.xml", None)]);
     }
 
@@ -537,7 +567,7 @@ mod tests {
         body.resize(SNIFF_WINDOW - 1, b'x');
         body.extend_from_slice(&[0xff, 0xfe, 0xfd]);
         body.extend_from_slice(b"</title></head></html>");
-        let out = extract(&body, "https://blog.test/");
+        let out = extract(&body, None, "https://blog.test/");
         assert!(out.feeds.is_empty(), "the replacement chars are plain text");
     }
 
@@ -567,7 +597,7 @@ mod tests {
             "fixture precondition: the cut falls inside a char"
         );
         assert!(!looks_like_feed(&html));
-        let out = extract(html.as_bytes(), "https://blog.test/ja/");
+        let out = extract(html.as_bytes(), None, "https://blog.test/ja/");
         assert_eq!(
             out.feeds,
             vec![feed("https://blog.test/atom.xml", Some("フィード 📰"))]
@@ -588,14 +618,14 @@ mod tests {
             "fixture precondition: the cut falls inside a char"
         );
         assert!(looks_like_feed(&body));
-        let out = extract(body.as_bytes(), "https://blog.test/atom.xml");
+        let out = extract(body.as_bytes(), None, "https://blog.test/atom.xml");
         assert_eq!(out.feeds, vec![feed("https://blog.test/atom.xml", None)]);
     }
 
     #[test]
     fn html_mentioning_a_feed_tag_runs_the_html_path() {
         let page = "<html><head><title>How to write a <feed> element</title></head></html>";
-        let out = extract(page.as_bytes(), "https://blog.test/");
+        let out = extract(page.as_bytes(), None, "https://blog.test/");
         assert!(!out.is_feed);
         assert!(out.feeds.is_empty(), "the HTML path ran, finding no links");
     }
@@ -605,12 +635,12 @@ mod tests {
         fn extract_never_panics_on_arbitrary_bytes(
             body in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..4096),
         ) {
-            let _ = extract(&body, "https://blog.test/");
+            let _ = extract(&body, None, "https://blog.test/");
         }
 
         #[test]
         fn extract_never_panics_on_arbitrary_text(body in "\\PC{0,3000}") {
-            let _ = extract(body.as_bytes(), "https://blog.test/");
+            let _ = extract(body.as_bytes(), None, "https://blog.test/");
         }
     }
 }

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Café Feed — BOM edition</title>
+  <id>urn:curio:fixtures:bom</id>
+  <updated>2026-01-01T00:00:00Z</updated>
+  <entry>
+    <title>Naïve façade</title>
+    <id>urn:curio:fixtures:bom:1</id>
+    <link href="https://example.com/bom/1"/>
+    <updated>2026-01-01T00:00:00Z</updated>
+    <summary>A UTF-8 feed that opens with a byte-order mark.</summary>
+  </entry>
+</feed>

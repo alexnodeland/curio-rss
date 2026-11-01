@@ -74,6 +74,8 @@ rustix = { workspace = true }
 # Self dev-dependency: the integration tests under tests/ link the library
 # with `test-support` on (see the feature above).
 curio-core = { path = ".", features = ["test-support"] }
+brotli = { workspace = true }
+flate2 = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

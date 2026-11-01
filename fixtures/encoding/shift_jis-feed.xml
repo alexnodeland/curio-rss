@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>日本語のフィード</title>
+    <link>https://example.jp/</link>
+    <description>HTTP ヘッダーだけが文字コードを伝えるフィード</description>
+    <item>
+      <title>こんにちは世界</title>
+      <link>https://example.jp/posts/1</link>
+      <guid>https://example.jp/posts/1</guid>
+      <description>シフトJISで書かれた本文です。</description>
+    </item>
+  </channel>
+</rss>

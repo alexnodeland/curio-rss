@@ -14,14 +14,14 @@ use std::time::{Duration, Instant};
 
 use reqwest::Method;
 use reqwest::header::{
-    ACCEPT, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION,
-    RETRY_AFTER, USER_AGENT,
+    ACCEPT, AUTHORIZATION, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
+    LOCATION, RETRY_AFTER, USER_AGENT,
 };
 use url::Url;
 
 use super::pool::Pools;
 use super::resolve::{DnsLookup, SystemLookup};
-use super::{FetchError, FetchRequest, FetchResponse};
+use super::{FetchError, FetchKind, FetchRequest, FetchResponse};
 
 /// Default streaming response-body cap: 10 MB.
 pub const DEFAULT_MAX_BODY_BYTES: u64 = 10 * 1024 * 1024;
@@ -34,6 +34,14 @@ pub const DEFAULT_MAX_REDIRECTS: u32 = 5;
 /// the odds a content-negotiating server hands back XML rather than HTML.
 pub const DEFAULT_ACCEPT: &str =
     "application/rss+xml, application/atom+xml;q=0.9, text/xml;q=0.8, */*;q=0.5";
+
+/// The `Accept` header of an article-page fetch ([`FetchKind::Page`]): HTML
+/// first, so a content-negotiating host never answers a "load full article"
+/// with the feed.
+pub const PAGE_ACCEPT: &str = "text/html, application/xhtml+xml;q=0.9, */*;q=0.5";
+
+/// The `Accept` header of an image fetch ([`FetchKind::Image`]).
+pub const IMAGE_ACCEPT: &str = "image/avif, image/webp, image/*;q=0.8, */*;q=0.5";
 
 /// The browser-class User-Agent sent to reddit.com. Paired with the native
 /// TLS stack (see [`HostOverride::use_native_tls`]): a live diagnosis showed
@@ -73,7 +81,9 @@ pub struct HostOverride {
 pub struct FetchConfig {
     /// The honest User-Agent every request carries.
     pub user_agent: String,
-    /// The `Accept` header sent on every request. See [`DEFAULT_ACCEPT`].
+    /// The `Accept` header sent on feed requests ([`FetchKind::Feed`], the
+    /// default). See [`DEFAULT_ACCEPT`]; pages and images send
+    /// [`PAGE_ACCEPT`] / [`IMAGE_ACCEPT`].
     pub accept: String,
     /// Per-host policy overrides, matched by host suffix (first match wins).
     pub host_overrides: Vec<HostOverride>,
@@ -198,6 +208,15 @@ impl PolicedClient {
         &self.config
     }
 
+    /// The `Accept` header a fetch of `kind` sends.
+    fn accept_for(&self, kind: FetchKind) -> &str {
+        match kind {
+            FetchKind::Feed => self.config.accept.as_str(),
+            FetchKind::Page => PAGE_ACCEPT,
+            FetchKind::Image => IMAGE_ACCEPT,
+        }
+    }
+
     /// The first host override whose suffix matches `url`'s host, if any.
     /// Suffix match is case-insensitive and boundary-aware: `reddit.com`
     /// matches `reddit.com` and `*.reddit.com`, never `notreddit.com`.
@@ -272,7 +291,7 @@ impl PolicedClient {
                 .pools
                 .request(screened, native_tls, Method::GET)?
                 .header(USER_AGENT, user_agent)
-                .header(ACCEPT, self.config.accept.as_str());
+                .header(ACCEPT, self.accept_for(request.kind));
             if let Some(host_override) = host_override {
                 for (name, value) in &host_override.extra_headers {
                     req = req.header(name.as_str(), value.as_str());
@@ -330,6 +349,7 @@ impl PolicedClient {
 
             let etag = header_string(&response, ETAG.as_str());
             let last_modified = header_string(&response, LAST_MODIFIED.as_str());
+            let content_type = header_string(&response, CONTENT_TYPE.as_str());
             // Retry-After in its delta-seconds form (the shape rate limiters
             // send); the rare HTTP-date form is ignored rather than parsed.
             let retry_after = header_string(&response, RETRY_AFTER.as_str())
@@ -348,6 +368,7 @@ impl PolicedClient {
                 etag,
                 last_modified,
                 retry_after,
+                content_type,
                 body,
             });
         }
@@ -399,6 +420,7 @@ impl PolicedClient {
         let retry_after = header_string(&response, RETRY_AFTER.as_str())
             .and_then(|value| value.trim().parse::<u64>().ok())
             .map(Duration::from_secs);
+        let content_type = header_string(&response, CONTENT_TYPE.as_str());
         let body = if response.status().is_success() {
             self.read_capped(&url, response).await?
         } else {
@@ -412,12 +434,15 @@ impl PolicedClient {
             etag: None,
             last_modified: None,
             retry_after,
+            content_type,
             body,
         })
     }
 
     /// Streams the body, enforcing the size cap (a lying or absent
-    /// `Content-Length` cannot bypass it).
+    /// `Content-Length` cannot bypass it). reqwest decompresses as it
+    /// streams and drops the compressed `Content-Length`, so the cap counts
+    /// *decoded* bytes: a small gzip/brotli bomb is cut off at the cap.
     async fn read_capped(
         &self,
         url: &Url,

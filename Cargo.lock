@@ -1033,7 +1033,7 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "curio-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "curio-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ammonia",
  "chrono",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "curio-desktop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "curio-core",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "curio-fixtures"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "curio-core",
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "curio-types"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "jsonschema",
@@ -7426,7 +7426,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde_yaml",
  "toml 0.9.12+spec-1.1.0",

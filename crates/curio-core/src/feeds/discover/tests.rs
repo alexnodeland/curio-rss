@@ -727,3 +727,23 @@ async fn resolve_passes_discovery_errors_through() {
     .unwrap_err();
     assert!(matches!(error, DiscoverError::InvalidUrl { .. }), "{error}");
 }
+
+/// A feed with no entries yet — a freshly created email-to-feed inbox
+/// (docs/newsletters.md) — is still a valid feed to subscribe to.
+#[tokio::test]
+async fn resolve_accepts_a_feed_with_no_entries_yet() {
+    let server = MockServer::start().await;
+    let empty = r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Weekly Digest Inbox</title>
+  <id>urn:inbox:k7xq2p</id>
+  <updated>2026-11-01T00:00:00Z</updated>
+</feed>"#;
+    serve(&server, "/feeds/k7xq2p.xml", empty).await;
+    let url = format!("{}/feeds/k7xq2p.xml", server.uri());
+
+    let resolution = resolve(&client(), &url, DiscoverOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(resolution.url, url);
+}

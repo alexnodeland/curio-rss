@@ -227,6 +227,9 @@ a hint — `--no-validate` subscribes the URL as given, without fetching it.
 `--allow-private-network` also lets discovery reach the private address,
 and is recorded under the feed URL actually subscribed.
 
+Email newsletters can be subscribed as feeds too: see
+[newsletters as feeds](newsletters.md).
+
 `feed add` emits `feed.added` (with the tags — tags-in-payload rule);
 `feed rm` emits the `feed.removed` negation and keeps the articles.
 

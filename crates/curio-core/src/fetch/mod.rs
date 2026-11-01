@@ -30,7 +30,7 @@ pub mod policy;
 mod pool;
 mod resolve;
 
-pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient};
+pub use client::{DEFAULT_ACCEPT, FetchConfig, HostOverride, PolicedClient, screen_url};
 pub use resolve::{DnsLookup, LookupFuture, SystemLookup};
 
 use std::net::IpAddr;
@@ -50,6 +50,15 @@ pub struct FetchRequest {
     /// OAuth bearer token, sent as `Authorization: Bearer …` (the
     /// authenticated enrichment path). Never logged.
     pub bearer: Option<String>,
+    /// Refuse — without requesting it — any redirect hop whose origin
+    /// (scheme, host, port) differs from [`Self::url`]'s, failing with
+    /// [`FetchError::CrossOriginRedirect`]. Discovery probes set it so a
+    /// guessed path can never send a request off the page's origin.
+    pub same_origin_redirects: bool,
+    /// Tightens [`FetchConfig::max_redirects`] for this request (never
+    /// loosens it: the lower of the two applies). `Some(0)` refuses every
+    /// redirect.
+    pub max_redirects: Option<u32>,
 }
 
 impl FetchRequest {
@@ -74,6 +83,9 @@ pub struct FetchResponse {
     /// `true` iff at least one redirect was followed and *every* hop was
     /// permanent (301/308) — the caller may update the stored feed URL.
     pub permanent_redirect: bool,
+    /// How many redirect hops were followed — the fetch cost
+    /// `1 + redirects` HTTP requests.
+    pub redirects: u32,
     /// Response `ETag`, for the next conditional GET.
     pub etag: Option<String>,
     /// Response `Last-Modified`, for the next conditional GET.
@@ -179,6 +191,18 @@ pub enum FetchError {
         limit: u32,
         /// The URL the fetch started from.
         url: String,
+    },
+    /// A redirect pointed off the request's origin while
+    /// [`FetchRequest::same_origin_redirects`] was set. The target was
+    /// never requested.
+    #[error("{url:?} redirected off its origin to {location:?} — not followed")]
+    CrossOriginRedirect {
+        /// The URL that answered with the redirect.
+        url: String,
+        /// The cross-origin redirect target.
+        location: String,
+        /// Redirect hops already followed before the refused one.
+        hops: u32,
     },
     /// A redirect status arrived without a usable `Location` header.
     #[error("redirect from {url:?} carried no usable Location header")]

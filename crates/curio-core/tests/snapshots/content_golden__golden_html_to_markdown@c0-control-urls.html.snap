@@ -1,0 +1,10 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/c0-control-urls.html
+---
+Images behind control characters:
+
+![the fuzz find: unquoted, C0-led, a stray quote](https://example.com/cat.jpg") ![quoted, C0-led](https://example.com/dog.jpg)
+
+[an upper-case scheme](HTTPS://example.com/upper), a C0-led script link, a tab-split script link and a C0-led inline-document link.

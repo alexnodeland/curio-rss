@@ -216,7 +216,13 @@ impl PolicedClient {
     /// guard, redirect-cap or missing-Location, body cap, timeouts, or
     /// transport failures.
     pub async fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, FetchError> {
-        let mut url = parse_and_screen(&request.url)?;
+        let mut url = screen_url(&request.url)?;
+        let origin = url.origin();
+        let max_redirects = request
+            .max_redirects
+            .map_or(self.config.max_redirects, |cap| {
+                cap.min(self.config.max_redirects)
+            });
         let mut hops: u32 = 0;
         let mut all_permanent = true;
 
@@ -257,9 +263,9 @@ impl PolicedClient {
             let status = response.status().as_u16();
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
                 hops += 1;
-                if hops > self.config.max_redirects {
+                if hops > max_redirects {
                     return Err(FetchError::TooManyRedirects {
-                        limit: self.config.max_redirects,
+                        limit: max_redirects,
                         url: request.url.clone(),
                     });
                 }
@@ -281,7 +287,15 @@ impl PolicedClient {
                 // Re-validation: the next hop goes through the exact same
                 // scheme/userinfo screen — and, at the top of the loop,
                 // the same DNS + address policy — as the first hop.
-                url = parse_and_screen(&next)?;
+                let next = screen_url(&next)?;
+                if request.same_origin_redirects && next.origin() != origin {
+                    return Err(FetchError::CrossOriginRedirect {
+                        url: url.to_string(),
+                        location: next.to_string(),
+                        hops: hops - 1,
+                    });
+                }
+                url = next;
                 continue;
             }
 
@@ -301,6 +315,7 @@ impl PolicedClient {
                 status,
                 final_url: url.to_string(),
                 permanent_redirect: hops > 0 && all_permanent,
+                redirects: hops,
                 etag,
                 last_modified,
                 retry_after,
@@ -324,7 +339,7 @@ impl PolicedClient {
         basic_auth: (&str, &str),
         form: &[(&str, &str)],
     ) -> Result<FetchResponse, FetchError> {
-        let url = parse_and_screen(raw_url)?;
+        let url = screen_url(raw_url)?;
         let screened = self.resolve_and_check(&url, false).await?;
         let host_override = self.override_for(&url);
         self.be_polite(&url, host_override).await;
@@ -364,6 +379,7 @@ impl PolicedClient {
             status,
             final_url: url.to_string(),
             permanent_redirect: false,
+            redirects: 0,
             etag: None,
             last_modified: None,
             retry_after,
@@ -479,9 +495,16 @@ impl PolicedClient {
     }
 }
 
-/// Parses a URL and screens its shape: http/https only, no userinfo.
-/// Runs on the first hop and on every redirect target.
-fn parse_and_screen(raw: &str) -> Result<Url, FetchError> {
+/// Parses a URL and screens its shape: http/https only, no userinfo, a
+/// host. [`PolicedClient`] runs it on the first hop and on every redirect
+/// target, before DNS and the address policy; it is public so the property
+/// tests and fuzz targets can drive the screen directly (pure, no I/O).
+///
+/// # Errors
+///
+/// [`FetchError::InvalidUrl`], [`FetchError::UnsupportedScheme`],
+/// [`FetchError::UserinfoForbidden`] or [`FetchError::NoHost`].
+pub fn screen_url(raw: &str) -> Result<Url, FetchError> {
     let url = Url::parse(raw).map_err(|err| FetchError::InvalidUrl {
         url: raw.to_owned(),
         message: err.to_string(),
@@ -540,7 +563,7 @@ mod tests {
             "javascript:alert(1)",
         ] {
             assert!(matches!(
-                parse_and_screen(bad),
+                screen_url(bad),
                 Err(FetchError::UnsupportedScheme { .. })
             ));
         }
@@ -549,11 +572,11 @@ mod tests {
     #[test]
     fn screen_rejects_userinfo() {
         assert!(matches!(
-            parse_and_screen("http://user:pass@example.com/"),
+            screen_url("http://user:pass@example.com/"),
             Err(FetchError::UserinfoForbidden { .. })
         ));
         assert!(matches!(
-            parse_and_screen("http://user@example.com/"),
+            screen_url("http://user@example.com/"),
             Err(FetchError::UserinfoForbidden { .. })
         ));
     }
@@ -561,15 +584,15 @@ mod tests {
     #[test]
     fn screen_rejects_garbage() {
         assert!(matches!(
-            parse_and_screen("not a url"),
+            screen_url("not a url"),
             Err(FetchError::InvalidUrl { .. })
         ));
     }
 
     #[test]
     fn screen_accepts_plain_http_and_https() {
-        assert!(parse_and_screen("http://example.com/feed.xml").is_ok());
-        assert!(parse_and_screen("https://example.com:8443/feed.xml").is_ok());
+        assert!(screen_url("http://example.com/feed.xml").is_ok());
+        assert!(screen_url("https://example.com:8443/feed.xml").is_ok());
     }
 
     #[test]

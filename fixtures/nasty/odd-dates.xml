@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Odd dates</title>
+    <link>https://dates.example.com/</link>
+    <description>Every way a date goes wrong.</description>
+    <item><title>No date at all</title><guid>d-none</guid></item>
+    <item><title>Empty date</title><guid>d-empty</guid><pubDate></pubDate></item>
+    <item><title>Garbage date</title><guid>d-garbage</guid><pubDate>yesterday-ish</pubDate></item>
+    <item><title>Odd zone</title><guid>d-zone</guid><pubDate>Wed, 01 Jul 2026 12:00:00 PDT</pubDate></item>
+    <item><title>Numeric zone</title><guid>d-num</guid><pubDate>Wed, 01 Jul 2026 12:00:00 +0530</pubDate></item>
+    <item><title>Wrong weekday</title><guid>d-weekday</guid><pubDate>Mon, 01 Jul 2026 12:00:00 GMT</pubDate></item>
+    <item><title>ISO in RSS</title><guid>d-iso</guid><pubDate>2026-07-01T12:00:00Z</pubDate></item>
+    <item><title>dc:date only</title><guid>d-dc</guid><dc:date>2026-07-01T12:00:00+00:00</dc:date></item>
+    <item><title>Epoch</title><guid>d-epoch</guid><pubDate>Thu, 01 Jan 1970 00:00:00 GMT</pubDate></item>
+    <item><title>Far future</title><guid>d-future</guid><pubDate>Fri, 31 Dec 9999 23:59:59 GMT</pubDate></item>
+    <item><title>Year zero</title><guid>d-zero</guid><pubDate>Sat, 01 Jan 0000 00:00:00 GMT</pubDate></item>
+    <item><title>Leap second</title><guid>d-leap</guid><pubDate>Wed, 31 Dec 2025 23:59:60 GMT</pubDate></item>
+    <item><title>Feb 30</title><guid>d-feb30</guid><pubDate>Mon, 30 Feb 2026 10:00:00 GMT</pubDate></item>
+  </channel>
+</rss>

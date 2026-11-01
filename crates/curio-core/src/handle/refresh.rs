@@ -76,6 +76,7 @@ impl CoreHandle {
             etag: feed.etag.clone(),
             last_modified: feed.last_modified.clone(),
             bearer: None,
+            ..FetchRequest::default()
         };
         let fetched = self.client.fetch(&request).await;
         let now = Timestamp::now();

@@ -44,7 +44,6 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained notice (merged into zbus 6); via zbus 4 (keyring Linux secret-service) and zbus 5 (tauri notification/opener/single-instance plugins) — re-triage when they move to zbus 6" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained notice (merged into zbus 6); same zbus 4/5 paths as RUSTSEC-2026-0370" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained notice (merged into zbus 6); same zbus 4/5 paths as RUSTSEC-2026-0370" },
-    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained notice via the deprecated serde_yaml (frontmatter + theme YAML); migration tracked in #180" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained notice; transitive of the tauri Linux (glib) stack" },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained notice; transitive of the tauri Linux stack" },
     { id = "RUSTSEC-2025-0075", reason = "unic-* unmaintained notices; urlpattern via tauri-utils pins them" },

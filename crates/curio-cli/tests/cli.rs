@@ -13,8 +13,8 @@ use predicates::prelude::predicate;
 use serde_json::json;
 
 use support::{
-    article_id_by_title, assert_valid, curio, events_lines, events_validator, fixture_server,
-    frontmatter_validator, manifest_validator, note_frontmatter, repo_root, seed,
+    article_id_by_title, assert_valid, curio, events_lines, events_validator, feedless_server,
+    fixture_server, frontmatter_validator, manifest_validator, note_frontmatter, repo_root, seed,
     set_default_destination, stdout_json,
 };
 
@@ -461,6 +461,73 @@ fn pocket_csv_imports_articles_as_read_later_via_the_cli() {
     );
 }
 
+#[test]
+fn messy_import_files_import_and_report_their_bad_rows() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    // A UTF-16LE Excel CSV: decoded, and its two unusable URLs reported.
+    let csv = repo_root().join("fixtures/import/pocket-utf16le.csv");
+    let imported = stdout_json(
+        &curio(profile.path())
+            .args(["import", "--from", "pocket"])
+            .arg(&csv)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(imported["articles_added"], 3);
+    assert_eq!(imported["articles_invalid"], 2);
+    assert_eq!(imported["rejected"][0]["kind"], "article");
+    assert_eq!(imported["rejected"][0]["reason"], "unsupported_scheme");
+    assert_eq!(imported["rejected"][0]["detail"], "javascript:alert(1)");
+    assert_eq!(imported["rejected"][1]["reason"], "invalid_url");
+
+    // HTML entities and a broken outline: every usable feed subscribes,
+    // the bad ones are counted on stdout and named on stderr.
+    let opml = repo_root().join("fixtures/opml/messy-entities.opml");
+    curio(profile.path())
+        .args(["opml", "import"])
+        .arg(&opml)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "imported 5 feed(s), skipped 0 already subscribed, 2 invalid",
+        ))
+        .stderr(predicate::str::contains(
+            "skipped invalid entry (unsupported scheme): webcal://calendar.example/events.ics",
+        ));
+    let again = stdout_json(
+        &curio(profile.path())
+            .args(["opml", "import"])
+            .arg(&opml)
+            .arg("--json")
+            .assert()
+            .success(),
+    );
+    assert_eq!(again["added"], 0);
+    assert_eq!(again["skipped"], 5);
+    assert_eq!(again["invalid"], 2);
+    let rejected = again["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 2);
+    assert!(rejected.iter().all(|row| row["kind"] == "feed"));
+    assert!(rejected.iter().any(|row| {
+        row["reason"] == "unsupported_scheme"
+            && row["detail"] == "webcal://calendar.example/events.ics"
+    }));
+    curio(profile.path())
+        .args(["import", "--from", "opml"])
+        .arg(&opml)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "imported 0 feed(s) and 0 article(s); skipped 5 already present, 2 invalid",
+        ))
+        .stderr(predicate::str::contains(
+            "skipped invalid entry (unsupported scheme): webcal://calendar.example/events.ics",
+        ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bulk_save_exports_the_library_idempotently() {
     let server = fixture_server().await;
@@ -802,6 +869,122 @@ async fn open_emits_article_opened_and_launches_the_browser() {
     let last = events.last().unwrap();
     assert_eq!(last["type"], "article.opened");
     assert_eq!(last["payload"]["curio_id"], json!(curio_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feed_add_subscribes_to_the_feed_discovered_on_a_site_url() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add"])
+            .arg(format!("{server}/"))
+            .args(["--allow-private-network", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], format!("{server}/feed.xml"));
+    // The W1 exemption is recorded under the URL actually subscribed.
+    let config = std::fs::read_to_string(profile.path().join("curio.toml")).unwrap();
+    assert!(config.contains(&format!("{server}/feed.xml")), "{config}");
+
+    // Re-adding the site resolves to the same feed: a duplicate, refused.
+    curio(profile.path())
+        .args(["feed", "add"])
+        .arg(format!("{server}/"))
+        .arg("--allow-private-network")
+        .assert()
+        .failure();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feed_add_probes_common_paths_when_a_page_declares_nothing() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    // `/plain` has no <link>; the same-origin probe finds `/feed.xml`.
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add"])
+            .arg(format!("{server}/plain"))
+            .args(["--allow-private-network", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], format!("{server}/feed.xml"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feed_add_refuses_a_page_with_no_feed_unless_told_not_to_validate() {
+    let server = feedless_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+
+    curio(profile.path())
+        .args(["feed", "add"])
+        .arg(format!("{server}/"))
+        .arg("--allow-private-network")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no feed found"))
+        .stderr(predicate::str::contains("--no-validate"));
+    let feeds = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "list", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(feeds.as_array().unwrap().len(), 0, "nothing was subscribed");
+
+    // The escape hatch subscribes the URL as given, without fetching it.
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add"])
+            .arg(format!("{server}/"))
+            .args(["--allow-private-network", "--no-validate", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], format!("{server}/"));
+}
+
+#[test]
+fn feed_add_normalizes_a_bare_domain() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    // --no-validate keeps the test offline; normalization runs either way.
+    let added = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "add", "example.test", "--no-validate", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(added["url"], "https://example.test/");
+
+    curio(profile.path())
+        .args(["feed", "add", "ftp://example.test/", "--no-validate"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a fetchable http(s) URL"));
+}
+
+#[test]
+fn feed_add_reports_an_unreachable_site() {
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    // Port 9 (discard) on loopback: refused, never the internet.
+    curio(profile.path())
+        .args([
+            "feed",
+            "add",
+            "http://127.0.0.1:9/",
+            "--allow-private-network",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("could not reach"));
 }
 
 #[test]

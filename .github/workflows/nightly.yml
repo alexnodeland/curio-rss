@@ -5,7 +5,8 @@
 # produces the shippable (unsigned) bundles, the WebdriverIO + tauri-driver
 # smoke on the two platforms a driver exists for (Linux + Windows — there is
 # no macOS tauri-driver, so macOS is covered by the manual release checklist),
-# and the criterion cold-start benchmark that hosts the Phase-4 <1.5s gate.
+# the criterion cold-start benchmark that hosts the Phase-4 <1.5s gate, and
+# the cargo-fuzz targets (fuzz/, nightly toolchain, 10 minutes each).
 #
 # Signing is intentionally OFF, permanently: distribution is an unsigned
 # Homebrew cask (Apple enrollment skipped, Windows deferred —
@@ -55,6 +56,7 @@ on:
       - apps/desktop/e2e/**
       - apps/desktop/package.json
       - apps/desktop/package-lock.json
+      - fuzz/**
 
 # A newer push to the same PR supersedes its run. Scheduled and dispatched
 # runs each get a group of their own (the run id), so one stuck run never
@@ -253,6 +255,62 @@ jobs:
         with:
           name: e2e-failures-${{ matrix.name }}
           path: ${{ runner.temp }}/e2e-failures
+          if-no-files-found: ignore
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    # A HARD gate (issue #133): libFuzzer exits non-zero on the first crash,
+    # panic, abort, OOM or slow input, which fails the job; the input that
+    # did it is uploaded below. Reproduce locally with
+    # `cargo +nightly fuzz run <target> <downloaded-artifact>`.
+    # Every [[bin]] in fuzz/Cargo.toml must have a leg here — `just
+    # workflows` (xtask) fails on a target the nightly never runs.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `seeds` are committed fixtures, passed as extra corpus dirs:
+          # libFuzzer reads them but writes its finds to the first dir only
+          # (fuzz/corpus/<target>, gitignored), so the tree stays clean.
+          - { target: feed_parse, seeds: fixtures/feeds fixtures/nasty }
+          - { target: opml, seeds: fixtures/opml }
+          - { target: content_pipeline, seeds: fixtures/html }
+          - { target: url_screen, seeds: "" }
+    env:
+      # Pinned: the runner is part of the gate. Bump deliberately.
+      CARGO_FUZZ_VERSION: 0.13.2
+      # 10 minutes per target on the schedule and on dispatch. A PR that
+      # touches the nightly's plumbing (fuzz/** included) gets a 60-second
+      # smoke: enough to prove every target builds and runs before merge.
+      FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '60' || '600' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          # libFuzzer's sanitizer coverage needs -Z flags: nightly only.
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz ${{ env.CARGO_FUZZ_VERSION }}
+        run: cargo install cargo-fuzz --locked --version "$CARGO_FUZZ_VERSION"
+      - name: Fuzz ${{ matrix.target }} for ${{ env.FUZZ_SECONDS }}s
+        # The fuzz crate is its own workspace with no committed lock: start
+        # it from the workspace's, so the fuzzed dependency versions are the
+        # ones that ship (cargo only adds libfuzzer-sys + arbitrary).
+        run: |
+          cp Cargo.lock fuzz/Cargo.lock
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          cargo fuzz run "${{ matrix.target }}" \
+            "fuzz/corpus/${{ matrix.target }}" ${{ matrix.seeds }} -- \
+            -max_total_time="$FUZZ_SECONDS" -timeout=30 -rss_limit_mb=2048
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts
           if-no-files-found: ignore
 
   bench:

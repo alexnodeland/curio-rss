@@ -27,6 +27,7 @@ caught is wasted wall-clock.
 | `Cargo.toml` / `Cargo.lock` / new deps | `just deny` · `just boundary` (curio-core stays webview-free) · `just msrv` (every crate builds on its declared `rust-version`; needs `jq`, downloads the pinned toolchains) |
 | `.github/workflows/**`, `.github/dependabot.yml` | `just workflows` (every action SHA-pinned with a `# vX.Y.Z` comment, release gated on `ci.yml`, updater signing key in exactly one build-free step of a job deployed to the `updater-signing` environment, draft release carries SHA256SUMS/SBOM/attestation) · `cargo test -p xtask` · a `release.yml` change also gets a `workflow_dispatch` dry run after merge (runbook §2) |
 | docs / rustdoc comments | `just doc` (rustdoc `-D warnings`) |
+| `fuzz/**` | `just workflows` (every `[[bin]]` target has a bounded, unconditional leg in nightly.yml's `fuzz` job) · `just fuzz <target> 30` if you have a nightly toolchain + cargo-fuzz (outside the stable gate; the PR's nightly run smoke-fuzzes every target for 60s) |
 | anything added to git | `just blob-guard` (no object over 1 MB, ever) |
 
 ## Rules

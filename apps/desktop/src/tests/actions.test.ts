@@ -32,6 +32,7 @@ import {
     commandErrorFixture,
     feedFixture,
     flushIpc,
+    importOutcomeFixture,
     installIpcHarness,
     refreshOutcomeFixture,
     rejectWith,
@@ -310,18 +311,43 @@ describe('actions — importFromFile', () => {
     it('imports the picked file and toasts the outcome', async () => {
         harness = installIpcHarness({
             pick_import_file: { token: 'tok-1' },
-            import_file: {
+            import_file: importOutcomeFixture({
                 feeds_added: 3,
                 articles_added: 10,
                 feeds_skipped: 1,
                 articles_skipped: 0,
-            },
+            }),
         });
         await importFromFile('opml');
 
         expect(harness.callsFor('import_file')).toEqual([{ pathToken: 'tok-1', source: 'opml' }]);
         expect(toastStore.toasts).toHaveLength(1);
         expect(toastStore.toasts[0]?.tone).toBe('success');
+    });
+
+    it('warns with the invalid-row count when some rows were unusable', async () => {
+        harness = installIpcHarness({
+            pick_import_file: { token: 'tok-2' },
+            import_file: importOutcomeFixture({
+                feeds_added: 5,
+                feeds_skipped: 0,
+                feeds_invalid: 1,
+                articles_added: 2,
+                articles_skipped: 1,
+                articles_invalid: 1,
+                rejected: [
+                    { kind: 'feed', reason: 'unsupported_scheme', detail: 'webcal://x.test/a' },
+                    { kind: 'article', reason: 'invalid_url', detail: 'not a url' },
+                ],
+            }),
+        });
+        await importFromFile('pocket_csv');
+
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.tone).toBe('warning');
+        expect(toastStore.toasts[0]?.message).toBe(
+            'Imported 5 feeds and 2 articles, skipped 1; ignored 2 invalid entries',
+        );
     });
 
     it('a cancelled picker toasts politely and never imports', async () => {

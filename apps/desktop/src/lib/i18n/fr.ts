@@ -174,6 +174,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'addFeed.candidates': 'Flux trouvés',
     'addFeed.noneFound': 'Aucun flux trouvé sur cette page — essayez l’URL directe du flux.',
     'addFeed.useUrl': 'Utiliser cette URL directement',
+    'addFeed.unreachable': 'Impossible de joindre cette adresse pour y chercher un flux.',
     'addFeed.already': 'Vous êtes déjà abonné à ce flux.',
     'addFeed.added': 'Abonné à {title}',
     'addFeed.saveLink': 'Enregistrer pour plus tard',
@@ -191,6 +192,11 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'presets.reddit': 'Reddit',
     'presets.youtube': 'YouTube',
     'presets.mastodon': 'Mastodon',
+    'presets.github': 'Versions GitHub',
+    'presets.newsletter': 'Newsletter',
+    'presets.newsletter.hint':
+        'Les newsletters arrivent par e-mail. Créez une boîte sur Kill the Newsletter, abonnez-vous à la newsletter avec son adresse, puis collez ici cette adresse ou l’URL de son flux. Les newsletters Substack n’ont pas besoin de boîte — collez leur adresse web.',
+    'presets.newsletter.open': 'Ouvrir Kill the Newsletter',
     'presets.hn': 'Hacker News',
     'presets.hn.frontpage': 'À la une',
     'presets.hn.newest': 'Plus récents',
@@ -323,6 +329,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'import.running': 'Importation…',
     'import.done':
         '{feeds, plural, one {# flux} other {# flux}} et {articles, plural, one {# article} other {# articles}} importés, {skipped, plural, one {# ignoré} other {# ignorés}}',
+    'import.doneWithInvalid':
+        '{feeds, plural, one {# flux} other {# flux}} et {articles, plural, one {# article} other {# articles}} importés, {skipped, plural, one {# ignoré} other {# ignorés}} ; {invalid, plural, one {# entrée invalide écartée} other {# entrées invalides écartées}}',
     'import.hint':
         'Les fichiers OPML importent les abonnements aux flux ; les CSV de Pocket, Instapaper et Readwise importent les articles enregistrés comme éléments à lire plus tard, avec leurs étiquettes.',
     'doctor.title': 'Diagnostic de la base de données',

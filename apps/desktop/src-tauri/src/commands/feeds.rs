@@ -4,31 +4,40 @@
 use std::sync::Arc;
 
 use curio_core::CoreHandle;
-use curio_core::model::{FeedId, FeedStatus};
+use curio_core::feeds::{DiscoverOptions, normalize_input};
+use curio_core::model::{FeedId, FeedStatus, NewFeed};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
-use crate::discovery::{Discovery, DiscoveryDto};
+use crate::discovery::DiscoveryDto;
 use crate::dto::{FeedDto, FeedStatusDto, FetchRecordDto, NewFeedDto, RefreshOutcomeDto};
-use crate::error::CommandError;
+use crate::error::{CommandError, ErrorCode};
 use crate::events::{ArticlesChanged, FeedsChanged, RefreshFinished, RefreshProgress, emit_or_log};
 use crate::refresh_scheduler::RefreshScheduler;
 
-/// Autodiscovers feeds (and a favicon) for a URL the user typed — fetches
-/// the page once through the policed client and scans it. Head-local
-/// platform policy; the Google favicon fallback is the frontend's opt-in.
+/// Autodiscovers feeds (and a favicon) for what the user typed — a bare
+/// domain, a site, a page, or a feed URL. The core's discovery normalizes
+/// it, applies the fetch-free rewrites, scans and probes through the
+/// policed client and offers only validated feeds; the Google favicon
+/// fallback is the frontend's opt-in.
 #[tauri::command]
 #[specta::specta]
 pub async fn discover_feeds(
-    discovery: State<'_, Discovery>,
+    core: State<'_, SharedCore>,
     url: String,
 ) -> Result<DiscoveryDto, CommandError> {
-    discovery.discover(&url).await
+    let core = Arc::clone(core.inner());
+    crate::discovery::discover(&core, &url).await
 }
 
 /// Subscribes to a feed and kicks off its first fetch in the background —
 /// a new subscription must not sit empty until the next refresh cycle.
-/// Duplicate URLs are a storage error (user tier).
+/// By default the typed URL is resolved through the core's validating
+/// discovery first, so a homepage or a bare domain subscribes to its feed
+/// and a page with none is refused (`NO_FEED`) instead of becoming a
+/// subscription that fails on every refresh; `validate: false` is the
+/// explicit "subscribe anyway" (normalized only). A URL already subscribed
+/// — including one a homepage resolved to — is `ALREADY_SUBSCRIBED`.
 // The arg is `new_feed`, not `new` — `new` is a reserved word in the
 // generated TypeScript.
 #[tauri::command]
@@ -39,10 +48,7 @@ pub async fn add_feed(
     new_feed: NewFeedDto,
 ) -> Result<FeedDto, CommandError> {
     let core = Arc::clone(core.inner());
-    let feed = {
-        let core = Arc::clone(&core);
-        run_blocking(move || add_feed_impl(&core, new_feed)).await?
-    };
+    let feed = subscribe_impl(&core, new_feed).await?;
     emit_or_log(&app, &FeedsChanged);
     // Fire-and-forget so the add returns as soon as the row exists; a failed
     // first fetch surfaces through feed health, like any scheduled refresh.
@@ -305,8 +311,43 @@ pub async fn recent_fetches(
 
 // ------------------------------------------------------------------ impls
 
-fn add_feed_impl(core: &CoreHandle, new: NewFeedDto) -> Result<FeedDto, CommandError> {
-    Ok(core.add_feed(new.into())?.into())
+/// The subscribe path: resolve (validate) or merely normalize what the
+/// user typed, then add it. Discovery runs on the async runtime (it is
+/// network-bound); only the storage write is blocking.
+async fn subscribe_impl(core: &Arc<CoreHandle>, new: NewFeedDto) -> Result<FeedDto, CommandError> {
+    let url = if new.validate {
+        core.resolve_feed_url(&new.url, DiscoverOptions::default())
+            .await?
+            .url
+    } else {
+        normalize_input(&new.url)?.into()
+    };
+    let core = Arc::clone(core);
+    run_blocking(move || {
+        add_feed_impl(
+            &core,
+            NewFeed {
+                url,
+                title: new.title,
+                tags: new.tags,
+            },
+        )
+    })
+    .await
+}
+
+/// Adds an already-resolved feed URL, refusing one already subscribed with
+/// a code the UI can branch on (the UNIQUE violation alone would read as
+/// an internal storage failure).
+fn add_feed_impl(core: &CoreHandle, new: NewFeed) -> Result<FeedDto, CommandError> {
+    if core.get_feed_by_url(&new.url)?.is_some() {
+        return Err(CommandError::user(
+            ErrorCode::AlreadySubscribed,
+            format!("already subscribed to {}", new.url),
+            false,
+        ));
+    }
+    Ok(core.add_feed(new)?.into())
 }
 
 fn remove_feed_impl(core: &CoreHandle, feed_id: i64) -> Result<(), CommandError> {
@@ -434,19 +475,122 @@ mod tests {
     use super::*;
     use crate::commands::testutil::{temp_core, temp_core_trusting_localhost};
     use crate::dto::FetchStatusDto;
-    use crate::error::{ErrorCode, ErrorKind};
+    use crate::error::ErrorKind;
 
     const RSS: &str = r#"<?xml version="1.0"?>
 <rss version="2.0"><channel><title>T</title><link>https://t.test</link>
 <item><guid>g1</guid><title>One</title><link>https://t.test/1</link><description>first</description></item>
 </channel></rss>"#;
 
+    async fn serve(server: &MockServer, at: &str, body: String) {
+        Mock::given(method("GET"))
+            .and(path(at))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(server)
+            .await;
+    }
+
+    fn new_feed(url: String, validate: bool) -> NewFeedDto {
+        NewFeedDto {
+            url,
+            title: None,
+            tags: vec!["blogs".into()],
+            validate,
+        }
+    }
+
+    /// Subscribe validates by default: a homepage subscribes to the feed
+    /// it declares, not to itself.
+    #[tokio::test]
+    async fn subscribe_resolves_a_homepage_to_its_feed() {
+        let server = MockServer::start().await;
+        let page = format!(
+            r#"<link rel="alternate" type="application/rss+xml" href="{}/feed.xml">"#,
+            server.uri()
+        );
+        serve(&server, "/", page).await;
+        serve(&server, "/feed.xml", RSS.to_owned()).await;
+        let (_dir, core) = temp_core_trusting_localhost();
+
+        let feed = subscribe_impl(&core, new_feed(format!("{}/", server.uri()), true))
+            .await
+            .unwrap();
+        assert_eq!(feed.url, format!("{}/feed.xml", server.uri()));
+        assert_eq!(feed.tags, vec!["blogs".to_owned()]);
+        assert_eq!(list_feeds_impl(&core).unwrap().len(), 1);
+    }
+
+    /// A page with no feed is refused with `NO_FEED` and creates nothing —
+    /// not a subscription that fails on every refresh.
+    #[tokio::test]
+    async fn subscribe_refuses_a_feedless_page() {
+        let server = MockServer::start().await;
+        serve(&server, "/", "<p>just a homepage</p>".to_owned()).await;
+        let (_dir, core) = temp_core_trusting_localhost();
+
+        let error = subscribe_impl(&core, new_feed(format!("{}/", server.uri()), true))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::User);
+        assert_eq!(error.code, ErrorCode::NoFeed);
+        assert!(error.message.contains("no feed found"), "{}", error.message);
+        assert_eq!(list_feeds_impl(&core).unwrap().len(), 0);
+    }
+
+    /// The explicit "subscribe anyway" never fetches, but still normalizes:
+    /// a bare domain is stored as an absolute https URL.
+    #[tokio::test]
+    async fn subscribe_without_validation_normalizes_a_bare_domain() {
+        let (_dir, core) = temp_core();
+        let feed = subscribe_impl(&core, new_feed(" example.test ".into(), false))
+            .await
+            .unwrap();
+        assert_eq!(feed.url, "https://example.test/");
+
+        let error = subscribe_impl(&core, new_feed("ftp://example.test/".into(), false))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+    }
+
+    /// A homepage that resolves to a feed already subscribed is refused
+    /// with a code the UI branches on, not an internal UNIQUE failure. This
+    /// is the case the frontend's own `get_feed_by_url(typed)` pre-check
+    /// cannot see: the typed homepage is not subscribed, the feed it
+    /// declares is — so the resolved URL is what gets deduped.
+    #[tokio::test]
+    async fn subscribe_refuses_a_feed_already_subscribed_under_its_resolved_url() {
+        let server = MockServer::start().await;
+        let page = format!(
+            r#"<link rel="alternate" type="application/rss+xml" href="{}/feed.xml">"#,
+            server.uri()
+        );
+        serve(&server, "/", page).await;
+        serve(&server, "/feed.xml", RSS.to_owned()).await;
+        let (_dir, core) = temp_core_trusting_localhost();
+        let homepage = format!("{}/", server.uri());
+        let feed_url = format!("{}/feed.xml", server.uri());
+        subscribe_impl(&core, new_feed(feed_url.clone(), false))
+            .await
+            .unwrap();
+        assert!(get_feed_by_url_impl(&core, &homepage).unwrap().is_none());
+
+        for typed in [homepage, feed_url] {
+            let error = subscribe_impl(&core, new_feed(typed.clone(), true))
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, ErrorKind::User, "{typed}");
+            assert_eq!(error.code, ErrorCode::AlreadySubscribed, "{typed}");
+        }
+        assert_eq!(list_feeds_impl(&core).unwrap().len(), 1);
+    }
+
     #[test]
     fn add_list_get_and_dedupe_lookup() {
         let (_dir, core) = temp_core();
         let feed = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: "https://example.test/feed.xml".into(),
                 title: Some("Example".into()),
                 tags: vec!["news".into()],
@@ -481,7 +625,7 @@ mod tests {
         let (_dir, core) = temp_core();
         let feed = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: "https://example.test/feed.xml".into(),
                 title: None,
                 tags: vec![],
@@ -500,7 +644,7 @@ mod tests {
         let (_dir, core) = temp_core();
         let feed = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: "https://example.test/feed.xml".into(),
                 title: None,
                 tags: vec!["Tech".into()],
@@ -537,7 +681,7 @@ mod tests {
         let (_dir, core) = temp_core();
         let feed = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: "https://example.test/feed.xml".into(),
                 title: Some("Original".into()),
                 tags: vec![],
@@ -571,7 +715,7 @@ mod tests {
         let (_dir, core) = temp_core();
         let feed = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: "https://example.test/feed.xml".into(),
                 title: None,
                 tags: vec![],
@@ -621,7 +765,7 @@ mod tests {
         let mk = |url: &str| {
             add_feed_impl(
                 &core,
-                NewFeedDto {
+                NewFeed {
                     url: url.into(),
                     title: None,
                     tags: vec![],
@@ -659,7 +803,7 @@ mod tests {
         let (_dir, core) = temp_core_trusting_localhost();
         let active = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: format!("{}/a.xml", server.uri()),
                 title: None,
                 tags: vec![],
@@ -668,7 +812,7 @@ mod tests {
         .unwrap();
         let paused = add_feed_impl(
             &core,
-            NewFeedDto {
+            NewFeed {
                 url: format!("{}/paused.xml", server.uri()),
                 title: None,
                 tags: vec![],

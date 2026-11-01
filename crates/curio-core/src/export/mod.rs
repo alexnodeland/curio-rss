@@ -39,15 +39,21 @@
 //! this module reports the [`ExportDisposition`] the facade maps onto
 //! the contract events.
 
+#[cfg(test)]
+mod golden_tests;
 mod lock;
 mod manifest;
 mod note;
+#[cfg(test)]
+mod roundtrip_tests;
 mod slug;
 mod target;
 mod write;
+pub mod yaml;
 
 pub use manifest::{load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
+pub use write::write_file_atomic;
 
 use std::path::{Path, PathBuf};
 
@@ -125,7 +131,7 @@ pub enum ExportError {
     },
     /// Frontmatter (de)serialization failed.
     #[error("frontmatter yaml: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] yaml::Error),
     /// The manifest failed to parse — refusing to guess and clobber it.
     #[error("manifest parse at {path}: {message}")]
     ManifestParse {

@@ -51,10 +51,12 @@ loopback endpoint, so nothing in the run reaches the real network.
 ## The five scenarios (`specs/smoke.e2e.ts`)
 
 1. **boot** — the app launches to the three-pane shell over the seeded feed.
-2. **add feed** — the add-feed modal subscribes to `<stub>/added.xml`; the row
-   lands in the sidebar, and because nothing typed into the UI can carry the
-   W1 exemption, the SSRF guard refuses its first fetch (the row turns
-   unhealthy; the stub never sees a request for it).
+2. **add feed** — the add-feed modal subscribes to `<stub>/added.xml`.
+   Because nothing typed into the UI can carry the W1 exemption, the SSRF
+   guard refuses subscribe's validation, so the modal offers "use this URL
+   directly" (`add-feed-unvalidated`) instead of subscribing; taken, the row
+   lands in the sidebar and the guard refuses its first fetch too (the row
+   turns unhealthy; the stub never sees a request for it).
 3. **stored-XSS inert** — the corpus went feed → ingest → DB →
    `SanitizedHtml` → real webview: no script/embedding element, no `on*`
    handler, no `javascript:`/`data:text/html` URL survives; the legitimate
@@ -66,7 +68,7 @@ loopback endpoint, so nothing in the run reaches the real network.
 
 All five run; none is skipped. Selectors are `data-testid` hooks on the
 frontend (`three-pane`, `feed-row` + `data-feed-url`, `article-row`,
-`add-feed-url`, `add-feed-submit`, `reader-content`). A failed scenario saves
+`add-feed-url`, `add-feed-submit`, `add-feed-unvalidated`, `reader-content`). A failed scenario saves
 a screenshot under `failures/` (or `$CURIO_E2E_SHOTS`); the nightly job
 uploads it as an artifact.
 

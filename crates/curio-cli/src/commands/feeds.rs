@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 use anyhow::Context as _;
 use curio_core::RefreshOutcome;
+use curio_core::feeds::{DiscoverError, DiscoverOptions, Resolution, normalize_input};
 use curio_core::model::NewFeed;
 use serde::Serialize;
 
@@ -18,7 +19,8 @@ pub(crate) fn run(app: &mut App, command: FeedCommand) -> anyhow::Result<ExitCod
             url,
             tags,
             allow_private_network,
-        } => add(app, url, tags, allow_private_network),
+            no_validate,
+        } => add(app, &url, tags, allow_private_network, no_validate),
         FeedCommand::List => list(app),
         FeedCommand::Rm { feed } => remove(app, &feed),
         FeedCommand::FullText { feed, mode } => full_text(app, &feed, mode.as_bool()),
@@ -44,12 +46,50 @@ fn full_text(app: &App, reference: &str, enabled: bool) -> anyhow::Result<ExitCo
     Ok(ExitCode::SUCCESS)
 }
 
+/// Turns the typed input into the URL to subscribe (plus any other
+/// validated candidates): the core's shared validating subscribe path by
+/// default, or merely normalized under `--no-validate`.
+fn resolve_feed_url(
+    app: &App,
+    input: &str,
+    allow_private_network: bool,
+    no_validate: bool,
+) -> anyhow::Result<Resolution> {
+    if no_validate {
+        return Ok(Resolution {
+            url: normalize_input(input)?.into(),
+            alternates: Vec::new(),
+        });
+    }
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building the discovery runtime")?;
+    runtime
+        .block_on(app.core.resolve_feed_url(
+            input,
+            DiscoverOptions {
+                allow_private_network,
+                ..DiscoverOptions::default()
+            },
+        ))
+        .map_err(|error| match error {
+            DiscoverError::NoFeed { .. } => anyhow::anyhow!(
+                "{error} — check the address, or pass --no-validate to subscribe anyway"
+            ),
+            other => other.into(),
+        })
+}
+
 fn add(
     app: &mut App,
-    url: String,
+    input: &str,
     tags: Vec<String>,
     allow_private_network: bool,
+    no_validate: bool,
 ) -> anyhow::Result<ExitCode> {
+    let Resolution { url, alternates } =
+        resolve_feed_url(app, input, allow_private_network, no_validate)?;
     let feed = app.core.add_feed(NewFeed {
         url: url.clone(),
         title: None,
@@ -75,6 +115,9 @@ fn add(
         emit_json(&FeedView::new(&feed))?;
     } else {
         println!("subscribed {} (id {})", feed.url, feed.id);
+        for alternate in &alternates {
+            println!("  also offered: {alternate}");
+        }
         if feed.allow_private_network {
             println!("  allow_private_network = true (W1 exemption, recorded in curio.toml)");
         }

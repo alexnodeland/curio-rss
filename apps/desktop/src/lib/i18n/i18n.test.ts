@@ -34,6 +34,9 @@ describe('t', () => {
         expect(t('import.done', { feeds: 2, articles: 1, skipped: 5 })).toBe(
             'Imported 2 feeds and 1 article, skipped 5',
         );
+        expect(t('import.doneWithInvalid', { feeds: 1, articles: 0, skipped: 0, invalid: 1 })).toBe(
+            'Imported 1 feed and 0 articles, skipped 0; ignored 1 invalid entry',
+        );
         expect(t('refresh.announce.done', { count: 1, feeds: 4 })).toBe(
             'Refresh complete: 1 new article across 4 feeds',
         );

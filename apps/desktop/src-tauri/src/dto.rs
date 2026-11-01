@@ -18,11 +18,14 @@ use std::path::Path;
 
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
-    Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus, NewFeed,
+    Article, ArticleState, Feed, FeedId, FeedStatus, FetchRecord, FetchStatus,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::ListArticles;
-use curio_core::{ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, SaveOutcome};
+use curio_core::{
+    ImportKind, ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, RejectReason,
+    Rejected, SaveOutcome,
+};
 use curio_types::Destination;
 use serde::{Deserialize, Serialize};
 
@@ -158,22 +161,18 @@ impl From<Feed> for FeedDto {
 /// Args for adding a subscription.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct NewFeedDto {
-    /// Feed URL.
+    /// What to subscribe: a feed URL, or anything discovery understands
+    /// (a site, a bare domain, a page a rewrite rule knows).
     pub url: String,
     /// Optional user-supplied title.
     pub title: Option<String>,
     /// Initial tags.
     pub tags: Vec<String>,
-}
-
-impl From<NewFeedDto> for NewFeed {
-    fn from(new: NewFeedDto) -> Self {
-        Self {
-            url: new.url,
-            title: new.title,
-            tags: new.tags,
-        }
-    }
+    /// Resolve `url` through the core's validating discovery and subscribe
+    /// to the feed it finds — the default. `false` is the explicit
+    /// "subscribe anyway" escape hatch: `url` is only normalized (a bare
+    /// domain gains `https://`), never fetched.
+    pub validate: bool,
 }
 
 /// The longest article-text excerpt the list DTO carries. The extracted
@@ -531,6 +530,8 @@ pub struct OpmlImportOutcomeDto {
     pub added: u64,
     /// Feeds skipped (already subscribed).
     pub skipped: u64,
+    /// Outlines dropped as unreadable or with an unusable URL.
+    pub invalid: u64,
 }
 
 impl From<OpmlImportOutcome> for OpmlImportOutcomeDto {
@@ -538,6 +539,7 @@ impl From<OpmlImportOutcome> for OpmlImportOutcomeDto {
         Self {
             added: u64::try_from(outcome.added).unwrap_or(u64::MAX),
             skipped: u64::try_from(outcome.skipped).unwrap_or(u64::MAX),
+            invalid: u64::try_from(outcome.invalid).unwrap_or(u64::MAX),
         }
     }
 }
@@ -567,18 +569,87 @@ impl From<ImportSourceDto> for ImportSource {
     }
 }
 
+/// Mirror of [`ImportKind`] — what a dropped import row would have been.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportKindDto {
+    /// A feed subscription.
+    Feed,
+    /// A saved article.
+    Article,
+}
+
+impl From<ImportKind> for ImportKindDto {
+    fn from(kind: ImportKind) -> Self {
+        match kind {
+            ImportKind::Feed => Self::Feed,
+            ImportKind::Article => Self::Article,
+        }
+    }
+}
+
+/// Mirror of [`RejectReason`] — why an import row was dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportRejectReasonDto {
+    /// The row itself could not be read.
+    Malformed,
+    /// The URL is not a parseable absolute URL.
+    InvalidUrl,
+    /// The URL is not http(s).
+    UnsupportedScheme,
+}
+
+impl From<RejectReason> for ImportRejectReasonDto {
+    fn from(reason: RejectReason) -> Self {
+        match reason {
+            RejectReason::Malformed => Self::Malformed,
+            RejectReason::InvalidUrl => Self::InvalidUrl,
+            RejectReason::UnsupportedScheme => Self::UnsupportedScheme,
+        }
+    }
+}
+
+/// Mirror of [`Rejected`] — one dropped import row and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ImportRejectionDto {
+    /// Feed or article.
+    pub kind: ImportKindDto,
+    /// Why it was dropped.
+    pub reason: ImportRejectReasonDto,
+    /// The offending value (the raw URL) or a description of the damage.
+    pub detail: String,
+}
+
+impl From<Rejected> for ImportRejectionDto {
+    fn from(rejected: Rejected) -> Self {
+        Self {
+            kind: rejected.kind.into(),
+            reason: rejected.reason.into(),
+            detail: rejected.detail,
+        }
+    }
+}
+
 /// Mirror of [`ImportOutcome`] — feeds and articles counted separately so
 /// the UI can report "N feeds, M articles" without guessing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ImportOutcomeDto {
     /// Feeds newly subscribed.
     pub feeds_added: u64,
     /// Feeds skipped (already subscribed).
     pub feeds_skipped: u64,
+    /// Feed rows dropped: unreadable, or with an unusable URL.
+    pub feeds_invalid: u64,
     /// Articles saved as feedless read-later items.
     pub articles_added: u64,
     /// Articles skipped (already imported).
     pub articles_skipped: u64,
+    /// Article rows dropped: unreadable, or with an unusable URL.
+    pub articles_invalid: u64,
+    /// Why rows were dropped (the first
+    /// [`curio_core::MAX_REJECTED_DETAILS`]; the counters stay exact).
+    pub rejected: Vec<ImportRejectionDto>,
 }
 
 impl From<ImportOutcome> for ImportOutcomeDto {
@@ -586,8 +657,11 @@ impl From<ImportOutcome> for ImportOutcomeDto {
         Self {
             feeds_added: u64::try_from(outcome.feeds_added).unwrap_or(u64::MAX),
             feeds_skipped: u64::try_from(outcome.feeds_skipped).unwrap_or(u64::MAX),
+            feeds_invalid: u64::try_from(outcome.feeds_invalid).unwrap_or(u64::MAX),
             articles_added: u64::try_from(outcome.articles_added).unwrap_or(u64::MAX),
             articles_skipped: u64::try_from(outcome.articles_skipped).unwrap_or(u64::MAX),
+            articles_invalid: u64::try_from(outcome.articles_invalid).unwrap_or(u64::MAX),
+            rejected: outcome.rejected.into_iter().map(Into::into).collect(),
         }
     }
 }

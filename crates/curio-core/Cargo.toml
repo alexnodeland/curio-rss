@@ -35,6 +35,7 @@ curio-types = { workspace = true }
 directories = { workspace = true }
 dom_smoothie = { workspace = true }
 ego-tree = { workspace = true }
+encoding_rs = { workspace = true }
 feed-rs = { workspace = true }
 fs4 = { workspace = true }
 htmd = { workspace = true }
@@ -45,10 +46,12 @@ quick-xml = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+ryu = { workspace = true }
 same-file = { workspace = true }
+saphyr-parser = { workspace = true }
 scraper = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 # "sync" on top of the workspace's net/time: tokio::sync::Mutex backs the

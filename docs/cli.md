@@ -34,7 +34,7 @@ future head.
 | Command | What it does |
 |---------|--------------|
 | `curio init [dir]` | Scaffold a profile (`curio.toml`, `curio.db`, events log) |
-| `curio feed add <url> [--tags …]` | Subscribe (autodiscovers the feed on a site URL) |
+| `curio feed add <url> [--tags …]` | Subscribe — to a feed URL, or the validated feed autodiscovered from a site, page or bare domain |
 | `curio feed list` / `curio feed rm <id>` | List / unsubscribe |
 | `curio fetch` | Refresh every feed; reports new-article counts |
 | `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
@@ -190,10 +190,45 @@ for you). Nothing in feed content can ever set it.
 
 ```sh
 curio feed add https://example.com/feed.xml --tags rust,databases
+curio feed add example.com                     # bare domain → https://example.com/
+curio feed add https://github.com/rust-lang/rust   # → its releases.atom
 curio feed add http://127.0.0.1:8787/digest.xml --allow-private-network
+curio feed add https://example.com/beta --no-validate   # as given, unfetched
 curio feed list [--json]
 curio feed rm example.com          # by id, exact URL, or unique substring
 ```
+
+`feed add` never subscribes to something a refresh could not parse. It
+takes whatever you typed — a feed URL, a site or page URL, or a bare
+domain (given `https://`; a legacy `feed://` link works too; a URL with a
+`user:password@` part is refused) — and
+autodiscovers the feed before subscribing:
+
+1. **Known sites, no scraping.** reddit `/r/<sub>` and `/user/<name>`,
+   GitHub `<owner>/<repo>` (its releases feed), YouTube playlists and
+   `/channel/UC…` pages, Mastodon `@user` profiles and Substack
+   publications map straight to their feed URL.
+2. **The page itself.** If the URL is a feed, that's it — subscribed as
+   typed, or at its new address only when it has moved permanently (a
+   temporary redirect's target is never stored). Otherwise its
+   declared `<link rel="alternate">` feeds count — RSS, Atom and JSON Feed
+   only; oEmbed and REST-API alternates are ignored, and comment feeds are
+   dropped when the page also declares its main feed.
+3. **Probing**, only when nothing is declared: feed-shaped links on the
+   page, then `/feed`, `/feed.xml`, `/index.xml`, `/rss.xml`, `/atom.xml`
+   and `/rss` — at most six requests in total (redirect hops count), all
+   on the page's own origin: a probe that redirects to another site is
+   dropped without that site ever being contacted.
+
+Every candidate is fetched and parsed before it is offered; the first one
+is subscribed (the others are listed). Discovery as a whole gives up after
+45 seconds, keeping whatever validated by then. A page with no feed is refused with
+a hint — `--no-validate` subscribes the URL as given, without fetching it.
+`--allow-private-network` also lets discovery reach the private address,
+and is recorded under the feed URL actually subscribed.
+
+Email newsletters can be subscribed as feeds too: see
+[newsletters as feeds](newsletters.md).
 
 `feed add` emits `feed.added` (with the tags — tags-in-payload rule);
 `feed rm` emits the `feed.removed` negation and keeps the articles.
@@ -240,6 +275,22 @@ tags:
 curio import subscriptions.opml --from opml         # --from defaults to opml
 curio import pocket-export.csv   --from pocket       # Pocket / Instapaper / Readwise CSV
 ```
+
+Imports are lenient about messy real-world exports. Files up to 50 MiB are
+read in whatever encoding they were written in (a byte-order mark, an XML
+`encoding="…"` declaration, BOM-less UTF-16 as Excel writes it, otherwise
+UTF-8 with a Windows-1252 fallback). OPML with HTML entities (`&nbsp;`,
+`&eacute;`) or bare `&` in titles imports; an outline that cannot be read at
+all is skipped, not fatal. Every URL is trimmed, `feed://…` / `feed:https://…`
+become `https://…`, anything that is not `http(s)` (`webcal:`, `javascript:`)
+is dropped, and duplicates are matched on the normalized URL — so re-importing
+a file adds nothing. Dropped rows are counted (`… N invalid`), each named on
+stderr, by both `curio import` and `curio opml import`; with `--json` they
+come back as `feeds_invalid` / `articles_invalid` (`invalid` for `curio opml
+import`) plus a `rejected` list of `{kind, reason, detail}` (`reason`:
+`malformed`, `invalid_url` or `unsupported_scheme`) — the first 100 rows,
+while the counts stay exact. `curio opml export` replaces its
+target atomically, so a failed write never truncates the previous file.
 
 **Per-host fetch policy.** A few hosts fingerprint-block the honest `curio`
 User-Agent + rustls TLS. `curio-core` carries a built-in per-host override

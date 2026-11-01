@@ -233,4 +233,126 @@ describe('articles store', () => {
         expect(starred).toEqual({ status: 'ok', data: false }); // idempotent no-op
         expect(harness.callsFor('mark_read')[0]).toEqual({ articleId: 9, read: true });
     });
+
+    describe('session read-hold', () => {
+        /** An unread-only backend over ids 105..101; `read` ids drop out. */
+        function unreadBackend(read: Set<number>) {
+            return (args: Record<string, unknown>) => {
+                const params = args.params as ListArticlesDto;
+                return page(105, 5)
+                    .filter((a) => params.read !== false || !read.has(a.id))
+                    .filter((a) => params.before === null || a.id < params.before)
+                    .slice(0, params.limit);
+            };
+        }
+
+        const UNREAD = { ...ALL_ARTICLES, read: false };
+
+        it('keeps a row read this session in its slot when the unread window drops it', async () => {
+            const read = new Set<number>();
+            harness = installIpcHarness({ list_articles: unreadBackend(read) });
+            articlesStore.filters = UNREAD;
+            const list = articlesStore.current;
+            await flushIpc();
+
+            articlesStore.holdRead(103);
+            read.add(103);
+            await list.query.refetch();
+
+            expect(list.query.data?.map((a) => a.id)).toEqual([105, 104, 102, 101]);
+            expect(list.items.map((a) => a.id)).toEqual([105, 104, 103, 102, 101]);
+            expect(list.isHeld(103)).toBe(true);
+        });
+
+        it('holding a row that is not displayed, or twice, changes nothing', async () => {
+            harness = installIpcHarness({ list_articles: unreadBackend(new Set()) });
+            articlesStore.filters = UNREAD;
+            const list = articlesStore.current;
+            await flushIpc();
+
+            articlesStore.holdRead(999);
+            expect(list.isHeld(999)).toBe(false);
+            articlesStore.holdRead(104);
+            articlesStore.holdRead(104);
+            expect(list.isHeld(104)).toBe(true);
+        });
+
+        it('a view switch ends the outgoing session: returning shows the backend window', async () => {
+            const read = new Set<number>();
+            harness = installIpcHarness({ list_articles: unreadBackend(read) });
+            articlesStore.filters = UNREAD;
+            const list = articlesStore.current;
+            await flushIpc();
+            articlesStore.holdRead(103);
+            read.add(103);
+            await list.query.refetch();
+
+            // Re-assigning the same filter set is not a view change.
+            articlesStore.filters = { ...UNREAD };
+            expect(list.isHeld(103)).toBe(true);
+
+            articlesStore.filters = ALL_ARTICLES;
+            articlesStore.filters = UNREAD;
+            expect(articlesStore.current).toBe(list);
+            expect(list.items.map((a) => a.id)).toEqual([105, 104, 102, 101]);
+        });
+
+        it('releaseHeld lets one row go; releaseHolds ends the whole hold', async () => {
+            const read = new Set<number>();
+            harness = installIpcHarness({ list_articles: unreadBackend(read) });
+            articlesStore.filters = UNREAD;
+            const list = articlesStore.current;
+            await flushIpc();
+            articlesStore.holdRead(104);
+            articlesStore.holdRead(103);
+            read.add(104);
+            read.add(103);
+            await list.query.refetch();
+            expect(list.items).toHaveLength(5);
+
+            articlesStore.releaseHeld(104);
+            articlesStore.releaseHeld(104); // already released: a no-op
+            expect(list.items.map((a) => a.id)).toEqual([105, 103, 102, 101]);
+
+            articlesStore.releaseHolds();
+            articlesStore.releaseHolds(); // nothing held: a no-op
+            expect(list.items.map((a) => a.id)).toEqual([105, 102, 101]);
+        });
+
+        it('pages from the backend window, never from a held row', async () => {
+            const read = new Set<number>();
+            harness = installIpcHarness({ list_articles: backend(500, 10) });
+            const list = new ArticleListState(UNREAD, 3);
+            await flushIpc();
+            expect(list.items.map((a) => a.id)).toEqual([500, 499, 498]);
+            list.hold(498);
+            // The backend now leaves 498 out of the window.
+            read.add(498);
+            harness.respond('list_articles', (args) => {
+                const params = args.params as ListArticlesDto;
+                return page(500, 10)
+                    .filter((a) => !read.has(a.id))
+                    .filter((a) => params.before === null || a.id < params.before)
+                    .slice(0, params.limit);
+            });
+            await list.query.refetch();
+            expect(list.query.data?.map((a) => a.id)).toEqual([500, 499, 497]);
+            expect(list.items.map((a) => a.id)).toEqual([500, 499, 498, 497]);
+
+            await list.loadMore();
+            const cursors = harness
+                .callsFor('list_articles')
+                .map((call) => (call.params as ListArticlesDto).before);
+            expect(cursors[cursors.length - 1]).toBe(497);
+        });
+
+        it('a hold reaches no list while nothing is shown for the filters', () => {
+            harness = installIpcHarness({ list_articles: [] });
+            // No list was ever created for the current filters: nothing to hold.
+            articlesStore.holdRead(1);
+            articlesStore.releaseHeld(1);
+            articlesStore.releaseHolds();
+            expect(harness.callsFor('list_articles')).toHaveLength(0);
+        });
+    });
 });

@@ -1228,6 +1228,49 @@ fn feed_health_derives_from_the_latest_fetch_outcome() {
     assert_eq!(recovered.last_error_kind, None);
 }
 
+/// Kinds are added without a migration, so a profile a newer build wrote
+/// can carry one this build does not know: it reads as no kind — never as
+/// a corrupt row — and the human error text still comes through.
+#[test]
+fn an_unknown_stored_error_kind_reads_as_none() {
+    let (dir, storage) = temp_storage();
+    let (feed, _) = storage
+        .add_feed(NewFeed {
+            url: "https://example.com/feed.xml".to_owned(),
+            title: None,
+            tags: vec![],
+        })
+        .unwrap();
+    storage
+        .record_fetch(FetchRecord {
+            feed_id: feed.id,
+            fetched_at: Timestamp::now(),
+            status: FetchStatus::Error,
+            http_status: None,
+            error: Some("something new went wrong".to_owned()),
+            error_kind: Some(FetchErrorKind::Refused),
+            articles_new: 0,
+            duration_ms: None,
+        })
+        .unwrap();
+    side_conn(&dir)
+        .execute(
+            "UPDATE fetch_log SET error_kind = 'kind_from_a_newer_build'",
+            [],
+        )
+        .unwrap();
+
+    let listed = storage.list_feeds().unwrap().pop().unwrap();
+    assert_eq!(listed.last_error_kind, None);
+    assert_eq!(
+        listed.last_error.as_deref(),
+        Some("something new went wrong")
+    );
+    let recent = storage.recent_fetches(feed.id, 1).unwrap();
+    assert_eq!(recent[0].error_kind, None);
+    assert_eq!(recent[0].error.as_deref(), Some("something new went wrong"));
+}
+
 #[test]
 fn settings_upsert_and_read_back() {
     let (_dir, storage) = temp_storage();

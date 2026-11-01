@@ -188,7 +188,9 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   `sqlite error`. The same `SQLite` result codes sort the other actionable failures
   into their own classes — `Duplicate { entity }` (a UNIQUE collision, e.g. a feed
   URL already subscribed), `DiskFull`, `ReadOnly` and `DatabaseCorrupt`; only what
-  fits none stays the generic `Sqlite`.
+  fits none stays the generic `Sqlite` (so does a desynced FTS index,
+  `SQLITE_CORRUPT_VTAB`, which a rebuild fixes). The desktop keeps these classes
+  internal-tier until each has its own localized message.
 - Fetch failures are outcomes with a class: each errored `fetch_log` row stores a
   stable `error_kind` (`refused`, `tls_certificate`, `connect_timeout`, `not_a_feed`,
   …) beside its short message, derived from the policed client's `FetchError::kind`

@@ -593,6 +593,47 @@ async fn read_timeout_is_enforced() {
     assert_eq!(err.kind(), FetchErrorKind::ReadTimeout);
 }
 
+/// A connection that never finishes establishing is the *connect*
+/// timeout, typed through a real reqwest error: the TCP accept succeeds
+/// but the server never answers the TLS handshake, which reqwest's
+/// connect timeout covers.
+#[tokio::test]
+async fn a_stalled_handshake_is_a_connect_timeout() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        // Hold every accepted socket open, silently.
+        let mut held = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            held.push(stream);
+        }
+    });
+
+    let mut config = fast_config();
+    config.connect_timeout = Duration::from_millis(200);
+    config.request_timeout = Duration::from_secs(10);
+    let started = Instant::now();
+    let err = PolicedClient::new(config)
+        .fetch(&allowed(format!("https://127.0.0.1:{port}/feed.xml")))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            FetchError::Timeout {
+                phase: TimeoutPhase::Connect,
+                ..
+            }
+        ),
+        "expected a connect Timeout, got {err:?}"
+    );
+    assert_eq!(err.kind(), FetchErrorKind::ConnectTimeout);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the connect timeout, not the request timeout, fired"
+    );
+}
+
 /// A loopback port with nothing listening on it.
 fn closed_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

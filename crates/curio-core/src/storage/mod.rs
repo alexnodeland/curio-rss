@@ -151,7 +151,9 @@ impl From<rusqlite::Error> for StorageError {
     /// `SQLITE_FULL` → [`StorageError::DiskFull`], `SQLITE_READONLY` /
     /// `SQLITE_PERM` → [`StorageError::ReadOnly`], `SQLITE_CORRUPT` /
     /// `SQLITE_NOTADB` → [`StorageError::DatabaseCorrupt`]. Every other
-    /// failure stays [`StorageError::Sqlite`].
+    /// failure stays [`StorageError::Sqlite`] — including
+    /// `SQLITE_CORRUPT_VTAB`, a search index out of step with its content
+    /// table: a rebuild fixes that, so it is no corrupt database.
     fn from(err: rusqlite::Error) -> Self {
         use rusqlite::ErrorCode;
         let (code, extended) = match &err {
@@ -174,6 +176,9 @@ impl From<rusqlite::Error> for StorageError {
             }
             ErrorCode::DiskFull => Self::DiskFull(err),
             ErrorCode::ReadOnly | ErrorCode::PermissionDenied => Self::ReadOnly(err),
+            ErrorCode::DatabaseCorrupt if extended == rusqlite::ffi::SQLITE_CORRUPT_VTAB => {
+                Self::Sqlite(err)
+            }
             ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase => Self::DatabaseCorrupt(err),
             _ => Self::Sqlite(err),
         }
@@ -393,7 +398,8 @@ impl Storage {
     /// # Errors
     ///
     /// Returns [`StorageError::Sqlite`] with `SQLITE_CORRUPT_VTAB` if the
-    /// index no longer matches the content table.
+    /// index no longer matches the content table (never
+    /// [`StorageError::DatabaseCorrupt`]: a desynced index is rebuildable).
     pub fn fts_integrity_check(&self) -> Result<(), StorageError> {
         self.write(|conn| {
             conn.execute(
@@ -494,6 +500,11 @@ mod tests {
                 "code {code}"
             );
         }
+        // A desynced FTS index is rebuildable — no corrupt database.
+        assert!(matches!(
+            sqlite(rusqlite::ffi::SQLITE_CORRUPT_VTAB),
+            StorageError::Sqlite(_)
+        ));
         // Another constraint (CHECK, NOT NULL, FOREIGN KEY) is no duplicate.
         assert!(matches!(
             sqlite(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),

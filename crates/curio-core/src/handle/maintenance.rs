@@ -44,8 +44,9 @@ impl CoreHandle {
     ///
     /// # Errors
     ///
-    /// [`CoreError::Storage`] wrapping `IntegrityFailed` when the index has
-    /// drifted; storage errors.
+    /// [`CoreError::Storage`] wrapping `StorageError::Sqlite` with
+    /// `SQLITE_CORRUPT_VTAB` when the index has drifted (rebuildable — never
+    /// `DatabaseCorrupt`); other storage errors.
     pub fn fts_integrity_check(&self) -> Result<(), CoreError> {
         Ok(self.storage.fts_integrity_check()?)
     }

@@ -367,21 +367,35 @@ pub async fn discover(
 }
 
 /// The fetch-free half of discovery, for a body that failed to parse as a
-/// feed: when it sniffs as an HTML page, the feeds that page declares
-/// (its `<link rel="alternate">` feeds, or a synthesized `YouTube` channel
-/// feed — unvalidated, and with no extra request); `None` when it is not
-/// a web page at all. A refresh uses it to say "this is a web page, not a
-/// feed" instead of reporting an XML parse error.
+/// feed: when it is an HTML page, the feeds that page declares (its
+/// `<link rel="alternate">` feeds, or a synthesized `YouTube` channel feed
+/// — unvalidated, and with no extra request); `None` when it is not a web
+/// page at all. A refresh uses it to say "this is a web page, not a feed"
+/// instead of reporting an XML parse error.
+///
+/// A web page is a body served as `text/html` / `application/xhtml+xml`,
+/// or one whose sniff window looks like HTML (servers mislabel pages too);
+/// either way, a body that sniffs as a feed is a broken feed, not a page.
+/// Only the sniff window is decoded for the decision; the full body is
+/// decoded once, and only for a page.
 pub(crate) fn web_page_feeds(response: &FetchResponse) -> Option<Vec<DiscoveredFeed>> {
-    if !sniff::looks_like_html(&String::from_utf8_lossy(&response.body)) {
+    let content_type = response.content_type.as_deref();
+    let window = &response.body[..response.body.len().min(sniff::SNIFF_WINDOW)];
+    let head = decode_html(window, content_type);
+    if sniff::looks_like_feed(&head) {
         return None;
     }
-    let extracted = html::extract(
+    let served_as_html = content_type
+        .and_then(crate::fetch::decode::mime_essence)
+        .is_some_and(|essence| essence == "text/html" || essence == "application/xhtml+xml");
+    if !served_as_html && !sniff::looks_like_html(&head) {
+        return None;
+    }
+    Some(html::declared_feeds(
         &response.body,
-        response.content_type.as_deref(),
+        content_type,
         &response.final_url,
-    );
-    Some(extracted.feeds)
+    ))
 }
 
 /// The URL to subscribe for a fetch of `requested`: the redirect target

@@ -552,6 +552,7 @@ mod tests {
 
         let skipped = core.refresh_feed(feed.id).await.unwrap();
         assert_eq!(skipped.status, FetchStatus::Error);
+        assert_eq!(skipped.error_kind, Some(FetchErrorKind::Busy));
         assert!(
             skipped
                 .error
@@ -568,7 +569,11 @@ mod tests {
         drop(held);
         let refreshed = core.refresh_feed(feed.id).await.unwrap();
         assert_eq!(refreshed.http_status, Some(500));
-        assert_eq!(core.recent_fetches(feed.id, 10).unwrap().len(), 1);
+        assert_eq!(refreshed.error_kind, Some(FetchErrorKind::Http));
+        assert_eq!(refreshed.error.as_deref(), Some("HTTP 500"));
+        let recorded = core.recent_fetches(feed.id, 10).unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].error_kind, Some(FetchErrorKind::Http));
 
         // Unsubscribing deletes the lock file; an unknown feed never
         // mints one.

@@ -454,13 +454,29 @@ async fn a_web_page_at_a_feed_url_is_not_a_feed_and_counts_its_feeds() {
             .mount(&server)
             .await;
     }
-    Mock::given(method("GET"))
-        .and(path("/broken.xml"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_raw("<rss><channel>", "application/rss+xml"),
-        )
-        .mount(&server)
-        .await;
+    // HTML5 lets a page omit <html>/<head>/<body>: the doctype marks it,
+    // even under a Content-Type that says nothing about HTML.
+    let tagless = r#"<!DOCTYPE html><meta charset=utf-8><title>Blog</title>
+        <link rel="alternate" type="application/rss+xml" href="/feed.xml"><p>Hi"#;
+    let other_routes = [
+        ("/broken.xml", "<rss><channel>", "application/rss+xml"),
+        ("/tagless", tagless, "text/plain"),
+        // Served as HTML: a page, whatever its markup looks like…
+        (
+            "/served-html",
+            "Under construction",
+            "text/html; charset=utf-8",
+        ),
+        // …unless it sniffs as a feed — then it is a broken feed.
+        ("/broken-as-html", "<rss><channel>", "text/html"),
+    ];
+    for (route, body, content_type) in other_routes {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, content_type))
+            .mount(&server)
+            .await;
+    }
 
     let profile = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
@@ -505,9 +521,22 @@ async fn a_web_page_at_a_feed_url_is_not_a_feed_and_counts_its_feeds() {
         Some("this is a web page, not a feed — found no feeds on it")
     );
 
-    // A body that is feed-shaped but broken stays a parse error.
-    let (_, outcome) = refresh("/broken.xml").await;
-    assert_eq!(outcome.error_kind, Some(FetchErrorKind::Parse));
+    let (_, outcome) = refresh("/tagless").await;
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::NotAFeed));
+    assert!(
+        outcome.error.unwrap().contains("found 1 feed on it: "),
+        "the tagless page's declared feed"
+    );
+
+    let (_, outcome) = refresh("/served-html").await;
+    assert_eq!(outcome.error_kind, Some(FetchErrorKind::NotAFeed));
+
+    // A body that is feed-shaped but broken stays a parse error, whatever
+    // it is served as.
+    for route in ["/broken.xml", "/broken-as-html"] {
+        let (_, outcome) = refresh(route).await;
+        assert_eq!(outcome.error_kind, Some(FetchErrorKind::Parse), "{route}");
+    }
 }
 
 #[tokio::test]

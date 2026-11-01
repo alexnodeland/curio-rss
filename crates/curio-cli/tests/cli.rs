@@ -1226,3 +1226,58 @@ async fn a_failing_feed_backs_off_between_bare_fetches() {
     assert!(feeds[0]["next_attempt_at"].is_string());
     assert!(feeds[0]["auto_paused_at"].is_null());
 }
+
+/// #122: `feed pause` takes a feed out of bare fetches; `feed resume`
+/// puts it back with its backoff forgotten, so the next bare fetch
+/// fetches it — the headless way out of an automatic pause.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn feed_pause_and_resume_take_a_feed_out_of_fetches_and_back() {
+    let server = feedless_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    curio(profile.path()).arg("init").assert().success();
+    curio(profile.path())
+        .args(["feed", "add"])
+        .arg(format!("{server}/missing.xml"))
+        .args(["--no-validate", "--allow-private-network"])
+        .assert()
+        .success();
+    curio(profile.path()).arg("fetch").assert().success();
+
+    curio(profile.path())
+        .args(["feed", "pause", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("paused "));
+    let feeds = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "list", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(feeds[0]["status"], "paused");
+    assert_eq!(feeds[0]["consecutive_failures"], 1, "a pause keeps the run");
+
+    let resumed = stdout_json(
+        &curio(profile.path())
+            .args(["feed", "resume", "missing.xml", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(resumed["status"], "active");
+    assert_eq!(resumed["consecutive_failures"], 0);
+    assert!(resumed["next_attempt_at"].is_null(), "backoff forgotten");
+    assert!(resumed["auto_paused_at"].is_null());
+
+    let fetched = stdout_json(
+        &curio(profile.path())
+            .args(["fetch", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(fetched.as_array().unwrap().len(), 1, "due again at once");
+
+    curio(profile.path())
+        .args(["feed", "resume", "nope"])
+        .assert()
+        .failure();
+}

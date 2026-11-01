@@ -36,6 +36,7 @@ future head.
 | `curio init [dir]` | Scaffold a profile (`curio.toml`, `curio.db`, events log) |
 | `curio feed add <url> [--tags …]` | Subscribe — to a feed URL, or the validated feed autodiscovered from a site, page or bare domain |
 | `curio feed list` / `curio feed rm <id>` | List / unsubscribe |
+| `curio feed pause <id>` / `curio feed resume <id>` | Take a feed out of refreshes / put it back (also after an automatic pause) |
 | `curio fetch` | Refresh every feed that is due; reports new-article counts |
 | `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
 | `curio show <id>` | Render an article as markdown in the terminal |
@@ -196,6 +197,8 @@ curio feed add http://127.0.0.1:8787/digest.xml --allow-private-network
 curio feed add https://example.com/beta --no-validate   # as given, unfetched
 curio feed list [--json]
 curio feed rm example.com          # by id, exact URL, or unique substring
+curio feed pause example.com       # bare `curio fetch` skips it …
+curio feed resume example.com      # … until it is resumed (backoff forgotten)
 ```
 
 `feed add` never subscribes to something a refresh could not parse. It
@@ -272,12 +275,18 @@ doubling with each one after it, up to a day. A host that answers 429 (or
 503 with `Retry-After`) is left alone until the time it asked for, by
 `curio fetch <feed>` too. A feed that declares how often it changes
 (`<ttl>`, `sy:updatePeriod`, or a `Cache-Control: max-age` from its
-server) is not fetched more often than that, up to once a day. A feed that
-keeps failing — 10 times in a row over at least 3 days — is paused
-(`curio feed list --json` shows `auto_paused_at` and `next_attempt_at`), and a feed that answers
-HTTP 410 twice in a row is marked dead. `curio fetch <feed>` refreshes one
-feed straight away whatever its backoff, which is how you retry one by
-hand. Each feed's fetch log keeps its latest 50 attempts.
+server) is not fetched more often than that, up to once a day — a
+`304 Not Modified` keeps the hint its last full response declared. A feed
+that keeps failing — 10 times in a row over at least 3 days — is paused
+(`curio feed list --json` shows `auto_paused_at` and `next_attempt_at`),
+and a feed that answers HTTP 410 twice in a row is marked dead.
+`curio feed resume <feed>` brings a paused feed back (and reactivates a
+dead one) with its backoff forgotten, so the next `curio fetch` fetches
+it; `curio feed pause <feed>` takes one out of refreshes by hand.
+`curio fetch <feed>` refreshes one feed straight away whatever its
+backoff, which is how you retry one by hand — and when that works on a
+feed Curio paused by itself, the feed is resumed (a pause you made
+yourself stays). Each feed's fetch log keeps its latest 50 attempts.
 
 Sloppy feeds are normalized on the way in. An entry with no publication
 date takes its last-updated date, and a date in the future is clamped to

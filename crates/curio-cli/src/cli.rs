@@ -43,10 +43,13 @@ pub(crate) enum Command {
     /// Manage feed subscriptions.
     #[command(subcommand)]
     Feed(FeedCommand),
-    /// Refresh one feed (by id, URL, or unique substring) or all
-    /// active feeds, reporting new-article counts.
+    /// Refresh one feed (by id, URL, or unique substring) right away, or
+    /// every active feed that is due (not inside a failure backoff, a
+    /// host's Retry-After or its own refresh interval), reporting
+    /// new-article counts.
     Fetch {
-        /// Feed to refresh; omit to refresh every active feed.
+        /// Feed to refresh now, whatever its backoff; omit to refresh
+        /// every due feed.
         feed: Option<String>,
     },
     /// List articles, newest rows first.
@@ -183,6 +186,19 @@ pub(crate) enum FeedCommand {
     /// Unsubscribe a feed (by id, URL, or unique substring). Articles
     /// keep their rows; emits the feed.removed negation.
     Rm { feed: String },
+    /// Pause a feed: refreshes skip it until it is resumed.
+    Pause {
+        /// Feed to pause (by id, URL, or unique substring).
+        feed: String,
+    },
+    /// Resume a paused feed — one you paused, or one Curio paused by
+    /// itself after a long run of failed fetches — or reactivate a dead
+    /// one. Forgets its failure backoff, so the next `curio fetch`
+    /// fetches it.
+    Resume {
+        /// Feed to resume (by id, URL, or unique substring).
+        feed: String,
+    },
     /// Turn full-text mode on or off for a feed. When on, every refresh
     /// fetches each NEW article's source page and stores the
     /// readability-extracted full body (for feeds that ship excerpts).

@@ -131,10 +131,14 @@ arrow and page keys scroll it; <kbd>←</kbd> or <kbd>Esc</kbd> returns to the
 list. Reorder a feed inside its folder with <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
 
 The sidebar and focus mode are remembered across launches (the View menu has
-them as <kbd>⌥⌘S</kbd> / <kbd>⌥⌘F</kbd>, and each pane has a toolbar button). In a
-window 1000 px wide or less the sidebar folds away on its own so the list and
-the article keep their room; <kbd>&#92;</kbd> peeks it back open until the
-window is resized.
+them as <kbd>⌥⌘S</kbd> / <kbd>⌥⌘F</kbd>, and each pane has a toolbar button). On
+layouts where <kbd>&#92;</kbd> is an Option chord (German, French, Spanish, Italian
+Macs) that chord works as the key. Focus mode steps aside on its own when you
+need a hidden pane: <kbd>g</kbd> <kbd>f</kbd> brings the feed tree back,
+<kbd>/</kbd> the search box, and with no article open the reader shows an
+**Exit focus mode** button. In a window 1000 px wide or less the sidebar folds
+away on its own so the list and the article keep their room; <kbd>&#92;</kbd>
+peeks it back open until the window is resized.
 
 A feed entry published without a link of its own has no page to open, so
 <kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it

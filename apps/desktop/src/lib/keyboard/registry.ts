@@ -383,13 +383,23 @@ function isActivatable(target: HTMLElement): boolean {
 }
 
 /**
+ * Bound characters that some keyboard layouts can only type through Option
+ * (⌥): on the German, French, Spanish and Italian Mac layouts `\` is an
+ * Option chord (⌥⇧7 on German). An Option chord that types one of these is
+ * the character itself, not a modified key. Where `\` is a plain key (US),
+ * ⌥\ types `«` instead, so nothing collides.
+ */
+const OPTION_TYPED_KEYS: ReadonlySet<string> = new Set(['\\']);
+
+/**
  * Whether a keydown event should bypass shortcuts entirely: typing contexts
- * (inputs, textareas, contenteditable), any ctrl/alt/meta combination, and
- * Space on a control that Space activates all belong to the platform, not
- * to us.
+ * (inputs, textareas, contenteditable), any ctrl/meta combination, any alt
+ * combination except one that only types an {@link OPTION_TYPED_KEYS}
+ * character, and Space on a control that Space activates all belong to the
+ * platform, not to us.
  */
 export function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
-    if (event.ctrlKey || event.altKey || event.metaKey) {
+    if (event.ctrlKey || event.metaKey || (event.altKey && !OPTION_TYPED_KEYS.has(event.key))) {
         return true;
     }
     const target = event.target;

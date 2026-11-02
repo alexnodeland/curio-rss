@@ -268,6 +268,24 @@ describe('shouldIgnoreKeyEvent', () => {
         div.remove();
     });
 
+    it('passes an Option chord that only types a backslash (German / French Mac layouts)', () => {
+        const div = document.createElement('div');
+        document.body.append(div);
+
+        // ⌥⇧7 on the German Mac layout types `\`.
+        const typed = eventOn(div, { key: '\\', altKey: true, shiftKey: true });
+        expect(shouldIgnoreKeyEvent(typed)).toBe(false);
+        expect(frameShortcut(eventKeyName(typed))).toBe('view.toggleSidebar');
+        // The exemption is the character, not Option: ⌥ with any other key is
+        // still ignored, and ⌘ / ⌃ chords that type `\` stay the platform's.
+        expect(shouldIgnoreKeyEvent(eventOn(div, { key: '/', altKey: true }))).toBe(true);
+        expect(shouldIgnoreKeyEvent(eventOn(div, { key: '\\', metaKey: true }))).toBe(true);
+        const altGr = eventOn(div, { key: '\\', ctrlKey: true, altKey: true });
+        expect(shouldIgnoreKeyEvent(altGr)).toBe(true);
+
+        div.remove();
+    });
+
     it('leaves Space to a control Space activates, but not to a listbox row', () => {
         const button = document.createElement('button');
         const toggle = document.createElement('div');

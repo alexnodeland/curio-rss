@@ -26,10 +26,22 @@
 //! longer than any backtick run, or a single-line inline span — and never
 //! as live raw HTML (#245). A `pre`/`code` `language-*` class becomes the
 //! fence's info string.
+//!
+//! htmd's walk recurses once per nesting level, so before it runs the
+//! tree's depth is capped (see `depth`): a hostile feed's nesting can never
+//! overflow the stack and abort an export (#244).
 
 use htmd::HtmlToMarkdown;
 
+use super::depth::{MAX_DEPTH, cap_depth};
 use super::{ContentError, code, footnotes};
+
+/// Elements dropped with their whole subtree — by htmd's walk above the
+/// depth cap and by the cap's flattening below it, so the cap never
+/// exports text an uncapped walk would not.
+pub(super) const SKIP_TAGS: &[&str] = &[
+    "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg", "canvas",
+];
 
 /// Converts an HTML fragment to `CommonMark`.
 ///
@@ -38,11 +50,17 @@ use super::{ContentError, code, footnotes};
 /// [`ContentError::Markdown`] if the DOM walk fails to serialize
 /// (practically unreachable for parseable HTML).
 pub fn to_markdown(html: &str) -> Result<String, ContentError> {
-    let builder = HtmlToMarkdown::builder().skip_tags(vec![
-        "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg", "canvas",
-    ]);
-    let converter = code::register(footnotes::register(builder, html)).build();
-    Ok(converter.convert(html)?.trim().to_owned())
+    let converter = converter(html);
+    let tree = converter.html_to_tree(html)?;
+    cap_depth(&tree, MAX_DEPTH);
+    Ok(converter.tree_to_markdown(&tree).trim().to_owned())
+}
+
+/// The converter for `html`: the skip list plus the footnote and code
+/// handlers.
+pub(super) fn converter(html: &str) -> HtmlToMarkdown {
+    let builder = HtmlToMarkdown::builder().skip_tags(SKIP_TAGS.to_vec());
+    code::register(footnotes::register(builder, html)).build()
 }
 
 #[cfg(test)]

@@ -61,7 +61,7 @@ pub async fn import_file(
         emit_or_log(&app, &FeedsChanged);
     }
     if outcome.articles_added > 0 {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(&app, &ArticlesChanged::rows(None));
     }
     Ok(outcome)
 }

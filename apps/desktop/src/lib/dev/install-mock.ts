@@ -11,56 +11,59 @@
  * inside the packaged app.
  */
 import type {
-    ArticleFlagDto,
-    ArticleStateDto,
-    ArticleSummaryDto,
-    CommandError,
-    FeedDto,
-    FetchErrorKindDto,
-    NewFeedDto,
-    StartupFailureClass,
-    StartupFailureDto,
-} from '$lib/bindings';
+	ArticleFlagDto,
+	ArticleStateDto,
+	ArticleSummaryDto,
+	CommandError,
+	FeedDto,
+	FetchErrorKindDto,
+	FlagField,
+	NewFeedDto,
+	StartupFailureClass,
+	StartupFailureDto,
+} from "$lib/bindings";
 
 let installed = false;
 
-const DEV_PROFILE = '/Users/alex/Library/Application Support/io.github.alexnodeland.curio';
+const DEV_PROFILE =
+	"/Users/alex/Library/Application Support/io.github.alexnodeland.curio";
 
 const DEV_STARTUP_MESSAGES: Record<StartupFailureClass, string> = {
-    corrupt: `${DEV_PROFILE}/curio.db is not a readable Curio database (corrupt or not SQLite): file is not a database`,
-    too_new:
-        'database schema version 8 is newer than this build supports (7) — update Curio to open it',
-    locked: `${DEV_PROFILE}/curio.db is locked by another process — close other copies of Curio and retry`,
-    io: `cannot open ${DEV_PROFILE}/curio.db: unable to open database file`,
-    profile: `profile io at ${DEV_PROFILE}: Not a directory (os error 20)`,
-    network_fs: `${DEV_PROFILE}/curio.db is on iCloud Drive, where the database can be corrupted (SQLite's locking is unsafe there and sync clients copy the file mid-write) — move the profile to a local disk, or set CURIO_ALLOW_NETWORK_FS=1 to open it anyway`,
-    upgrade:
-        'migrating the database from schema v6 to v7 failed and was rolled back: sqlite error: disk I/O error',
-    no_profile: 'the platform reports no home directory — cannot resolve profile/cache paths',
-    other: 'could not enable WAL journal mode (got "delete")',
+	corrupt: `${DEV_PROFILE}/curio.db is not a readable Curio database (corrupt or not SQLite): file is not a database`,
+	too_new:
+		"database schema version 8 is newer than this build supports (7) — update Curio to open it",
+	locked: `${DEV_PROFILE}/curio.db is locked by another process — close other copies of Curio and retry`,
+	io: `cannot open ${DEV_PROFILE}/curio.db: unable to open database file`,
+	profile: `profile io at ${DEV_PROFILE}: Not a directory (os error 20)`,
+	network_fs: `${DEV_PROFILE}/curio.db is on iCloud Drive, where the database can be corrupted (SQLite's locking is unsafe there and sync clients copy the file mid-write) — move the profile to a local disk, or set CURIO_ALLOW_NETWORK_FS=1 to open it anyway`,
+	upgrade:
+		"migrating the database from schema v6 to v7 failed and was rolled back: sqlite error: disk I/O error",
+	no_profile:
+		"the platform reports no home directory — cannot resolve profile/cache paths",
+	other: 'could not enable WAL journal mode (got "delete")',
 };
 
 /** The startup failure `?startup=<class>` asks the dev mock to report. */
 function devStartupFailure(): StartupFailureDto | null {
-    const params = new URLSearchParams(window.location.search);
-    const requested = params.get('startup') as StartupFailureClass | null;
-    if (requested === null || !(requested in DEV_STARTUP_MESSAGES)) {
-        return null;
-    }
-    const hasProfile = requested !== 'no_profile';
-    const hasBackup =
-        hasProfile &&
-        requested !== 'locked' &&
-        requested !== 'profile' &&
-        requested !== 'network_fs' &&
-        params.get('backup') !== '0';
-    return {
-        class: requested,
-        message: DEV_STARTUP_MESSAGES[requested],
-        profile_dir: hasProfile ? DEV_PROFILE : null,
-        backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
-        app_version: '0.6.0',
-    };
+	const params = new URLSearchParams(window.location.search);
+	const requested = params.get("startup") as StartupFailureClass | null;
+	if (requested === null || !(requested in DEV_STARTUP_MESSAGES)) {
+		return null;
+	}
+	const hasProfile = requested !== "no_profile";
+	const hasBackup =
+		hasProfile &&
+		requested !== "locked" &&
+		requested !== "profile" &&
+		requested !== "network_fs" &&
+		params.get("backup") !== "0";
+	return {
+		class: requested,
+		message: DEV_STARTUP_MESSAGES[requested],
+		profile_dir: hasProfile ? DEV_PROFILE : null,
+		backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
+		app_version: "0.6.0",
+	};
 }
 
 /**
@@ -68,81 +71,86 @@ function devStartupFailure(): StartupFailureDto | null {
  * library from an earlier release — the notice and the doctor panel.
  */
 function devLegacyProfiles(): unknown[] {
-    const query = new URLSearchParams(window.location.search);
-    const status = query.get('legacy');
-    if (status === null) {
-        return [];
-    }
-    return [
-        {
-            path: '~/Library/Application Support/curio',
-            default_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
-            status,
-            detail:
-                status === 'move_failed' || status === 'unreadable'
-                    ? 'Cross-device link (os error 18)'
-                    : null,
-            opened_in_place: query.get('inPlace') === '1',
-        },
-    ];
+	const query = new URLSearchParams(window.location.search);
+	const status = query.get("legacy");
+	if (status === null) {
+		return [];
+	}
+	return [
+		{
+			path: "~/Library/Application Support/curio",
+			default_dir: "~/Library/Application Support/io.github.alexnodeland.curio",
+			status,
+			detail:
+				status === "move_failed" || status === "unreadable"
+					? "Cross-device link (os error 18)"
+					: null,
+			opened_in_place: query.get("inPlace") === "1",
+		},
+	];
 }
 
 export async function installDevMock(): Promise<void> {
-    if (installed) return;
-    if (!import.meta.env.DEV) return;
-    if (typeof window === 'undefined') return;
-    // Real Tauri sets this before our code runs; never shadow the real IPC.
-    if ('__TAURI_INTERNALS__' in window && !('__CURIO_DEV_MOCK__' in window)) return;
-    installed = true;
-    (window as unknown as Record<string, boolean>).__CURIO_DEV_MOCK__ = true;
+	if (installed) return;
+	if (!import.meta.env.DEV) return;
+	if (typeof window === "undefined") return;
+	// Real Tauri sets this before our code runs; never shadow the real IPC.
+	if ("__TAURI_INTERNALS__" in window && !("__CURIO_DEV_MOCK__" in window))
+		return;
+	installed = true;
+	(window as unknown as Record<string, boolean>).__CURIO_DEV_MOCK__ = true;
 
-    const { mockIPC } = await import('@tauri-apps/api/mocks');
-    const { previewFeeds, previewArticles, previewDestinations } = await import('./preview-data');
+	const { mockIPC } = await import("@tauri-apps/api/mocks");
+	const { previewFeeds, previewArticles, previewDestinations } = await import(
+		"./preview-data"
+	);
 
-    // Preview scenarios for the zero/error states: `?library=empty` is the
-    // first run (no feeds, nothing saved); `?feedError=<kind>` adds a feed
-    // whose last fetch failed with that class; `?fail=<command>` (repeatable)
-    // fails that command's first call, so its error state and Retry show.
-    const scenario = new URLSearchParams(window.location.search);
-    const emptyLibrary = scenario.get('library') === 'empty';
-    const feeds = structuredClone(previewFeeds).filter(() => !emptyLibrary);
-    const articles = structuredClone(previewArticles).filter(() => !emptyLibrary);
-    const feedError = scenario.get('feedError') as FetchErrorKindDto | null;
-    if (feedError !== null && feeds.length > 0) {
-        // An extra, article-less feed whose fetches fail: its empty list
-        // shows the failing-feed state.
-        feeds.push({
-            ...structuredClone(feeds[0]),
-            id: Math.max(...feeds.map((feed) => feed.id)) + 1,
-            url: 'https://broken.example.org/feed.xml',
-            title: 'Broken feed',
-            tags: [],
-            last_error: `dev: ${feedError}`,
-            last_error_kind: feedError,
-            consecutive_failures: 3,
-        });
-    }
-    const failOnce = new Set(scenario.getAll('fail'));
-    const devFailure: CommandError = {
-        kind: 'user',
-        code: 'IO',
-        params: {},
-        message: 'The library could not be read (dev preview failure).',
-        recoverable: true,
-    };
-    const destinations = structuredClone(previewDestinations);
-    const settings = new Map<string, string>([
-        ['ui.theme', 'dark'],
-        ['ui.theme.mode', 'dark'],
-    ]);
-    // `?sidebar=collapsed` previews the shell with the sidebar collapsed.
-    if (new URLSearchParams(window.location.search).get('sidebar') === 'collapsed') {
-        settings.set('ui.panes.sidebar-collapsed', 'true');
-    }
+	// Preview scenarios for the zero/error states: `?library=empty` is the
+	// first run (no feeds, nothing saved); `?feedError=<kind>` adds a feed
+	// whose last fetch failed with that class; `?fail=<command>` (repeatable)
+	// fails that command's first call, so its error state and Retry show.
+	const scenario = new URLSearchParams(window.location.search);
+	const emptyLibrary = scenario.get("library") === "empty";
+	const feeds = structuredClone(previewFeeds).filter(() => !emptyLibrary);
+	const articles = structuredClone(previewArticles).filter(() => !emptyLibrary);
+	const feedError = scenario.get("feedError") as FetchErrorKindDto | null;
+	if (feedError !== null && feeds.length > 0) {
+		// An extra, article-less feed whose fetches fail: its empty list
+		// shows the failing-feed state.
+		feeds.push({
+			...structuredClone(feeds[0]),
+			id: Math.max(...feeds.map((feed) => feed.id)) + 1,
+			url: "https://broken.example.org/feed.xml",
+			title: "Broken feed",
+			tags: [],
+			last_error: `dev: ${feedError}`,
+			last_error_kind: feedError,
+			consecutive_failures: 3,
+		});
+	}
+	const failOnce = new Set(scenario.getAll("fail"));
+	const devFailure: CommandError = {
+		kind: "user",
+		code: "IO",
+		params: {},
+		message: "The library could not be read (dev preview failure).",
+		recoverable: true,
+	};
+	const destinations = structuredClone(previewDestinations);
+	const settings = new Map<string, string>([
+		["ui.theme", "dark"],
+		["ui.theme.mode", "dark"],
+	]);
+	// `?sidebar=collapsed` previews the shell with the sidebar collapsed.
+	if (
+		new URLSearchParams(window.location.search).get("sidebar") === "collapsed"
+	) {
+		settings.set("ui.panes.sidebar-collapsed", "true");
+	}
 
-    // A canned custom theme the dev mock "reads" on import, so the theme
-    // import flow can be exercised in the plain-browser visual loop.
-    const DEV_THEME_YAML = `schema: curio.theme/v1
+	// A canned custom theme the dev mock "reads" on import, so the theme
+	// import flow can be exercised in the plain-browser visual loop.
+	const DEV_THEME_YAML = `schema: curio.theme/v1
 id: ocean
 name: Ocean
 appearance: dark
@@ -170,650 +178,713 @@ tokens:
   link-visited: "#c4b5fd"
 `;
 
-    const byId = (id: number) => articles.find((a) => a.summary.id === id);
-    // A list row as the engine returns it: the summary with the article's
-    // current flags and tags joined in.
-    const row = (a: (typeof articles)[number]): ArticleSummaryDto => ({
-        ...structuredClone(a.summary),
-        state: { ...a.state },
-        tags: [...a.tags],
-    });
-    // Mirrors core's `unread_counts`: archived items leave the reading flow
-    // (badge included), and an article whose feed is gone still counts
-    // toward the total, just under no feed.
-    const unreadCounts = () => {
-        const by = new Map<number, number>();
-        let total = 0;
-        for (const a of articles) {
-            if (a.state.read || a.state.archived) continue;
-            total += 1;
-            if (a.summary.feed_id != null) {
-                by.set(a.summary.feed_id, (by.get(a.summary.feed_id) ?? 0) + 1);
-            }
-        }
-        return { total, by_feed: [...by.entries()] };
-    };
-    const feedById = (id: unknown) => feeds.find((f) => f.id === id);
-    const notFound = (entity: string): CommandError => ({
-        kind: 'user',
-        code: 'NOT_FOUND',
-        params: {},
-        message: `${entity} not found`,
-        recoverable: false,
-    });
+	const byId = (id: number) => articles.find((a) => a.summary.id === id);
+	// A list row as the engine returns it: the summary with the article's
+	// current flags and tags joined in.
+	const row = (a: (typeof articles)[number]): ArticleSummaryDto => ({
+		...structuredClone(a.summary),
+		state: { ...a.state },
+		tags: [...a.tags],
+	});
+	// Mirrors core's `unread_counts`: archived items leave the reading flow
+	// (badge included), and an article whose feed is gone still counts
+	// toward the total, just under no feed.
+	const unreadCounts = () => {
+		const by = new Map<number, number>();
+		let total = 0;
+		for (const a of articles) {
+			if (a.state.read || a.state.archived) continue;
+			total += 1;
+			if (a.summary.feed_id != null) {
+				by.set(a.summary.feed_id, (by.get(a.summary.feed_id) ?? 0) + 1);
+			}
+		}
+		return { total, by_feed: [...by.entries()] };
+	};
+	const feedById = (id: unknown) => feeds.find((f) => f.id === id);
+	const notFound = (entity: string): CommandError => ({
+		kind: "user",
+		code: "NOT_FOUND",
+		params: {},
+		message: `${entity} not found`,
+		recoverable: false,
+	});
 
-    // A simulated refresh sweep: one feed every `SWEEP_STEP_MS`, emitting
-    // `RefreshProgress` per feed and `RefreshFinished` at the end, so the
-    // progress pill and its Stop button can be reviewed. `?sweep=<n>` pads
-    // the sweep to n feeds (e.g. 300) to preview a large library's count;
-    // `?fulltext=<n>` has n full-text pages load after the last feed, one
-    // per step, to preview the "Loading full text" count.
-    const { events } = await import('$lib/bindings');
+	// A simulated refresh sweep: one feed every `SWEEP_STEP_MS`, emitting
+	// `RefreshProgress` per feed and `RefreshFinished` at the end, so the
+	// progress pill and its Stop button can be reviewed. `?sweep=<n>` pads
+	// the sweep to n feeds (e.g. 300) to preview a large library's count;
+	// `?fulltext=<n>` has n full-text pages load after the last feed, one
+	// per step, to preview the "Loading full text" count.
+	const { events } = await import("$lib/bindings");
 
-    // The invalidation events the real commands emit
-    // (src-tauri/src/commands/*.rs), so the query cache refetches — badges,
-    // lists, the sidebar — exactly as it does in the app. A handler emits
-    // after its change and before it resolves, like the command; where the
-    // command reports whether anything changed, only when something did.
-    const articlesChanged =
-        (feedId: number | null = null) =>
-        (): Promise<void> =>
-            events.articlesChanged.emit({ feed_id: feedId });
-    const feedsChanged = (): Promise<void> => events.feedsChanged.emit();
-    async function emitting<T>(
-        result: T,
-        changed: boolean,
-        ...emits: Array<() => Promise<void>>
-    ): Promise<T> {
-        if (changed) {
-            for (const emit of emits) await emit();
-        }
-        return result;
-    }
-    /** A feed-row write: applies `edit` to the feed, then `FeedsChanged`. */
-    function editFeed(feedId: unknown, edit: (feed: (typeof feeds)[number]) => void) {
-        const feed = feedById(feedId);
-        if (!feed) return Promise.reject(notFound('feed'));
-        edit(feed);
-        return emitting(null, true, feedsChanged);
-    }
-    /** The id the next `add_feed` hands out. */
-    let nextFeedId = Math.max(0, ...feeds.map((f) => f.id)) + 1;
+	// The invalidation events the real commands emit
+	// (src-tauri/src/commands/*.rs), so the query cache refetches — badges,
+	// lists, the sidebar — exactly as it does in the app. A handler emits
+	// after its change and before it resolves, like the command; where the
+	// command reports whether anything changed, only when something did.
+	const articlesChanged =
+		(feedId: number | null = null) =>
+		(): Promise<void> =>
+			events.articlesChanged.emit({ feed_id: feedId, flags: null });
+	// A pure state flip names its articles, flag and value (#135), so the
+	// cache patches rows in place exactly as it does in the app.
+	const flagChanged =
+		(
+			feedId: number | null,
+			field: FlagField,
+			articleIds: number[],
+			value: boolean,
+		) =>
+		(): Promise<void> =>
+			events.articlesChanged.emit({
+				feed_id: feedId,
+				flags: { article_ids: articleIds, field, value },
+			});
+	const feedsChanged = (): Promise<void> => events.feedsChanged.emit();
+	async function emitting<T>(
+		result: T,
+		changed: boolean,
+		...emits: Array<() => Promise<void>>
+	): Promise<T> {
+		if (changed) {
+			for (const emit of emits) await emit();
+		}
+		return result;
+	}
+	/** A feed-row write: applies `edit` to the feed, then `FeedsChanged`. */
+	function editFeed(
+		feedId: unknown,
+		edit: (feed: (typeof feeds)[number]) => void,
+	) {
+		const feed = feedById(feedId);
+		if (!feed) return Promise.reject(notFound("feed"));
+		edit(feed);
+		return emitting(null, true, feedsChanged);
+	}
+	/** The id the next `add_feed` hands out. */
+	let nextFeedId = Math.max(0, ...feeds.map((f) => f.id)) + 1;
 
-    const SWEEP_STEP_MS = 350;
-    let sweep: { cancelled: boolean } | null = null;
-    let sweepId = 0;
-    function sweepFeedIds(): number[] {
-        const padTo = Number(new URLSearchParams(window.location.search).get('sweep') ?? 0);
-        const ids = feeds.map((f) => f.id);
-        while (ids.length < padTo) {
-            ids.push(ids[ids.length % feeds.length]);
-        }
-        return ids;
-    }
-    /** `?fulltext=<n>`: how many full-text pages a sweep loads. */
-    function sweepPages(): number {
-        return Number(new URLSearchParams(window.location.search).get('fulltext') ?? 0);
-    }
-    /** The sweep's full-text pages, one per step after the last of its `feeds`. */
-    async function loadPages(current: { cancelled: boolean }, feeds: number): Promise<void> {
-        const pagesTotal = sweepPages();
-        for (let page = 1; page <= pagesTotal; page++) {
-            if (current.cancelled) return;
-            await new Promise((resolve) => setTimeout(resolve, SWEEP_STEP_MS));
-            if (current.cancelled) return;
-            await events.refreshProgress.emit({
-                sweep_id: sweepId,
-                done: feeds,
-                total: feeds,
-                pages_done: page,
-                pages_total: pagesTotal,
-                feed_id: null,
-                outcome: null,
-            });
-        }
-    }
-    async function runSweep(): Promise<unknown[]> {
-        const ids = sweepFeedIds();
-        const pagesTotal = sweepPages();
-        const current = { cancelled: false };
-        sweep = current;
-        sweepId += 1;
-        const outcomes = [];
-        for (const [index, feedId] of ids.entries()) {
-            await new Promise((resolve) => setTimeout(resolve, SWEEP_STEP_MS));
-            if (current.cancelled) break;
-            const outcome = {
-                feed_id: feedId,
-                status: 'ok' as const,
-                http_status: 200,
-                new_articles: index % 3 === 0 ? 1 : 0,
-                updated_articles: 0,
-                error: null,
-                error_kind: null,
-            };
-            outcomes.push(outcome);
-            await events.refreshProgress.emit({
-                sweep_id: sweepId,
-                done: index + 1,
-                total: ids.length,
-                pages_done: 0,
-                pages_total: pagesTotal,
-                feed_id: feedId,
-                outcome,
-            });
-        }
-        await loadPages(current, ids.length);
-        sweep = null;
-        await events.refreshFinished.emit({
-            sweep_id: sweepId,
-            cancelled: current.cancelled,
-            outcomes,
-        });
-        // The sweep's owner announces the data change (a joined sweep
-        // doesn't); the mock never joins one.
-        await feedsChanged();
-        await articlesChanged()();
-        return outcomes;
-    }
+	const SWEEP_STEP_MS = 350;
+	let sweep: { cancelled: boolean } | null = null;
+	let sweepId = 0;
+	function sweepFeedIds(): number[] {
+		const padTo = Number(
+			new URLSearchParams(window.location.search).get("sweep") ?? 0,
+		);
+		const ids = feeds.map((f) => f.id);
+		while (ids.length < padTo) {
+			ids.push(ids[ids.length % feeds.length]);
+		}
+		return ids;
+	}
+	/** `?fulltext=<n>`: how many full-text pages a sweep loads. */
+	function sweepPages(): number {
+		return Number(
+			new URLSearchParams(window.location.search).get("fulltext") ?? 0,
+		);
+	}
+	/** The sweep's full-text pages, one per step after the last of its `feeds`. */
+	async function loadPages(
+		current: { cancelled: boolean },
+		feeds: number,
+	): Promise<void> {
+		const pagesTotal = sweepPages();
+		for (let page = 1; page <= pagesTotal; page++) {
+			if (current.cancelled) return;
+			await new Promise((resolve) => setTimeout(resolve, SWEEP_STEP_MS));
+			if (current.cancelled) return;
+			await events.refreshProgress.emit({
+				sweep_id: sweepId,
+				done: feeds,
+				total: feeds,
+				pages_done: page,
+				pages_total: pagesTotal,
+				feed_id: null,
+				outcome: null,
+			});
+		}
+	}
+	async function runSweep(): Promise<unknown[]> {
+		const ids = sweepFeedIds();
+		const pagesTotal = sweepPages();
+		const current = { cancelled: false };
+		sweep = current;
+		sweepId += 1;
+		const outcomes = [];
+		for (const [index, feedId] of ids.entries()) {
+			await new Promise((resolve) => setTimeout(resolve, SWEEP_STEP_MS));
+			if (current.cancelled) break;
+			const outcome = {
+				feed_id: feedId,
+				status: "ok" as const,
+				http_status: 200,
+				new_articles: index % 3 === 0 ? 1 : 0,
+				updated_articles: 0,
+				error: null,
+				error_kind: null,
+			};
+			outcomes.push(outcome);
+			await events.refreshProgress.emit({
+				sweep_id: sweepId,
+				done: index + 1,
+				total: ids.length,
+				pages_done: 0,
+				pages_total: pagesTotal,
+				feed_id: feedId,
+				outcome,
+			});
+		}
+		await loadPages(current, ids.length);
+		sweep = null;
+		await events.refreshFinished.emit({
+			sweep_id: sweepId,
+			cancelled: current.cancelled,
+			outcomes,
+		});
+		// The sweep's owner announces the data change (a joined sweep
+		// doesn't); the mock never joins one.
+		await feedsChanged();
+		await articlesChanged()();
+		return outcomes;
+	}
 
-    mockIPC(
-        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a flat 1:1 IPC dispatch table for the dev mock; splitting it would obscure the mapping
-        (cmd, raw) => {
-            const args = (raw ?? {}) as Record<string, unknown>;
-            if (failOnce.delete(cmd)) {
-                return Promise.reject(devFailure);
-            }
-            switch (cmd) {
-                case 'list_feeds':
-                    return structuredClone(feeds);
-                case 'get_unread_counts':
-                    return unreadCounts();
-                case 'count_articles':
-                    return articles.length;
-                case 'list_tags':
-                    return [...new Set(articles.flatMap((a) => a.tags))].sort();
-                case 'list_destinations': {
-                    // `?destinations=broken` previews a registry the host
-                    // cannot read: an internal failure, shown generically.
-                    if (
-                        new URLSearchParams(window.location.search).get('destinations') === 'broken'
-                    ) {
-                        const failure: CommandError = {
-                            kind: 'internal',
-                            code: 'IO',
-                            params: {},
-                            message: 'destination registry is unreadable: expected value at line 1',
-                            recoverable: false,
-                        };
-                        return Promise.reject(failure);
-                    }
-                    return structuredClone(destinations);
-                }
-                case 'load_full_article': {
-                    // `?reddit=<reason>` previews Reddit refusing a full post
-                    // (`credentials_missing`, `token_unavailable`, …).
-                    const reason = new URLSearchParams(window.location.search).get('reddit');
-                    if (reason !== null) {
-                        const failure: CommandError = {
-                            kind: 'user',
-                            code: 'REDDIT_AUTH',
-                            params: { reason, status: '403' },
-                            message: `reddit refused the full post (HTTP 403): ${reason}`,
-                            recoverable: reason.startsWith('token_'),
-                        };
-                        return Promise.reject(failure);
-                    }
-                    return null;
-                }
-                case 'list_articles': {
-                    const p = (args.params ?? {}) as Record<string, unknown>;
-                    let rows = articles
-                        .filter((a) => (p.feed_id == null ? true : a.summary.feed_id === p.feed_id))
-                        .filter((a) => (p.read == null ? true : a.state.read === p.read))
-                        .filter((a) => (p.starred == null ? true : a.state.starred === p.starred))
-                        .filter((a) =>
-                            p.read_later == null ? true : a.state.read_later === p.read_later,
-                        )
-                        .filter((a) =>
-                            p.archived == null ? true : a.state.archived === p.archived,
-                        )
-                        .filter((a) => (p.tag == null ? true : a.tags.includes(p.tag as string)))
-                        .sort((x, y) => y.summary.id - x.summary.id);
-                    if (p.before != null)
-                        rows = rows.filter((a) => a.summary.id < (p.before as number));
-                    return rows.slice(0, (p.limit as number) ?? 50).map(row);
-                }
-                case 'search_articles': {
-                    const q = String(args.query ?? '').toLowerCase();
-                    return articles
-                        .filter((a) => a.summary.title.toLowerCase().includes(q))
-                        .slice(0, (args.limit as number) ?? 20)
-                        .map(row);
-                }
-                case 'get_article':
-                    return structuredClone(byId(args.articleId as number)?.full ?? null);
-                case 'get_article_state':
-                    return structuredClone(byId(args.articleId as number)?.state ?? null);
-                case 'get_article_tags':
-                    return structuredClone(byId(args.articleId as number)?.tags ?? []);
-                case 'mark_read':
-                    return flipOne(args.articleId, 'read', args.read);
-                case 'mark_all_read': {
-                    // The ids actually flipped (the undo snapshot), ascending.
-                    const feedId = (args.feedId as number | null | undefined) ?? null;
-                    const flipped = articles
-                        .filter((a) => feedId === null || a.summary.feed_id === feedId)
-                        .filter((a) => flip(a, 'read', true))
-                        .map((a) => a.summary.id)
-                        .sort((x, y) => x - y);
-                    return emitting(flipped, flipped.length > 0, articlesChanged(feedId));
-                }
-                case 'mark_read_many': {
-                    const count = (args.articleIds as number[]).filter((id) =>
-                        flip(byId(id), 'read', args.read as boolean),
-                    ).length;
-                    return emitting(count, count > 0, articlesChanged());
-                }
-                case 'set_starred':
-                    return flipOne(args.articleId, 'starred', args.starred);
-                case 'set_flag_many': {
-                    // The ids actually flipped, in the order given (the undo set).
-                    const flipped = (args.articleIds as number[]).filter((id) =>
-                        flip(byId(id), args.flag as ArticleFlagDto, args.value as boolean),
-                    );
-                    return emitting(flipped, flipped.length > 0, articlesChanged());
-                }
-                case 'set_read_later':
-                    return flipOne(args.articleId, 'read_later', args.readLater);
-                case 'set_archived':
-                    return flipOne(args.articleId, 'archived', args.archived);
-                case 'record_opened':
-                    return null;
-                case 'tag_article': {
-                    const a = byId(args.articleId as number);
-                    const tag = args.tag as string;
-                    const added = a !== undefined && !a.tags.includes(tag);
-                    if (added) a.tags.push(tag);
-                    return emitting(added, added, articlesChanged());
-                }
-                case 'untag_article': {
-                    const a = byId(args.articleId as number);
-                    const before = a?.tags.length ?? 0;
-                    if (a) a.tags = a.tags.filter((t) => t !== args.tag);
-                    const removed = (a?.tags.length ?? 0) !== before;
-                    return emitting(removed, removed, articlesChanged());
-                }
-                case 'promote_article':
-                    return {
-                        destination: String(args.destination),
-                        path: 'curio/promoted-note.md',
-                        checksum: `sha256:${'0'.repeat(64)}`,
-                        disposition: 'created',
-                    };
-                case 'get_setting':
-                    return settings.get(args.key as string) ?? null;
-                case 'set_setting':
-                    settings.set(args.key as string, args.value as string);
-                    return null;
-                case 'request_notification_permission':
-                    return true;
-                case 'get_feed_by_url':
-                    return structuredClone(feeds.find((f) => f.url === args.url) ?? null);
-                case 'set_feed_status':
-                    return editFeed(args.feedId, (f) => {
-                        // Mirrors core: any explicit change ends an
-                        // automatic pause; going active forgets the backoff.
-                        f.status = args.status as typeof f.status;
-                        f.auto_paused_at = null;
-                        if (f.status === 'active') {
-                            f.consecutive_failures = 0;
-                            f.next_attempt_at = null;
-                        }
-                    });
-                case 'set_feed_title':
-                    return editFeed(args.feedId, (f) => {
-                        f.title = (args.title as string | null) ?? null;
-                    });
-                case 'set_feed_tags':
-                    return editFeed(args.feedId, (f) => {
-                        f.tags = (args.tags as string[] | undefined) ?? [];
-                    });
-                case 'set_feed_metadata':
-                    return editFeed(args.feedId, (f) => {
-                        f.site_url = (args.siteUrl as string | null) ?? null;
-                        f.description = (args.description as string | null) ?? null;
-                    });
-                // Core only fills the fields still empty (`COALESCE(title, ?)`
-                // …): an already-set value — a human edit — always wins.
-                case 'update_feed_metadata':
-                    return editFeed(args.feedId, (f) => {
-                        f.title = f.title ?? (args.title as string | null) ?? null;
-                        f.site_url = f.site_url ?? (args.siteUrl as string | null) ?? null;
-                        f.description =
-                            f.description ?? (args.description as string | null) ?? null;
-                    });
-                case 'set_feed_full_text':
-                    return editFeed(args.feedId, (f) => {
-                        f.fetch_full_text = args.enabled as boolean;
-                    });
-                case 'reorder_feeds': {
-                    // Core stores each listed id's position and lists by it
-                    // (then id); a feed left out keeps its old place.
-                    const order = args.feedIds as number[];
-                    const rank = new Map(feeds.map((f, at) => [f.id, at]));
-                    for (const [at, id] of order.entries()) rank.set(id, at);
-                    feeds.sort(
-                        (x, y) => (rank.get(x.id) ?? 0) - (rank.get(y.id) ?? 0) || x.id - y.id,
-                    );
-                    return emitting(null, true, feedsChanged);
-                }
-                case 'recent_fetches':
-                    return [
-                        {
-                            feed_id: args.feedId as number,
-                            fetched_at: '2026-07-06T09:00:00.000Z',
-                            status: 'ok',
-                            http_status: 200,
-                            error: null,
-                            error_kind: null,
-                            articles_new: 2,
-                            duration_ms: 143,
-                        },
-                        {
-                            feed_id: args.feedId as number,
-                            fetched_at: '2026-07-06T06:00:00.000Z',
-                            status: 'ok',
-                            http_status: 200,
-                            error: null,
-                            error_kind: null,
-                            articles_new: 0,
-                            duration_ms: 98,
-                        },
-                        {
-                            feed_id: args.feedId as number,
-                            fetched_at: '2026-07-05T22:00:00.000Z',
-                            status: 'not_modified',
-                            http_status: 304,
-                            error: null,
-                            error_kind: null,
-                            articles_new: 0,
-                            duration_ms: 61,
-                        },
-                    ];
-                case 'refresh_feed':
-                    return emitting(
-                        {
-                            feed_id: args.feedId as number,
-                            status: 'ok',
-                            http_status: 200,
-                            new_articles: 0,
-                            updated_articles: 0,
-                            error: null,
-                            error_kind: null,
-                        },
-                        true,
-                        feedsChanged,
-                        articlesChanged(args.feedId as number),
-                    );
-                case 'cancel_refresh':
-                    if (sweep === null) return false;
-                    sweep.cancelled = true;
-                    return true;
-                case 'refresh_all':
-                    return runSweep();
-                // `?offline=1` previews the sidebar's "Offline" badge.
-                case 'connectivity_online':
-                    return new URLSearchParams(window.location.search).get('offline') !== '1';
-                // `?titlebar=overlay` previews the macOS overlay title bar's
-                // header inset (the browser draws no traffic lights);
-                // `&fullscreen=1` its fullscreen state, where the inset is off.
-                case 'window_chrome': {
-                    const query = new URLSearchParams(window.location.search);
-                    return {
-                        overlay_title_bar: query.get('titlebar') === 'overlay',
-                        fullscreen: query.get('fullscreen') === '1',
-                    };
-                }
-                case 'get_app_info':
-                    return {
-                        version: '0.6.0',
-                        profile_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
-                        db_schema_version: 5,
-                        schema_supported: true,
-                    };
-                case 'legacy_profiles':
-                    return devLegacyProfiles();
-                case 'db_stats':
-                    return {
-                        article_count: articles.length,
-                        schema_version: 5,
-                        db_path:
-                            '~/Library/Application Support/io.github.alexnodeland.curio/curio.db',
-                    };
-                case 'integrity_check':
-                case 'fts_integrity_check':
-                case 'vacuum_db':
-                    return null;
-                case 'sweep_event_retention':
-                    return [];
-                case 'add_destination':
-                    destinations.push({ name: String(args.name), root: '/Users/alex/picked' });
-                    return null;
-                case 'remove_destination': {
-                    const i = destinations.findIndex((d) => d.name === args.name);
-                    if (i >= 0) destinations.splice(i, 1);
-                    return null;
-                }
-                case 'pick_import_file':
-                case 'pick_export_path':
-                case 'pick_theme_export_path':
-                case 'pick_theme_import_file':
-                case 'pick_destination_root':
-                    return { token: 'dev-token', path: '/Users/alex/picked/path' };
-                case 'read_text_file':
-                    return DEV_THEME_YAML;
-                case 'export_text_file':
-                    return null;
-                case 'import_opml':
-                    return { added: 4, skipped: 1, invalid: 0 };
-                case 'import_file':
-                    // A CSV source plays the messy-export path (rows with
-                    // unusable URLs are counted, not fatal); OPML stays clean.
-                    if (args.source !== 'opml') {
-                        return {
-                            feeds_added: 0,
-                            feeds_skipped: 0,
-                            feeds_invalid: 0,
-                            articles_added: 12,
-                            articles_skipped: 3,
-                            articles_invalid: 2,
-                            rejected: [
-                                {
-                                    kind: 'article',
-                                    reason: 'unsupported_scheme',
-                                    detail: 'javascript:void(0)',
-                                },
-                                { kind: 'article', reason: 'invalid_url', detail: 'n/a' },
-                            ],
-                        };
-                    }
-                    return {
-                        feeds_added: 4,
-                        feeds_skipped: 1,
-                        feeds_invalid: 0,
-                        articles_added: 12,
-                        articles_skipped: 0,
-                        articles_invalid: 0,
-                        rejected: [],
-                    };
-                case 'export_opml':
-                    return null;
-                case 'discover_feeds': {
-                    const query = String(args.url);
-                    // A canned stand-in for `curio_core::feeds::discover` (no
-                    // normalization, rewrites, probing or validation): a
-                    // YouTube @handle resolves to its channel videos feed,
-                    // anything else to itself.
-                    if (/nofeed/i.test(query)) {
-                        return { feeds: [], favicon: null };
-                    }
-                    // A host under the reserved `.invalid` TLD never resolves:
-                    // previews the host's typed fetch failure, which the UI
-                    // localizes from its code + params.
-                    const host = /^[a-z]+:\/\/([^/:?#]+)/i.exec(query)?.[1] ?? '';
-                    if (host.endsWith('.invalid')) {
-                        const failure: CommandError = {
-                            kind: 'user',
-                            code: 'HOST_NOT_FOUND',
-                            params: { host },
-                            message: `could not reach ${query}: dns resolution failed for "${host}": no such host`,
-                            recoverable: true,
-                        };
-                        return Promise.reject(failure);
-                    }
-                    if (/youtube\.com\/@/.test(query)) {
-                        return {
-                            feeds: [
-                                {
-                                    url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCXuqSBlHAE6Xw-yeJA0Tunw',
-                                    title: 'YouTube Channel',
-                                },
-                            ],
-                            favicon: null,
-                        };
-                    }
-                    return {
-                        feeds: [{ url: query, title: 'Discovered Feed' }],
-                        favicon: null,
-                    };
-                }
-                case 'get_cached_image': {
-                    // `.invalid` hosts (RFC 2606) stand in for an unreachable
-                    // image, so the reader's failed-image path is previewable.
-                    const url = String(args.url ?? '');
-                    if (/^https?:\/\/[^/]*\.invalid\//i.test(url)) {
-                        throw {
-                            kind: 'user',
-                            code: 'NETWORK',
-                            message: `could not fetch ${url}`,
-                            recoverable: true,
-                        };
-                    }
-                    return url;
-                }
-                case 'copy_diagnostics_bundle':
-                    return { token: 'dev-token', path: '/Users/alex/curio-diagnostics.zip' };
-                case 'add_feed': {
-                    // A canned stand-in for subscribe-time validation: a URL
-                    // mentioning `nofeed` has no feed, one mentioning
-                    // `offline` is unreachable — unless `validate: false`
-                    // (the "use this URL directly" escape hatch).
-                    const newFeed = args.newFeed as NewFeedDto;
-                    if (newFeed.validate && /nofeed/i.test(newFeed.url)) {
-                        throw {
-                            kind: 'user',
-                            code: 'NO_FEED',
-                            message: `no feed found at ${newFeed.url}`,
-                            recoverable: false,
-                        };
-                    }
-                    if (newFeed.validate && /offline/i.test(newFeed.url)) {
-                        throw {
-                            kind: 'user',
-                            code: 'NETWORK',
-                            message: `could not reach ${newFeed.url}: connection refused`,
-                            recoverable: true,
-                        };
-                    }
-                    if (feeds.some((f) => f.url === newFeed.url)) {
-                        const failure: CommandError = {
-                            kind: 'user',
-                            code: 'ALREADY_SUBSCRIBED',
-                            params: {},
-                            message: `already subscribed to ${newFeed.url}`,
-                            recoverable: false,
-                        };
-                        return Promise.reject(failure);
-                    }
-                    // Subscribed, not yet fetched: the real command's first
-                    // refresh runs in the background; the mock's never does.
-                    const feed: FeedDto = {
-                        id: nextFeedId++,
-                        url: newFeed.url,
-                        title: newFeed.title,
-                        site_url: null,
-                        description: null,
-                        status: 'active',
-                        added_at: new Date().toISOString(),
-                        last_fetched_at: null,
-                        last_error: null,
-                        last_error_kind: null,
-                        last_ok_at: null,
-                        tags: [...newFeed.tags],
-                        fetch_full_text: false,
-                        consecutive_failures: 0,
-                        next_attempt_at: null,
-                        auto_paused_at: null,
-                    };
-                    feeds.push(feed);
-                    return emitting(structuredClone(feed), true, feedsChanged);
-                }
-                case 'remove_feed': {
-                    const at = feeds.findIndex((f) => f.id === args.feedId);
-                    if (at < 0) return Promise.reject(notFound('feed'));
-                    feeds.splice(at, 1);
-                    // Core's `ON DELETE SET NULL`: the feed's articles stay
-                    // in the library, under no feed.
-                    for (const a of articles) {
-                        if (a.summary.feed_id === args.feedId) {
-                            a.summary.feed_id = null;
-                            a.full.feed_id = null;
-                        }
-                    }
-                    return emitting(null, true, feedsChanged, articlesChanged());
-                }
-                case 'stage_feed_removal':
-                case 'unstage_feed_removal':
-                    return null;
-                // Startup recovery: `?startup=<class>` (and `&backup=0` for
-                // no backup) previews the recovery screen. A retry still
-                // fails; restore / start fresh succeed.
-                case 'get_startup_failure':
-                    return devStartupFailure();
-                case 'retry_startup':
-                    return { failure: devStartupFailure(), set_aside: null };
-                case 'restore_startup_backup':
-                case 'start_fresh_profile':
-                    return {
-                        failure: null,
-                        set_aside: `${DEV_PROFILE}/set-aside/20261031T120000Z`,
-                    };
-                default:
-                    return null;
-            }
-        },
-        { shouldMockEvents: true },
-    );
+	mockIPC(
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a flat 1:1 IPC dispatch table for the dev mock; splitting it would obscure the mapping
+		(cmd, raw) => {
+			const args = (raw ?? {}) as Record<string, unknown>;
+			if (failOnce.delete(cmd)) {
+				return Promise.reject(devFailure);
+			}
+			switch (cmd) {
+				case "list_feeds":
+					return structuredClone(feeds);
+				case "get_unread_counts":
+					return unreadCounts();
+				case "count_articles":
+					return articles.length;
+				case "list_tags":
+					return [...new Set(articles.flatMap((a) => a.tags))].sort();
+				case "list_destinations": {
+					// `?destinations=broken` previews a registry the host
+					// cannot read: an internal failure, shown generically.
+					if (
+						new URLSearchParams(window.location.search).get("destinations") ===
+						"broken"
+					) {
+						const failure: CommandError = {
+							kind: "internal",
+							code: "IO",
+							params: {},
+							message:
+								"destination registry is unreadable: expected value at line 1",
+							recoverable: false,
+						};
+						return Promise.reject(failure);
+					}
+					return structuredClone(destinations);
+				}
+				case "load_full_article": {
+					// `?reddit=<reason>` previews Reddit refusing a full post
+					// (`credentials_missing`, `token_unavailable`, …).
+					const reason = new URLSearchParams(window.location.search).get(
+						"reddit",
+					);
+					if (reason !== null) {
+						const failure: CommandError = {
+							kind: "user",
+							code: "REDDIT_AUTH",
+							params: { reason, status: "403" },
+							message: `reddit refused the full post (HTTP 403): ${reason}`,
+							recoverable: reason.startsWith("token_"),
+						};
+						return Promise.reject(failure);
+					}
+					return null;
+				}
+				case "list_articles": {
+					const p = (args.params ?? {}) as Record<string, unknown>;
+					let rows = articles
+						.filter((a) =>
+							p.feed_id == null ? true : a.summary.feed_id === p.feed_id,
+						)
+						.filter((a) => (p.read == null ? true : a.state.read === p.read))
+						.filter((a) =>
+							p.starred == null ? true : a.state.starred === p.starred,
+						)
+						.filter((a) =>
+							p.read_later == null ? true : a.state.read_later === p.read_later,
+						)
+						.filter((a) =>
+							p.archived == null ? true : a.state.archived === p.archived,
+						)
+						.filter((a) =>
+							p.tag == null ? true : a.tags.includes(p.tag as string),
+						)
+						.sort((x, y) => y.summary.id - x.summary.id);
+					if (p.before != null)
+						rows = rows.filter((a) => a.summary.id < (p.before as number));
+					return rows.slice(0, (p.limit as number) ?? 50).map(row);
+				}
+				case "search_articles": {
+					const q = String(args.query ?? "").toLowerCase();
+					return articles
+						.filter((a) => a.summary.title.toLowerCase().includes(q))
+						.slice(0, (args.limit as number) ?? 20)
+						.map(row);
+				}
+				case "get_article":
+					return structuredClone(byId(args.articleId as number)?.full ?? null);
+				case "get_article_state":
+					return structuredClone(byId(args.articleId as number)?.state ?? null);
+				case "get_article_tags":
+					return structuredClone(byId(args.articleId as number)?.tags ?? []);
+				case "mark_read":
+					return flipOne(args.articleId, "read", args.read);
+				case "mark_all_read": {
+					// The ids actually flipped (the undo snapshot), ascending.
+					const feedId = (args.feedId as number | null | undefined) ?? null;
+					const flipped = articles
+						.filter((a) => feedId === null || a.summary.feed_id === feedId)
+						.filter((a) => flip(a, "read", true))
+						.map((a) => a.summary.id)
+						.sort((x, y) => x - y);
+					return emitting(
+						flipped,
+						flipped.length > 0,
+						flagChanged(feedId, "read", flipped, true),
+					);
+				}
+				case "mark_read_many": {
+					const ids = args.articleIds as number[];
+					const read = args.read as boolean;
+					const count = ids.filter((id) => flip(byId(id), "read", read)).length;
+					return emitting(
+						count,
+						count > 0,
+						flagChanged(null, "read", ids, read),
+					);
+				}
+				case "set_starred":
+					return flipOne(args.articleId, "starred", args.starred);
+				case "set_flag_many": {
+					// The ids actually flipped, in the order given (the undo set).
+					const flag = args.flag as ArticleFlagDto;
+					const value = args.value as boolean;
+					const flipped = (args.articleIds as number[]).filter((id) =>
+						flip(byId(id), flag, value),
+					);
+					return emitting(
+						flipped,
+						flipped.length > 0,
+						flagChanged(null, flag, flipped, value),
+					);
+				}
+				case "set_read_later":
+					return flipOne(args.articleId, "read_later", args.readLater);
+				case "set_archived":
+					return flipOne(args.articleId, "archived", args.archived);
+				case "record_opened":
+					return null;
+				case "tag_article": {
+					const a = byId(args.articleId as number);
+					const tag = args.tag as string;
+					const added = a !== undefined && !a.tags.includes(tag);
+					if (added) a.tags.push(tag);
+					return emitting(added, added, articlesChanged());
+				}
+				case "untag_article": {
+					const a = byId(args.articleId as number);
+					const before = a?.tags.length ?? 0;
+					if (a) a.tags = a.tags.filter((t) => t !== args.tag);
+					const removed = (a?.tags.length ?? 0) !== before;
+					return emitting(removed, removed, articlesChanged());
+				}
+				case "promote_article":
+					return {
+						destination: String(args.destination),
+						path: "curio/promoted-note.md",
+						checksum: `sha256:${"0".repeat(64)}`,
+						disposition: "created",
+					};
+				case "get_setting":
+					return settings.get(args.key as string) ?? null;
+				case "set_setting":
+					settings.set(args.key as string, args.value as string);
+					return null;
+				case "request_notification_permission":
+					return true;
+				case "get_feed_by_url":
+					return structuredClone(feeds.find((f) => f.url === args.url) ?? null);
+				case "set_feed_status":
+					return editFeed(args.feedId, (f) => {
+						// Mirrors core: any explicit change ends an
+						// automatic pause; going active forgets the backoff.
+						f.status = args.status as typeof f.status;
+						f.auto_paused_at = null;
+						if (f.status === "active") {
+							f.consecutive_failures = 0;
+							f.next_attempt_at = null;
+						}
+					});
+				case "set_feed_title":
+					return editFeed(args.feedId, (f) => {
+						f.title = (args.title as string | null) ?? null;
+					});
+				case "set_feed_tags":
+					return editFeed(args.feedId, (f) => {
+						f.tags = (args.tags as string[] | undefined) ?? [];
+					});
+				case "set_feed_metadata":
+					return editFeed(args.feedId, (f) => {
+						f.site_url = (args.siteUrl as string | null) ?? null;
+						f.description = (args.description as string | null) ?? null;
+					});
+				// Core only fills the fields still empty (`COALESCE(title, ?)`
+				// …): an already-set value — a human edit — always wins.
+				case "update_feed_metadata":
+					return editFeed(args.feedId, (f) => {
+						f.title = f.title ?? (args.title as string | null) ?? null;
+						f.site_url = f.site_url ?? (args.siteUrl as string | null) ?? null;
+						f.description =
+							f.description ?? (args.description as string | null) ?? null;
+					});
+				case "set_feed_full_text":
+					return editFeed(args.feedId, (f) => {
+						f.fetch_full_text = args.enabled as boolean;
+					});
+				case "reorder_feeds": {
+					// Core stores each listed id's position and lists by it
+					// (then id); a feed left out keeps its old place.
+					const order = args.feedIds as number[];
+					const rank = new Map(feeds.map((f, at) => [f.id, at]));
+					for (const [at, id] of order.entries()) rank.set(id, at);
+					feeds.sort(
+						(x, y) =>
+							(rank.get(x.id) ?? 0) - (rank.get(y.id) ?? 0) || x.id - y.id,
+					);
+					return emitting(null, true, feedsChanged);
+				}
+				case "recent_fetches":
+					return [
+						{
+							feed_id: args.feedId as number,
+							fetched_at: "2026-07-06T09:00:00.000Z",
+							status: "ok",
+							http_status: 200,
+							error: null,
+							error_kind: null,
+							articles_new: 2,
+							duration_ms: 143,
+						},
+						{
+							feed_id: args.feedId as number,
+							fetched_at: "2026-07-06T06:00:00.000Z",
+							status: "ok",
+							http_status: 200,
+							error: null,
+							error_kind: null,
+							articles_new: 0,
+							duration_ms: 98,
+						},
+						{
+							feed_id: args.feedId as number,
+							fetched_at: "2026-07-05T22:00:00.000Z",
+							status: "not_modified",
+							http_status: 304,
+							error: null,
+							error_kind: null,
+							articles_new: 0,
+							duration_ms: 61,
+						},
+					];
+				case "refresh_feed":
+					return emitting(
+						{
+							feed_id: args.feedId as number,
+							status: "ok",
+							http_status: 200,
+							new_articles: 0,
+							updated_articles: 0,
+							error: null,
+							error_kind: null,
+						},
+						true,
+						feedsChanged,
+						articlesChanged(args.feedId as number),
+					);
+				case "cancel_refresh":
+					if (sweep === null) return false;
+					sweep.cancelled = true;
+					return true;
+				case "refresh_all":
+					return runSweep();
+				// `?offline=1` previews the sidebar's "Offline" badge.
+				case "connectivity_online":
+					return (
+						new URLSearchParams(window.location.search).get("offline") !== "1"
+					);
+				// `?titlebar=overlay` previews the macOS overlay title bar's
+				// header inset (the browser draws no traffic lights);
+				// `&fullscreen=1` its fullscreen state, where the inset is off.
+				case "window_chrome": {
+					const query = new URLSearchParams(window.location.search);
+					return {
+						overlay_title_bar: query.get("titlebar") === "overlay",
+						fullscreen: query.get("fullscreen") === "1",
+					};
+				}
+				case "get_app_info":
+					return {
+						version: "0.6.0",
+						profile_dir:
+							"~/Library/Application Support/io.github.alexnodeland.curio",
+						db_schema_version: 5,
+						schema_supported: true,
+					};
+				case "legacy_profiles":
+					return devLegacyProfiles();
+				case "db_stats":
+					return {
+						article_count: articles.length,
+						schema_version: 5,
+						db_path:
+							"~/Library/Application Support/io.github.alexnodeland.curio/curio.db",
+					};
+				case "integrity_check":
+				case "fts_integrity_check":
+				case "vacuum_db":
+					return null;
+				case "sweep_event_retention":
+					return [];
+				case "add_destination":
+					destinations.push({
+						name: String(args.name),
+						root: "/Users/alex/picked",
+					});
+					return null;
+				case "remove_destination": {
+					const i = destinations.findIndex((d) => d.name === args.name);
+					if (i >= 0) destinations.splice(i, 1);
+					return null;
+				}
+				case "pick_import_file":
+				case "pick_export_path":
+				case "pick_theme_export_path":
+				case "pick_theme_import_file":
+				case "pick_destination_root":
+					return { token: "dev-token", path: "/Users/alex/picked/path" };
+				case "read_text_file":
+					return DEV_THEME_YAML;
+				case "export_text_file":
+					return null;
+				case "import_opml":
+					return { added: 4, skipped: 1, invalid: 0 };
+				case "import_file":
+					// A CSV source plays the messy-export path (rows with
+					// unusable URLs are counted, not fatal); OPML stays clean.
+					if (args.source !== "opml") {
+						return {
+							feeds_added: 0,
+							feeds_skipped: 0,
+							feeds_invalid: 0,
+							articles_added: 12,
+							articles_skipped: 3,
+							articles_invalid: 2,
+							rejected: [
+								{
+									kind: "article",
+									reason: "unsupported_scheme",
+									detail: "javascript:void(0)",
+								},
+								{ kind: "article", reason: "invalid_url", detail: "n/a" },
+							],
+						};
+					}
+					return {
+						feeds_added: 4,
+						feeds_skipped: 1,
+						feeds_invalid: 0,
+						articles_added: 12,
+						articles_skipped: 0,
+						articles_invalid: 0,
+						rejected: [],
+					};
+				case "export_opml":
+					return null;
+				case "discover_feeds": {
+					const query = String(args.url);
+					// A canned stand-in for `curio_core::feeds::discover` (no
+					// normalization, rewrites, probing or validation): a
+					// YouTube @handle resolves to its channel videos feed,
+					// anything else to itself.
+					if (/nofeed/i.test(query)) {
+						return { feeds: [], favicon: null };
+					}
+					// A host under the reserved `.invalid` TLD never resolves:
+					// previews the host's typed fetch failure, which the UI
+					// localizes from its code + params.
+					const host = /^[a-z]+:\/\/([^/:?#]+)/i.exec(query)?.[1] ?? "";
+					if (host.endsWith(".invalid")) {
+						const failure: CommandError = {
+							kind: "user",
+							code: "HOST_NOT_FOUND",
+							params: { host },
+							message: `could not reach ${query}: dns resolution failed for "${host}": no such host`,
+							recoverable: true,
+						};
+						return Promise.reject(failure);
+					}
+					if (/youtube\.com\/@/.test(query)) {
+						return {
+							feeds: [
+								{
+									url: "https://www.youtube.com/feeds/videos.xml?channel_id=UCXuqSBlHAE6Xw-yeJA0Tunw",
+									title: "YouTube Channel",
+								},
+							],
+							favicon: null,
+						};
+					}
+					return {
+						feeds: [{ url: query, title: "Discovered Feed" }],
+						favicon: null,
+					};
+				}
+				case "get_cached_image": {
+					// `.invalid` hosts (RFC 2606) stand in for an unreachable
+					// image, so the reader's failed-image path is previewable.
+					const url = String(args.url ?? "");
+					if (/^https?:\/\/[^/]*\.invalid\//i.test(url)) {
+						throw {
+							kind: "user",
+							code: "NETWORK",
+							message: `could not fetch ${url}`,
+							recoverable: true,
+						};
+					}
+					return url;
+				}
+				case "copy_diagnostics_bundle":
+					return {
+						token: "dev-token",
+						path: "/Users/alex/curio-diagnostics.zip",
+					};
+				case "add_feed": {
+					// A canned stand-in for subscribe-time validation: a URL
+					// mentioning `nofeed` has no feed, one mentioning
+					// `offline` is unreachable — unless `validate: false`
+					// (the "use this URL directly" escape hatch).
+					const newFeed = args.newFeed as NewFeedDto;
+					if (newFeed.validate && /nofeed/i.test(newFeed.url)) {
+						throw {
+							kind: "user",
+							code: "NO_FEED",
+							message: `no feed found at ${newFeed.url}`,
+							recoverable: false,
+						};
+					}
+					if (newFeed.validate && /offline/i.test(newFeed.url)) {
+						throw {
+							kind: "user",
+							code: "NETWORK",
+							message: `could not reach ${newFeed.url}: connection refused`,
+							recoverable: true,
+						};
+					}
+					if (feeds.some((f) => f.url === newFeed.url)) {
+						const failure: CommandError = {
+							kind: "user",
+							code: "ALREADY_SUBSCRIBED",
+							params: {},
+							message: `already subscribed to ${newFeed.url}`,
+							recoverable: false,
+						};
+						return Promise.reject(failure);
+					}
+					// Subscribed, not yet fetched: the real command's first
+					// refresh runs in the background; the mock's never does.
+					const feed: FeedDto = {
+						id: nextFeedId++,
+						url: newFeed.url,
+						title: newFeed.title,
+						site_url: null,
+						description: null,
+						status: "active",
+						added_at: new Date().toISOString(),
+						last_fetched_at: null,
+						last_error: null,
+						last_error_kind: null,
+						last_ok_at: null,
+						tags: [...newFeed.tags],
+						fetch_full_text: false,
+						consecutive_failures: 0,
+						next_attempt_at: null,
+						auto_paused_at: null,
+					};
+					feeds.push(feed);
+					return emitting(structuredClone(feed), true, feedsChanged);
+				}
+				case "remove_feed": {
+					const at = feeds.findIndex((f) => f.id === args.feedId);
+					if (at < 0) return Promise.reject(notFound("feed"));
+					feeds.splice(at, 1);
+					// Core's `ON DELETE SET NULL`: the feed's articles stay
+					// in the library, under no feed.
+					for (const a of articles) {
+						if (a.summary.feed_id === args.feedId) {
+							a.summary.feed_id = null;
+							a.full.feed_id = null;
+						}
+					}
+					return emitting(null, true, feedsChanged, articlesChanged());
+				}
+				case "stage_feed_removal":
+				case "unstage_feed_removal":
+					return null;
+				// Startup recovery: `?startup=<class>` (and `&backup=0` for
+				// no backup) previews the recovery screen. A retry still
+				// fails; restore / start fresh succeed.
+				case "get_startup_failure":
+					return devStartupFailure();
+				case "retry_startup":
+					return { failure: devStartupFailure(), set_aside: null };
+				case "restore_startup_backup":
+				case "start_fresh_profile":
+					return {
+						failure: null,
+						set_aside: `${DEV_PROFILE}/set-aside/20261031T120000Z`,
+					};
+				default:
+					return null;
+			}
+		},
+		{ shouldMockEvents: true },
+	);
 
-    function flip(
-        a: { state: ArticleStateDto } | undefined,
-        key: keyof ArticleStateDto,
-        value: boolean,
-    ): boolean {
-        if (!a) return false;
-        const changed = a.state[key] !== value;
-        a.state[key] = value;
-        return changed;
-    }
+	function flip(
+		a: { state: ArticleStateDto } | undefined,
+		key: keyof ArticleStateDto,
+		value: boolean,
+	): boolean {
+		if (!a) return false;
+		const changed = a.state[key] !== value;
+		a.state[key] = value;
+		return changed;
+	}
 
-    /** One article's state flag: the command's "changed" bool, `ArticlesChanged` if so. */
-    function flipOne(
-        articleId: unknown,
-        key: keyof ArticleStateDto,
-        value: unknown,
-    ): Promise<boolean> {
-        const changed = flip(byId(articleId as number), key, value as boolean);
-        return emitting(changed, changed, articlesChanged());
-    }
+	/** One article's state flag: the command's "changed" bool, `ArticlesChanged` if so. */
+	function flipOne(
+		articleId: unknown,
+		key: FlagField,
+		value: unknown,
+	): Promise<boolean> {
+		const id = articleId as number;
+		const changed = flip(byId(id), key, value as boolean);
+		return emitting(
+			changed,
+			changed,
+			flagChanged(null, key, [id], value as boolean),
+		);
+	}
 }

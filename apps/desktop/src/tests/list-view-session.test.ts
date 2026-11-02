@@ -301,7 +301,7 @@ describe('list view sessions', () => {
         await settle();
         // The reader marked it read; the backend's unread window now drops it.
         expect(read.has(1078)).toBe(true);
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await settle();
 
         const list = articlesStore.current;
@@ -331,7 +331,7 @@ describe('list view sessions', () => {
 
         await scrollTo(container, ROW_HEIGHT * 3);
         expect(markedIds(harness)).toEqual([1080, 1079, 1078]);
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await settle();
 
         // The backend window dropped the three read rows, but they are held
@@ -360,7 +360,7 @@ describe('list view sessions', () => {
         }
         const scrolled = Array.from({ length: 20 }, (_, index) => 1080 - index);
         expect(markedIds(harness)).toEqual(scrolled);
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await settle();
         expect(articlesStore.current.items[20]?.id).toBe(1060);
 

@@ -88,7 +88,7 @@ describe('Retry on error states', () => {
         await flushIpc();
 
         harness.respond('list_articles', rejectWith(failure));
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await flushIpc();
         expect(getByText('Kept row')).toBeTruthy();
 

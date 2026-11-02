@@ -197,7 +197,7 @@ describe('query cache', () => {
             const unwire = await wireInvalidation();
             await flushIpc();
 
-            await events.articlesChanged.emit({ feed_id: 1 });
+            await events.articlesChanged.emit({ feed_id: 1, flags: null });
             await flushIpc();
 
             expect(listFeed1.calls()).toBe(2); // scoped to the changed feed
@@ -206,7 +206,7 @@ describe('query cache', () => {
             expect(counts.calls()).toBe(2); // read-state flips move badges
             expect(detail.calls()).toBe(2); // detail namespaces refresh
 
-            await events.articlesChanged.emit({ feed_id: null });
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
             await flushIpc();
 
             expect(listFeed1.calls()).toBe(3); // broad event hits every list

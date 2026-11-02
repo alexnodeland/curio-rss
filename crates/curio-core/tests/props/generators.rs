@@ -248,51 +248,87 @@ fn html_from(elements: &'static [&'static str]) -> impl Strategy<Value = String>
     })
 }
 
-/// Wrappers a hostile feed can nest without limit, as (open, close) pairs:
-/// every one survives sanitization, and each is walked by its own htmd
-/// handler (lists and quotes cost the most stack a level).
-const NESTING: &[(&str, &str)] = &[
-    ("<div>", "</div>"),
-    ("<section>", "</section>"),
-    ("<article>", "</article>"),
-    ("<aside>", "</aside>"),
-    ("<blockquote>", "</blockquote>"),
-    ("<ul><li>", "</li></ul>"),
-    ("<ol><li>", "</li></ol>"),
-    ("<dl><dd>", "</dd></dl>"),
-    ("<table><tr><td>", "</td></tr></table>"),
-    ("<span>", "</span>"),
-    ("<em>", "</em>"),
-    ("<strong>", "</strong>"),
+/// Wrappers a hostile feed can nest without limit, as (open, close, block)
+/// triples: every one survives sanitization, and each is walked by its own
+/// htmd handler (lists and quotes cost the most stack a level). `block`
+/// marks a word boundary: text on either side of a block tag is two words,
+/// while an inline tag joins what it separates.
+const NESTING: &[(&str, &str, bool)] = &[
+    ("<div>", "</div>", true),
+    ("<section>", "</section>", true),
+    ("<article>", "</article>", true),
+    ("<aside>", "</aside>", true),
+    ("<blockquote>", "</blockquote>", true),
+    ("<ul><li>", "</li></ul>", true),
+    ("<ol><li>", "</li></ol>", true),
+    ("<dl><dd>", "</dd></dl>", true),
+    ("<table><tr><td>", "</td></tr></table>", true),
+    ("<span>", "</span>", false),
+    ("<em>", "</em>", false),
+    ("<strong>", "</strong>", false),
 ];
+
+/// The words of [`deep_html`] as it is written: a text run joins the word
+/// before it unless a block tag stands between them.
+#[derive(Default)]
+struct Words {
+    words: Vec<String>,
+    boundary: bool,
+}
+
+impl Words {
+    fn tag(&mut self, block: bool) {
+        self.boundary |= block;
+    }
+
+    fn text(&mut self, html: &mut String, run: &str) {
+        html.push_str(run);
+        match self.words.last_mut() {
+            Some(last) if !self.boundary => last.push_str(run),
+            _ => self.words.push(run.to_owned()),
+        }
+        self.boundary = false;
+    }
+}
 
 /// Pathologically deep HTML (#244): 1000–1500 random wrappers from
 /// [`NESTING`] — past the depth that overflowed a 2 MB stack in htmd's
-/// walk for every mix — with lowercase words scattered through the levels
-/// and `needle` innermost. Yields the HTML and every word it carries.
-pub fn deep_html() -> impl Strategy<Value = (String, Vec<String>)> {
-    prop::collection::vec(
-        (
-            prop::sample::select(NESTING),
-            prop::option::weighted(0.05, "[a-z]{3,8}"),
-        ),
-        1000..1500,
-    )
-    .prop_map(|levels| {
-        let mut html = String::new();
-        let mut words = Vec::new();
-        for ((open, _), word) in &levels {
-            html.push_str(open);
-            if let Some(word) = word {
-                write!(html, "{word} ").unwrap();
-                words.push(word.clone());
+/// walk for every mix — with lowercase text after open and close tags
+/// alike, never with whitespace around it, and `needle` innermost. Yields
+/// the HTML and its words in document order, so only the tags decide where
+/// one word ends: joined across inline tags, split at block ones.
+///
+/// `spans: false` leaves `span` out of the mix. htmd's own `span` handler
+/// trims its content, so a block boundary just inside a span's edge joins
+/// the words around it at any depth (`<span><div>a</div></span>b` → `ab`);
+/// without spans the words are exactly what an export must keep apart.
+pub fn deep_html(spans: bool) -> impl Strategy<Value = (String, Vec<String>)> {
+    let wrappers: Vec<_> = NESTING
+        .iter()
+        .copied()
+        .filter(|(open, _, _)| spans || *open != "<span>")
+        .collect();
+    let text = || prop::option::weighted(0.05, "[a-z]{3,8}");
+    prop::collection::vec((prop::sample::select(wrappers), text(), text()), 1000..1500).prop_map(
+        |levels| {
+            let mut html = String::new();
+            let mut words = Words::default();
+            for ((open, _, block), after_open, _) in &levels {
+                html.push_str(open);
+                words.tag(*block);
+                if let Some(run) = after_open {
+                    words.text(&mut html, run);
+                }
             }
-        }
-        html.push_str("needle");
-        words.push("needle".to_owned());
-        for ((_, close), _) in levels.iter().rev() {
-            html.push_str(close);
-        }
-        (html, words)
-    })
+            words.text(&mut html, "needle");
+            for ((_, close, block), _, after_close) in levels.iter().rev() {
+                html.push_str(close);
+                words.tag(*block);
+                if let Some(run) = after_close {
+                    words.text(&mut html, run);
+                }
+            }
+            (html, words.words)
+        },
+    )
 }

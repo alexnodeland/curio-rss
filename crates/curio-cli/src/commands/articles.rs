@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Context as _;
-use curio_core::storage::{ArticleFilter, ListArticles, SearchArticles};
+use curio_core::storage::{ArticleFilter, ListArticles, ListCursor, SearchArticles};
 use serde::Serialize;
 
 use crate::app::App;
@@ -21,17 +21,17 @@ pub(crate) fn list(app: &App, args: &ListArgs) -> anyhow::Result<ExitCode> {
         .transpose()?;
     let feeds = feed_map(&app.core)?;
     let mut views = Vec::new();
-    let mut before = None;
+    let mut after = None;
     'pages: loop {
         let page = app.core.list_articles(ListArticles {
             feed_id: feed.as_ref().map(|f| f.id),
-            before,
+            after,
             limit: PAGE,
             ..ListArticles::default()
         })?;
         let page_len = page.len();
         for article in page {
-            before = Some(article.id);
+            after = Some(ListCursor::from(&article));
             let view = ArticleView::build(&app.core, &article, &feeds)?;
             if matches_filters(&view, args) {
                 views.push(view);

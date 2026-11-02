@@ -1,17 +1,29 @@
 -- index idx_article_state_archived
 CREATE INDEX idx_article_state_archived ON article_state(article_id) WHERE is_archived = 1
 
+-- index idx_article_state_archived_dated
+CREATE INDEX idx_article_state_archived_dated ON article_state(dated) WHERE is_archived = 1
+
 -- index idx_article_state_read_later
 CREATE INDEX idx_article_state_read_later ON article_state(article_id) WHERE is_read_later = 1
 
+-- index idx_article_state_read_later_dated
+CREATE INDEX idx_article_state_read_later_dated ON article_state(dated) WHERE is_read_later = 1
+
 -- index idx_article_state_starred
 CREATE INDEX idx_article_state_starred ON article_state(article_id) WHERE is_starred = 1
+
+-- index idx_article_state_starred_dated
+CREATE INDEX idx_article_state_starred_dated ON article_state(dated) WHERE is_starred = 1
 
 -- index idx_article_tags_tag_id
 CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id)
 
 -- index idx_article_tombstones_feed_id
 CREATE INDEX idx_article_tombstones_feed_id ON article_tombstones(feed_id)
+
+-- index idx_articles_dated
+CREATE INDEX idx_articles_dated ON articles(COALESCE(published_at, saved_at))
 
 -- index idx_articles_feed_id
 CREATE INDEX idx_articles_feed_id ON articles(feed_id)
@@ -52,7 +64,7 @@ CREATE TABLE article_state (
     is_archived   INTEGER NOT NULL DEFAULT 0,
     updated_at    TEXT    NOT NULL
 , read_permille INTEGER NOT NULL DEFAULT 0
-    CHECK (read_permille BETWEEN 0 AND 1000))
+    CHECK (read_permille BETWEEN 0 AND 1000), dated TEXT)
 
 -- table article_tags
 CREATE TABLE article_tags (
@@ -178,6 +190,25 @@ CREATE TABLE tags (
     id   INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
 )
+
+-- trigger article_state_dated_ai
+CREATE TRIGGER article_state_dated_ai AFTER INSERT ON article_state
+WHEN new.dated IS NULL
+BEGIN
+    UPDATE article_state
+       SET dated = (SELECT COALESCE(a.published_at, a.saved_at) FROM articles a
+                     WHERE a.id = new.article_id)
+     WHERE article_id = new.article_id;
+END
+
+-- trigger article_state_dated_au
+CREATE TRIGGER article_state_dated_au AFTER UPDATE OF published_at, saved_at ON articles
+WHEN COALESCE(old.published_at, old.saved_at) IS NOT COALESCE(new.published_at, new.saved_at)
+BEGIN
+    UPDATE article_state
+       SET dated = COALESCE(new.published_at, new.saved_at)
+     WHERE article_id = new.id;
+END
 
 -- trigger articles_fts_ad
 CREATE TRIGGER articles_fts_ad AFTER DELETE ON articles BEGIN

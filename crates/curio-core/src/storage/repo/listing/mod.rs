@@ -1,0 +1,490 @@
+//! The article list and search queries: the [`ListArticles`] and
+//! [`SearchArticles`] compilers (both projections — whole articles and
+//! list rows) over one shared [`ArticleFilter`] clause builder, the
+//! unread-count read, and the list-row parser.
+
+use super::query::fts_match_expr;
+use super::rows::{parse_curio_id, parse_opt_ts, parse_ts};
+use super::state::decode_progress;
+use super::{ARTICLE_COLS, ArticleFilter, ListArticles, ListCursor, ListOrder, SearchArticles};
+use crate::model::{
+    ArticleId, ArticleState, FeedId, ListedArticle, ReadProgress, SNIPPET_SOURCE_CHARS, snippet,
+};
+use crate::storage::StorageError;
+use rusqlite::types::ToSql;
+use rusqlite::{Connection, OptionalExtension, Row};
+
+/// Which columns a list or search query selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Projection {
+    /// Every article column, body included — [`RawArticle`].
+    Full,
+    /// The list-row columns — [`RawListed`]: no body, a bounded text
+    /// prefix, the state flags and the tags.
+    Listed,
+}
+
+/// A state flag a membership view pages through, and its two partial
+/// indexes on `article_state`.
+struct Membership {
+    /// The `article_state` flag column.
+    column: &'static str,
+    /// Keyed on `article_id` (migration 0012): the id orders.
+    by_id: &'static str,
+    /// Keyed on the copied list date, `dated` (migration 0015):
+    /// [`ListOrder::Published`].
+    by_date: &'static str,
+}
+
+/// The membership views, in the order one is picked to drive when a
+/// filter requires several. Walking a view's index reads only member rows
+/// in list order, where walking `articles` would probe every article's
+/// state until a page fills — and, however dense the view, no page sorts
+/// its members.
+const MEMBERSHIPS: [Membership; 3] = [
+    Membership {
+        column: "is_starred",
+        by_id: "idx_article_state_starred",
+        by_date: "idx_article_state_starred_dated",
+    },
+    Membership {
+        column: "is_read_later",
+        by_id: "idx_article_state_read_later",
+        by_date: "idx_article_state_read_later_dated",
+    },
+    Membership {
+        column: "is_archived",
+        by_id: "idx_article_state_archived",
+        by_date: "idx_article_state_archived_dated",
+    },
+];
+
+/// The [`Projection::Listed`] select list, over `articles a` and an
+/// `article_state s` join. The text prefix is one character longer than
+/// the snippet reads, so the parser can tell that the text runs on; the
+/// tags come back as one JSON array per row.
+fn listed_cols() -> String {
+    format!(
+        "a.id, a.curio_id, a.feed_id, a.title, a.source_url, a.author, a.published_at, a.lang, \
+         a.word_count, a.saved_at, a.lead_image, substr(a.content_text, 1, {}), \
+         COALESCE(s.is_read, 0), COALESCE(s.is_starred, 0), COALESCE(s.is_read_later, 0), \
+         COALESCE(s.is_archived, 0), COALESCE(s.read_permille, 0), \
+         (SELECT json_group_array(t.name) FROM article_tags at JOIN tags t ON t.id = at.tag_id \
+          WHERE at.article_id = a.id)",
+        SNIPPET_SOURCE_CHARS + 1
+    )
+}
+
+/// Appends the [`ArticleFilter`] clauses (static fragments, every value a
+/// bind) over the `a` (articles) and `s` (`article_state`) aliases; the
+/// caller provides the state join whenever a state flag is filtered. A
+/// missing state row defaults every flag to 0 via `COALESCE`. `driving`
+/// names the state column the query already pages through (a membership
+/// index), which is not re-tested.
+fn push_filter_clauses(
+    filter: &ArticleFilter,
+    driving: Option<&str>,
+    clauses: &mut Vec<String>,
+    binds: &mut Vec<Box<dyn ToSql>>,
+) {
+    if let Some(feed) = filter.feed_id {
+        clauses.push("a.feed_id = ?".to_owned());
+        binds.push(Box::new(feed.0));
+    }
+    for (column, want) in filter.state_flags() {
+        if driving == Some(column) {
+            continue;
+        }
+        if let Some(want) = want {
+            clauses.push(format!("COALESCE(s.{column}, 0) = ?"));
+            binds.push(Box::new(want));
+        }
+    }
+    if let Some(tag) = &filter.tag {
+        clauses.push(
+            "EXISTS (SELECT 1 FROM article_tags at JOIN tags t ON t.id = at.tag_id \
+             WHERE at.article_id = a.id AND t.name = ?)"
+                .to_owned(),
+        );
+        binds.push(Box::new(tag.trim().to_owned()));
+    }
+    if let Some(feed_tag) = &filter.feed_tag {
+        // Folder scope: the feed carries a path tag equal to `feed_tag` or
+        // nested beneath it (`Tech` → `Tech`, `Tech/Databases`, …). The
+        // subtree test is an exact, case-sensitive prefix compare — never
+        // `LIKE`, whose `%`/`_` wildcards would let folder `a_b` match
+        // `axb/…` and whose ASCII case folding the `=` branch lacks.
+        let feed_tag = feed_tag.trim().to_owned();
+        clauses.push(
+            "a.feed_id IN (SELECT f.id FROM feeds f, json_each(f.tags) je \
+             WHERE je.value = ? OR substr(je.value, 1, length(?) + 1) = ? || '/')"
+                .to_owned(),
+        );
+        binds.push(Box::new(feed_tag.clone()));
+        binds.push(Box::new(feed_tag.clone()));
+        binds.push(Box::new(feed_tag));
+    }
+}
+
+/// The publication date [`ListOrder::Published`] sorts by, over the `a`
+/// (articles) alias: `published_at`, an undated article standing at its
+/// `saved_at`. Migration 0015 indexes exactly this expression — `SQLite`
+/// uses an expression index only for a query that spells the same
+/// expression — and the index's implicit trailing rowid is the id
+/// tie-break, so a published-order page walks the index with no sort.
+///
+/// Both columns hold the one fixed-width form every write produces
+/// ([`curio_types::Timestamp`]'s `YYYY-MM-DDTHH:MM:SS.mmmZ`), so text
+/// order is time order, and a cursor's date binds as the very text its
+/// row stores.
+const DATED: &str = "COALESCE(a.published_at, a.saved_at)";
+
+/// [`DATED`] as a membership view reads it: the copy migration 0015 keeps
+/// on each `article_state` row, which that view's date index is keyed on.
+const STATE_DATED: &str = "s.dated";
+
+/// Fills in the date of a [`ListOrder::Published`] cursor that carries
+/// only its row id, from that row — so the compiled query always binds
+/// the cursor's date itself. The id orders need no date and pass through.
+///
+/// # Errors
+///
+/// [`StorageError::NotFound`] (`"article"`) when the cursor's row no
+/// longer exists: with its date gone there is no place to resume from,
+/// and an empty page would read as the end of the list. A cursor built
+/// from the row itself ([`ListCursor::from`]) never needs this lookup.
+pub(super) fn resolve_cursor(
+    conn: &Connection,
+    mut params: ListArticles,
+) -> Result<ListArticles, StorageError> {
+    if params.order != ListOrder::Published {
+        return Ok(params);
+    }
+    if let Some(cursor) = params.after.as_mut().filter(|c| c.dated.is_none()) {
+        let dated: Option<String> = conn
+            .prepare_cached("SELECT COALESCE(published_at, saved_at) FROM articles WHERE id = ?")?
+            .query_row([cursor.id.0], |row| row.get(0))
+            .optional()?;
+        let dated = dated.ok_or(StorageError::NotFound { entity: "article" })?;
+        cursor.dated = Some(parse_ts("articles.published_at", &dated)?);
+    }
+    Ok(params)
+}
+
+/// Compiles [`ListArticles`] into SQL + positional binds; a
+/// [`ListOrder::Published`] cursor is resolved first
+/// ([`resolve_cursor`]). Static clause fragments only — no user input
+/// ever lands in the SQL string (the tag value is a bind). A missing
+/// state row defaults every flag to 0 via `COALESCE`. The query takes one of three shapes:
+///
+/// - a filter that requires a [`MEMBERSHIPS`] flag pages through that
+///   flag's partial index for the order (`INDEXED BY`, so the plan cannot
+///   drift back to a scan or a sort) and joins each member to its article
+///   — `CROSS JOIN` pins that loop order;
+/// - otherwise, when a state filter or the [`Projection::Listed`] columns
+///   need the flags, `articles` is walked in list order with its state
+///   row `LEFT JOIN`ed;
+/// - and the unfiltered [`Projection::Full`] path stays join-free.
+///
+/// Every shape orders by [`ListArticles::order`], keyset-paginated by
+/// [`ListArticles::after`] — filters never change the order — and every
+/// order walks an index in that order, so a page reads only its rows: the
+/// id orders the driving table's key, [`ListOrder::Published`] the
+/// [`DATED`] index, or in a membership view its [`STATE_DATED`] one.
+pub(super) fn list_articles_query(
+    params: &ListArticles,
+    projection: Projection,
+) -> (String, Vec<Box<dyn ToSql>>) {
+    let cols = match projection {
+        Projection::Full => article_cols_prefixed("a"),
+        Projection::Listed => listed_cols(),
+    };
+    let Filtered {
+        from,
+        order_by,
+        filter,
+        mut binds,
+    } = filtered_articles(params, projection == Projection::Listed);
+    let sql = format!("SELECT {cols} FROM {from}{filter} ORDER BY {order_by} LIMIT ?");
+    binds.push(Box::new(params.limit));
+    (sql, binds)
+}
+
+/// Compiles [`ListArticles`] into a `COUNT(*)` of every article its
+/// filters (and `after` cursor) keep across every page — `limit` plays no
+/// part. The same `FROM … WHERE` as [`list_articles_query`]'s whole
+/// articles, so the count is exactly what paging through it walks.
+pub(super) fn count_articles_query(params: &ListArticles) -> (String, Vec<Box<dyn ToSql>>) {
+    let Filtered {
+        from,
+        filter,
+        binds,
+        ..
+    } = filtered_articles(params, false);
+    (format!("SELECT COUNT(*) FROM {from}{filter}"), binds)
+}
+
+/// The `FROM` and `WHERE` (keyword included; empty when nothing filters)
+/// a [`ListArticles`] compiles to, its binds, and the `ORDER BY` terms
+/// the list pages by.
+struct Filtered {
+    from: String,
+    order_by: String,
+    filter: String,
+    binds: Vec<Box<dyn ToSql>>,
+}
+
+/// The keyset half of a list query: pushes the clause (and its binds)
+/// that resumes after `cursor` in `order`, and returns the `ORDER BY`
+/// terms. `id` and `dated` are the id column and the date the query
+/// shape walks — a membership view's `s.article_id` and [`STATE_DATED`],
+/// or `a.id` and [`DATED`]. The id orders always bind a bound (the far
+/// end of the key range when there is no cursor), so each walk is a range
+/// search on the key; the date order adds its clause only with a cursor,
+/// whose date [`resolve_cursor`] has filled in.
+fn keyset(
+    order: ListOrder,
+    cursor: Option<&ListCursor>,
+    (id, dated): (&str, &str),
+    clauses: &mut Vec<String>,
+    binds: &mut Vec<Box<dyn ToSql>>,
+) -> String {
+    match order {
+        ListOrder::Newest => {
+            clauses.push(format!("{id} < ?"));
+            binds.push(Box::new(cursor.map_or(i64::MAX, |c| c.id.0)));
+            format!("{id} DESC")
+        }
+        ListOrder::Oldest => {
+            clauses.push(format!("{id} > ?"));
+            binds.push(Box::new(cursor.map_or(i64::MIN, |c| c.id.0)));
+            format!("{id} ASC")
+        }
+        ListOrder::Published => {
+            if let Some(cursor) = cursor {
+                // `(date, id) < (cursor date, cursor id)`, spelled so the
+                // planner can seek: the `<=` bounds the index range (a
+                // row-value compare would not, as the id is the index's
+                // implicit rowid), the `OR` settles the date's ties. A
+                // cursor still without a date (one that skipped
+                // `resolve_cursor`) binds NULL and matches nothing.
+                clauses.push(format!("{dated} <= ? AND ({dated} < ? OR {id} < ?)"));
+                let date = cursor.dated.map(|dated| dated.to_string());
+                binds.push(Box::new(date.clone()));
+                binds.push(Box::new(date));
+                binds.push(Box::new(cursor.id.0));
+            }
+            format!("{dated} DESC, {id} DESC")
+        }
+    }
+}
+
+/// The shared half of [`list_articles_query`] and
+/// [`count_articles_query`]: picks the query shape (see the former) and
+/// builds the keyset and filter clauses. `listed` says the select list
+/// needs the state flags, so `article_state` is joined even with no state
+/// filter.
+fn filtered_articles(params: &ListArticles, listed: bool) -> Filtered {
+    let filter = params.filter();
+    let state_filters = filter.state_flags();
+    let membership = MEMBERSHIPS.iter().find(|membership| {
+        state_filters
+            .iter()
+            .any(|(filtered, want)| *filtered == membership.column && *want == Some(true))
+    });
+    let needs_state = listed || state_filters.iter().any(|(_, want)| want.is_some());
+    let (from, key) = match membership {
+        Some(membership) => {
+            let index = match params.order {
+                ListOrder::Newest | ListOrder::Oldest => membership.by_id,
+                ListOrder::Published => membership.by_date,
+            };
+            (
+                format!(
+                    "article_state s INDEXED BY {index} \
+                     CROSS JOIN articles a ON a.id = s.article_id"
+                ),
+                ("s.article_id", STATE_DATED),
+            )
+        }
+        None if needs_state => (
+            "articles a LEFT JOIN article_state s ON s.article_id = a.id".to_owned(),
+            ("a.id", DATED),
+        ),
+        None => ("articles a".to_owned(), ("a.id", DATED)),
+    };
+    let mut clauses = Vec::new();
+    let mut binds: Vec<Box<dyn ToSql>> = Vec::new();
+    let order_by = keyset(
+        params.order,
+        params.after.as_ref(),
+        key,
+        &mut clauses,
+        &mut binds,
+    );
+    if let Some(membership) = membership {
+        // A literal, not a bind: a partial index only serves a query whose
+        // WHERE visibly implies the index's own `= 1`.
+        clauses.push(format!("s.{} = 1", membership.column));
+    }
+    push_filter_clauses(
+        &filter,
+        membership.map(|membership| membership.column),
+        &mut clauses,
+        &mut binds,
+    );
+    let filter = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+    Filtered {
+        from,
+        order_by,
+        filter,
+        binds,
+    }
+}
+
+/// The per-feed unread counts: one `feed_unread` row per feed (key 0 =
+/// no feed), kept by migration 0012's triggers — never a scan of the
+/// articles.
+pub(super) const UNREAD_COUNTS: &str = "SELECT feed_key, unread FROM feed_unread WHERE unread > 0";
+
+/// BM25 column weights for `articles_fts(title, content_text)`: a title
+/// hit outranks a body hit.
+const SEARCH_RANK: &str = "bm25(articles_fts, 10.0, 1.0)";
+
+/// Compiles [`SearchArticles`] into SQL + positional binds: the escaped
+/// FTS expression (see `query`) is the first bind, then the
+/// [`ArticleFilter`] clauses exactly as [`list_articles_query`] applies
+/// them, ordered by the title-weighted BM25 rank with `id DESC` breaking
+/// ties. The `article_state` join appears only when the projection or a
+/// state filter needs it. `None` when the query has nothing to match.
+pub(super) fn search_articles_query(
+    params: &SearchArticles,
+    projection: Projection,
+) -> Option<(String, Vec<Box<dyn ToSql>>)> {
+    let expr = fts_match_expr(&params.query)?;
+    let cols = match projection {
+        Projection::Full => article_cols_prefixed("a"),
+        Projection::Listed => listed_cols(),
+    };
+    let needs_state = projection == Projection::Listed
+        || params
+            .filter
+            .state_flags()
+            .iter()
+            .any(|(_, want)| want.is_some());
+    let join = if needs_state {
+        " LEFT JOIN article_state s ON s.article_id = a.id"
+    } else {
+        ""
+    };
+    let mut clauses = vec!["articles_fts MATCH ?".to_owned()];
+    let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(expr)];
+    push_filter_clauses(&params.filter, None, &mut clauses, &mut binds);
+    let sql = format!(
+        "SELECT {cols} FROM articles_fts JOIN articles a ON a.id = articles_fts.rowid{join} \
+         WHERE {} ORDER BY {SEARCH_RANK}, a.id DESC LIMIT ?",
+        clauses.join(" AND ")
+    );
+    binds.push(Box::new(params.limit));
+    Some((sql, binds))
+}
+
+pub(super) fn article_cols_prefixed(alias: &str) -> String {
+    ARTICLE_COLS
+        .split(',')
+        .map(|col| format!("{alias}.{}", col.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Raw row image of a [`Projection::Listed`] row: primitives out of
+/// rusqlite, parsed into the domain type in a second step so parse
+/// failures surface as [`StorageError::Corrupt`], not panics.
+pub(super) struct RawListed {
+    id: i64,
+    curio_id: String,
+    feed_id: Option<i64>,
+    title: String,
+    source_url: String,
+    author: Option<String>,
+    published_at: Option<String>,
+    lang: Option<String>,
+    word_count: Option<u32>,
+    saved_at: String,
+    lead_image: Option<String>,
+    text_prefix: String,
+    state: ArticleState,
+    read_permille: u16,
+    tags: String,
+}
+
+pub(super) fn raw_listed(row: &Row<'_>) -> rusqlite::Result<RawListed> {
+    Ok(RawListed {
+        id: row.get(0)?,
+        curio_id: row.get(1)?,
+        feed_id: row.get(2)?,
+        title: row.get(3)?,
+        source_url: row.get(4)?,
+        author: row.get(5)?,
+        published_at: row.get(6)?,
+        lang: row.get(7)?,
+        word_count: row.get(8)?,
+        saved_at: row.get(9)?,
+        lead_image: row.get(10)?,
+        text_prefix: row.get(11)?,
+        state: ArticleState {
+            read: row.get(12)?,
+            starred: row.get(13)?,
+            read_later: row.get(14)?,
+            archived: row.get(15)?,
+            progress: ReadProgress::START,
+        },
+        read_permille: row.get(16)?,
+        tags: row.get(17)?,
+    })
+}
+
+impl RawListed {
+    pub(super) fn into_listed(mut self) -> Result<ListedArticle, StorageError> {
+        self.state.progress = decode_progress(self.read_permille)?;
+        let mut tags: Vec<String> =
+            serde_json::from_str(&self.tags).map_err(|err| StorageError::Corrupt {
+                column: "tags.name",
+                message: err.to_string(),
+            })?;
+        tags.sort_unstable();
+        // The query reads one character past the snippet's source window;
+        // that character's presence says the text runs on.
+        let mut prefix = self.text_prefix;
+        let runs_on = match prefix.char_indices().nth(SNIPPET_SOURCE_CHARS) {
+            Some((at, _)) => {
+                prefix.truncate(at);
+                true
+            }
+            None => false,
+        };
+        Ok(ListedArticle {
+            id: ArticleId(self.id),
+            curio_id: parse_curio_id(&self.curio_id)?,
+            feed_id: self.feed_id.map(FeedId),
+            title: self.title,
+            source_url: self.source_url,
+            author: self.author,
+            published_at: parse_opt_ts("articles.published_at", self.published_at)?,
+            lang: self.lang,
+            word_count: self.word_count,
+            saved_at: parse_ts("articles.saved_at", &self.saved_at)?,
+            lead_image: self.lead_image,
+            snippet: snippet(&prefix, runs_on),
+            state: self.state,
+            tags,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;

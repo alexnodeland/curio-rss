@@ -1,10 +1,16 @@
-//! List read-path benchmark (#136): the three reads the desktop list makes
-//! on every state change, on the 100 000-article fixture —
+//! List read-path benchmark (#136): the reads the desktop list makes on
+//! every state change, on the 100 000-article fixture —
 //!
 //! - `first_page`: the default view's first page of list rows (state and
 //!   tags included, `archived: false`, 50 rows);
 //! - `starred_page`: the Starred view's first page (`starred: true`,
 //!   `archived: false`);
+//! - `published_page`: the default view in publication-date order, one
+//!   page deep (its keyset cursor seeks the date index);
+//! - `starred_published_page`: the Starred view in publication-date
+//!   order, one page deep — a dense membership (the fixture stars every
+//!   7th article) that pages through its own date index, never sorting
+//!   its members;
 //! - `unread_counts`: the per-feed unread badges.
 //!
 //! The budget is p95 < 10 ms for each. Criterion reports the mean; before
@@ -22,7 +28,7 @@ use std::time::{Duration, Instant};
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use curio_core::CoreHandle;
-use curio_core::storage::ListArticles;
+use curio_core::storage::{ListArticles, ListCursor, ListOrder};
 use curio_fixtures::{FixtureSpec, generate};
 
 const PAGE: u32 = 50;
@@ -79,6 +85,42 @@ fn list_queries(c: &mut Criterion) {
         assert_eq!(rows.len(), PAGE as usize);
         black_box(rows);
     };
+    let first_published = handle
+        .list_article_rows(ListArticles {
+            order: ListOrder::Published,
+            ..default_view()
+        })
+        .expect("published first page");
+    let cursor = first_published.last().map(ListCursor::from);
+    let published_page = || {
+        let rows = handle
+            .list_article_rows(ListArticles {
+                order: ListOrder::Published,
+                after: cursor,
+                ..default_view()
+            })
+            .expect("published page");
+        assert_eq!(rows.len(), PAGE as usize);
+        black_box(rows);
+    };
+    let first_starred_published = handle
+        .list_article_rows(ListArticles {
+            order: ListOrder::Published,
+            ..starred_view()
+        })
+        .expect("starred published first page");
+    let starred_cursor = first_starred_published.last().map(ListCursor::from);
+    let starred_published_page = || {
+        let rows = handle
+            .list_article_rows(ListArticles {
+                order: ListOrder::Published,
+                after: starred_cursor,
+                ..starred_view()
+            })
+            .expect("starred published page");
+        assert_eq!(rows.len(), PAGE as usize);
+        black_box(rows);
+    };
     let unread_counts = || {
         black_box(handle.unread_counts().expect("unread counts"));
     };
@@ -86,6 +128,8 @@ fn list_queries(c: &mut Criterion) {
     for (name, read) in [
         ("first_page", &first_page as &dyn Fn()),
         ("starred_page", &starred_page),
+        ("published_page", &published_page),
+        ("starred_published_page", &starred_published_page),
         ("unread_counts", &unread_counts),
     ] {
         let (p50, p95, max) = percentiles(500, read);
@@ -95,6 +139,10 @@ fn list_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("list_queries_100k");
     group.bench_function("first_page", |b| b.iter(first_page));
     group.bench_function("starred_page", |b| b.iter(starred_page));
+    group.bench_function("published_page", |b| b.iter(published_page));
+    group.bench_function("starred_published_page", |b| {
+        b.iter(starred_published_page);
+    });
     group.bench_function("unread_counts", |b| b.iter(unread_counts));
     group.finish();
 }

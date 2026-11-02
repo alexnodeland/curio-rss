@@ -82,6 +82,17 @@ pub async fn window_chrome(window: tauri::WebviewWindow) -> Result<WindowChromeD
         .iter()
         .find(|config| config.label == window.label())
         .is_some_and(|config| overlay_title_bar(config, cfg!(target_os = "macos")));
+    let fullscreen = fullscreen_or_windowed(&window);
+    Ok(WindowChromeDto {
+        overlay_title_bar: overlay,
+        fullscreen,
+    })
+}
+
+/// The window's fullscreen state, recorded as the tracker's baseline (a
+/// reloaded webview re-seeds it). One the OS will not report reads as
+/// windowed (logged) — the inset stays, the safe side.
+fn fullscreen_or_windowed(window: &tauri::WebviewWindow) -> bool {
     let fullscreen = window.is_fullscreen().unwrap_or_else(|error| {
         tracing::warn!(%error, "could not read the window's fullscreen state");
         false
@@ -89,10 +100,7 @@ pub async fn window_chrome(window: tauri::WebviewWindow) -> Result<WindowChromeD
     if let Some(tracker) = window.try_state::<FullscreenTracker>() {
         tracker.observe(fullscreen);
     }
-    Ok(WindowChromeDto {
-        overlay_title_bar: overlay,
-        fullscreen,
-    })
+    fullscreen
 }
 
 /// Watches the main window's resizes (entering or leaving fullscreen is

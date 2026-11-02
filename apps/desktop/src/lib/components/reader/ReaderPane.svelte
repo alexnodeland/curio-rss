@@ -747,7 +747,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         background: transparent;
         color: var(--fg-muted);
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         cursor: pointer;
         transition:
             background var(--dur-fast) var(--ease),

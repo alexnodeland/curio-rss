@@ -104,7 +104,7 @@ desktop-dev:
 desktop-test:
     cargo test -p curio-desktop
 
-# Frontend bans: {@html} only in SanitizedHtml.svelte, raw invoke imports only in bindings.ts, no raw font-weight numbers in components
+# Frontend bans: {@html} only in SanitizedHtml.svelte, raw invoke imports only in bindings.ts, no raw font weights in components
 frontend-bans:
     bash scripts/check-frontend-bans.sh
 

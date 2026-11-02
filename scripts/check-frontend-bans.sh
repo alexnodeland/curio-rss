@@ -7,9 +7,11 @@
 #   2. `@tauri-apps/api/core` (hand-written invoke) may be imported only by
 #      the generated bindings file — the snake_case/error-shape drift class
 #      stays unrepresentable.
-#   3. No raw numeric `font-weight` in components or routes — weights come
-#      from the `--weight-*` scale in app.css (where the numbers live), so
-#      the type hierarchy stays one consistent set of steps (#156).
+#   3. No raw `font-weight` in components or routes — neither a number nor
+#      a keyword (`bold`, `normal`, …), and no weight inside the `font:`
+#      shorthand. Weights come from the `--weight-*` scale in app.css (where
+#      the numbers live), so the type hierarchy stays one consistent set of
+#      steps (#156).
 #
 # Run from anywhere; CI job `frontend-bans` and the lefthook pre-commit
 # step both call this. Mirrored as an eslint no-restricted-imports rule so
@@ -34,9 +36,13 @@ if [ -n "$invoke_hits" ]; then
     status=1
 fi
 
-weight_hits="$(grep -rnE 'font-weight:[[:space:]]*[0-9]' "$src/lib/components" "$src/routes" --include='*.svelte' --include='*.css' || true)"
+weight_kw='([1-9]00|bold|bolder|lighter|normal)'
+weight_hits="$(grep -rnE \
+    -e "font-weight:[[:space:]]*([0-9]|bold|bolder|lighter|normal)" \
+    -e "(^|[^-[:alnum:]])font:([^;]*[[:space:]])?${weight_kw}([[:space:];]|\$)" \
+    "$src/lib/components" "$src/routes" --include='*.svelte' --include='*.css' || true)"
 if [ -n "$weight_hits" ]; then
-    echo "BAN: raw font-weight number — use a --weight-* token from app.css:" >&2
+    echo "BAN: raw font weight — use a --weight-* token from app.css:" >&2
     echo "$weight_hits" >&2
     status=1
 fi

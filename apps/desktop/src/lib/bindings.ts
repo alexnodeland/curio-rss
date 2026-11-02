@@ -658,11 +658,19 @@ export type ArticleSummaryDto = {
 /**
  *  Article rows or per-article state changed. `feed_id: Some(id)` scopes
  *  the invalidation to one feed's lists; `None` means not scoped to a
- *  single feed (state flips, deletes, refresh-all) — invalidate broadly.
+ *  single feed (deletes, refresh-all, tag edits) — invalidate broadly.
+ * 
+ *  `flags: Some(..)` narrows it further (#135): the change was only one state
+ *  flag set to one value on exactly those articles — no row was added or
+ *  removed and no content changed. The UI cache then patches the articles'
+ *  flags in place and refetches only the lists and counts that flag can move,
+ *  instead of the whole cache.
  */
 export type ArticlesChanged = {
 	/**  The feed whose articles changed, when known. */
 	feed_id: number | null,
+	/**  The state-flag flip this change consists of, when that is all it is. */
+	flags: FlagChange | null,
 };
 
 /**  Mirror of [`curio_core::BulkSaveOutcome`] — what a bulk note export did. */
@@ -1007,6 +1015,30 @@ export type FetchStatusDto =
 "not_modified" | 
 /**  Anything else (recorded, not raised). */
 "error";
+
+/**  One state flag set to one value on a set of articles. */
+export type FlagChange = {
+	/**
+	 *  The articles whose flag now holds `value` (an id that no longer
+	 *  exists may appear; it matches no cached row).
+	 */
+	article_ids: number[],
+	/**  Which flag. */
+	field: FlagField,
+	/**  Its value on every listed article now. */
+	value: boolean,
+};
+
+/**  A per-article state flag, named as its `ArticleStateDto` field. */
+export type FlagField = 
+/**  Read / unread. */
+"read" | 
+/**  Starred. */
+"starred" | 
+/**  In the read-later queue. */
+"read_later" | 
+/**  Archived. */
+"archived";
 
 /**
  *  The main window entered or left fullscreen. Fires on change only;

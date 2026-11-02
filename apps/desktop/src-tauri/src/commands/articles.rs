@@ -54,7 +54,7 @@ pub async fn load_full_article(
         "load_full_article",
         load_full_article_impl(&core, article_id).await,
     )?;
-    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    emit_or_log(&app, &ArticlesChanged::rows(None));
     Ok(article)
 }
 
@@ -71,7 +71,7 @@ pub async fn save_url(
 ) -> Result<SavedUrlDto, CommandError> {
     let core = Arc::clone(core.inner());
     let saved = logged("save_url", save_url_impl(&core, &url, tags).await)?;
-    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    emit_or_log(&app, &ArticlesChanged::rows(None));
     Ok(saved)
 }
 
@@ -134,7 +134,7 @@ pub async fn delete_article(
         delete_article_impl(&core, article_id)
     })
     .await?;
-    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    emit_or_log(&app, &ArticlesChanged::rows(None));
     Ok(())
 }
 

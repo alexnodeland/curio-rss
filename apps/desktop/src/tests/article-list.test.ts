@@ -186,7 +186,7 @@ describe('ArticleList', () => {
         expect(tags.data).toEqual(['kept']);
 
         readId = 500; // opening it marked it read
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await flushIpc();
 
         const first = container.querySelector('.article-row');
@@ -216,7 +216,7 @@ describe('ArticleList', () => {
         expect(container.querySelector('.article-row')?.classList.contains('unread')).toBe(true);
 
         read = true;
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await flushIpc();
         expect(container.querySelector('.article-row')?.classList.contains('unread')).toBe(false);
         unwire();

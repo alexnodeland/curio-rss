@@ -82,7 +82,12 @@ describe('dev mock IPC', () => {
             await flushIpc();
 
             expect(flipped).toHaveLength(feedUnread);
-            expect(recorded.articles).toEqual([{ feed_id: 1 }]);
+            expect(recorded.articles).toEqual([
+                {
+                    feed_id: 1,
+                    flags: { article_ids: flipped, field: 'read', value: true },
+                },
+            ]);
             expect(await unreadIn(1)).toBe(0);
             expect(ok(await commands.getUnreadCounts()).total).toBe(before.total - feedUnread);
 
@@ -94,7 +99,10 @@ describe('dev mock IPC', () => {
             // The toast's Undo restores the badge and the All count.
             expect(ok(await commands.markReadMany(flipped, false))).toBe(feedUnread);
             await flushIpc();
-            expect(recorded.articles).toEqual([{ feed_id: 1 }, { feed_id: null }]);
+            expect(recorded.articles[1]).toEqual({
+                feed_id: null,
+                flags: { article_ids: flipped, field: 'read', value: false },
+            });
             expect(await unreadIn(1)).toBe(feedUnread);
             expect(ok(await commands.getUnreadCounts()).total).toBe(before.total);
         });
@@ -103,7 +111,9 @@ describe('dev mock IPC', () => {
             const recorded = await installMock();
             ok(await commands.markAllRead(null));
             await flushIpc();
-            expect(recorded.articles).toEqual([{ feed_id: null }]);
+            expect(recorded.articles).toHaveLength(1);
+            expect(recorded.articles[0].feed_id).toBeNull();
+            expect(recorded.articles[0].flags?.field).toBe('read');
             expect(ok(await commands.getUnreadCounts()).total).toBe(0);
         });
 
@@ -122,6 +132,14 @@ describe('dev mock IPC', () => {
 
             expect(recorded.articles).toHaveLength(4);
             expect(recorded.articles.every((event) => event.feed_id === null)).toBe(true);
+            // Each flip names exactly its article, flag and new value.
+            expect(recorded.articles.map((event) => event.flags)).toEqual(
+                (['read', 'starred', 'read_later', 'archived'] as const).map((field) => ({
+                    article_ids: [first.id],
+                    field,
+                    value: true,
+                })),
+            );
             expect(recorded.feeds).toBe(0);
         });
 
@@ -164,7 +182,7 @@ describe('dev mock IPC', () => {
             await flushIpc();
 
             expect(recorded.feeds).toBe(1);
-            expect(recorded.articles).toEqual([{ feed_id: null }]);
+            expect(recorded.articles).toEqual([{ feed_id: null, flags: null }]);
             const feeds = ok(await commands.listFeeds());
             expect(feeds.some((feed) => feed.id === 1)).toBe(false);
             expect(ok(await commands.listArticles(listParams({ feed_id: 1 })))).toEqual([]);
@@ -262,7 +280,11 @@ describe('dev mock IPC', () => {
             await flushIpc();
 
             expect(recorded.feeds).toBe(1);
-            expect(added).toMatchObject({ url: newFeed.url, title: 'Example', tags: ['Dev'] });
+            expect(added).toMatchObject({
+                url: newFeed.url,
+                title: 'Example',
+                tags: ['Dev'],
+            });
             expect(before.some((feed) => feed.id === added.id)).toBe(false);
             const after = ok(await commands.listFeeds());
             expect(after.at(-1)?.id).toBe(added.id);
@@ -278,7 +300,7 @@ describe('dev mock IPC', () => {
             ok(await commands.refreshFeed(3));
             await flushIpc();
             expect(recorded.feeds).toBe(1);
-            expect(recorded.articles).toEqual([{ feed_id: 3 }]);
+            expect(recorded.articles).toEqual([{ feed_id: 3, flags: null }]);
         });
     });
 });

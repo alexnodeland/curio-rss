@@ -3,6 +3,9 @@
 //! The `bool` returns are core's "state actually changed" idempotency
 //! signal — the frontend query cache skips invalidation on `false`, and
 //! this layer mirrors that by emitting [`ArticlesChanged`] only on `true`.
+//! Every flip here is a pure flag change, so the event names the articles,
+//! the flag and its new value (`ArticlesChanged::flag`): the cache patches
+//! those rows in place instead of refetching everything (#135).
 
 use std::sync::Arc;
 
@@ -13,7 +16,7 @@ use tauri::{AppHandle, State};
 use super::{SharedCore, run_blocking};
 use crate::dto::ArticleFlagDto;
 use crate::error::CommandError;
-use crate::events::{ArticlesChanged, emit_or_log};
+use crate::events::{ArticlesChanged, FlagField, emit_or_log};
 
 /// Marks read/unread. Returns whether anything changed.
 #[tauri::command]
@@ -28,7 +31,10 @@ pub async fn mark_read(
     let changed =
         run_blocking("mark_read", move || mark_read_impl(&core, article_id, read)).await?;
     if changed {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(None, FlagField::Read, vec![article_id], read),
+        );
     }
     Ok(changed)
 }
@@ -48,7 +54,10 @@ pub async fn mark_all_read(
     let core = Arc::clone(core.inner());
     let changed = run_blocking("mark_all_read", move || mark_all_read_impl(&core, feed_id)).await?;
     if !changed.is_empty() {
-        emit_or_log(&app, &ArticlesChanged { feed_id });
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(feed_id, FlagField::Read, changed.clone(), true),
+        );
     }
     Ok(changed)
 }
@@ -65,12 +74,18 @@ pub async fn mark_read_many(
     read: bool,
 ) -> Result<u64, CommandError> {
     let core = Arc::clone(core.inner());
+    let ids = article_ids.clone();
     let changed = run_blocking("mark_read_many", move || {
-        mark_read_many_impl(&core, &article_ids, read)
+        mark_read_many_impl(&core, &ids, read)
     })
     .await?;
     if changed > 0 {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        // Every id that exists now holds `read` (the unchanged ones already
+        // did), so the whole request is the patch.
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(None, FlagField::Read, article_ids, read),
+        );
     }
     Ok(changed)
 }
@@ -106,7 +121,10 @@ pub async fn set_archived(
     })
     .await?;
     if changed {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(None, FlagField::Archived, vec![article_id], archived),
+        );
     }
     Ok(changed)
 }
@@ -126,7 +144,10 @@ pub async fn set_starred(
     })
     .await?;
     if changed {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(None, FlagField::Starred, vec![article_id], starred),
+        );
     }
     Ok(changed)
 }
@@ -147,7 +168,10 @@ pub async fn set_read_later(
     })
     .await?;
     if changed {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(None, FlagField::ReadLater, vec![article_id], read_later),
+        );
     }
     Ok(changed)
 }
@@ -173,7 +197,10 @@ pub async fn set_flag_many(
     })
     .await?;
     if !changed.is_empty() {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(
+            &app,
+            &ArticlesChanged::flag(None, flag.into(), changed.clone(), value),
+        );
     }
     Ok(changed)
 }

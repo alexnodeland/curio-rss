@@ -353,7 +353,7 @@ describe('multi-select', () => {
             'list_articles',
             rows().filter((item) => item.id !== 305),
         );
-        applyArticlesChanged({ feed_id: null });
+        applyArticlesChanged({ feed_id: null, flags: null });
         await flushIpc();
         expect(selectionStore.selectedIndex).toBe(-1);
 

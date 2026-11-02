@@ -17,6 +17,7 @@ import type {
     CommandError,
     FeedDto,
     FetchErrorKindDto,
+    FlagField,
     NewFeedDto,
     StartupFailureClass,
     StartupFailureDto,
@@ -234,7 +235,16 @@ tokens:
     const articlesChanged =
         (feedId: number | null = null) =>
         (): Promise<void> =>
-            events.articlesChanged.emit({ feed_id: feedId });
+            events.articlesChanged.emit({ feed_id: feedId, flags: null });
+    // A pure state flip names its articles, flag and value (#135), so the
+    // cache patches rows in place exactly as it does in the app.
+    const flagChanged =
+        (feedId: number | null, field: FlagField, articleIds: number[], value: boolean) =>
+        (): Promise<void> =>
+            events.articlesChanged.emit({
+                feed_id: feedId,
+                flags: { article_ids: articleIds, field, value },
+            });
     const feedsChanged = (): Promise<void> => events.feedsChanged.emit();
     async function emitting<T>(
         result: T,
@@ -421,22 +431,32 @@ tokens:
                         .filter((a) => flip(a, 'read', true))
                         .map((a) => a.summary.id)
                         .sort((x, y) => x - y);
-                    return emitting(flipped, flipped.length > 0, articlesChanged(feedId));
+                    return emitting(
+                        flipped,
+                        flipped.length > 0,
+                        flagChanged(feedId, 'read', flipped, true),
+                    );
                 }
                 case 'mark_read_many': {
-                    const count = (args.articleIds as number[]).filter((id) =>
-                        flip(byId(id), 'read', args.read as boolean),
-                    ).length;
-                    return emitting(count, count > 0, articlesChanged());
+                    const ids = args.articleIds as number[];
+                    const read = args.read as boolean;
+                    const count = ids.filter((id) => flip(byId(id), 'read', read)).length;
+                    return emitting(count, count > 0, flagChanged(null, 'read', ids, read));
                 }
                 case 'set_starred':
                     return flipOne(args.articleId, 'starred', args.starred);
                 case 'set_flag_many': {
                     // The ids actually flipped, in the order given (the undo set).
+                    const flag = args.flag as ArticleFlagDto;
+                    const value = args.value as boolean;
                     const flipped = (args.articleIds as number[]).filter((id) =>
-                        flip(byId(id), args.flag as ArticleFlagDto, args.value as boolean),
+                        flip(byId(id), flag, value),
                     );
-                    return emitting(flipped, flipped.length > 0, articlesChanged());
+                    return emitting(
+                        flipped,
+                        flipped.length > 0,
+                        flagChanged(null, flag, flipped, value),
+                    );
                 }
                 case 'set_read_later':
                     return flipOne(args.articleId, 'read_later', args.readLater);
@@ -612,7 +632,10 @@ tokens:
                 case 'sweep_event_retention':
                     return [];
                 case 'add_destination':
-                    destinations.push({ name: String(args.name), root: '/Users/alex/picked' });
+                    destinations.push({
+                        name: String(args.name),
+                        root: '/Users/alex/picked',
+                    });
                     return null;
                 case 'remove_destination': {
                     const i = destinations.findIndex((d) => d.name === args.name);
@@ -717,7 +740,10 @@ tokens:
                     return url;
                 }
                 case 'copy_diagnostics_bundle':
-                    return { token: 'dev-token', path: '/Users/alex/curio-diagnostics.zip' };
+                    return {
+                        token: 'dev-token',
+                        path: '/Users/alex/curio-diagnostics.zip',
+                    };
                 case 'add_feed': {
                     // A canned stand-in for subscribe-time validation: a URL
                     // mentioning `nofeed` has no feed, one mentioning
@@ -822,12 +848,9 @@ tokens:
     }
 
     /** One article's state flag: the command's "changed" bool, `ArticlesChanged` if so. */
-    function flipOne(
-        articleId: unknown,
-        key: keyof ArticleStateDto,
-        value: unknown,
-    ): Promise<boolean> {
-        const changed = flip(byId(articleId as number), key, value as boolean);
-        return emitting(changed, changed, articlesChanged());
+    function flipOne(articleId: unknown, key: FlagField, value: unknown): Promise<boolean> {
+        const id = articleId as number;
+        const changed = flip(byId(id), key, value as boolean);
+        return emitting(changed, changed, flagChanged(null, key, [id], value as boolean));
     }
 }

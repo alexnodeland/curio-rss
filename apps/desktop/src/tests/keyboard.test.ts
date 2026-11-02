@@ -10,6 +10,7 @@ import {
     type ShortcutId,
     createMatcher,
     eventKeyName,
+    frameShortcut,
     paneShortcut,
     shouldIgnoreKeyEvent,
 } from '$lib/keyboard/registry';
@@ -41,6 +42,8 @@ describe('shortcut table', () => {
             'view.readLater': ['g', 'l'],
             'view.archived': ['g', 'e'],
             'view.feeds': ['g', 'f'],
+            'view.toggleSidebar': ['\\'],
+            'view.toggleFocusMode': ['f'],
             'app.addFeed': ['a'],
             'app.settings': [','],
             'help.toggle': ['?'],
@@ -154,6 +157,14 @@ describe('matcher', () => {
         expect(matcher.handle('a', 1)).toEqual({ kind: 'match', id: 'app.addFeed' });
     });
 
+    it('f toggles focus mode alone, yet still completes g f', () => {
+        const matcher = createMatcher();
+        expect(matcher.handle('f', 0)).toEqual({ kind: 'match', id: 'view.toggleFocusMode' });
+        matcher.handle('g', 10);
+        expect(matcher.handle('f', 20)).toEqual({ kind: 'match', id: 'view.feeds' });
+        expect(matcher.handle('\\', 30)).toEqual({ kind: 'match', id: 'view.toggleSidebar' });
+    });
+
     it('unknown keys are none', () => {
         const matcher = createMatcher();
         expect(matcher.handle('z', 0)).toEqual({ kind: 'none' });
@@ -190,6 +201,16 @@ describe('eventKeyName', () => {
     });
 });
 
+describe('frameShortcut', () => {
+    it('resolves only the layout toggles — the keys the sidebar tree lets through', () => {
+        expect(frameShortcut('\\')).toBe('view.toggleSidebar');
+        expect(frameShortcut('f')).toBe('view.toggleFocusMode');
+        expect(frameShortcut('j')).toBeNull();
+        expect(frameShortcut('g')).toBeNull();
+        expect(frameShortcut('?')).toBeNull();
+    });
+});
+
 describe('shortcutKbd', () => {
     it('prints the global key the registry binds, as the help overlay does', () => {
         // Add feed is a plain a; A (Shift+a) is the bulk mark-view-read.
@@ -198,6 +219,8 @@ describe('shortcutKbd', () => {
         expect(shortcutKbd('app.refreshAll')).toBe('R');
         expect(shortcutKbd('article.toggleStar')).toBe('s');
         expect(shortcutKbd('view.all')).toBe('g a');
+        expect(shortcutKbd('view.toggleSidebar')).toBe('\\');
+        expect(shortcutKbd('view.toggleFocusMode')).toBe('f');
     });
 
     it('is undefined for a pane-only action (no tooltip suffix)', () => {

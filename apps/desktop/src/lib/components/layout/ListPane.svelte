@@ -1,8 +1,9 @@
 <script lang="ts">
 /**
- * The middle column: a header (search + destinations entry) over either the
- * filter list or the FTS results, chosen by whether a search is active. The
- * reader reacts to selection regardless of which list is showing.
+ * The middle column: a header (the sidebar toggle, search, the list tools)
+ * over either the filter list or the FTS results, chosen by whether a search
+ * is active. The reader reacts to selection regardless of which list is
+ * showing.
  */
 import ArticleList from '$components/articles/ArticleList.svelte';
 import RedditFeed from '$components/articles/RedditFeed.svelte';
@@ -12,6 +13,7 @@ import Icon from '$components/common/Icon.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
+import { shortcutKbd } from '$lib/keyboard/labels';
 import { feedHomeType } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -31,10 +33,24 @@ const homeType = $derived.by(() => {
 });
 
 const homeOn = $derived(homeType !== null && layoutStore.isHomeLayout(homeType));
+
+const sidebarLabel = $derived(
+    layoutStore.sidebarVisible ? t('pane.sidebar.hide') : t('pane.sidebar.show'),
+);
 </script>
 
 <div class="list-pane">
     <div class="list-header">
+        <button
+            class="list-tool"
+            type="button"
+            aria-expanded={layoutStore.sidebarVisible}
+            aria-label={sidebarLabel}
+            use:tooltip={{ text: sidebarLabel, kbd: shortcutKbd('view.toggleSidebar') }}
+            onclick={() => void layoutStore.toggleSidebar()}
+        >
+            <Icon name="sidebar" />
+        </button>
         <div class="search-slot">
             <SearchBar />
         </div>

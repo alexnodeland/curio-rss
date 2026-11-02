@@ -22,6 +22,7 @@ import { t } from '$lib/i18n';
 import {
     createMatcher,
     eventKeyName,
+    frameShortcut,
     paneShortcut,
     shouldIgnoreKeyEvent,
 } from '$lib/keyboard/registry';
@@ -72,6 +73,26 @@ function handleEscapeStepback(event: KeyboardEvent): boolean {
 }
 
 /**
+ * While the sidebar tree owns the keyboard it handles its own navigation keys
+ * (which stopPropagation), so anything reaching here is a stray that must not
+ * fire an article-pane shortcut underneath the tree. Only the layout toggles
+ * get through: they move the frame, not a pane. Returns true when the sidebar
+ * owned the event.
+ */
+function handleSidebarKey(event: KeyboardEvent): boolean {
+    if (selectionStore.focus !== 'sidebar') {
+        return false;
+    }
+    matcher.reset();
+    const frameId = frameShortcut(eventKeyName(event));
+    if (frameId !== null) {
+        event.preventDefault();
+        handleShortcut(frameId);
+    }
+    return true;
+}
+
+/**
  * Whether nothing in particular holds focus — `<body>` (app launch, or the
  * focused element was unmounted) or the skip-link's `<main>` target. The
  * article list is the default pane, so its keys (↑/↓, Enter/→) work from
@@ -101,11 +122,7 @@ function onKeydown(event: KeyboardEvent): void {
     if (shouldIgnoreKeyEvent(event)) {
         return;
     }
-    if (selectionStore.focus === 'sidebar') {
-        // The sidebar tree owns the keyboard: it handles its own navigation
-        // keys (which stopPropagation), so anything reaching here is a stray
-        // that must not fire an article-pane shortcut underneath the tree.
-        matcher.reset();
+    if (handleSidebarKey(event)) {
         return;
     }
     if (handleEscapeStepback(event)) {

@@ -5,8 +5,11 @@
 
 use super::query::fts_match_expr;
 use super::rows::{parse_curio_id, parse_opt_ts, parse_ts};
+use super::state::decode_progress;
 use super::{ARTICLE_COLS, ArticleFilter, ListArticles, SearchArticles};
-use crate::model::{ArticleId, ArticleState, FeedId, ListedArticle, SNIPPET_SOURCE_CHARS, snippet};
+use crate::model::{
+    ArticleId, ArticleState, FeedId, ListedArticle, ReadProgress, SNIPPET_SOURCE_CHARS, snippet,
+};
 use crate::storage::StorageError;
 use rusqlite::Row;
 use rusqlite::types::ToSql;
@@ -41,7 +44,7 @@ fn listed_cols() -> String {
         "a.id, a.curio_id, a.feed_id, a.title, a.source_url, a.author, a.published_at, a.lang, \
          a.word_count, a.saved_at, a.lead_image, substr(a.content_text, 1, {}), \
          COALESCE(s.is_read, 0), COALESCE(s.is_starred, 0), COALESCE(s.is_read_later, 0), \
-         COALESCE(s.is_archived, 0), \
+         COALESCE(s.is_archived, 0), COALESCE(s.read_permille, 0), \
          (SELECT json_group_array(t.name) FROM article_tags at JOIN tags t ON t.id = at.tag_id \
           WHERE at.article_id = a.id)",
         SNIPPET_SOURCE_CHARS + 1
@@ -240,6 +243,7 @@ pub(super) struct RawListed {
     lead_image: Option<String>,
     text_prefix: String,
     state: ArticleState,
+    read_permille: u16,
     tags: String,
 }
 
@@ -262,13 +266,16 @@ pub(super) fn raw_listed(row: &Row<'_>) -> rusqlite::Result<RawListed> {
             starred: row.get(13)?,
             read_later: row.get(14)?,
             archived: row.get(15)?,
+            progress: ReadProgress::START,
         },
-        tags: row.get(16)?,
+        read_permille: row.get(16)?,
+        tags: row.get(17)?,
     })
 }
 
 impl RawListed {
-    pub(super) fn into_listed(self) -> Result<ListedArticle, StorageError> {
+    pub(super) fn into_listed(mut self) -> Result<ListedArticle, StorageError> {
+        self.state.progress = decode_progress(self.read_permille)?;
         let mut tags: Vec<String> =
             serde_json::from_str(&self.tags).map_err(|err| StorageError::Corrupt {
                 column: "tags.name",

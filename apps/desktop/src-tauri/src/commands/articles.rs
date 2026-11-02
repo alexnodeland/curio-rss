@@ -306,6 +306,11 @@ mod tests {
         core.mark_read(ArticleId(marked), true).unwrap();
         core.set_starred(ArticleId(marked), true).unwrap();
         core.tag_article(ArticleId(marked), "rust").unwrap();
+        core.set_read_progress(
+            ArticleId(marked),
+            curio_core::model::ReadProgress::from_permille(420).unwrap(),
+        )
+        .unwrap();
 
         let page = list_articles_impl(&core, default_params()).unwrap();
         assert_eq!(page[0].id, marked);
@@ -316,6 +321,7 @@ mod tests {
                 starred: true,
                 read_later: false,
                 archived: false,
+                read_permille: 420,
             }
         );
         assert_eq!(page[0].tags, ["rust"]);

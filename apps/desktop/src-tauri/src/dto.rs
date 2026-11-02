@@ -993,6 +993,7 @@ mod tests {
                 starred: false,
                 read_later: true,
                 archived: false,
+                progress: curio_core::model::ReadProgress::from_permille(420).unwrap(),
             },
             tags: vec!["a".to_owned(), "b".to_owned()],
         };
@@ -1008,6 +1009,7 @@ mod tests {
                 starred: false,
                 read_later: true,
                 archived: false,
+                read_permille: 420,
             }
         );
         assert_eq!(dto.tags, ["a", "b"]);

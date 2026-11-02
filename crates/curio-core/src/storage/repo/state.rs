@@ -398,7 +398,7 @@ fn flag_column(flag: ArticleFlag) -> &'static str {
 
 /// The stored thousandths as a [`ReadProgress`] — the column's CHECK keeps
 /// it in range, so a miss means the file was edited outside Curio.
-fn decode_progress(permille: u16) -> Result<ReadProgress, StorageError> {
+pub(super) fn decode_progress(permille: u16) -> Result<ReadProgress, StorageError> {
     ReadProgress::from_permille(permille).ok_or_else(|| StorageError::Corrupt {
         column: "article_state.read_permille",
         message: format!("{permille} is outside 0..=1000"),

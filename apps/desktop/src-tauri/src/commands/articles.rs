@@ -9,7 +9,8 @@ use tauri::{AppHandle, State};
 
 use super::{SharedCore, logged, run_blocking};
 use crate::dto::{
-    ArticleDto, ArticleStateDto, ArticleSummaryDto, ListArticlesDto, SavedUrlDto, UnreadCountsDto,
+    ArticleDto, ArticleStateDto, ArticleSummaryDto, ListArticlesDto, SavedUrlDto,
+    SearchArticlesDto, UnreadCountsDto,
 };
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, emit_or_log};
@@ -136,18 +137,19 @@ pub async fn delete_article(
     Ok(())
 }
 
-/// FTS5 search over title + extracted text (query is phrase-escaped in
-/// core — hostile input cannot break the MATCH grammar).
+/// FTS5 search over title + extracted text, scoped by the list filters and
+/// ranked best match first (title hits above body hits). The query syntax
+/// is compiled to escaped FTS5 in core — hostile input cannot break the
+/// MATCH grammar.
 #[tauri::command]
 #[specta::specta]
 pub async fn search_articles(
     core: State<'_, SharedCore>,
-    query: String,
-    limit: u32,
+    params: SearchArticlesDto,
 ) -> Result<Vec<ArticleSummaryDto>, CommandError> {
     let core = Arc::clone(core.inner());
     run_blocking("search_articles", move || {
-        search_articles_impl(&core, &query, limit)
+        search_articles_impl(&core, params)
     })
     .await
 }
@@ -214,11 +216,10 @@ fn delete_article_impl(core: &CoreHandle, article_id: i64) -> Result<(), Command
 
 fn search_articles_impl(
     core: &CoreHandle,
-    query: &str,
-    limit: u32,
+    params: SearchArticlesDto,
 ) -> Result<Vec<ArticleSummaryDto>, CommandError> {
     Ok(core
-        .search_articles(query, limit)?
+        .search(params.into())?
         .into_iter()
         .map(ArticleSummaryDto::from)
         .collect())
@@ -313,10 +314,49 @@ mod tests {
         let state = get_article_state_impl(&core, id).unwrap();
         assert_eq!(state, crate::dto::ArticleStateDto::default());
 
-        let hits = search_articles_impl(&core, "quenched", 10).unwrap();
+        let hits = search_articles_impl(&core, search_params("quenched")).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, id);
-        assert_eq!(search_articles_impl(&core, "   ", 10).unwrap().len(), 0);
+        assert_eq!(
+            search_articles_impl(&core, search_params("   "))
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    fn search_params(query: &str) -> SearchArticlesDto {
+        SearchArticlesDto {
+            query: query.to_owned(),
+            limit: 10,
+            feed_id: None,
+            read: None,
+            starred: None,
+            read_later: None,
+            archived: None,
+            tag: None,
+            feed_tag: None,
+        }
+    }
+
+    #[test]
+    fn search_is_scoped_by_the_list_filters() {
+        let (_dir, core) = temp_core();
+        let id = seed_article(&core, "quenched");
+        let prefix = search_articles_impl(&core, search_params("quen")).unwrap();
+        assert_eq!(prefix.len(), 1, "the last word matches as a prefix");
+
+        core.mark_read(ArticleId(id), true).unwrap();
+        let unread_only = SearchArticlesDto {
+            read: Some(false),
+            ..search_params("quenched")
+        };
+        assert_eq!(search_articles_impl(&core, unread_only).unwrap(), []);
+        let other_feed = SearchArticlesDto {
+            feed_id: Some(id + 999),
+            ..search_params("quenched")
+        };
+        assert_eq!(search_articles_impl(&core, other_feed).unwrap(), []);
     }
 
     #[test]

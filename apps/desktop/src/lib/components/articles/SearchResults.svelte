@@ -1,12 +1,17 @@
 <script lang="ts">
 /**
- * The middle pane while a search is active: the FTS result window (a fixed,
- * backend-ordered list — no keyset paging) through the same virtualizer and
- * row as the filter list. Selection reads `activeItems`, which is the search
- * results during a search, so j/k and the reader work unchanged.
+ * The middle pane while a search is active: a scope bar (hit count, where the
+ * search runs, and the "search everywhere" toggle) over the FTS result window
+ * (a fixed, backend-ranked list — no keyset paging) through the same
+ * virtualizer and row as the filter list. Selection reads `activeItems`,
+ * which is the search results during a search, so j/k and the reader work
+ * unchanged.
  */
 import { commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
+import type { ArticleFilters } from '$lib/state/articles.svelte';
+import { articlesStore } from '$lib/state/articles.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
@@ -20,6 +25,32 @@ import VirtualList from './VirtualList.svelte';
 const resultsError = $derived(
     searchStore.error === null ? '' : commandErrorMessage(searchStore.error),
 );
+
+/** The name of the view a scoped search runs in (most specific dimension first). */
+function viewName(filters: ArticleFilters): string {
+    if (filters.feedId !== null) {
+        const feed = feedsStore.feeds.find((candidate) => candidate.id === filters.feedId);
+        return feed === undefined ? t('view.feeds') : (feed.title ?? feed.url);
+    }
+    if (filters.feedTag !== null) {
+        return filters.feedTag;
+    }
+    if (filters.tag !== null) {
+        return `#${filters.tag}`;
+    }
+    if (filters.starred === true) {
+        return t('view.starred');
+    }
+    if (filters.readLater === true) {
+        return t('view.readLater');
+    }
+    if (filters.archived === true) {
+        return t('view.archived');
+    }
+    return t('view.all');
+}
+
+const scopeName = $derived(viewName(articlesStore.filters));
 
 /** The listbox's active option: the selected result, when one is selected. */
 const activeDescendantId = $derived(
@@ -82,6 +113,29 @@ function openSelectedMenu(): void {
 </script>
 
 <div class="search-results">
+    <div class="scope-bar">
+        <span class="scope-summary truncate">
+            {#if searchStore.settled && searchStore.error === null}
+                <span class="scope-count">{t('search.results', { count: searchStore.results.length })}</span>
+                <span class="scope-sep" aria-hidden="true">·</span>
+            {/if}
+            <span class="scope-where">
+                {searchStore.everywhere
+                    ? t('search.scope.everywhere')
+                    : t('search.scope.in', { scope: scopeName })}
+            </span>
+        </span>
+        <button
+            class="scope-toggle truncate"
+            type="button"
+            aria-pressed={searchStore.everywhere}
+            onclick={() => searchStore.setEverywhere(!searchStore.everywhere)}
+        >
+            {searchStore.everywhere
+                ? t('search.scope.only', { scope: scopeName })
+                : t('search.scope.widen')}
+        </button>
+    </div>
     {#if searchStore.error !== null}
         <p class="status error" role="alert">{resultsError}</p>
     {:else if searchStore.results.length === 0 && !searchStore.settled}
@@ -125,6 +179,52 @@ function openSelectedMenu(): void {
         flex-direction: column;
         min-height: 0;
         background: var(--bg);
+    }
+
+    .scope-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        min-height: 32px;
+        padding: var(--space-1) var(--space-4);
+        border-bottom: 1px solid var(--hairline);
+        background: var(--surface-list);
+        font-size: var(--text-xs);
+        color: var(--fg-muted);
+    }
+
+    .scope-summary {
+        min-width: 0;
+    }
+
+    .scope-count {
+        color: var(--fg);
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .scope-sep {
+        margin: 0 var(--space-1);
+        color: var(--fg-subtle);
+    }
+
+    .scope-toggle {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 50%;
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--accent);
+        font-size: var(--text-xs);
+        font-weight: 500;
+        transition: background var(--dur-fast) var(--ease);
+    }
+
+    .scope-toggle:hover {
+        background: var(--bg-hover);
     }
 
     .status {

@@ -6,9 +6,9 @@
  */
 import SearchResults from '$components/articles/SearchResults.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
-import { articlesStore } from '$lib/state/articles.svelte';
+import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
-import { SEARCH_LIMIT, searchStore } from '$lib/state/search.svelte';
+import { EVERYWHERE, SEARCH_LIMIT, searchParams, searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
@@ -17,6 +17,7 @@ import {
     type IpcHarness,
     articleStateFixture,
     articleSummaryFixture,
+    feedFixture,
     flushIpc,
     installIpcHarness,
 } from './ipc-harness';
@@ -47,9 +48,82 @@ describe('search store', () => {
         expect(searchStore.active).toBe(true);
         expect(searchStore.results.map((row) => row.id)).toEqual([7]);
         expect(harness.callsFor('search_articles')[0]).toEqual({
-            query: 'rust',
-            limit: SEARCH_LIMIT,
+            params: {
+                query: 'rust',
+                limit: SEARCH_LIMIT,
+                feed_id: null,
+                read: null,
+                starred: null,
+                read_later: null,
+                // The default All view keeps archived articles out.
+                archived: false,
+                tag: null,
+                feed_tag: null,
+            },
         });
+    });
+
+    it('searching inside a feed passes its feed_id', async () => {
+        harness = installIpcHarness({ search_articles: [] });
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: 3 };
+        searchStore.setQuery('rust', 0);
+        await flushIpc();
+
+        const [call] = harness.callsFor('search_articles');
+        expect(call).toEqual({ params: searchParams('rust', { ...ALL_ARTICLES, feedId: 3 }) });
+        expect((call as { params: { feed_id: number } }).params.feed_id).toBe(3);
+    });
+
+    it('is scoped to the folder, tag and built-in view, minus the unread toggle', async () => {
+        harness = installIpcHarness({ search_articles: [] });
+        articlesStore.filters = {
+            ...ALL_ARTICLES,
+            read: false,
+            starred: true,
+            tag: 'later',
+            feedTag: 'Tech',
+        };
+        searchStore.setQuery('rust', 0);
+        await flushIpc();
+
+        const [call] = harness.callsFor('search_articles') as { params: Record<string, unknown> }[];
+        expect(call.params).toMatchObject({
+            read: null,
+            starred: true,
+            tag: 'later',
+            feed_tag: 'Tech',
+            archived: false,
+        });
+    });
+
+    it('search everywhere drops the scope, re-runs, and resets on clear', async () => {
+        harness = installIpcHarness({ search_articles: [] });
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: 3 };
+        searchStore.setQuery('rust', 0);
+        await flushIpc();
+        searchStore.setEverywhere(true);
+        await flushIpc();
+
+        const calls = harness.callsFor('search_articles');
+        expect(calls).toHaveLength(2);
+        expect(calls[1]).toEqual({ params: searchParams('rust', EVERYWHERE) });
+
+        searchStore.clear();
+        expect(searchStore.everywhere).toBe(false);
+        searchStore.setQuery('rust', 0);
+        await flushIpc();
+        expect(harness.callsFor('search_articles')[2]).toEqual({
+            params: searchParams('rust', { ...ALL_ARTICLES, feedId: 3 }),
+        });
+    });
+
+    it('toggling everywhere without a query fires nothing', async () => {
+        harness = installIpcHarness({ search_articles: [] });
+        searchStore.setEverywhere(true);
+        searchStore.setEverywhere(true);
+        await flushIpc();
+        expect(harness.callsFor('search_articles')).toHaveLength(0);
+        expect(searchStore.everywhere).toBe(true);
     });
 
     it('an empty query clears the results without a call', async () => {
@@ -104,7 +178,7 @@ describe('search store', () => {
             await vi.advanceTimersByTimeAsync(300);
             const calls = harness.callsFor('search_articles');
             expect(calls).toHaveLength(1);
-            expect(calls[0]).toEqual({ query: 'rus', limit: SEARCH_LIMIT });
+            expect(calls[0]).toEqual({ params: searchParams('rus', searchStore.scope) });
         } finally {
             vi.useRealTimers();
         }
@@ -178,6 +252,44 @@ describe('SearchResults', () => {
         const { getByText } = render(SearchResults);
         await flushIpc();
         expect(getByText('No matches')).toBeTruthy();
+    });
+
+    it('names the scope and widens it with the everywhere toggle', async () => {
+        harness = installIpcHarness({
+            search_articles: [articleSummaryFixture({ id: 7 }), articleSummaryFixture({ id: 8 })],
+            get_article_state: articleStateFixture(),
+            list_feeds: [feedFixture({ id: 3, title: 'Lobsters' })],
+        });
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: 3 };
+        searchStore.setQuery('x', 0);
+        await flushIpc();
+        const { getByRole, getByText } = render(SearchResults);
+        await flushIpc();
+
+        expect(getByText('2 results')).toBeTruthy();
+        expect(getByText('In Lobsters')).toBeTruthy();
+        const toggle = getByRole('button', { name: 'Search everywhere' });
+        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.click(toggle);
+        await flushIpc();
+        expect(searchStore.everywhere).toBe(true);
+        expect(getByText('Everywhere')).toBeTruthy();
+        expect(getByRole('button', { name: 'Only Lobsters' }).getAttribute('aria-pressed')).toBe(
+            'true',
+        );
+        const calls = harness.callsFor('search_articles') as { params: { feed_id: unknown } }[];
+        expect(calls.at(-1)?.params.feed_id).toBeNull();
+    });
+
+    it('names a built-in view when no feed or folder is selected', async () => {
+        harness = installIpcHarness({ search_articles: [], list_feeds: [] });
+        articlesStore.filters = { ...ALL_ARTICLES, starred: true };
+        searchStore.setQuery('x', 0);
+        await flushIpc();
+        const { getByText } = render(SearchResults);
+        await flushIpc();
+        expect(getByText('In Starred')).toBeTruthy();
     });
 
     it('does not flash "No matches" while the query is still pending', () => {

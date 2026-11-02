@@ -274,10 +274,12 @@ export const commands = {
 	/**  Deletes an article (cascades state/tags/FTS). */
 	deleteArticle: (articleId: number) => typedError<null, CommandError>(__TAURI_INVOKE("delete_article", { articleId })),
 	/**
-	 *  FTS5 search over title + extracted text (query is phrase-escaped in
-	 *  core — hostile input cannot break the MATCH grammar).
+	 *  FTS5 search over title + extracted text, scoped by the list filters and
+	 *  ranked best match first (title hits above body hits). The query syntax
+	 *  is compiled to escaped FTS5 in core — hostile input cannot break the
+	 *  MATCH grammar.
 	 */
-	searchArticles: (query: string, limit: number) => typedError<ArticleSummaryDto[], CommandError>(__TAURI_INVOKE("search_articles", { query, limit })),
+	searchArticles: (params: SearchArticlesDto) => typedError<ArticleSummaryDto[], CommandError>(__TAURI_INVOKE("search_articles", { params })),
 	/**  Marks read/unread. Returns whether anything changed. */
 	markRead: (articleId: number, read: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("mark_read", { articleId, read })),
 	/**
@@ -1259,6 +1261,34 @@ export type SavedUrlDto = {
 	 *  unreachable page — the bare link is kept — and for existing rows).
 	 */
 	hydrated: boolean,
+};
+
+/**
+ *  Mirror of [`SearchArticles`]: a query in Curio's search syntax (the
+ *  last word matches as a prefix; `"phrase"`, `word*`, `-excluded`,
+ *  `a OR b`), scoped by the [`ListArticlesDto`] filters (all `None` =
+ *  everywhere, archived included). Ranking is backend-owned: best match
+ *  first, a title hit above a body hit.
+ */
+export type SearchArticlesDto = {
+	/**  The user's query text. */
+	query: string,
+	/**  Maximum number of hits. */
+	limit: number,
+	/**  Restrict to one feed. */
+	feed_id: number | null,
+	/**  Keep only (un)read articles. */
+	read: boolean | null,
+	/**  Keep only (un)starred articles. */
+	starred: boolean | null,
+	/**  Keep only articles (not) in the read-later queue. */
+	read_later: boolean | null,
+	/**  Keep only (un)archived articles. */
+	archived: boolean | null,
+	/**  Keep only articles carrying this tag. */
+	tag: string | null,
+	/**  Keep only articles whose feed is in this folder (or beneath it). */
+	feed_tag: string | null,
 };
 
 /**  Why startup failed — the class the recovery screen branches on. */

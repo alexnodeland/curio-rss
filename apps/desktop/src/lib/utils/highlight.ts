@@ -11,11 +11,18 @@ export interface HighlightSegment {
     readonly mark: boolean;
 }
 
-/** The query's word tokens (letters/numbers), lower-cased; FTS operators drop out. */
+/** A query atom: an optionally `-`-excluded `"phrase"` (maybe unterminated) or bare word. */
+const QUERY_ATOM = /-?"[^"]*"?|\S+/gu;
+
+/**
+ * The query's word tokens (letters/numbers), lower-cased. Search-syntax
+ * operators drop out: an `OR`, and every `-excluded` word or phrase — it is
+ * what a hit does *not* contain, so there is nothing of it to mark.
+ */
 function queryTerms(query: string): string[] {
-    return query
-        .toLowerCase()
-        .split(/[^\p{L}\p{N}]+/u)
+    return (query.match(QUERY_ATOM) ?? [])
+        .filter((atom) => atom !== 'OR' && !atom.startsWith('-'))
+        .flatMap((atom) => atom.toLowerCase().split(/[^\p{L}\p{N}]+/u))
         .filter((term) => term.length > 0);
 }
 

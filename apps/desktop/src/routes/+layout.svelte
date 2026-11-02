@@ -27,6 +27,15 @@ let { children }: { children: Snippet } = $props();
  */
 let phase: 'checking' | 'app' | 'recovery' = $state('checking');
 
+/** The stores that read the boot-mirrored keys (`BOOT_KEYS`) adopt them —
+ *  once from the mirror before the shell mounts, again from the backend. */
+function adoptBootSettings(): void {
+    localeStore.init();
+    layoutStore.initLayout();
+    typographyStore.initTypography();
+    prefsStore.initReading();
+}
+
 onMount(() => {
     const teardowns: Array<() => void> = [];
     let unmounted = false;
@@ -51,18 +60,21 @@ onMount(() => {
             phase = 'recovery';
             return;
         }
+        // The boot mirror before the shell mounts: the last-known pane
+        // widths, density, typography and locale apply on the first paint
+        // (the theme already did, from app.html), so nothing shifts when the
+        // backend's settings land below.
+        settingsStore.primeFromMirror();
+        adoptBootSettings();
         phase = 'app';
         // Settings first: the persisted theme wins over the preload's
         // localStorage mirror once the backend answers.
         await settingsStore.load();
-        localeStore.init();
         // Custom themes before initTheme: a custom preference must resolve
         // against a populated list and have its rule injected pre-paint.
         themeStore.initCustomThemes();
         themeStore.initTheme();
-        layoutStore.initLayout();
-        typographyStore.initTypography();
-        prefsStore.initReading();
+        adoptBootSettings();
         prefsStore.initRefresh();
         prefsStore.initNotifications();
         prefsStore.initUpdates();

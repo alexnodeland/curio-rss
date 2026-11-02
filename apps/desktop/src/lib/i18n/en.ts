@@ -134,7 +134,7 @@ export const en = {
     'reader.action.focusMode': 'Focus mode',
     'reader.action.exitFocusMode': 'Exit focus mode',
     'reader.meta.words': '{count, plural, one {# word} other {# words}}',
-    'article.date.firstSeen': 'First seen {date}',
+    'article.date.firstSeen': 'First seen: {date}',
     'article.date.firstSeenHint': 'The feed gave no publication date',
     'reddit.postedBy': 'Posted by u/{author}',
 

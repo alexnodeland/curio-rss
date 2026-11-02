@@ -94,6 +94,36 @@ export function formatIntlDate(date: Date, now: Date = new Date()): string {
     }).format(date);
 }
 
+/** How many calendar days back the list says "yesterday" / "3 days ago"
+ *  instead of a date. */
+export const LIST_DATE_RELATIVE_DAYS = 6;
+
+/** Local calendar days from `date` to `now` (positive = `date` is earlier). */
+function calendarDaysBefore(date: Date, now: Date): number {
+    const startOf = (value: Date): number =>
+        new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+    // Rounded, so a DST day (23 or 25 hours) still counts as one.
+    return Math.round((startOf(now) - startOf(date)) / 86_400_000);
+}
+
+/** A list row's date, scaled to its age — in the active locale: the time of
+ *  day for today (`4:05 PM`), a relative day for the last
+ *  {@link LIST_DATE_RELATIVE_DAYS} days (`yesterday`, `3 days ago`), and the
+ *  {@link formatIntlDate} date otherwise (also for a future date, which a
+ *  feed's clock skew can produce on a later day). `''` when unparseable. */
+export function formatIntlListDate(date: Date, now: Date = new Date()): string {
+    if (Number.isNaN(date.getTime())) return '';
+    const locale = localeStore.active;
+    const days = calendarDaysBefore(date, now);
+    if (days === 0) {
+        return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date);
+    }
+    if (days > 0 && days <= LIST_DATE_RELATIVE_DAYS) {
+        return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-days, 'day');
+    }
+    return formatIntlDate(date, now);
+}
+
 /** Full date + time, e.g. `Jun 3, 2025, 4:05 PM` — in the active locale.
  *  Returns `''` for an unparseable date (see `formatIntlDate`). */
 export function formatIntlDateTime(date: Date): string {

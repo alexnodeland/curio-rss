@@ -411,7 +411,7 @@ function hue(text: string): number {
         height: 20px;
         border-radius: var(--radius-sm);
         font-size: 0.68rem;
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         color: hsl(var(--mono-hue) 60% 80%);
         background: hsl(var(--mono-hue) 45% 34% / 0.5);
         box-shadow: inset 0 0 0 1px hsl(var(--mono-hue) 50% 58% / 0.3);
@@ -434,7 +434,7 @@ function hue(text: string): number {
         background: var(--surface-raised);
         color: var(--fg-muted);
         font-size: 0.7rem;
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.5;

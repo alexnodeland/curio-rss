@@ -61,7 +61,7 @@ let {
 
     .empty-title {
         font-size: var(--text-lg);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         color: var(--fg);
         letter-spacing: var(--tracking-snug);
     }

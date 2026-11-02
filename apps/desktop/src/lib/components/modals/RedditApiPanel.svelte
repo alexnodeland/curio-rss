@@ -133,7 +133,7 @@ async function remove(): Promise<void> {
 
     h4 {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -187,7 +187,7 @@ async function remove(): Promise<void> {
         padding: 0 var(--space-4);
         border-radius: var(--radius-md);
         font-size: var(--text-sm);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
     }
 
     .save {
@@ -219,7 +219,7 @@ async function remove(): Promise<void> {
         background: transparent;
         color: var(--accent);
         font-size: var(--text-xs);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .link-button:hover {

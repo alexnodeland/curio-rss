@@ -4,7 +4,7 @@
  * and the keyboard actions so each surface reads them the same way.
  */
 import type { ArticleSummaryDto, FeedDto } from '$lib/bindings';
-import { formatIntlDate, t } from '$lib/i18n';
+import { formatIntlListDate, t } from '$lib/i18n';
 
 /**
  * Whether the article is a link-less feed entry. The published frontmatter
@@ -62,14 +62,17 @@ export interface ListDateLabel {
 /**
  * The date every list layout (row, Reddit card, YouTube card) shows: the
  * publication date, or — for a date-less entry — when Curio first saw it,
- * labelled as such so it never reads as a publish date. `null` when the
- * timestamp is unparseable, so the layout renders no date at all.
+ * labelled as such so it never reads as a publish date. Scaled to its age
+ * ({@link formatIntlListDate}): a time for today, a relative day for the last
+ * few days, a date otherwise. `null` when the timestamp is unparseable, so
+ * the layout renders no date at all.
  */
 export function listDateLabel(
     article: Pick<ArticleSummaryDto, 'published_at' | 'saved_at'>,
+    now: Date = new Date(),
 ): ListDateLabel | null {
     const { iso, firstSeen } = articleDate(article);
-    const date = formatIntlDate(new Date(iso));
+    const date = formatIntlListDate(new Date(iso), now);
     if (date === '') {
         return null;
     }

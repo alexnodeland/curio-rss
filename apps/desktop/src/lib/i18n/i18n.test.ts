@@ -1,8 +1,15 @@
 /**
  * i18n routing: typed lookup, interpolation, and the Intl date helpers.
  */
-import { formatIntlDate, formatIntlDateTime, t } from '$lib/i18n';
-import { describe, expect, it } from 'vitest';
+import {
+    LIST_DATE_RELATIVE_DAYS,
+    formatIntlDate,
+    formatIntlDateTime,
+    formatIntlListDate,
+    localeStore,
+    t,
+} from '$lib/i18n';
+import { afterEach, describe, expect, it } from 'vitest';
 
 describe('t', () => {
     it('resolves a message key', () => {
@@ -58,5 +65,52 @@ describe('Intl date helpers', () => {
         const formatted = formatIntlDateTime(new Date('2026-03-05T13:45:00'));
         expect(formatted).toContain('Mar 5, 2026');
         expect(formatted).toMatch(/1:45/);
+    });
+});
+
+describe('formatIntlListDate — a list date scaled to its age', () => {
+    // Local wall-clock dates, so the calendar-day maths holds in any TZ.
+    const now = new Date(2026, 9, 31, 18, 30);
+
+    afterEach(() => {
+        localeStore.reset();
+    });
+
+    it('shows the time of day for an article published today', () => {
+        expect(formatIntlListDate(new Date(2026, 9, 31, 9, 5), now)).toMatch(/^9:05\sAM$/);
+        // Just after midnight is still today, not "yesterday".
+        expect(formatIntlListDate(new Date(2026, 9, 31, 0, 1), now)).toMatch(/^12:01\sAM$/);
+    });
+
+    it('says "yesterday" by calendar day, not by 24-hour distance', () => {
+        // 19 hours earlier, but on the previous calendar day.
+        expect(formatIntlListDate(new Date(2026, 9, 30, 23, 30), now)).toBe('yesterday');
+    });
+
+    it('counts back relative days for the last few days', () => {
+        expect(formatIntlListDate(new Date(2026, 9, 28, 12, 0), now)).toBe('3 days ago');
+        const edge = new Date(2026, 9, 31 - LIST_DATE_RELATIVE_DAYS, 12, 0);
+        expect(formatIntlListDate(edge, now)).toBe(`${LIST_DATE_RELATIVE_DAYS} days ago`);
+    });
+
+    it('falls back to the date beyond the relative window', () => {
+        const older = new Date(2026, 9, 31 - LIST_DATE_RELATIVE_DAYS - 1, 12, 0);
+        expect(formatIntlListDate(older, now)).toBe(formatIntlDate(older, now));
+        expect(formatIntlListDate(new Date(2024, 2, 5, 12, 0), now)).toBe('March 5, 2024');
+    });
+
+    it('shows a future day (feed clock skew) as a date, never "in 2 days"', () => {
+        expect(formatIntlListDate(new Date(2026, 10, 2, 8, 0), now)).toBe('November 2');
+    });
+
+    it('localizes the time and the relative day', () => {
+        localeStore.active = 'de';
+        // German reads the 24-hour clock — no AM/PM.
+        expect(formatIntlListDate(new Date(2026, 9, 31, 17, 5), now)).toBe('17:05');
+        expect(formatIntlListDate(new Date(2026, 9, 30, 9, 5), now)).toBe('gestern');
+    });
+
+    it('returns an empty string for an unparseable date', () => {
+        expect(formatIntlListDate(new Date('not-a-date'), now)).toBe('');
     });
 });

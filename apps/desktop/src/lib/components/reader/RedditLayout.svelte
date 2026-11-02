@@ -150,7 +150,7 @@ function linkHost(url: string): string {
     .subreddit {
         font-family: var(--font-family);
         font-size: var(--text-md);
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         color: var(--fg);
     }
 
@@ -164,7 +164,7 @@ function linkHost(url: string): string {
         margin-left: auto;
         font-family: var(--font-family);
         font-size: var(--text-xs);
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         letter-spacing: var(--tracking-wide);
         color: #ff4500;
         opacity: 0.85;
@@ -215,7 +215,7 @@ function linkHost(url: string): string {
     .link-card-host {
         font-family: var(--font-family);
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
     }
 
     .link-card-url {
@@ -249,7 +249,7 @@ function linkHost(url: string): string {
         color: var(--fg-muted);
         font-family: var(--font-family);
         font-size: var(--text-sm);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);

@@ -13,6 +13,7 @@ import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import Icon from '$components/common/Icon.svelte';
 import { subredditOf } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { listDateLabel } from '$lib/utils/article';
@@ -54,7 +55,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         <div class="feed" role="listbox" aria-label={t('list.label')}>
             {#each list.items as article (article.id)}
                 {@const sub = subredditOf(article.source_url)}
-                {@const date = listDateLabel(article)}
+                {@const date = listDateLabel(article, dayClock.now)}
                 <button
                     class="card"
                     class:selected={article.id === selectionStore.selectedArticleId}
@@ -171,7 +172,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     }
 
     .sub {
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         color: #ff6a33;
     }
 
@@ -199,7 +200,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     .title {
         font-family: var(--font-family);
         font-size: var(--text-base);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         line-height: 1.35;
         color: var(--fg);
         letter-spacing: var(--tracking-snug);
@@ -207,7 +208,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 
     .card.read .title {
         color: var(--fg-muted);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .foot {
@@ -222,7 +223,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         gap: 5px;
         font-family: var(--font-family);
         font-size: var(--text-xs);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-subtle);
     }
 </style>

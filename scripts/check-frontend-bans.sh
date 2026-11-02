@@ -7,6 +7,11 @@
 #   2. `@tauri-apps/api/core` (hand-written invoke) may be imported only by
 #      the generated bindings file — the snake_case/error-shape drift class
 #      stays unrepresentable.
+#   3. No raw `font-weight` in components or routes — neither a number nor
+#      a keyword (`bold`, `normal`, …), and no weight inside the `font:`
+#      shorthand. Weights come from the `--weight-*` scale in app.css (where
+#      the numbers live), so the type hierarchy stays one consistent set of
+#      steps (#156).
 #
 # Run from anywhere; CI job `frontend-bans` and the lefthook pre-commit
 # step both call this. Mirrored as an eslint no-restricted-imports rule so
@@ -31,7 +36,18 @@ if [ -n "$invoke_hits" ]; then
     status=1
 fi
 
+weight_kw='([1-9]00|bold|bolder|lighter|normal)'
+weight_hits="$(grep -rnE \
+    -e "font-weight:[[:space:]]*([0-9]|bold|bolder|lighter|normal)" \
+    -e "(^|[^-[:alnum:]])font:([^;]*[[:space:]])?${weight_kw}([[:space:];]|\$)" \
+    "$src/lib/components" "$src/routes" --include='*.svelte' --include='*.css' || true)"
+if [ -n "$weight_hits" ]; then
+    echo "BAN: raw font weight — use a --weight-* token from app.css:" >&2
+    echo "$weight_hits" >&2
+    status=1
+fi
+
 if [ "$status" -eq 0 ]; then
-    echo "frontend bans: OK — no stray {@html}, no hand-written invoke imports"
+    echo "frontend bans: OK — no stray {@html}, no hand-written invoke imports, no raw font weights"
 fi
 exit "$status"

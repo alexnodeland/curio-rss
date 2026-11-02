@@ -150,13 +150,13 @@ export class TypographyStore {
             TYPOGRAPHY_LIMITS.paragraphSpacing.default,
         );
         const persistedFont = settingsStore.get(SETTING_KEYS.fontFamily);
-        if (persistedFont !== undefined && isReaderFontId(persistedFont)) {
-            this.fontFamily = persistedFont;
-        }
+        this.fontFamily =
+            persistedFont !== undefined && isReaderFontId(persistedFont) ? persistedFont : 'serif';
         const persistedAlign = settingsStore.get(SETTING_KEYS.textAlign);
-        if (persistedAlign !== undefined && isReaderTextAlign(persistedAlign)) {
-            this.textAlign = persistedAlign;
-        }
+        this.textAlign =
+            persistedAlign !== undefined && isReaderTextAlign(persistedAlign)
+                ? persistedAlign
+                : 'left';
         this.fontWeight = readNumber(
             SETTING_KEYS.fontWeight,
             TYPOGRAPHY_LIMITS.fontWeight,
@@ -169,9 +169,10 @@ export class TypographyStore {
         );
         this.hyphenate = settingsStore.get(SETTING_KEYS.hyphenate) === 'true';
         const persistedReadingTheme = settingsStore.get(SETTING_KEYS.readingTheme);
-        if (persistedReadingTheme !== undefined && isReaderTheme(persistedReadingTheme)) {
-            this.readingTheme = persistedReadingTheme;
-        }
+        this.readingTheme =
+            persistedReadingTheme !== undefined && isReaderTheme(persistedReadingTheme)
+                ? persistedReadingTheme
+                : 'default';
     }
 
     /** Sets the reader font size (px), clamped, and persists it. */

@@ -325,7 +325,7 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         color: var(--accent);
         border: none;
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         cursor: pointer;
     }
 
@@ -376,7 +376,7 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         color: var(--fg);
         line-height: 1.25;
         letter-spacing: var(--tracking-snug);
-        font-weight: 640;
+        font-weight: var(--weight-heading);
         margin: 1.9em 0 0.6em;
     }
 
@@ -487,7 +487,7 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
     .sanitized-content :global(th) {
         background: var(--reader-tint);
         color: var(--fg);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         white-space: nowrap;
     }
 
@@ -614,7 +614,7 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
     }
 
     .sanitized-content :global(strong) {
-        font-weight: 680;
+        font-weight: var(--weight-bold);
         color: var(--fg);
     }
 

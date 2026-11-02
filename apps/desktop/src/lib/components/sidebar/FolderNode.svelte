@@ -307,7 +307,7 @@ function onFolderDrop(event: DragEvent): void {
         color: var(--fg-muted);
         text-align: left;
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition: background var(--dur-fast) var(--ease);
     }
 
@@ -362,7 +362,7 @@ function onFolderDrop(event: DragEvent): void {
         background: var(--surface-raised);
         color: var(--fg-muted);
         font-size: 0.7rem;
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.5;

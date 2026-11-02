@@ -475,7 +475,7 @@ async function saveLink(): Promise<void> {
 
     .field-label {
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         color: var(--fg-subtle);
     }
 
@@ -551,7 +551,7 @@ async function saveLink(): Promise<void> {
         padding: var(--space-2) var(--space-4);
         background: var(--accent);
         color: var(--accent-fg);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
     }
 
     .add-button:hover:not(:disabled) {
@@ -571,7 +571,7 @@ async function saveLink(): Promise<void> {
     .candidates legend {
         padding: 0 var(--space-1);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         color: var(--fg-subtle);
     }
 

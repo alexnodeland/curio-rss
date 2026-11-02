@@ -297,6 +297,16 @@ describe('actions — toggles', () => {
         await openInBrowser(7, 'file:///etc/passwd');
         expect(harness.calls).toHaveLength(0);
     });
+
+    it('openInBrowser on an article never shown in the reader records the open without a dwell', async () => {
+        harness = installIpcHarness({
+            'plugin:opener|open_url': null,
+            record_opened: null,
+        });
+        await openInBrowser(7, 'https://example.org/post/7');
+        // Read only in the browser: Curio cannot measure how long.
+        expect(harness.callsFor('record_opened')).toEqual([{ articleId: 7, dwellMs: null }]);
+    });
 });
 
 describe('actions — views and shortcut routing', () => {

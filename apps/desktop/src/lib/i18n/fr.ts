@@ -131,6 +131,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'list.filter.all': 'Afficher tous les articles',
     'list.row.unread': 'Non lu',
     'list.row.starred': 'Favori',
+    'list.row.progress': '{percent} lu',
     'reader.empty': 'Sélectionnez un article à lire',
     'reader.hint.move': 'pour naviguer',
     'reader.hint.read': 'pour lire',
@@ -157,7 +158,10 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'reader.action.typography': 'Typographie',
     'reader.action.focusMode': 'Mode concentration',
     'reader.action.exitFocusMode': 'Quitter le mode concentration',
+    'reader.action.copyLink': 'Copier le lien',
     'reader.meta.words': '{count, plural, one {# mot} other {# mots}}',
+    'reader.meta.minutes':
+        '{count, plural, one {# minute de lecture} other {# minutes de lecture}}',
     'article.date.firstSeen': 'Vu pour la première fois : {date}',
     'article.date.firstSeenHint': 'Le flux n’indique aucune date de publication',
     'reddit.postedBy': 'Publié par u/{author}',
@@ -238,6 +242,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll.done': '{written} note(s) exportée(s) ; {unchanged} déjà à jour',
     'destinations.needNameAndFolder': 'Saisissez d’abord un nom et choisissez un dossier.',
     'toast.promote.saved': 'Enregistré dans {name}',
+    'toast.linkCopied': 'Lien copié',
+    'toast.linkCopyFailed': 'Impossible de copier le lien',
     'toast.promote.unchanged': 'Déjà à jour dans {name}',
     'toast.markAllRead':
         '{count, plural, one {# article marqué comme lu} other {# articles marqués comme lus}}',

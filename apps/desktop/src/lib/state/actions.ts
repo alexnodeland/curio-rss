@@ -21,6 +21,7 @@ import {
 import { type MessageKey, t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { isLinkless } from '$lib/utils/article';
+import { copyText } from '$lib/utils/clipboard';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { isOpenableUrl, openExternal } from '$lib/utils/external';
 import {
@@ -45,6 +46,7 @@ import {
     queryKeys,
     unpinArticleFlag,
 } from './query-cache.svelte';
+import { readingSession } from './reading-session';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
 import { type ToastOptions, toastStore } from './toasts.svelte';
@@ -896,6 +898,11 @@ export function pageReader(direction: 'down' | 'up'): void {
 /**
  * Opens the article's source in the OS browser and records the open.
  * Non-http(s) URLs are refused outright — no open, no `article.opened`.
+ *
+ * The article in the reader records through its reading session, with the
+ * time read so far as the dwell. Any other row (a context menu on an
+ * article never shown) went straight to the browser: Curio cannot see how
+ * long it is read there, so that open carries no dwell.
  */
 export async function openInBrowser(articleId: number, url: string): Promise<void> {
     if (!isOpenableUrl(url)) {
@@ -907,7 +914,22 @@ export async function openInBrowser(articleId: number, url: string): Promise<voi
         toastStore.showToast(t('app.error.internal'), 'error');
         return;
     }
+    if (readingSession.recordExternalOpen(articleId)) {
+        return;
+    }
     await run(() => commands.recordOpened(articleId, null));
+}
+
+/**
+ * Copies the article's source URL to the clipboard and says so. A link-less
+ * entry has no page of its own, so its surfaces never offer this.
+ */
+export async function copyLink(url: string): Promise<void> {
+    const copied = await copyText(url);
+    toastStore.showToast(
+        t(copied ? 'toast.linkCopied' : 'toast.linkCopyFailed'),
+        copied ? 'success' : 'error',
+    );
 }
 
 /**

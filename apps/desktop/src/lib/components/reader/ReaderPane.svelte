@@ -28,6 +28,7 @@ import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
 import { advertisedKeys, keyLabel, shortcutKbd } from '$lib/keyboard/labels';
 import { type ShortcutId, eventKeyName, paneShortcut } from '$lib/keyboard/registry';
 import {
+    copyLink,
     handleShortcut,
     loadFullArticle,
     markReadOnOpen,
@@ -44,9 +45,11 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
+import { readingSession } from '$lib/state/reading-session';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
 import { windowChromeStore } from '$lib/state/window-chrome.svelte';
+import { PERMILLE_END, permilleAt, readMinutes, resumable, resumeScroll } from '$lib/utils/reading';
 import { articleDate, isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
@@ -58,7 +61,7 @@ import { tooltip } from '$lib/actions/tooltip';
 import ArticleTags from './ArticleTags.svelte';
 import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
-import { untrack } from 'svelte';
+import { onDestroy, untrack } from 'svelte';
 
 type HintPart = { readonly ids: readonly ShortcutId[]; readonly label: MessageKey };
 
@@ -349,13 +352,130 @@ $effect(() => {
     }
 });
 
+// ─── reading session, position and resume (#153) ────────────────────────────
+
+/** Whether the selected article's body is in hand (a boolean, so a refetch
+ *  that swaps the data object never restarts what depends on it). */
+const bodyLoaded = $derived(articleQuery?.data != null);
+
+/** The window is in the foreground: visible and focused. */
+function windowActive(): boolean {
+    return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+// One reading session per selection, once its body has loaded (a failed load
+// was never read). The session ends — recording the open with its dwell — as
+// the selection moves on, the reader closes or the pane unmounts.
+$effect(() => {
+    const articleId = selectedId;
+    if (articleId === null || !bodyLoaded) {
+        return;
+    }
+    untrack(() => readingSession.begin(articleId, windowActive()));
+    return () => {
+        if (readingSession.articleId === articleId) {
+            readingSession.end();
+        }
+    };
+});
+
+/** Dwell counts foreground time only: a blur pauses it, a focus resumes it. */
+function onWindowActivity(): void {
+    readingSession.setActive(windowActive());
+}
+
+/**
+ * Hidden (minimised, another space, the window closing) or the page going
+ * away ends the session while the webview can still deliver it; coming back
+ * starts a fresh one on the same article.
+ */
+function onVisibilityChange(): void {
+    if (document.visibilityState === 'hidden') {
+        readingSession.end();
+    } else if (selectedId !== null && bodyLoaded) {
+        readingSession.begin(selectedId, windowActive());
+    }
+}
+
+/**
+ * Where the body on screen is, for the progress bar — tagged with its
+ * selection so a switch never shows the previous article's bar. `permille`
+ * is `null` when the body fits without scrolling.
+ */
+let position = $state<{ articleId: number; permille: number | null } | null>(null);
+/** The selection whose resume has been scheduled (one per selection). */
+let resumeScheduledFor: number | null = null;
+/**
+ * The selection whose stored position has been applied. Saving starts only
+ * then, so a body still laying out never overwrites a stored position with
+ * the top it happens to be showing.
+ */
+let trackingFor: number | null = null;
+let cancelResume: (() => void) | null = null;
+
+/** The bar's fill for the article on screen, `null` when there is no bar. */
+function barPermille(): number | null {
+    return position !== null && position.articleId === selectedId ? position.permille : null;
+}
+
+// Once the body and its stored position are both in, put the body back where
+// reading stopped (after the frame that lays the content out).
+$effect(() => {
+    const body = scrollBody;
+    const articleId = selectedId;
+    const saved = stateQuery?.data?.read_permille;
+    if (articleId === null) {
+        // Closed: reopening the same article later resumes it again.
+        resumeScheduledFor = null;
+        trackingFor = null;
+        return;
+    }
+    if (body === null || !bodyLoaded || saved === undefined || resumeScheduledFor === articleId) {
+        return;
+    }
+    resumeScheduledFor = articleId;
+    untrack(() => {
+        cancelResume?.();
+        cancelResume = null;
+        requestAnimationFrame(() => {
+            if (scrollBody !== body || selectedId !== articleId) {
+                return; // moved on before the frame
+            }
+            cancelResume = resumable(saved) ? resumeScroll(body, saved) : null;
+            trackingFor = articleId;
+            position = { articleId, permille: permilleAt(body) };
+        });
+    });
+});
+
+onDestroy(() => cancelResume?.());
+
+function onBodyScroll(event: Event): void {
+    const body = event.currentTarget;
+    const articleId = selectedId;
+    if (!(body instanceof HTMLElement) || articleId === null) {
+        return;
+    }
+    const permille = permilleAt(body);
+    position = { articleId, permille };
+    if (permille !== null && trackingFor === articleId) {
+        readingSession.trackProgress(articleId, permille);
+    }
+}
+
 function openSource(event: MouseEvent, current: ReaderHead): void {
     event.preventDefault();
     void openInBrowser(current.id, current.source_url);
 }
 </script>
 
-<svelte:window onfocusin={onWindowFocusIn} />
+<svelte:window
+    onfocusin={onWindowFocusIn}
+    onfocus={onWindowActivity}
+    onblur={onWindowActivity}
+    onpagehide={() => readingSession.end()}
+/>
+<svelte:document onvisibilitychange={onVisibilityChange} />
 
 <!-- With no toolbar (nothing selected, a failed or missing article) the
      macOS title bar (#148) still needs a handle over the reader: a bare strip
@@ -575,6 +695,29 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     >
                         <Icon name="external" />
                     </button>
+                    <button
+                        class="tool"
+                        disabled={header === null}
+                        aria-label={t('reader.action.copyLink')}
+                        use:tooltip={t('reader.action.copyLink')}
+                        onclick={() => {
+                            if (header !== null) {
+                                void copyLink(header.source_url);
+                            }
+                        }}
+                    >
+                        <Icon name="link" />
+                    </button>
+                {/if}
+                {#if barPermille() !== null}
+                    <!-- How far through the article: decorative (the scroll
+                         position is already exposed to assistive tech). -->
+                    <span class="reading-progress" aria-hidden="true">
+                        <span
+                            class="reading-progress-fill"
+                            style:transform="scaleX({(barPermille() ?? 0) / PERMILLE_END})"
+                        ></span>
+                    </span>
                 {/if}
             </div>
             {#if current !== null && failure() !== null}
@@ -613,6 +756,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                 data-reading-theme={typographyStore.readingTheme}
                 bind:this={scrollBody}
                 onkeydown={onBodyKeydown}
+                onscroll={onBodyScroll}
             >
                 <article
                     class="reader-article"
@@ -672,6 +816,13 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                                 {/if}
                                 {#if header.word_count !== null}
                                     <span>{t('reader.meta.words', { count: header.word_count })}</span>
+                                {/if}
+                                {#if readMinutes(header.word_count) !== null}
+                                    <span data-read-time
+                                        >{t('reader.meta.minutes', {
+                                            count: readMinutes(header.word_count) ?? 0,
+                                        })}</span
+                                    >
                                 {/if}
                             </p>
                             <ArticleTags articleId={header.id} />
@@ -791,6 +942,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     }
 
     .reader-toolbar {
+        position: relative;
         flex: 0 0 auto;
         display: flex;
         align-items: center;
@@ -820,6 +972,36 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         height: 18px;
         margin: 0 var(--space-1);
         background: var(--hairline);
+    }
+
+    /* Reading progress: a 2px accent line laid over the toolbar's bottom
+       hairline, filling left to right as the body scrolls. */
+    .reading-progress {
+        position: absolute;
+        right: 0;
+        bottom: -1px;
+        left: 0;
+        height: 2px;
+        pointer-events: none;
+    }
+
+    .reading-progress-fill {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        transform-origin: left center;
+    }
+
+    :global([dir='rtl']) .reading-progress-fill {
+        transform-origin: right center;
+    }
+
+    /* Glides between scroll steps; static (it just jumps) under reduced
+       motion. */
+    @media (prefers-reduced-motion: no-preference) {
+        .reading-progress-fill {
+            transition: transform var(--dur-fast) linear;
+        }
     }
 
     .tool {
@@ -992,7 +1174,9 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
     .reader-title {
         font-family: var(--font-family);
-        font-size: var(--text-2xl);
+        /* In em of the article, so the title follows the reader's font-size
+           slider: 1.75em is the --text-2xl 28px at the 16px default. */
+        font-size: 1.75em;
         font-weight: var(--weight-bold);
         line-height: 1.16;
         letter-spacing: var(--tracking-tight);
@@ -1014,20 +1198,32 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         text-decoration-color: var(--fg-subtle);
     }
 
+    /* Every item leads with its "·" separator, and the line is shifted left
+       by one separator and clipped there — so the first item on each line,
+       wrapped ones included, never starts with a stray dot. */
     .reader-meta {
+        --meta-sep: calc(2 * var(--space-3) + 0.3em);
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--space-3);
+        row-gap: var(--space-1);
         margin-top: var(--space-3);
+        margin-inline-start: calc(-1 * var(--meta-sep));
+        clip-path: inset(0 0 0 var(--meta-sep));
         font-family: var(--font-family);
         font-size: var(--text-sm);
         color: var(--fg-subtle);
     }
 
-    .reader-meta span + span::before {
+    :global([dir='rtl']) .reader-meta {
+        clip-path: inset(0 var(--meta-sep) 0 0);
+    }
+
+    .reader-meta > span::before {
         content: '·';
-        margin-right: var(--space-3);
+        display: inline-block;
+        width: var(--meta-sep);
+        text-align: center;
         color: var(--fg-subtle);
     }
 </style>

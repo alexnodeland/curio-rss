@@ -183,6 +183,7 @@ describe('list keyboard navigation', () => {
             'readLater',
             'archive',
             'open',
+            'copyLink',
             'markAllRead',
         ]);
     });

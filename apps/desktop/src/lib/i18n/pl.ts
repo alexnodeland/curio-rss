@@ -134,6 +134,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'list.filter.all': 'Pokaż wszystkie artykuły',
     'list.row.unread': 'Nieprzeczytany',
     'list.row.starred': 'Oznaczony gwiazdką',
+    'list.row.progress': 'Przeczytano {percent}',
     'reader.empty': 'Wybierz artykuł do przeczytania',
     'reader.hint.move': 'aby się przesuwać',
     'reader.hint.read': 'aby czytać',
@@ -160,8 +161,11 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.action.typography': 'Typografia',
     'reader.action.focusMode': 'Tryb skupienia',
     'reader.action.exitFocusMode': 'Wyjdź z trybu skupienia',
+    'reader.action.copyLink': 'Kopiuj link',
     'reader.meta.words':
         '{count, plural, one {# słowo} few {# słowa} many {# słów} other {# słowa}}',
+    'reader.meta.minutes':
+        '{count, plural, one {# minuta czytania} few {# minuty czytania} many {# minut czytania} other {# minuty czytania}}',
     'article.date.firstSeen': 'Zauważony po raz pierwszy: {date}',
     'article.date.firstSeenHint': 'Kanał nie podaje daty publikacji',
     'reddit.postedBy': 'Opublikowane przez u/{author}',
@@ -241,6 +245,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll.done': 'Wyeksportowano {written} notatek; {unchanged} bez zmian',
     'destinations.needNameAndFolder': 'Najpierw wpisz nazwę i wybierz folder.',
     'toast.promote.saved': 'Zapisano w {name}',
+    'toast.linkCopied': 'Skopiowano link',
+    'toast.linkCopyFailed': 'Nie udało się skopiować linku',
     'toast.promote.unchanged': 'Już aktualne w {name}',
     'toast.markAllRead':
         '{count, plural, one {Oznaczono # jako przeczytany} few {Oznaczono # jako przeczytane} many {Oznaczono # jako przeczytane} other {Oznaczono # jako przeczytane}}',

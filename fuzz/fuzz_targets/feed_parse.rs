@@ -5,7 +5,9 @@
 
 #![no_main]
 
-// The markdown half of the audit is not run here yet (#245).
+// The markdown half of the audit is not run here yet: htmd still writes
+// link/image URLs and image alt text unescaped (#337). Code no longer
+// leaks (#245); the `props` markdown suite audits it.
 #[allow(dead_code)]
 #[path = "../../crates/curio-core/tests/common/inert.rs"]
 mod inert;

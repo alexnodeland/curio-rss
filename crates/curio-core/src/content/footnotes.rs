@@ -207,21 +207,47 @@ fn list_item(
         return handlers.fallback(element);
     };
     let body = handlers.walk_children(element.node).content;
-    let mut definition = format!("[^{label}]: ");
-    for (index, line) in body.trim().lines().enumerate() {
-        if index > 0 {
-            definition.push('\n');
-            if !line.trim().is_empty() {
-                definition.push_str("    ");
-            }
+    let body = body.trim();
+    let mut lines = body.lines().map(str::trim_end);
+    let mut definition = format!("[^{label}]:");
+    if opens_with_code(body) {
+        // The whole body goes below, after a blank line.
+        definition.push('\n');
+    } else {
+        definition.push(' ');
+        definition.push_str(lines.next().unwrap_or_default());
+    }
+    for line in lines {
+        definition.push('\n');
+        if !line.trim().is_empty() {
+            definition.push_str("    ");
         }
-        definition.push_str(line.trim_end());
+        definition.push_str(line);
     }
     pending
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .push(definition);
     Some(String::new().into())
+}
+
+/// Whether a definition `body`'s first block holds a code fence, which
+/// cannot start on the `[^n]:` label line.
+///
+/// A renderer without the footnote extension reads a definition as a
+/// paragraph that opens on the label line and runs to the first blank
+/// line: every line of that block is inline text to it, so a fence there
+/// is no fence, and the code text in it — written unescaped — is live raw
+/// HTML (#245). After a blank line the indented lines are an indented code
+/// block to that renderer, and still the definition's body to one with the
+/// extension. Only the code handlers write a backtick run of three
+/// (htmd escapes a backtick in text), so a run in the first block is the
+/// cue — one that is an inline span's delimiter instead costs no more than
+/// the blank line.
+fn opens_with_code(body: &str) -> bool {
+    body.lines()
+        .take_while(|line| !line.trim().is_empty())
+        .any(|line| line.contains("```"))
 }
 
 /// A footnote list → its definitions as a block; any other list → htmd.

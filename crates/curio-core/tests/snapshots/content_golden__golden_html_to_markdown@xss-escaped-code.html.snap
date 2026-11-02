@@ -1,0 +1,65 @@
+---
+source: crates/curio-core/tests/content_golden.rs
+expression: markdown
+input_file: fixtures/html/xss-escaped-code.html
+---
+# Escaped markup inside code
+
+Every payload below is escaped text in the HTML, so it passes the sanitizer on purpose. Exported, it must stay code: never live raw HTML (#245).
+
+```
+<img src=x onerror=alert(1)>
+```
+
+```
+<script>alert(1)</script>
+```
+
+`<script>alert(2)</script> A`
+
+A span across a blank line: `first <img src=x onerror=alert(3)>` and a list marker: `x - <svg onload=alert(4)>`.
+
+A carriage return by reference: `x <iframe src=javascript:alert(5)>`
+
+`````
+```
+<script>alert(6)</script>
+````
+<img src=x onerror=alert(7)>
+`````
+
+Adjacent spans: `a` ``` ``<script>alert(8)</script> ```
+
+Link syntax in code: `[x](javascript:alert(9))`
+
+> ```
+> <script>alert(10)</script>
+> ```
+
+*   step one
+
+    ```
+    <img src=x onerror=alert(11)>
+    second line
+    ```
+
+*`<script>alert(12)</script>`*
+
+## A heading `<script>alert(13)</script>`
+
+[`<img src=x onerror=alert(14)>`](https://example.com/code)
+
+| cell                             |
+| -------------------------------- |
+| `<script>alert(15)</script>&#124;<b>` |
+
+```html
+<div onclick="alert(16)"></div>
+```
+
+```
+<a href="javascript:alert(17)">x</a>
+<script>alert(18)</script>
+```
+
+Legitimate **content** around the payloads survives.

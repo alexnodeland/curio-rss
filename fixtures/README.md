@@ -73,7 +73,10 @@ Current layout:
   finds is pinned back here as a new seed.
 
 - `html/` — article HTML → sanitize → extract → CommonMark cases, pinned to
-  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate.
+  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate, and
+  `xss-escaped-code.html` its export half: payloads that are escaped text
+  inside `<pre>`/`<code>` (kept by the sanitizer on purpose) must stay code
+  in the markdown, never live raw HTML (#245).
   They also seed the `content_pipeline` fuzz target, whose checks
   `content_golden.rs` replays over every file here, so a find pinned as a
   fixture (`c0-control-urls.html`, the first one) stays fixed

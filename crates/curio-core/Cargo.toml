@@ -78,6 +78,7 @@ brotli = { workspace = true }
 flate2 = { workspace = true }
 insta = { workspace = true }
 proptest = { workspace = true }
+pulldown-cmark = { workspace = true }
 rcgen = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

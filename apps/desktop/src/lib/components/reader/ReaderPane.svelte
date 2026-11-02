@@ -45,6 +45,7 @@ import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { articleDate, isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
@@ -329,8 +330,18 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
 <svelte:window onfocusin={onWindowFocusIn} />
 
+<!-- With no toolbar (nothing selected, a failed or missing article) the
+     macOS title bar (#148) still needs a handle over the reader: a bare strip
+     the header's height, which only drags (its content stays inert). -->
+{#snippet dragStrip()}
+    {#if windowChromeStore.dragSurface !== undefined}
+        <div class="drag-strip" data-tauri-drag-region={windowChromeStore.dragSurface}></div>
+    {/if}
+{/snippet}
+
 <div class="reader">
     {#if selectedId === null}
+        {@render dragStrip()}
         <EmptyState icon="sparkle" title={t('reader.empty')}>
             {#snippet hint()}
                 {#each HINT as part, index (part.label)}
@@ -355,24 +366,26 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         {@const header = head()}
         {#if current === null && failure() !== null}
             <!-- No article to preserve: the load itself failed. -->
+            {@render dragStrip()}
             <div class="reader-status">
                 <p class="error" role="alert">{failureMessage()}</p>
             </div>
         {:else if current === null && articleLoaded()}
+            {@render dragStrip()}
             <div class="reader-status">
                 <p>{t('reader.missing')}</p>
             </div>
         {:else}
-            {#if current !== null && failure() !== null}
-                <!-- Stale-while-revalidate: a refetch failed but the article is
-                     still in hand — keep showing it under a non-destructive
-                     banner instead of blanking a populated reader (parity with
-                     the article list's refetch banner). -->
-                <p class="reader-banner" role="alert">{failureMessage()}</p>
-            {/if}
             <!-- Mounted for the whole selection — including while the body is
-                 still loading — so j/k never unmounts it or resets its state. -->
-            <div class="reader-toolbar" role="toolbar" aria-label={t('reader.toolbar')}>
+                 still loading — so j/k never unmounts it or resets its state.
+                 Always the pane's top row: it is the title bar's drag region
+                 under the macOS overlay (#148), level with the other headers. -->
+            <div
+                class="reader-toolbar"
+                role="toolbar"
+                aria-label={t('reader.toolbar')}
+                data-tauri-drag-region={windowChromeStore.dragRegion}
+            >
                 <button
                     class="tool"
                     class:on={flags()?.read === true}
@@ -459,6 +472,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                             role="dialog"
                             aria-label={t('reader.action.typography')}
                             tabindex="-1"
+                            data-tauri-drag-region={windowChromeStore.dragRegion && 'false'}
                             use:dismissable={{
                                 onclose: () => {
                                     showTypography = false;
@@ -500,6 +514,13 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     </button>
                 {/if}
             </div>
+            {#if current !== null && failure() !== null}
+                <!-- Stale-while-revalidate: a refetch failed but the article is
+                     still in hand — keep showing it under a non-destructive
+                     banner instead of blanking a populated reader (parity with
+                     the article list's refetch banner, also under its header). -->
+                <p class="reader-banner" role="alert">{failureMessage()}</p>
+            {/if}
             <!-- Key on the selection so switching articles remounts the
                  scroll body at the top instead of inheriting the previous scroll
                  offset; the body landing within one selection does not. -->
@@ -618,11 +639,19 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
 <style>
     .reader {
+        position: relative;
         flex: 1 1 auto;
         display: flex;
         flex-direction: column;
         min-height: 0;
         background: var(--surface-app);
+    }
+
+    /* Out of flow, so the centred empty/status content does not move. */
+    .drag-strip {
+        position: absolute;
+        inset: 0 0 auto;
+        height: var(--header-height);
     }
 
     .reader-status {

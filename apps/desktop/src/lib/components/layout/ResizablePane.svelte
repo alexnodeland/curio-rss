@@ -37,10 +37,15 @@ function clamp(value: number): number {
     return Math.min(max, Math.max(min, value));
 }
 
+// The width as drawn: a stored width outside the bounds (saved before they
+// moved — the sidebar's minimum rises under the macOS overlay title bar)
+// renders clamped, while the stored value stays put until the user resizes.
+const shown = $derived(clamp(width));
+
 function onPointerDown(event: PointerEvent): void {
     dragging = true;
     dragStartX = event.clientX;
-    dragStartWidth = width;
+    dragStartWidth = shown;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 }
 
@@ -62,9 +67,9 @@ function onPointerUp(): void {
 function onKeyDown(event: KeyboardEvent): void {
     let next: number | null = null;
     if (event.key === 'ArrowLeft') {
-        next = clamp(width - KEYBOARD_STEP);
+        next = clamp(shown - KEYBOARD_STEP);
     } else if (event.key === 'ArrowRight') {
-        next = clamp(width + KEYBOARD_STEP);
+        next = clamp(shown + KEYBOARD_STEP);
     } else if (event.key === 'Home') {
         next = min;
     } else if (event.key === 'End') {
@@ -79,7 +84,7 @@ function onKeyDown(event: KeyboardEvent): void {
 }
 </script>
 
-<div class="pane {variant ?? ''}" style:flex="0 0 {width}px" style:width="{width}px">
+<div class="pane {variant ?? ''}" style:flex="0 0 {shown}px" style:width="{shown}px">
     {@render children()}
 </div>
 <!--
@@ -95,7 +100,7 @@ function onKeyDown(event: KeyboardEvent): void {
     role="separator"
     aria-orientation="vertical"
     aria-label={label}
-    aria-valuenow={Math.round(width)}
+    aria-valuenow={Math.round(shown)}
     aria-valuemin={min}
     aria-valuemax={max}
     tabindex="0"

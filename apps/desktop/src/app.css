@@ -126,6 +126,34 @@ h6 {
     --sidebar-width: 264px;
     --list-width: 384px;
     --header-height: 52px;
+    /* Extra leading room the leftmost pane header keeps clear of the window
+       controls. 0 with native decorations; see the overlay rule below. */
+    --titlebar-inset: 0px;
+}
+
+/* macOS overlay title bar (#148): the traffic lights sit inside the leftmost
+   pane header — 14px buttons on a 20px pitch from x = 16 (tauri.conf.json's
+   trafficLightPosition), so they end at 70px; the header's own 16px padding
+   plus this inset puts its content 12px past them. Set by the window-chrome
+   store, which drops it in fullscreen (macOS hides the lights there); its
+   TITLEBAR_INSET_PX mirrors the value for layout done in script. */
+:root[data-titlebar="overlay"] {
+    --titlebar-inset: 66px;
+}
+
+/* A title bar's words are never selected. A double-click on a header zooms
+   the window, and on macOS Tauri lets that second press through (the zoom
+   waits for mouseup), so WebKit would select the word under it — "Curio" in
+   the sidebar header. A `false` subtree (the search field, the typography
+   popover) keeps normal selection. */
+[data-tauri-drag-region="deep"] {
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+[data-tauri-drag-region="deep"] [data-tauri-drag-region="false"] {
+    -webkit-user-select: text;
+    user-select: text;
 }
 
 /* Derived surface + elevation tokens — computed from each theme's own base

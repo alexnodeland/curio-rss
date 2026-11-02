@@ -17,6 +17,26 @@ export const PANE_LIMITS = {
     list: { min: 260, max: 600 },
 } as const;
 
+/**
+ * The narrowest sidebar whose header still fits the brand mark and the
+ * toolbar side by side, before any title-bar inset: the header's 16px
+ * leading padding + mark 26 + gap 8 + toolbar 94 (3 × 30 + 2 × 2) + 8px
+ * trailing padding + the sidebar's 1px border-right.
+ */
+export const SIDEBAR_HEADER_MIN = 153;
+
+/**
+ * The sidebar's floor and resize minimum for a leading-header inset of
+ * `insetPx` (the macOS traffic lights, #148). `floor` keeps the header from
+ * colliding at any window size — it outranks the narrow-window caps — and
+ * `min` is the resize bound: the usual minimum, raised to the floor when the
+ * inset needs more.
+ */
+export function sidebarBounds(insetPx: number): { floor: number; min: number } {
+    const floor = SIDEBAR_HEADER_MIN + insetPx;
+    return { floor, min: Math.max(PANE_LIMITS.sidebar.min, floor) };
+}
+
 export class LayoutStore {
     sidebarCollapsed: boolean = $state(false);
     sidebarWidth: number = $state(280);

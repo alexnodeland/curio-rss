@@ -8,6 +8,7 @@
 import { localeStore } from '$lib/i18n';
 import { settingsStore } from '$lib/state/settings.svelte';
 import { startupStore } from '$lib/state/startup.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +26,7 @@ describe('root layout startup gate', () => {
         cleanup();
         vi.restoreAllMocks();
         startupStore.reset();
+        windowChromeStore.reset();
         localeStore.reset();
         harness?.teardown();
         harness = null;
@@ -42,8 +44,24 @@ describe('root layout startup gate', () => {
         expect(screen.getByRole('heading', { level: 1 })).toBeTruthy();
         expect(fromSystem).toHaveBeenCalledOnce();
         expect(load).not.toHaveBeenCalled();
-        // Nothing but the gate check reached the backend.
-        expect(harness.calls.map((call) => call.cmd)).toEqual(['get_startup_failure']);
+        // Nothing but the gate check and the window chrome (which needs no
+        // core) reached the backend.
+        expect(harness.calls.map((call) => call.cmd).sort()).toEqual([
+            'get_startup_failure',
+            'window_chrome',
+        ]);
+    });
+
+    it('knows the window chrome before either screen renders', async () => {
+        harness = installIpcHarness({
+            get_startup_failure: startupFailureFixture(),
+            window_chrome: { overlay_title_bar: true, fullscreen: false },
+        });
+        render(Layout, { children: reader });
+        await flushIpc();
+
+        expect(document.documentElement.dataset.titlebar).toBe('overlay');
+        expect(screen.getByRole('main').getAttribute('data-tauri-drag-region')).toBe('true');
     });
 
     it('mounts the reader and loads settings on a normal start', async () => {

@@ -6,7 +6,8 @@
  */
 import { t } from '$lib/i18n';
 import { SETTING_KEYS, settingsStore } from '$lib/state/settings.svelte';
-import { PANE_LIMITS, layoutStore } from '$lib/state/layout.svelte';
+import { PANE_LIMITS, layoutStore, sidebarBounds } from '$lib/state/layout.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import type { Snippet } from 'svelte';
 import ResizablePane from './ResizablePane.svelte';
 
@@ -20,6 +21,12 @@ let {
     reader: Snippet;
 } = $props();
 
+// Under the macOS overlay title bar the sidebar header also holds the
+// traffic lights (#148), so the sidebar never gets narrower than the header
+// needs: the resize bound rises with the inset, and `--sidebar-floor` holds
+// the line against the narrow-window caps below.
+const sidebarSize = $derived(sidebarBounds(windowChromeStore.insetPx));
+
 function persistSidebarWidth(width: number): void {
     void settingsStore.set(SETTING_KEYS.sidebarWidth, String(Math.round(width)));
 }
@@ -29,11 +36,11 @@ function persistListWidth(width: number): void {
 }
 </script>
 
-<div class="three-pane" data-testid="three-pane">
+<div class="three-pane" data-testid="three-pane" style:--sidebar-floor="{sidebarSize.floor}px">
     {#if !layoutStore.sidebarCollapsed}
         <ResizablePane
             bind:width={layoutStore.sidebarWidth}
-            min={PANE_LIMITS.sidebar.min}
+            min={sidebarSize.min}
             max={PANE_LIMITS.sidebar.max}
             label={t('pane.sidebar.resize')}
             variant="sidebar"
@@ -63,6 +70,12 @@ function persistListWidth(width: number): void {
         height: 100vh;
         overflow: hidden;
         background: var(--bg);
+    }
+
+    /* The header-fit floor (see the script): a no-op with native chrome,
+       where every cap below stays above it. min-width wins over max-width. */
+    .three-pane :global(.pane.sidebar) {
+        min-width: var(--sidebar-floor);
     }
 
     .reader-slot {

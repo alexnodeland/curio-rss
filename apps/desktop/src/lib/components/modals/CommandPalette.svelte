@@ -355,7 +355,7 @@ function onBackdropClick(event: MouseEvent): void {
     .option-label mark {
         background: transparent;
         color: var(--accent);
-        font-weight: 640;
+        font-weight: var(--weight-semibold);
     }
 
     .option-detail {

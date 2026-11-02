@@ -157,7 +157,7 @@ const count = $derived(selectionStore.selectedIds.length);
         background: var(--accent);
         color: var(--accent-fg);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.6;

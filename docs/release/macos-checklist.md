@@ -86,6 +86,18 @@ at 15 minutes, and notifications on (Settings → General / Notifications).
 - [ ] **German error toast** — with German chosen, Add Feed → `http://127.0.0.1:9/` → Find feeds: the error toast is German and names `127.0.0.1` (no English engine text).
 - [ ] **Internal errors are logged once** — with the app running, overwrite the database underneath it (`printf garbage > "$CURIO_PROFILE/curio.db"`), then run the integrity check from the doctor panel (Settings › Advanced): the toast is the generic "Something went wrong" line, and `logs/curio.log.*` gains exactly one `ERROR … command failed` line naming `integrity_check`.
 
+## Window chrome: overlay title bar (real macOS only — the dev browser and jsdom draw no traffic lights)
+
+The pane headers are the title bar (#148): no OS title bar sits above them,
+and the traffic lights live inside the leftmost header.
+
+- [ ] **No stacked title bar** — the window opens with the three 52 px pane headers at the very top and no title text; the traffic lights sit vertically centred in the sidebar header, left of the brand tile, with a clear gap (adjust `trafficLightPosition` in `tauri.conf.json` if they look off-centre on this macOS version).
+- [ ] **Drag** — press and drag on empty space in each header (the sidebar's, the list's beside the search field, the reader toolbar's between its buttons) and on the top strip of the empty reader: the window moves. The same on the recovery screen's backdrop (relaunch with a corrupt `curio.db`, as above).
+- [ ] **Buttons stay buttons** — in every header, the buttons (add feed, refresh, settings, unread filter, the reader's actions), the search field and the open typography popover react to clicks and never start a window drag; selecting text in an article never moves the window.
+- [ ] **Double-click zoom** — double-click empty header space: the window zooms (fills the screen) and a second double-click restores it, as it would on a native title bar.
+- [ ] **No overlap at minimum width** — drag the window to its minimum size (800 × 600): the traffic lights, the brand tile (or the amber Offline tile, with Wi-Fi off) and the header's three buttons do not touch; the "Curio" name only hides when there is no room. With the sidebar collapsed (`ui.panes.sidebar-collapsed` = `true`), the list header's search field starts clear of the traffic lights instead.
+- [ ] **Fullscreen** — Window → Enter Full Screen (`⌃⌘F` or the green button): the traffic lights hide and the headers drop their inset (the brand tile moves back to the leading edge); leaving fullscreen brings the lights and the inset back with nothing overlapping.
+
 ## Network-filesystem guard (real macOS only — CI has no iCloud account or SMB server)
 
 - [ ] **iCloud Drive refused (CLI)** — `curio --profile ~/Library/Mobile\ Documents/com~apple~CloudDocs/curio-test init` fails with "is on iCloud Drive" and creates nothing. With `--allow-network-fs` (or `CURIO_ALLOW_NETWORK_FS=1`) it opens.

@@ -2,11 +2,14 @@
 //! deletion and content replacement.
 
 use super::rows::{
-    RawArticle, article_by_id, article_cols_prefixed, fts_match_expr, list_articles_query,
-    parse_ts, raw_article, scoped_dedupe_key,
+    Projection, RawArticle, RawListed, UNREAD_COUNTS, article_by_id, article_cols_prefixed,
+    fts_match_expr, list_articles_query, parse_ts, raw_article, raw_listed, scoped_dedupe_key,
+    search_listed_query,
 };
 use super::{ARTICLE_COLS, ListArticles, UpsertOutcome, begin_write};
-use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, NewArticle};
+use crate::model::{
+    Article, ArticleContent, ArticleId, ContentOrigin, FeedId, ListedArticle, NewArticle,
+};
 use crate::storage::{Storage, StorageError};
 use curio_types::{CurioId, Timestamp};
 use rusqlite::OptionalExtension as _;
@@ -248,15 +251,18 @@ impl Storage {
         })
     }
 
-    /// Keyset-paginated listing, newest row id first. See [`ListArticles`]
-    /// for the filter semantics; filters never change the order.
+    /// Keyset-paginated listing of whole articles (body included), newest
+    /// row id first — for walks that need the content, such as a bulk
+    /// export. A list a head renders reads [`Self::list_article_rows`]
+    /// instead. See [`ListArticles`] for the filter semantics; filters
+    /// never change the order.
     ///
     /// # Errors
     ///
     /// Database or stored-value corruption errors.
     pub fn list_articles(&self, params: ListArticles) -> Result<Vec<Article>, StorageError> {
         self.read(move |conn| {
-            let (sql, binds) = list_articles_query(&params);
+            let (sql, binds) = list_articles_query(&params, Projection::Full);
             let mut stmt = conn.prepare_cached(&sql)?;
             let raws = stmt
                 .query_map(
@@ -268,34 +274,58 @@ impl Storage {
         })
     }
 
-    /// Unread-article counts, grouped by feed (`GROUP BY feed_id` in
-    /// SQL — counts are backend-owned, never client badge math). The
-    /// `None` key counts articles that belong to no feed (manual saves,
-    /// rows orphaned by a feed removal); the total unread count is the
-    /// sum of the map's values. An article with no `article_state` row
-    /// has never been touched and counts as unread; starred and read-later
-    /// do not affect unreadness, but **archived articles are excluded** —
+    /// [`Self::list_articles`] as list rows: the same filters, order and
+    /// keyset, but each row carries its state flags, tags and a bounded
+    /// text preview instead of the body — one read renders a page.
+    ///
+    /// # Errors
+    ///
+    /// Database or stored-value corruption errors.
+    pub fn list_article_rows(
+        &self,
+        params: ListArticles,
+    ) -> Result<Vec<ListedArticle>, StorageError> {
+        self.read(move |conn| {
+            let (sql, binds) = list_articles_query(&params, Projection::Listed);
+            let mut stmt = conn.prepare_cached(&sql)?;
+            let raws = stmt
+                .query_map(
+                    rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                    raw_listed,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            raws.into_iter().map(RawListed::into_listed).collect()
+        })
+    }
+
+    /// Unread-article counts per feed (backend-owned, never client badge
+    /// math). The `None` key counts articles that belong to no feed
+    /// (manual saves, rows orphaned by a feed removal); the total unread
+    /// count is the sum of the map's values, and a feed with nothing
+    /// unread is absent. An article with no `article_state` row has never
+    /// been touched and counts as unread; starred and read-later do not
+    /// affect unreadness, but **archived articles are excluded** —
     /// archiving takes an item out of the reading flow, badge included.
+    ///
+    /// Read from the `feed_unread` counters that migration 0012's triggers
+    /// keep in step with every write, so the cost is one row per feed, not
+    /// a scan of the articles.
     ///
     /// # Errors
     ///
     /// Database errors.
     pub fn unread_counts(&self) -> Result<BTreeMap<Option<FeedId>, u64>, StorageError> {
         self.read(|conn| {
-            let mut stmt = conn.prepare_cached(
-                "SELECT a.feed_id, COUNT(*) FROM articles a \
-                 LEFT JOIN article_state s ON s.article_id = a.id \
-                 WHERE COALESCE(s.is_read, 0) = 0 AND COALESCE(s.is_archived, 0) = 0 \
-                 GROUP BY a.feed_id",
-            )?;
+            let mut stmt = conn.prepare_cached(UNREAD_COUNTS)?;
             let rows = stmt
-                .query_map([], |row| {
-                    Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?))
-                })?
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(feed_id, n)| (feed_id.map(FeedId), u64::try_from(n).unwrap_or_default()))
+                .map(|(key, n)| {
+                    let feed = (key != 0).then_some(FeedId(key));
+                    (feed, u64::try_from(n).unwrap_or_default())
+                })
                 .collect())
         })
     }
@@ -336,6 +366,29 @@ impl Storage {
                 .query_map((expr, limit), raw_article)?
                 .collect::<Result<Vec<_>, _>>()?;
             raws.into_iter().map(RawArticle::into_article).collect()
+        })
+    }
+
+    /// [`Self::search_articles`] as list rows (see
+    /// [`Self::list_article_rows`]), best match first.
+    ///
+    /// # Errors
+    ///
+    /// Database or stored-value corruption errors.
+    pub fn search_article_rows(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<ListedArticle>, StorageError> {
+        let Some(expr) = fts_match_expr(query) else {
+            return Ok(Vec::new());
+        };
+        self.read(move |conn| {
+            let mut stmt = conn.prepare_cached(&search_listed_query())?;
+            let raws = stmt
+                .query_map((expr, limit), raw_listed)?
+                .collect::<Result<Vec<_>, _>>()?;
+            raws.into_iter().map(RawListed::into_listed).collect()
         })
     }
 

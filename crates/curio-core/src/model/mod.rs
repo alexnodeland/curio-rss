@@ -339,6 +339,72 @@ pub enum ArticleFlag {
     Archived,
 }
 
+/// The longest text preview a [`ListedArticle`] carries, in characters
+/// (`…` added when the text runs on).
+pub const SNIPPET_MAX_CHARS: usize = 200;
+
+/// How much of the extracted text a listing reads to build the preview,
+/// in characters. Enough slack over [`SNIPPET_MAX_CHARS`] for the
+/// whitespace the preview collapses, so the body itself is never read
+/// whole for a list row.
+pub(crate) const SNIPPET_SOURCE_CHARS: usize = 4 * SNIPPET_MAX_CHARS;
+
+/// One row of an article list or search: what a list renders, in one
+/// read — the summary columns, a bounded text preview, the article's
+/// state flags and its tags. Never the body; that stays on [`Article`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedArticle {
+    /// Row id (the keyset cursor).
+    pub id: ArticleId,
+    /// Article identity: `UUIDv7`.
+    pub curio_id: CurioId,
+    /// The feed the article came from; `None` for manual saves.
+    pub feed_id: Option<FeedId>,
+    /// Article title.
+    pub title: String,
+    /// Canonical article URL.
+    pub source_url: String,
+    /// Author, if known.
+    pub author: Option<String>,
+    /// Publication time, if known.
+    pub published_at: Option<Timestamp>,
+    /// BCP-47 language tag, if detected.
+    pub lang: Option<String>,
+    /// Word count of the extracted text, if computed.
+    pub word_count: Option<u32>,
+    /// When the article was first stored.
+    pub saved_at: Timestamp,
+    /// Lead image URL, if known (see [`Article::lead_image`]).
+    pub lead_image: Option<String>,
+    /// The start of the extracted text, whitespace-collapsed and cut at
+    /// [`SNIPPET_MAX_CHARS`] (`…`-suffixed when the text runs on); `None`
+    /// when the article has no extracted text.
+    pub snippet: Option<String>,
+    /// The article's flags (all-false if never touched).
+    pub state: ArticleState,
+    /// The article's tags, sorted.
+    pub tags: Vec<String>,
+}
+
+/// Builds a [`ListedArticle::snippet`] from the first
+/// `SNIPPET_SOURCE_CHARS` characters of the extracted text; `runs_on`
+/// says the text continues past them. Reading only that prefix has two
+/// edge cases, both left as they are because telling them apart would
+/// mean reading the whole body: a prefix that collapses to less than a
+/// full preview gets the `…` even when the rest is only whitespace, and a
+/// prefix that is all whitespace reads as no text at all.
+pub(crate) fn snippet(prefix: &str, runs_on: bool) -> Option<String> {
+    let normalized = prefix.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    let mut snippet: String = normalized.chars().take(SNIPPET_MAX_CHARS).collect();
+    if runs_on || normalized.chars().count() > SNIPPET_MAX_CHARS {
+        snippet.push('…');
+    }
+    Some(snippet)
+}
+
 /// Outcome of a fetch attempt, recorded in `fetch_log`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchStatus {
@@ -510,6 +576,35 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn snippet_collapses_whitespace_and_bounds_the_preview() {
+        assert_eq!(snippet("", false), None);
+        assert_eq!(snippet("   \n\t  ", false), None);
+        assert_eq!(
+            snippet("  hello   world\n\nagain  ", false).as_deref(),
+            Some("hello world again")
+        );
+        let long = "word ".repeat(100);
+        let cut = snippet(&long, false).unwrap();
+        assert_eq!(cut.chars().count(), SNIPPET_MAX_CHARS + 1);
+        assert!(cut.ends_with('…'));
+        let exact = "x".repeat(SNIPPET_MAX_CHARS);
+        assert_eq!(
+            snippet(&exact, false),
+            Some(exact.clone()),
+            "no … at the limit"
+        );
+    }
+
+    #[test]
+    fn snippet_marks_a_text_that_runs_past_the_prefix() {
+        assert_eq!(snippet("short", true).as_deref(), Some("short…"));
+        // Characters, not bytes: a multi-byte preview is cut on a char.
+        let wide = "é".repeat(SNIPPET_MAX_CHARS + 5);
+        let cut = snippet(&wide, false).unwrap();
+        assert_eq!(cut.chars().count(), SNIPPET_MAX_CHARS + 1);
+    }
 
     #[test]
     fn feed_status_round_trips_its_text_form() {

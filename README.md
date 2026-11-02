@@ -142,7 +142,9 @@ peeks it back open until the window is resized.
 
 A feed entry published without a link of its own has no page to open, so
 <kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it
-and its title is plain text. An entry the feed gave no date is dated by the
+and its title is plain text. The same goes for an entry whose link is not a
+web address (`javascript:`, a custom scheme like `foo://`, `ftp://`): Curio
+only keeps `http(s)` links, for entries and for a feed's own site. An entry the feed gave no date is dated by the
 day Curio first saw it, labelled **First seen**.
 
 macOS command chords (also in the menu bar):

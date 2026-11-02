@@ -3,7 +3,7 @@
  * exactly (http/https for the browser, mailto/tel for the OS mail/dialer) and
  * fail closed on everything else, so a hostile feed href can't reach IPC.
  */
-import { isOpenableUrl } from '$lib/utils/external';
+import { isOpenableUrl, isWebUrl } from '$lib/utils/external';
 import { describe, expect, it } from 'vitest';
 
 describe('isOpenableUrl', () => {
@@ -26,5 +26,31 @@ describe('isOpenableUrl', () => {
         expect(isOpenableUrl('/relative/path')).toBe(false);
         expect(isOpenableUrl('mailtoX:nope')).toBe(false);
         expect(isOpenableUrl('')).toBe(false);
+    });
+});
+
+describe('isWebUrl', () => {
+    it('accepts http(s) only (case- and whitespace-insensitive)', () => {
+        expect(isWebUrl('https://example.com/a')).toBe(true);
+        expect(isWebUrl('http://example.com')).toBe(true);
+        expect(isWebUrl('  HTTPS://EXAMPLE.COM  ')).toBe(true);
+    });
+
+    it('rejects every other source, the opener-only schemes included', () => {
+        for (const url of [
+            'javascript:alert(1)',
+            '  JaVaScRiPt:alert(2)',
+            'httpsupdated://xss.example.com/one',
+            'foo://h/dir/three',
+            'ftp://files.example/pub/two',
+            'data:text/html,x',
+            'mailto:hi@example.com',
+            'tel:+1-555-0100',
+            '//example.com',
+            '/relative/path',
+            '',
+        ]) {
+            expect(isWebUrl(url), url).toBe(false);
+        }
     });
 });

@@ -40,6 +40,13 @@ describe('isLinkless', () => {
         expect(isLinkless(trailing, FEEDS)).toBe(false);
     });
 
+    it('is true for a source that is no web address, whatever its feed (#262)', () => {
+        for (const source_url of ['javascript:alert(1)', 'foo://h/two', '/relative']) {
+            expect(isLinkless(articleSummaryFixture({ feed_id: 1, source_url }), FEEDS)).toBe(true);
+            expect(isLinkless(articleSummaryFixture({ feed_id: null, source_url }), [])).toBe(true);
+        }
+    });
+
     it('is false without a known feed (feedless save, feeds not loaded)', () => {
         const feedless = articleSummaryFixture({
             feed_id: null,

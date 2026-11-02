@@ -16,6 +16,16 @@ export function isOpenableUrl(url: string): boolean {
     return /^(?:https?:\/\/|mailto:|tel:)/i.test(url.trim());
 }
 
+/**
+ * Whether `url` is a web page address (`http`/`https`) — the only kind of
+ * article source the UI renders as a link or offers to open. Core stores
+ * nothing else as a feed entry's source (#262); this keeps a value from an
+ * older build, or any other surprise, from ever becoming a live `href`.
+ */
+export function isWebUrl(url: string): boolean {
+    return /^https?:\/\//i.test(url.trim());
+}
+
 /** Opens `url` in the system handler; silently drops any other scheme. */
 export async function openExternal(url: string): Promise<void> {
     if (!isOpenableUrl(url)) {

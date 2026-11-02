@@ -600,6 +600,22 @@ describe('ReaderPane — link-less and date-less feed entries', () => {
         );
     });
 
+    it('a non-http(s) source is never a live link (#262)', async () => {
+        harness = installIpcHarness(
+            responders({ source_url: 'javascript:alert(1)', feed_id: null }),
+        );
+        selectionStore.selectedArticleId = 100;
+        const { container, getByRole, queryByRole } = render(ReaderPane);
+        await flushIpc();
+
+        const title = getByRole('heading', { level: 1 });
+        expect(title.textContent?.trim()).toBe('The article');
+        expect(container.querySelector('a[href^="javascript"]')).toBeNull();
+        expect(title.querySelector('a')).toBeNull();
+        expect(queryByRole('button', { name: 'Open in browser' })).toBeNull();
+        expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
+    });
+
     it('an entry with its own link keeps the link and both actions', async () => {
         harness = installIpcHarness(responders({ source_url: 'https://example.org/post/100' }));
         selectionStore.selectedArticleId = 100;

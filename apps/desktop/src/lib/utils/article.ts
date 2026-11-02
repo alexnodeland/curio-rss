@@ -5,20 +5,28 @@
  */
 import type { ArticleSummaryDto, FeedDto } from '$lib/bindings';
 import { formatIntlListDate, t } from '$lib/i18n';
+import { isWebUrl } from '$lib/utils/external';
 
 /**
  * Whether the article is a link-less feed entry. The published frontmatter
  * contract requires every article to carry a source URI, so core stores the
- * feed's own URL as `source_url` when an entry has no `<link>` (and never
- * hydrates it). Such an article has no page of its own: opening its "source"
- * would open the raw feed XML. Matched exactly, against the feed's current
- * URL — the same test core applies. An article whose feed is unknown (not
- * loaded yet, or a manual save with no feed) is not link-less.
+ * feed's own URL as `source_url` when an entry has no `<link>` — or only a
+ * non-http(s) one (#262) — and never hydrates it. Such an article has no page
+ * of its own: opening its "source" would open the raw feed XML. Matched
+ * exactly, against the feed's current URL — the same test core applies. An
+ * article whose feed is unknown (not loaded yet, or a manual save with no
+ * feed) is not link-less by that test.
+ *
+ * A `source_url` that is no web address at all is link-less whatever its feed:
+ * it is never rendered as a link nor offered to open or load in full.
  */
 export function isLinkless(
     article: Pick<ArticleSummaryDto, 'feed_id' | 'source_url'>,
     feeds: readonly Pick<FeedDto, 'id' | 'url'>[],
 ): boolean {
+    if (!isWebUrl(article.source_url)) {
+        return true;
+    }
     const feedId = article.feed_id;
     if (feedId === null) {
         return false;

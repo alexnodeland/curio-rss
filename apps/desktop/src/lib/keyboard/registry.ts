@@ -43,6 +43,8 @@ export type ShortcutId =
     | 'view.readLater'
     | 'view.archived'
     | 'view.feeds'
+    | 'view.toggleSidebar'
+    | 'view.toggleFocusMode'
     | 'app.addFeed'
     | 'app.settings'
     | 'help.toggle';
@@ -177,6 +179,18 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         category: 'views',
     },
     { id: 'view.feeds', keys: ['g', 'f'], description: 'shortcut.viewFeeds', category: 'views' },
+    {
+        id: 'view.toggleSidebar',
+        keys: ['\\'],
+        description: 'shortcut.toggleSidebar',
+        category: 'views',
+    },
+    {
+        id: 'view.toggleFocusMode',
+        keys: ['f'],
+        description: 'shortcut.toggleFocusMode',
+        category: 'views',
+    },
     { id: 'app.addFeed', keys: ['a'], description: 'shortcut.addFeed', category: 'app' },
     { id: 'app.settings', keys: [','], description: 'shortcut.settings', category: 'app' },
     { id: 'help.toggle', keys: ['?'], description: 'shortcut.help', category: 'app' },
@@ -312,6 +326,30 @@ export function paneShortcut(scope: PaneScope, key: string): ShortcutId | null {
 }
 
 /**
+ * The layout toggles: they change the frame, not a pane's content, so they
+ * stay live while the sidebar tree owns the keyboard (where every other
+ * global key is swallowed) — `\` can hide the very sidebar it is pressed in.
+ */
+const FRAME_SHORTCUTS: ReadonlySet<ShortcutId> = new Set<ShortcutId>([
+    'view.toggleSidebar',
+    'view.toggleFocusMode',
+]);
+
+/**
+ * Resolves a single key (an {@link eventKeyName} value) to a layout toggle,
+ * or `null` for any other key.
+ */
+export function frameShortcut(key: string): ShortcutId | null {
+    const shortcut = SHORTCUTS.find(
+        (candidate) =>
+            FRAME_SHORTCUTS.has(candidate.id) &&
+            candidate.keys.length === 1 &&
+            candidate.keys[0] === key,
+    );
+    return shortcut?.id ?? null;
+}
+
+/**
  * Roles whose Space activation belongs to the control, not to us. Listbox
  * options are absent on purpose: Space over a focused article row pages
  * the reader (options select on focus, they don't activate).
@@ -345,13 +383,23 @@ function isActivatable(target: HTMLElement): boolean {
 }
 
 /**
+ * Bound characters that some keyboard layouts can only type through Option
+ * (⌥): on the German, French, Spanish and Italian Mac layouts `\` is an
+ * Option chord (⌥⇧7 on German). An Option chord that types one of these is
+ * the character itself, not a modified key. Where `\` is a plain key (US),
+ * ⌥\ types `«` instead, so nothing collides.
+ */
+const OPTION_TYPED_KEYS: ReadonlySet<string> = new Set(['\\']);
+
+/**
  * Whether a keydown event should bypass shortcuts entirely: typing contexts
- * (inputs, textareas, contenteditable), any ctrl/alt/meta combination, and
- * Space on a control that Space activates all belong to the platform, not
- * to us.
+ * (inputs, textareas, contenteditable), any ctrl/meta combination, any alt
+ * combination except one that only types an {@link OPTION_TYPED_KEYS}
+ * character, and Space on a control that Space activates all belong to the
+ * platform, not to us.
  */
 export function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
-    if (event.ctrlKey || event.altKey || event.metaKey) {
+    if (event.ctrlKey || event.metaKey || (event.altKey && !OPTION_TYPED_KEYS.has(event.key))) {
         return true;
     }
     const target = event.target;

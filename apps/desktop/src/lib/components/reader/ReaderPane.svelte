@@ -41,6 +41,7 @@ import {
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
@@ -58,12 +59,28 @@ import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
 import { untrack } from 'svelte';
 
+type HintPart = { readonly ids: readonly ShortcutId[]; readonly label: MessageKey };
+
 /** The empty-state hint, as registry actions: each part prints its bound keys. */
-const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: MessageKey }[] = [
+const HINT: readonly HintPart[] = [
     { ids: ['nav.previousArticle', 'nav.nextArticle'], label: 'reader.hint.move' },
     { ids: ['nav.focusReader'], label: 'reader.hint.read' },
     { ids: ['help.toggle'], label: 'reader.hint.help' },
 ];
+
+/** Focus mode hides the toolbar's way out along with the article, so the
+ *  empty reader names the key that leaves it. */
+const FOCUS_HINT: readonly HintPart[] = [
+    ...HINT.slice(0, 2),
+    { ids: ['view.toggleFocusMode'], label: 'reader.hint.exitFocus' },
+    ...HINT.slice(2),
+];
+
+const hintParts = $derived(layoutStore.focusMode ? FOCUS_HINT : HINT);
+
+const focusModeLabel = $derived(
+    layoutStore.focusMode ? t('reader.action.exitFocusMode') : t('reader.action.focusMode'),
+);
 
 /**
  * What the header needs — carried by both the full `ArticleDto` and the list
@@ -339,12 +356,27 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     {/if}
 {/snippet}
 
+<!-- Focus mode can be the launch layout, and with no article open the
+     toolbar's toggle is absent: the empty reader carries a pointer way back
+     to the list. The hint above it already names the key, so it carries no
+     tooltip repeating its own label. -->
+{#snippet exitFocusAction()}
+    <button type="button" class="exit-focus" onclick={() => void layoutStore.toggleFocusMode()}>
+        <Icon name="focus-exit" size={16} />
+        {focusModeLabel}
+    </button>
+{/snippet}
+
 <div class="reader">
     {#if selectedId === null}
         {@render dragStrip()}
-        <EmptyState icon="sparkle" title={t('reader.empty')}>
+        <EmptyState
+            icon="sparkle"
+            title={t('reader.empty')}
+            action={layoutStore.focusMode ? exitFocusAction : undefined}
+        >
             {#snippet hint()}
-                {#each HINT as part, index (part.label)}
+                {#each hintParts as part, index (part.label)}
                     {#if index > 0}
                         <span class="hint-sep" aria-hidden="true">·</span>
                     {/if}
@@ -382,10 +414,22 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                  under the macOS overlay (#148), level with the other headers. -->
             <div
                 class="reader-toolbar"
+                class:leading={!layoutStore.listVisible}
                 role="toolbar"
                 aria-label={t('reader.toolbar')}
                 data-tauri-drag-region={windowChromeStore.dragRegion}
             >
+                <button
+                    class="tool"
+                    class:on={layoutStore.focusMode}
+                    aria-pressed={layoutStore.focusMode}
+                    aria-label={focusModeLabel}
+                    use:tooltip={{ text: focusModeLabel, kbd: shortcutKbd('view.toggleFocusMode') }}
+                    onclick={() => void layoutStore.toggleFocusMode()}
+                >
+                    <Icon name={layoutStore.focusMode ? 'focus-exit' : 'focus'} />
+                </button>
+                <span class="toolbar-divider" aria-hidden="true"></span>
                 <button
                     class="tool"
                     class:on={flags()?.read === true}
@@ -691,6 +735,30 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         font-size: var(--text-xs);
     }
 
+    /* A quiet secondary button: the hint above names the key, this is the
+       pointer route. */
+    .exit-focus {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--hairline-strong);
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .exit-focus:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
     .reader-toolbar {
         flex: 0 0 auto;
         display: flex;
@@ -702,8 +770,25 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         background: color-mix(in srgb, var(--surface-app), var(--surface-chrome) 45%);
     }
 
+    /* In focus mode the toolbar is the leftmost header: under the macOS
+       overlay title bar it keeps the traffic lights clear of its first
+       button (the focus-mode toggle), like the list header does with the
+       sidebar off screen. */
+    :global(:root[data-titlebar='overlay']) .reader-toolbar.leading {
+        padding-left: calc(var(--space-4) + var(--titlebar-inset));
+    }
+
     .toolbar-spring {
         flex: 1 1 auto;
+    }
+
+    /* Sets the layout toggle apart from the article's own actions. */
+    .toolbar-divider {
+        flex: 0 0 1px;
+        align-self: center;
+        height: 18px;
+        margin: 0 var(--space-1);
+        background: var(--hairline);
     }
 
     .tool {

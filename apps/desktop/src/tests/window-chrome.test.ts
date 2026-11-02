@@ -465,6 +465,31 @@ describe('window chrome', () => {
             expect(query(container, '.list-header').classList.contains('leading')).toBe(true);
         });
 
+        it('a narrow window folding the sidebar away makes the list header lead', async () => {
+            harness = installIpcHarness(shellResponders());
+            emulateOverlay();
+            const { container } = render(ListPane);
+            layoutStore.setNarrow(true);
+            await tick();
+            expect(query(container, '.list-header').classList.contains('leading')).toBe(true);
+            // Peeked back open, the sidebar's own header holds the lights again.
+            layoutStore.toggleSidebar();
+            await tick();
+            expect(query(container, '.list-header').classList.contains('leading')).toBe(false);
+        });
+
+        it('in focus mode the reader toolbar leads, past the traffic lights', async () => {
+            harness = installIpcHarness(shellResponders());
+            emulateOverlay();
+            selectionStore.selectedArticleId = 100;
+            const { container } = render(ReaderPane);
+            await flushIpc();
+            expect(query(container, '.reader-toolbar').classList.contains('leading')).toBe(false);
+            layoutStore.toggleFocusMode();
+            await tick();
+            expect(query(container, '.reader-toolbar').classList.contains('leading')).toBe(true);
+        });
+
         it('the recovery screen’s backdrop drags the window, its card does not', async () => {
             harness = installIpcHarness({});
             emulateOverlay();

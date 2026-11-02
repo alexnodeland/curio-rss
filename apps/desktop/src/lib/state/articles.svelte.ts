@@ -21,6 +21,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { ListPositions } from './list-position';
 import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
 import { type HeldRow, captureHeld, mergeHeld } from './read-hold';
+import { landRowDetails, rowDetails } from './row-details';
 import { searchStore } from './search.svelte';
 
 /** The UI-facing filter set — `ListArticlesDto` minus the cursor fields. */
@@ -125,6 +126,7 @@ export class ArticleListState {
             queryKeys.articleList(filterKey(filters)),
             () => this.#fetchLoadedRange(),
             { feedId: filters.feedId },
+            rowDetails,
         );
     }
 
@@ -222,6 +224,7 @@ export class ArticleListState {
                 return; // a refetch replaced the window while we appended
             }
             this.query.data = [...window, ...result.data];
+            landRowDetails(result.data);
             this.query.error = null; // a good page clears any prior append banner
             this.exhausted = result.data.length < this.pageSize;
         } finally {

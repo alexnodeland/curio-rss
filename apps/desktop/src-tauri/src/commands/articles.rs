@@ -14,8 +14,9 @@ use crate::dto::{
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, emit_or_log};
 
-/// Lists article summaries. Filters and order are backend-owned — the
-/// frontend passes them through and never re-filters or re-sorts.
+/// Lists article summaries, each with its state flags and tags — one call
+/// renders a page. Filters and order are backend-owned — the frontend
+/// passes them through and never re-filters or re-sorts.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_articles(
@@ -159,7 +160,7 @@ fn list_articles_impl(
     params: ListArticlesDto,
 ) -> Result<Vec<ArticleSummaryDto>, CommandError> {
     Ok(core
-        .list_articles(params.into())?
+        .list_article_rows(params.into())?
         .into_iter()
         .map(ArticleSummaryDto::from)
         .collect())
@@ -218,7 +219,7 @@ fn search_articles_impl(
     limit: u32,
 ) -> Result<Vec<ArticleSummaryDto>, CommandError> {
     Ok(core
-        .search_articles(query, limit)?
+        .search_article_rows(query, limit)?
         .into_iter()
         .map(ArticleSummaryDto::from)
         .collect())
@@ -294,6 +295,38 @@ mod tests {
             counts.by_feed.is_empty(),
             "feedless bucket stays out of by_feed"
         );
+    }
+
+    #[test]
+    fn list_and_search_rows_carry_state_and_tags() {
+        let (_dir, core) = temp_core();
+        let plain = seed_article(&core, "plain");
+        let marked = seed_article(&core, "marked");
+        core.mark_read(ArticleId(marked), true).unwrap();
+        core.set_starred(ArticleId(marked), true).unwrap();
+        core.tag_article(ArticleId(marked), "rust").unwrap();
+
+        let page = list_articles_impl(&core, default_params()).unwrap();
+        assert_eq!(page[0].id, marked);
+        assert_eq!(
+            page[0].state,
+            ArticleStateDto {
+                read: true,
+                starred: true,
+                read_later: false,
+                archived: false,
+            }
+        );
+        assert_eq!(page[0].tags, ["rust"]);
+        assert_eq!(page[0].snippet.as_deref(), Some("marked"));
+        assert_eq!(page[1].id, plain);
+        assert_eq!(page[1].state, ArticleStateDto::default());
+        assert_eq!(page[1].tags, Vec::<String>::new());
+
+        let hits = search_articles_impl(&core, "marked", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].state.starred);
+        assert_eq!(hits[0].tags, ["rust"]);
     }
 
     #[test]

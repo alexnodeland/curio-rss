@@ -7,14 +7,19 @@ import { events } from '$lib/bindings';
 import {
     type CommandResult,
     ensureQuery,
+    hasQuery,
     invalidatePrefix,
+    landCarried,
     queryKeys,
     resetQueryCache,
     wireInvalidation,
 } from '$lib/state/query-cache.svelte';
+import { landRowDetails } from '$lib/state/row-details';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
     type IpcHarness,
+    articleStateFixture,
+    articleSummaryFixture,
     commandErrorFixture,
     flushIpc,
     installIpcHarness,
@@ -222,6 +227,208 @@ describe('query cache', () => {
             await flushIpc();
 
             expect(feeds.calls()).toBe(1);
+        });
+    });
+
+    it('a landed entry is loaded without a fetch and refetches on invalidation', async () => {
+        const fetcher = countingFetcher(() => 'fetched');
+        landCarried([{ key: 'article-state:7', fetcher: fetcher.fetch, data: 'landed' }]);
+        const query = ensureQuery('article-state:7', fetcher.fetch);
+        await query.whenLoaded();
+        await flushIpc();
+        expect(query.data).toBe('landed');
+        expect(query.loaded).toBe(true);
+        expect(fetcher.calls()).toBe(0);
+
+        invalidatePrefix('article-state:');
+        await flushIpc();
+        expect(query.data).toBe('fetched');
+        expect(fetcher.calls()).toBe(1);
+    });
+
+    it('landing overwrites an existing entry and supersedes its in-flight fetch', async () => {
+        const pending: ((value: CommandResult<string>) => void)[] = [];
+        const fetcher = () =>
+            new Promise<CommandResult<string>>((resolve) => pending.push(resolve));
+        const query = ensureQuery('article-tags:7', fetcher);
+        await flushIpc();
+        expect(pending).toHaveLength(1);
+
+        landCarried([{ key: 'article-tags:7', fetcher, data: 'landed' }]);
+        expect(ensureQuery('article-tags:7', fetcher)).toBe(query);
+        expect(query.data).toBe('landed');
+        expect(query.loading).toBe(false);
+
+        pending[0]({ status: 'ok', data: 'older' });
+        await flushIpc();
+        expect(query.data).toBe('landed'); // the superseded fetch lands nothing
+    });
+
+    it('carries lands each landed result, never a superseded one', async () => {
+        let payload = 'first';
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let calls = 0;
+        const detail = countingFetcher(() => 'fetched');
+        const query = ensureQuery(
+            'articles:x',
+            async (): Promise<CommandResult<string>> => {
+                calls += 1;
+                const data = payload;
+                if (calls === 1) {
+                    await gate; // the first fetch is overtaken
+                }
+                return { status: 'ok', data };
+            },
+            {},
+            (data) => [{ key: 'article-state:1', fetcher: detail.fetch, data }],
+        );
+        await Promise.resolve();
+        payload = 'second';
+        await query.refetch();
+        expect(ensureQuery('article-state:1', detail.fetch).data).toBe('second');
+        release();
+        await flushIpc();
+        expect(query.data).toBe('second');
+        expect(ensureQuery('article-state:1', detail.fetch).data).toBe('second');
+        expect(detail.calls()).toBe(0);
+    });
+
+    it('list rows land their state and tags entries', async () => {
+        harness = installIpcHarness({});
+        const state = articleStateFixture({ starred: true });
+        landRowDetails([articleSummaryFixture({ id: 9, state, tags: ['a'] })]);
+        const { commands } = await import('$lib/bindings');
+        const stateQuery = ensureQuery(queryKeys.articleState(9), () =>
+            commands.getArticleState(9),
+        );
+        const tagsQuery = ensureQuery(queryKeys.articleTags(9), () => commands.getArticleTags(9));
+        await flushIpc();
+        expect(stateQuery.data).toEqual(state);
+        expect(tagsQuery.data).toEqual(['a']);
+        expect(harness.callsFor('get_article_state')).toEqual([]);
+        expect(harness.callsFor('get_article_tags')).toEqual([]);
+    });
+
+    describe('ArticlesChanged over carried detail entries', () => {
+        /** A list of `ids` whose rows carry `article-state:<id>` = `flag`. */
+        function carryingList(
+            initial: number[],
+            flag: () => string,
+            detail: ReturnType<typeof countingFetcher<string>>,
+            fail: () => boolean = () => false,
+        ) {
+            let ids = initial;
+            const list = countingFetcher(() => ids);
+            const query = ensureQuery<number[]>(
+                queryKeys.articleList('x'),
+                () =>
+                    fail()
+                        ? Promise.resolve({
+                              status: 'error' as const,
+                              error: commandErrorFixture(),
+                          })
+                        : list.fetch(),
+                { feedId: null },
+                (rows) =>
+                    rows.map((id) => ({
+                        key: queryKeys.articleState(id),
+                        fetcher: detail.fetch,
+                        data: `${flag()} ${id}`,
+                    })),
+            );
+            return {
+                query,
+                list,
+                setIds: (next: number[]) => {
+                    ids = next;
+                },
+            };
+        }
+
+        it('a refetching list refreshes the rows it carries with no per-row call', async () => {
+            harness = installIpcHarness({});
+            let flag = 'unread';
+            const detail = countingFetcher(() => 'fetched');
+            const { list } = carryingList([1, 2, 3], () => flag, detail);
+            const unwire = await wireInvalidation();
+            await flushIpc();
+            const row = ensureQuery(queryKeys.articleState(2), detail.fetch);
+            expect(row.data).toBe('unread 2');
+
+            flag = 'read';
+            await events.articlesChanged.emit({ feed_id: 1 });
+            await flushIpc();
+
+            expect(list.calls()).toBe(2);
+            expect(detail.calls()).toBe(0);
+            expect(row.data).toBe('read 2');
+            unwire();
+        });
+
+        it('a carried row the refetch drops is refetched when read, dropped when not', async () => {
+            harness = installIpcHarness({});
+            const detail = countingFetcher(() => 'fetched');
+            const { setIds } = carryingList([1, 2, 3], () => 'unread', detail);
+            const unwire = await wireInvalidation();
+            await flushIpc();
+            const shown = ensureQuery(queryKeys.articleState(2), detail.fetch);
+
+            setIds([1]); // 2 and 3 left the window (read in an unread-only view)
+            await events.articlesChanged.emit({ feed_id: null });
+            await flushIpc();
+
+            expect(detail.calls()).toBe(1); // only the row something reads
+            expect(shown.data).toBe('fetched');
+            expect(hasQuery(queryKeys.articleState(3))).toBe(false);
+            expect(hasQuery(queryKeys.articleState(1))).toBe(true);
+            unwire();
+        });
+
+        it('a failed list refetch settles every row it was left', async () => {
+            harness = installIpcHarness({});
+            let fail = false;
+            const detail = countingFetcher(() => 'fetched');
+            carryingList(
+                [1, 2],
+                () => 'unread',
+                detail,
+                () => fail,
+            );
+            const unwire = await wireInvalidation();
+            await flushIpc();
+            const shown = ensureQuery(queryKeys.articleState(1), detail.fetch);
+
+            fail = true;
+            await events.articlesChanged.emit({ feed_id: null });
+            await flushIpc();
+
+            expect(detail.calls()).toBe(1);
+            expect(shown.data).toBe('fetched');
+            expect(hasQuery(queryKeys.articleState(2))).toBe(false);
+            unwire();
+        });
+
+        it('an entry no list carries refetches when read and is dropped when not', async () => {
+            harness = installIpcHarness({});
+            const detail = countingFetcher(() => 'fetched');
+            landCarried([
+                { key: queryKeys.articleState(8), fetcher: detail.fetch, data: 'landed 8' },
+                { key: queryKeys.articleState(9), fetcher: detail.fetch, data: 'landed 9' },
+            ]);
+            const shown = ensureQuery(queryKeys.articleState(8), detail.fetch);
+            const unwire = await wireInvalidation();
+            await flushIpc();
+
+            await events.articlesChanged.emit({ feed_id: null });
+            await flushIpc();
+
+            expect(detail.calls()).toBe(1);
+            expect(shown.data).toBe('fetched');
+            expect(hasQuery(queryKeys.articleState(9))).toBe(false);
+            unwire();
         });
     });
 

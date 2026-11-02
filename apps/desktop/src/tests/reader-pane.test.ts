@@ -12,7 +12,12 @@ import { keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS } from '$lib/keyboard/registry';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher } from '$lib/state/prefetch';
-import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
+import {
+    hasQuery,
+    queryKeys,
+    resetQueryCache,
+    wireInvalidation,
+} from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
@@ -397,9 +402,12 @@ describe('ReaderPane', () => {
 
             // The selected body first, then the neighbours: +1, -1, +2, -2.
             expect(fetchedIds()).toEqual([106, 105, 107, 104, 108]);
-            expect(harness.callsFor('get_article_state').map((a) => a.articleId)).toEqual(
-                expect.arrayContaining([105, 107, 104, 108]),
-            );
+            // The neighbours' flags came with the list rows: already cached,
+            // so prefetching them costs no state call.
+            for (const id of [105, 107, 104, 108]) {
+                expect(hasQuery(queryKeys.articleState(id))).toBe(true);
+            }
+            expect(harness.callsFor('get_article_state')).toEqual([]);
         });
 
         it('moving to a prefetched neighbour renders from cache with no loading state', async () => {

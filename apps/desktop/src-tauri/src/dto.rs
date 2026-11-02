@@ -19,7 +19,7 @@ use std::path::Path;
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
     Article, ArticleFlag, ArticleState, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord,
-    FetchStatus,
+    FetchStatus, ListedArticle,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::ListArticles;
@@ -261,13 +261,9 @@ pub struct NewFeedDto {
     pub validate: bool,
 }
 
-/// The longest article-text excerpt the list DTO carries. The extracted
-/// text is already read per row (it backs FTS); the list keeps only this
-/// bounded preview, not the full body, so the "small payload" intent holds.
-const SNIPPET_MAX_CHARS: usize = 200;
-
-/// A list row: everything the article list renders, plus a short text
-/// preview — never the full content payload (that stays on [`ArticleDto`]).
+/// A list row: everything the article list renders — a short text
+/// preview, the state flags and the tags included — in one IPC reply;
+/// never the full content payload (that stays on [`ArticleDto`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ArticleSummaryDto {
     /// Row id (keyset cursor currency).
@@ -293,27 +289,19 @@ pub struct ArticleSummaryDto {
     /// image cache — never fetched directly.
     pub image: Option<String>,
     /// A whitespace-normalized, length-bounded preview of the extracted
-    /// text (up to `SNIPPET_MAX_CHARS`, `…`-suffixed when truncated).
+    /// text (up to 200 characters, `…`-suffixed when the text runs on),
+    /// built in the engine from the start of the text only.
     /// `None` when the article has no extracted text.
     pub snippet: Option<String>,
+    /// The article's flags, read with the row — the list renders read /
+    /// starred / read-later / archived state without a call per row.
+    pub state: ArticleStateDto,
+    /// The article's tags, sorted.
+    pub tags: Vec<String>,
 }
 
-/// Builds the bounded, whitespace-normalized preview for a list row.
-fn article_snippet(text: &str) -> Option<String> {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        return None;
-    }
-    let mut snippet: String = normalized.chars().take(SNIPPET_MAX_CHARS).collect();
-    if normalized.chars().count() > SNIPPET_MAX_CHARS {
-        snippet.push('…');
-    }
-    Some(snippet)
-}
-
-impl From<Article> for ArticleSummaryDto {
-    fn from(article: Article) -> Self {
-        let snippet = article_snippet(&article.content.text);
+impl From<ListedArticle> for ArticleSummaryDto {
+    fn from(article: ListedArticle) -> Self {
         Self {
             id: article.id.0,
             feed_id: article.feed_id.map(|id| id.0),
@@ -325,7 +313,9 @@ impl From<Article> for ArticleSummaryDto {
             word_count: article.word_count,
             lang: article.lang,
             image: article.lead_image,
-            snippet,
+            snippet: article.snippet,
+            state: article.state.into(),
+            tags: article.tags,
         }
     }
 }
@@ -931,17 +921,52 @@ mod tests {
     }
 
     #[test]
-    fn article_snippet_normalizes_and_bounds() {
-        assert_eq!(article_snippet(""), None);
-        assert_eq!(article_snippet("   \n\t  "), None);
+    fn a_list_row_crosses_with_its_state_and_tags() {
+        let saved_at: curio_types::Timestamp = "2026-07-01T10:00:00.000Z".parse().unwrap();
+        let row = ListedArticle {
+            id: curio_core::model::ArticleId(7),
+            curio_id: curio_types::CurioId::new(),
+            feed_id: Some(FeedId(3)),
+            title: "Title".to_owned(),
+            source_url: "https://example.org/post".to_owned(),
+            author: None,
+            published_at: None,
+            lang: Some("en".to_owned()),
+            word_count: Some(12),
+            saved_at,
+            lead_image: None,
+            snippet: Some("preview".to_owned()),
+            state: ArticleState {
+                read: true,
+                starred: false,
+                read_later: true,
+                archived: false,
+            },
+            tags: vec!["a".to_owned(), "b".to_owned()],
+        };
+        let dto = ArticleSummaryDto::from(row);
+        assert_eq!(dto.id, 7);
+        assert_eq!(dto.feed_id, Some(3));
+        assert_eq!(dto.saved_at, "2026-07-01T10:00:00.000Z");
+        assert_eq!(dto.snippet.as_deref(), Some("preview"));
         assert_eq!(
-            article_snippet("  hello   world\n\nagain  "),
-            Some("hello world again".to_owned())
+            dto.state,
+            ArticleStateDto {
+                read: true,
+                starred: false,
+                read_later: true,
+                archived: false,
+            }
         );
-        let long = "word ".repeat(100);
-        let snippet = article_snippet(&long).unwrap();
-        assert_eq!(snippet.chars().count(), SNIPPET_MAX_CHARS + 1);
-        assert!(snippet.ends_with('…'));
+        assert_eq!(dto.tags, ["a", "b"]);
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["state"]["read_later"], true);
+        assert_eq!(json["tags"][1], "b");
+        assert_eq!(
+            curio_core::model::SNIPPET_MAX_CHARS,
+            200,
+            "the preview bound the field docs name"
+        );
     }
 
     #[test]

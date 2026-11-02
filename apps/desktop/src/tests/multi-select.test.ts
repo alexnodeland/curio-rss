@@ -30,28 +30,32 @@ import { resetUiStores } from './ui-stores';
 
 const IDS = [306, 305, 304, 303, 302, 301];
 
-function rows(): ArticleSummaryDto[] {
-    return IDS.map((id) => articleSummaryFixture({ id, title: `Article ${id}` }));
-}
-
 /** `set_flag_many` over an in-memory flag table: returns the ids it changed. */
 function flagBackend(): Record<string, Set<number>> {
     return { read: new Set(), starred: new Set(), read_later: new Set(), archived: new Set() };
 }
 
+/** One article's flags as the backend reports them, on its row or alone. */
+function stateOf(flags: Record<string, Set<number>>, id: number) {
+    return articleStateFixture({
+        read: flags.read.has(id),
+        starred: flags.starred.has(id),
+        read_later: flags.read_later.has(id),
+        archived: flags.archived.has(id),
+    });
+}
+
+function rows(flags = flagBackend()): ArticleSummaryDto[] {
+    return IDS.map((id) =>
+        articleSummaryFixture({ id, title: `Article ${id}`, state: stateOf(flags, id) }),
+    );
+}
+
 function install(flags = flagBackend()): IpcHarness {
     return installIpcHarness({
-        list_articles: rows(),
+        list_articles: () => rows(flags),
         list_feeds: [],
-        get_article_state: (args) => {
-            const id = args.articleId as number;
-            return articleStateFixture({
-                read: flags.read.has(id),
-                starred: flags.starred.has(id),
-                read_later: flags.read_later.has(id),
-                archived: flags.archived.has(id),
-            });
-        },
+        get_article_state: (args) => stateOf(flags, args.articleId as number),
         get_article: (args) => articleFixture({ id: args.articleId as number }),
         mark_read: true,
         list_tags: [],

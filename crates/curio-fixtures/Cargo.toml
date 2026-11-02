@@ -32,6 +32,10 @@ path = "src/main.rs"
 name = "cold_start"
 harness = false
 
+[[bench]]
+name = "list_queries"
+harness = false
+
 [dependencies]
 curio-core = { workspace = true }
 curio-types = { workspace = true }

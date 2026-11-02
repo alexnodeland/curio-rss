@@ -8,6 +8,7 @@
  */
 import { type ArticleSummaryDto, type CommandError, commands } from '$lib/bindings';
 import type { CommandResult } from './query-cache.svelte';
+import { landRowDetails } from './row-details';
 
 /** FTS result cap — enough to scan, small enough to render without paging. */
 export const SEARCH_LIMIT = 100;
@@ -130,6 +131,7 @@ export class SearchStore {
         if (result.status === 'ok') {
             this.results = result.data;
             this.error = null;
+            landRowDetails(result.data);
         } else {
             this.error = result.error;
         }

@@ -437,7 +437,7 @@ describe('window chrome', () => {
             await flushIpc();
 
             harness.respond('get_article', rejectWith(commandErrorFixture({ kind: 'user' })));
-            await events.articlesChanged.emit({ feed_id: null });
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
             await flushIpc();
 
             const banner = getByRole('alert');

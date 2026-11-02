@@ -359,7 +359,7 @@ describe('query cache', () => {
             expect(row.data).toBe('unread 2');
 
             flag = 'read';
-            await events.articlesChanged.emit({ feed_id: 1 });
+            await events.articlesChanged.emit({ feed_id: 1, flags: null });
             await flushIpc();
 
             expect(list.calls()).toBe(2);
@@ -377,7 +377,7 @@ describe('query cache', () => {
             const shown = ensureQuery(queryKeys.articleState(2), detail.fetch);
 
             setIds([1]); // 2 and 3 left the window (read in an unread-only view)
-            await events.articlesChanged.emit({ feed_id: null });
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
             await flushIpc();
 
             expect(detail.calls()).toBe(1); // only the row something reads
@@ -402,7 +402,7 @@ describe('query cache', () => {
             const shown = ensureQuery(queryKeys.articleState(1), detail.fetch);
 
             fail = true;
-            await events.articlesChanged.emit({ feed_id: null });
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
             await flushIpc();
 
             expect(detail.calls()).toBe(1);
@@ -422,7 +422,7 @@ describe('query cache', () => {
             const unwire = await wireInvalidation();
             await flushIpc();
 
-            await events.articlesChanged.emit({ feed_id: null });
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
             await flushIpc();
 
             expect(detail.calls()).toBe(1);

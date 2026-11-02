@@ -5,349 +5,302 @@
  * the Rust command emits (only when something changed), or the visual-check
  * loop shows badges and lists that never react (#300).
  */
-import {
-	events,
-	type ArticlesChanged,
-	type ListArticlesDto,
-	commands,
-} from "$lib/bindings";
-import { clearMocks } from "@tauri-apps/api/mocks";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushIpc } from "./ipc-harness";
+import { events, type ArticlesChanged, type ListArticlesDto, commands } from '$lib/bindings';
+import { clearMocks } from '@tauri-apps/api/mocks';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushIpc } from './ipc-harness';
 
 interface Recorded {
-	articles: ArticlesChanged[];
-	feeds: number;
+    articles: ArticlesChanged[];
+    feeds: number;
 }
 
 let unlisteners: Array<() => void> = [];
 
 /** Installs a fresh mock (its preview data restarts) and records its events. */
 async function installMock(): Promise<Recorded> {
-	// `installDevMock` installs once per module instance; a fresh instance
-	// per test gives each test pristine preview data.
-	vi.resetModules();
-	const { installDevMock } = await import("$lib/dev/install-mock");
-	await installDevMock();
-	const recorded: Recorded = { articles: [], feeds: 0 };
-	unlisteners = await Promise.all([
-		events.articlesChanged.listen((event) => {
-			recorded.articles.push(event.payload);
-		}),
-		events.feedsChanged.listen(() => {
-			recorded.feeds += 1;
-		}),
-	]);
-	return recorded;
+    // `installDevMock` installs once per module instance; a fresh instance
+    // per test gives each test pristine preview data.
+    vi.resetModules();
+    const { installDevMock } = await import('$lib/dev/install-mock');
+    await installDevMock();
+    const recorded: Recorded = { articles: [], feeds: 0 };
+    unlisteners = await Promise.all([
+        events.articlesChanged.listen((event) => {
+            recorded.articles.push(event.payload);
+        }),
+        events.feedsChanged.listen(() => {
+            recorded.feeds += 1;
+        }),
+    ]);
+    return recorded;
 }
 
-function ok<T>(
-	result: { status: "ok"; data: T } | { status: "error"; error: unknown },
-): T {
-	if (result.status !== "ok") {
-		throw new Error(`expected ok, got ${JSON.stringify(result.error)}`);
-	}
-	return result.data;
+function ok<T>(result: { status: 'ok'; data: T } | { status: 'error'; error: unknown }): T {
+    if (result.status !== 'ok') {
+        throw new Error(`expected ok, got ${JSON.stringify(result.error)}`);
+    }
+    return result.data;
 }
 
-const listParams = (
-	overrides: Partial<ListArticlesDto> = {},
-): ListArticlesDto => ({
-	feed_id: null,
-	before: null,
-	limit: 500,
-	read: null,
-	starred: null,
-	read_later: null,
-	archived: null,
-	tag: null,
-	feed_tag: null,
-	...overrides,
+const listParams = (overrides: Partial<ListArticlesDto> = {}): ListArticlesDto => ({
+    feed_id: null,
+    before: null,
+    limit: 500,
+    read: null,
+    starred: null,
+    read_later: null,
+    archived: null,
+    tag: null,
+    feed_tag: null,
+    ...overrides,
 });
 
 async function unreadIn(feedId: number): Promise<number> {
-	const counts = ok(await commands.getUnreadCounts());
-	return counts.by_feed.find(([id]) => id === feedId)?.[1] ?? 0;
+    const counts = ok(await commands.getUnreadCounts());
+    return counts.by_feed.find(([id]) => id === feedId)?.[1] ?? 0;
 }
 
-describe("dev mock IPC", () => {
-	beforeEach(() => {
-		unlisteners = [];
-	});
+describe('dev mock IPC', () => {
+    beforeEach(() => {
+        unlisteners = [];
+    });
 
-	afterEach(() => {
-		for (const unlisten of unlisteners) unlisten();
-		clearMocks();
-	});
+    afterEach(() => {
+        for (const unlisten of unlisteners) unlisten();
+        clearMocks();
+    });
 
-	describe("article state → ArticlesChanged", () => {
-		it("mark_all_read emits once with its feed, and the counts follow", async () => {
-			const recorded = await installMock();
-			const before = ok(await commands.getUnreadCounts());
-			const feedUnread = await unreadIn(1);
-			expect(feedUnread).toBeGreaterThan(0);
+    describe('article state → ArticlesChanged', () => {
+        it('mark_all_read emits once with its feed, and the counts follow', async () => {
+            const recorded = await installMock();
+            const before = ok(await commands.getUnreadCounts());
+            const feedUnread = await unreadIn(1);
+            expect(feedUnread).toBeGreaterThan(0);
 
-			const flipped = ok(await commands.markAllRead(1));
-			await flushIpc();
+            const flipped = ok(await commands.markAllRead(1));
+            await flushIpc();
 
-			expect(flipped).toHaveLength(feedUnread);
-			expect(recorded.articles).toEqual([
-				{
-					feed_id: 1,
-					flags: { article_ids: flipped, field: "read", value: true },
-				},
-			]);
-			expect(await unreadIn(1)).toBe(0);
-			expect(ok(await commands.getUnreadCounts()).total).toBe(
-				before.total - feedUnread,
-			);
+            expect(flipped).toHaveLength(feedUnread);
+            expect(recorded.articles).toEqual([
+                {
+                    feed_id: 1,
+                    flags: { article_ids: flipped, field: 'read', value: true },
+                },
+            ]);
+            expect(await unreadIn(1)).toBe(0);
+            expect(ok(await commands.getUnreadCounts()).total).toBe(before.total - feedUnread);
 
-			// Nothing left to change: the command says so and stays silent.
-			expect(ok(await commands.markAllRead(1))).toEqual([]);
-			await flushIpc();
-			expect(recorded.articles).toHaveLength(1);
+            // Nothing left to change: the command says so and stays silent.
+            expect(ok(await commands.markAllRead(1))).toEqual([]);
+            await flushIpc();
+            expect(recorded.articles).toHaveLength(1);
 
-			// The toast's Undo restores the badge and the All count.
-			expect(ok(await commands.markReadMany(flipped, false))).toBe(feedUnread);
-			await flushIpc();
-			expect(recorded.articles[1]).toEqual({
-				feed_id: null,
-				flags: { article_ids: flipped, field: "read", value: false },
-			});
-			expect(await unreadIn(1)).toBe(feedUnread);
-			expect(ok(await commands.getUnreadCounts()).total).toBe(before.total);
-		});
+            // The toast's Undo restores the badge and the All count.
+            expect(ok(await commands.markReadMany(flipped, false))).toBe(feedUnread);
+            await flushIpc();
+            expect(recorded.articles[1]).toEqual({
+                feed_id: null,
+                flags: { article_ids: flipped, field: 'read', value: false },
+            });
+            expect(await unreadIn(1)).toBe(feedUnread);
+            expect(ok(await commands.getUnreadCounts()).total).toBe(before.total);
+        });
 
-		it("a library-wide mark_all_read carries no feed", async () => {
-			const recorded = await installMock();
-			ok(await commands.markAllRead(null));
-			await flushIpc();
-			expect(recorded.articles).toHaveLength(1);
-			expect(recorded.articles[0].feed_id).toBeNull();
-			expect(recorded.articles[0].flags?.field).toBe("read");
-			expect(ok(await commands.getUnreadCounts()).total).toBe(0);
-		});
+        it('a library-wide mark_all_read carries no feed', async () => {
+            const recorded = await installMock();
+            ok(await commands.markAllRead(null));
+            await flushIpc();
+            expect(recorded.articles).toHaveLength(1);
+            expect(recorded.articles[0].feed_id).toBeNull();
+            expect(recorded.articles[0].flags?.field).toBe('read');
+            expect(ok(await commands.getUnreadCounts()).total).toBe(0);
+        });
 
-		it("the per-article flags emit only when they change something", async () => {
-			const recorded = await installMock();
-			const [first] = ok(
-				await commands.listArticles(listParams({ read: false })),
-			);
+        it('the per-article flags emit only when they change something', async () => {
+            const recorded = await installMock();
+            const [first] = ok(await commands.listArticles(listParams({ read: false })));
 
-			expect(ok(await commands.markRead(first.id, true))).toBe(true);
-			expect(ok(await commands.markRead(first.id, true))).toBe(false);
-			expect(ok(await commands.setStarred(first.id, true))).toBe(true);
-			expect(ok(await commands.setReadLater(first.id, true))).toBe(true);
-			expect(ok(await commands.setArchived(first.id, true))).toBe(true);
-			expect(ok(await commands.setArchived(first.id, true))).toBe(false);
-			expect(ok(await commands.markReadMany([first.id], true))).toBe(0);
-			await flushIpc();
+            expect(ok(await commands.markRead(first.id, true))).toBe(true);
+            expect(ok(await commands.markRead(first.id, true))).toBe(false);
+            expect(ok(await commands.setStarred(first.id, true))).toBe(true);
+            expect(ok(await commands.setReadLater(first.id, true))).toBe(true);
+            expect(ok(await commands.setArchived(first.id, true))).toBe(true);
+            expect(ok(await commands.setArchived(first.id, true))).toBe(false);
+            expect(ok(await commands.markReadMany([first.id], true))).toBe(0);
+            await flushIpc();
 
-			expect(recorded.articles).toHaveLength(4);
-			expect(recorded.articles.every((event) => event.feed_id === null)).toBe(
-				true,
-			);
-			// Each flip names exactly its article, flag and new value.
-			expect(recorded.articles.map((event) => event.flags)).toEqual(
-				(["read", "starred", "read_later", "archived"] as const).map(
-					(field) => ({
-						article_ids: [first.id],
-						field,
-						value: true,
-					}),
-				),
-			);
-			expect(recorded.feeds).toBe(0);
-		});
+            expect(recorded.articles).toHaveLength(4);
+            expect(recorded.articles.every((event) => event.feed_id === null)).toBe(true);
+            // Each flip names exactly its article, flag and new value.
+            expect(recorded.articles.map((event) => event.flags)).toEqual(
+                (['read', 'starred', 'read_later', 'archived'] as const).map((field) => ({
+                    article_ids: [first.id],
+                    field,
+                    value: true,
+                })),
+            );
+            expect(recorded.feeds).toBe(0);
+        });
 
-		it("tagging emits only when the tag set changes", async () => {
-			const recorded = await installMock();
-			const [first] = ok(await commands.listArticles(listParams()));
+        it('tagging emits only when the tag set changes', async () => {
+            const recorded = await installMock();
+            const [first] = ok(await commands.listArticles(listParams()));
 
-			expect(ok(await commands.tagArticle(first.id, "dev-mock"))).toBe(true);
-			expect(ok(await commands.tagArticle(first.id, "dev-mock"))).toBe(false);
-			expect(ok(await commands.untagArticle(first.id, "dev-mock"))).toBe(true);
-			expect(ok(await commands.untagArticle(first.id, "dev-mock"))).toBe(false);
-			await flushIpc();
+            expect(ok(await commands.tagArticle(first.id, 'dev-mock'))).toBe(true);
+            expect(ok(await commands.tagArticle(first.id, 'dev-mock'))).toBe(false);
+            expect(ok(await commands.untagArticle(first.id, 'dev-mock'))).toBe(true);
+            expect(ok(await commands.untagArticle(first.id, 'dev-mock'))).toBe(false);
+            await flushIpc();
 
-			expect(recorded.articles).toHaveLength(2);
-		});
+            expect(recorded.articles).toHaveLength(2);
+        });
 
-		it("unread counts leave archived articles out, as core does", async () => {
-			await installMock();
-			const [first] = ok(
-				await commands.listArticles(listParams({ read: false })),
-			);
-			const feedId = first.feed_id ?? -1;
-			const before = ok(await commands.getUnreadCounts());
-			const feedBefore = await unreadIn(feedId);
+        it('unread counts leave archived articles out, as core does', async () => {
+            await installMock();
+            const [first] = ok(await commands.listArticles(listParams({ read: false })));
+            const feedId = first.feed_id ?? -1;
+            const before = ok(await commands.getUnreadCounts());
+            const feedBefore = await unreadIn(feedId);
 
-			ok(await commands.setArchived(first.id, true));
+            ok(await commands.setArchived(first.id, true));
 
-			expect(ok(await commands.getUnreadCounts()).total).toBe(before.total - 1);
-			expect(await unreadIn(feedId)).toBe(feedBefore - 1);
-		});
-	});
+            expect(ok(await commands.getUnreadCounts()).total).toBe(before.total - 1);
+            expect(await unreadIn(feedId)).toBe(feedBefore - 1);
+        });
+    });
 
-	describe("feed writes → FeedsChanged", () => {
-		it("remove_feed drops the feed for good and orphans its articles", async () => {
-			const recorded = await installMock();
-			const before = ok(await commands.getUnreadCounts());
-			const ownArticles = ok(
-				await commands.listArticles(listParams({ feed_id: 1 })),
-			);
-			expect(ownArticles.length).toBeGreaterThan(0);
+    describe('feed writes → FeedsChanged', () => {
+        it('remove_feed drops the feed for good and orphans its articles', async () => {
+            const recorded = await installMock();
+            const before = ok(await commands.getUnreadCounts());
+            const ownArticles = ok(await commands.listArticles(listParams({ feed_id: 1 })));
+            expect(ownArticles.length).toBeGreaterThan(0);
 
-			ok(await commands.stageFeedRemoval(1));
-			ok(await commands.removeFeed(1));
-			await flushIpc();
+            ok(await commands.stageFeedRemoval(1));
+            ok(await commands.removeFeed(1));
+            await flushIpc();
 
-			expect(recorded.feeds).toBe(1);
-			expect(recorded.articles).toEqual([{ feed_id: null, flags: null }]);
-			const feeds = ok(await commands.listFeeds());
-			expect(feeds.some((feed) => feed.id === 1)).toBe(false);
-			expect(
-				ok(await commands.listArticles(listParams({ feed_id: 1 }))),
-			).toEqual([]);
-			const counts = ok(await commands.getUnreadCounts());
-			expect(counts.by_feed.some(([id]) => id === 1)).toBe(false);
-			// Core's `ON DELETE SET NULL`: the articles stay in the library.
-			expect(counts.total).toBe(before.total);
-			const article = ok(await commands.getArticle(ownArticles[0].id));
-			expect(article?.feed_id).toBeNull();
+            expect(recorded.feeds).toBe(1);
+            expect(recorded.articles).toEqual([{ feed_id: null, flags: null }]);
+            const feeds = ok(await commands.listFeeds());
+            expect(feeds.some((feed) => feed.id === 1)).toBe(false);
+            expect(ok(await commands.listArticles(listParams({ feed_id: 1 })))).toEqual([]);
+            const counts = ok(await commands.getUnreadCounts());
+            expect(counts.by_feed.some(([id]) => id === 1)).toBe(false);
+            // Core's `ON DELETE SET NULL`: the articles stay in the library.
+            expect(counts.total).toBe(before.total);
+            const article = ok(await commands.getArticle(ownArticles[0].id));
+            expect(article?.feed_id).toBeNull();
 
-			// Gone for good: a second removal finds nothing, and says nothing.
-			const again = await commands.removeFeed(1);
-			expect(again.status).toBe("error");
-			expect(again.status === "error" && again.error.code).toBe("NOT_FOUND");
-			await flushIpc();
-			expect(recorded.feeds).toBe(1);
-		});
+            // Gone for good: a second removal finds nothing, and says nothing.
+            const again = await commands.removeFeed(1);
+            expect(again.status).toBe('error');
+            expect(again.status === 'error' && again.error.code).toBe('NOT_FOUND');
+            await flushIpc();
+            expect(recorded.feeds).toBe(1);
+        });
 
-		it("the feed-row writes change the feed and emit", async () => {
-			const recorded = await installMock();
+        it('the feed-row writes change the feed and emit', async () => {
+            const recorded = await installMock();
 
-			ok(await commands.setFeedTitle(2, "Renamed"));
-			ok(await commands.setFeedTags(2, ["Moved"]));
-			ok(await commands.setFeedStatus(2, "paused"));
-			ok(await commands.setFeedMetadata(2, "https://example.com", "About"));
-			ok(await commands.setFeedFullText(2, true));
-			// Like core, update_feed_metadata never clobbers a set value.
-			ok(
-				await commands.updateFeedMetadata(
-					2,
-					"Retitled",
-					"https://other.example",
-					null,
-				),
-			);
-			await flushIpc();
+            ok(await commands.setFeedTitle(2, 'Renamed'));
+            ok(await commands.setFeedTags(2, ['Moved']));
+            ok(await commands.setFeedStatus(2, 'paused'));
+            ok(await commands.setFeedMetadata(2, 'https://example.com', 'About'));
+            ok(await commands.setFeedFullText(2, true));
+            // Like core, update_feed_metadata never clobbers a set value.
+            ok(await commands.updateFeedMetadata(2, 'Retitled', 'https://other.example', null));
+            await flushIpc();
 
-			expect(recorded.feeds).toBe(6);
-			expect(recorded.articles).toEqual([]);
-			const feed = ok(await commands.listFeeds()).find(
-				(candidate) => candidate.id === 2,
-			);
-			expect(feed).toMatchObject({
-				title: "Renamed",
-				tags: ["Moved"],
-				status: "paused",
-				site_url: "https://example.com",
-				description: "About",
-				fetch_full_text: true,
-			});
+            expect(recorded.feeds).toBe(6);
+            expect(recorded.articles).toEqual([]);
+            const feed = ok(await commands.listFeeds()).find((candidate) => candidate.id === 2);
+            expect(feed).toMatchObject({
+                title: 'Renamed',
+                tags: ['Moved'],
+                status: 'paused',
+                site_url: 'https://example.com',
+                description: 'About',
+                fetch_full_text: true,
+            });
 
-			const missing = await commands.setFeedTitle(9999, "Nope");
-			expect(missing.status === "error" && missing.error.code).toBe(
-				"NOT_FOUND",
-			);
-			await flushIpc();
-			expect(recorded.feeds).toBe(6);
-		});
+            const missing = await commands.setFeedTitle(9999, 'Nope');
+            expect(missing.status === 'error' && missing.error.code).toBe('NOT_FOUND');
+            await flushIpc();
+            expect(recorded.feeds).toBe(6);
+        });
 
-		it("update_feed_metadata fills only the empty fields", async () => {
-			const recorded = await installMock();
+        it('update_feed_metadata fills only the empty fields', async () => {
+            const recorded = await installMock();
 
-			ok(await commands.setFeedTitle(2, null));
-			ok(await commands.setFeedMetadata(2, null, "Kept"));
-			ok(
-				await commands.updateFeedMetadata(
-					2,
-					"Filled",
-					"https://filled.example",
-					"Lost",
-				),
-			);
-			await flushIpc();
+            ok(await commands.setFeedTitle(2, null));
+            ok(await commands.setFeedMetadata(2, null, 'Kept'));
+            ok(await commands.updateFeedMetadata(2, 'Filled', 'https://filled.example', 'Lost'));
+            await flushIpc();
 
-			expect(recorded.feeds).toBe(3);
-			const feed = ok(await commands.listFeeds()).find(
-				(candidate) => candidate.id === 2,
-			);
-			expect(feed).toMatchObject({
-				title: "Filled",
-				site_url: "https://filled.example",
-				description: "Kept",
-			});
-		});
+            expect(recorded.feeds).toBe(3);
+            const feed = ok(await commands.listFeeds()).find((candidate) => candidate.id === 2);
+            expect(feed).toMatchObject({
+                title: 'Filled',
+                site_url: 'https://filled.example',
+                description: 'Kept',
+            });
+        });
 
-		it("reorder_feeds lists the feeds in the new order", async () => {
-			const recorded = await installMock();
-			const ids = ok(await commands.listFeeds()).map((feed) => feed.id);
-			const reversed = [...ids].reverse();
+        it('reorder_feeds lists the feeds in the new order', async () => {
+            const recorded = await installMock();
+            const ids = ok(await commands.listFeeds()).map((feed) => feed.id);
+            const reversed = [...ids].reverse();
 
-			ok(await commands.reorderFeeds(reversed));
-			await flushIpc();
+            ok(await commands.reorderFeeds(reversed));
+            await flushIpc();
 
-			expect(recorded.feeds).toBe(1);
-			expect(ok(await commands.listFeeds()).map((feed) => feed.id)).toEqual(
-				reversed,
-			);
+            expect(recorded.feeds).toBe(1);
+            expect(ok(await commands.listFeeds()).map((feed) => feed.id)).toEqual(reversed);
 
-			// A partial order moves only the listed feeds' positions.
-			ok(await commands.reorderFeeds([ids[0]]));
-			const partial = ok(await commands.listFeeds()).map((feed) => feed.id);
-			expect(partial[0]).toBe(ids[0]);
-			expect(partial).toHaveLength(ids.length);
-		});
+            // A partial order moves only the listed feeds' positions.
+            ok(await commands.reorderFeeds([ids[0]]));
+            const partial = ok(await commands.listFeeds()).map((feed) => feed.id);
+            expect(partial[0]).toBe(ids[0]);
+            expect(partial).toHaveLength(ids.length);
+        });
 
-		it("add_feed subscribes a new feed once", async () => {
-			const recorded = await installMock();
-			const before = ok(await commands.listFeeds());
-			const newFeed = {
-				url: "https://example.com/feed.xml",
-				title: "Example",
-				tags: ["Dev"],
-				validate: true,
-			};
+        it('add_feed subscribes a new feed once', async () => {
+            const recorded = await installMock();
+            const before = ok(await commands.listFeeds());
+            const newFeed = {
+                url: 'https://example.com/feed.xml',
+                title: 'Example',
+                tags: ['Dev'],
+                validate: true,
+            };
 
-			const added = ok(await commands.addFeed(newFeed));
-			await flushIpc();
+            const added = ok(await commands.addFeed(newFeed));
+            await flushIpc();
 
-			expect(recorded.feeds).toBe(1);
-			expect(added).toMatchObject({
-				url: newFeed.url,
-				title: "Example",
-				tags: ["Dev"],
-			});
-			expect(before.some((feed) => feed.id === added.id)).toBe(false);
-			const after = ok(await commands.listFeeds());
-			expect(after.at(-1)?.id).toBe(added.id);
+            expect(recorded.feeds).toBe(1);
+            expect(added).toMatchObject({
+                url: newFeed.url,
+                title: 'Example',
+                tags: ['Dev'],
+            });
+            expect(before.some((feed) => feed.id === added.id)).toBe(false);
+            const after = ok(await commands.listFeeds());
+            expect(after.at(-1)?.id).toBe(added.id);
 
-			const duplicate = await commands.addFeed(newFeed);
-			expect(duplicate.status === "error" && duplicate.error.code).toBe(
-				"ALREADY_SUBSCRIBED",
-			);
-			await flushIpc();
-			expect(recorded.feeds).toBe(1);
-		});
+            const duplicate = await commands.addFeed(newFeed);
+            expect(duplicate.status === 'error' && duplicate.error.code).toBe('ALREADY_SUBSCRIBED');
+            await flushIpc();
+            expect(recorded.feeds).toBe(1);
+        });
 
-		it("refresh_feed announces both changes, scoped to its feed", async () => {
-			const recorded = await installMock();
-			ok(await commands.refreshFeed(3));
-			await flushIpc();
-			expect(recorded.feeds).toBe(1);
-			expect(recorded.articles).toEqual([{ feed_id: 3, flags: null }]);
-		});
-	});
+        it('refresh_feed announces both changes, scoped to its feed', async () => {
+            const recorded = await installMock();
+            ok(await commands.refreshFeed(3));
+            await flushIpc();
+            expect(recorded.feeds).toBe(1);
+            expect(recorded.articles).toEqual([{ feed_id: 3, flags: null }]);
+        });
+    });
 });

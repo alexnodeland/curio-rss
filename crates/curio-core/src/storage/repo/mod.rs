@@ -11,7 +11,8 @@
 //! The functions are one `impl Storage` block per table family: `feeds`,
 //! `articles`, `state`, `tags`, `fetch_log`, `settings` and `intents`.
 //! `rows` holds the helpers they share (tag normalization, dedupe-key
-//! scoping, the list/search query compilers, the raw-row parsers). This
+//! scoping, the FTS query builder, the raw-row parsers) and `listing` the
+//! list/search query compilers and the list-row parser. This
 //! file holds the public parameter/outcome types, the column lists and
 //! [`begin_write`], the one way a mutation opens its transaction.
 
@@ -19,6 +20,7 @@ mod articles;
 mod feeds;
 mod fetch_log;
 mod intents;
+mod listing;
 mod rows;
 mod settings;
 mod state;

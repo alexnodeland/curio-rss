@@ -1,10 +1,12 @@
 //! Articles: batch upsert, lookup, keyset listing, unread counts, search,
 //! deletion and content replacement.
 
-use super::rows::{
-    Projection, RawArticle, RawListed, UNREAD_COUNTS, article_by_id, article_cols_prefixed,
-    fts_match_expr, list_articles_query, parse_ts, raw_article, raw_listed, scoped_dedupe_key,
+use super::listing::{
+    Projection, RawListed, UNREAD_COUNTS, article_cols_prefixed, list_articles_query, raw_listed,
     search_listed_query,
+};
+use super::rows::{
+    RawArticle, article_by_id, fts_match_expr, parse_ts, raw_article, scoped_dedupe_key,
 };
 use super::{ARTICLE_COLS, ListArticles, UpsertOutcome, begin_write};
 use crate::model::{

@@ -70,6 +70,17 @@ function harnessFor(read: Set<number>): IpcHarness {
             }
             return true;
         },
+        mark_read_many: (args) => {
+            const ids = args.articleIds as number[];
+            for (const id of ids) {
+                if (args.read === true) {
+                    read.add(id);
+                } else {
+                    read.delete(id);
+                }
+            }
+            return ids.length;
+        },
         set_archived: true,
         mark_all_read: [],
         refresh_all: [refreshOutcomeFixture()],
@@ -104,11 +115,16 @@ function renderedIds(container: HTMLElement): string[] {
     return [...container.querySelectorAll('.article-row')].map((row) => row.id);
 }
 
+/** The ids marked read, singly (an open) or in a mark-on-scroll batch, in call order. */
 function markedIds(harness: IpcHarness): number[] {
-    return harness
-        .callsFor('mark_read')
-        .filter((args) => args.read === true)
-        .map((args) => args.articleId as number);
+    return harness.calls
+        .filter((call) => call.args.read === true)
+        .flatMap((call) => {
+            if (call.cmd === 'mark_read') {
+                return [call.args.articleId as number];
+            }
+            return call.cmd === 'mark_read_many' ? (call.args.articleIds as number[]) : [];
+        });
 }
 
 describe('list view sessions', () => {

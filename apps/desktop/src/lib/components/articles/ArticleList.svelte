@@ -332,13 +332,16 @@ function onViewport(report: ViewportReport): void {
         if (!prefsStore.markOnScroll) {
             return;
         }
+        // Every row this report passed goes in one batch (one IPC call).
+        const passed: number[] = [];
         for (let index = 0; index < report.first; index++) {
             const id = items[index].id;
             if (seen.has(id) && !marked.has(id)) {
                 marked.add(id);
-                void markReadOnScroll(id);
+                passed.push(id);
             }
         }
+        void markReadOnScroll(passed);
     });
 }
 </script>

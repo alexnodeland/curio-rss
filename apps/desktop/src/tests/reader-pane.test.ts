@@ -18,6 +18,7 @@ import {
     resetQueryCache,
     wireInvalidation,
 } from '$lib/state/query-cache.svelte';
+import { HIDDEN_END_MS, IDLE_CAP_MS } from '$lib/state/reading-session';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
@@ -202,7 +203,7 @@ describe('ReaderPane', () => {
     });
 
     it('open-in-browser goes through the scoped opener and records the open with its dwell', async () => {
-        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
         vi.spyOn(document, 'hasFocus').mockReturnValue(true);
         try {
             harness = installIpcHarness({
@@ -288,7 +289,7 @@ describe('ReaderPane', () => {
         });
 
         it('records article.opened with the foreground dwell when the selection moves on', async () => {
-            vi.useFakeTimers({ toFake: ['Date'] });
+            vi.useFakeTimers({ toFake: ['Date', 'performance'] });
             const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
             harness = installIpcHarness({ ...baseResponders(), record_opened: null });
             selectionStore.selectedArticleId = 100;
@@ -311,7 +312,7 @@ describe('ReaderPane', () => {
         });
 
         it('records nothing for a pass too short to be a read, nor for a failed load', async () => {
-            vi.useFakeTimers({ toFake: ['Date'] });
+            vi.useFakeTimers({ toFake: ['Date', 'performance'] });
             vi.spyOn(document, 'hasFocus').mockReturnValue(true);
             harness = installIpcHarness({ ...baseResponders(), record_opened: null });
             selectionStore.selectedArticleId = 100;
@@ -327,30 +328,74 @@ describe('ReaderPane', () => {
             expect(harness.callsFor('record_opened')).toEqual([]);
         });
 
-        it('a hidden window ends the session; showing it again starts a fresh one', async () => {
-            vi.useFakeTimers({ toFake: ['Date'] });
+        it('a brief trip to the background pauses the session; one read stays one open', async () => {
+            vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] });
             vi.spyOn(document, 'hasFocus').mockReturnValue(true);
             const visibility = vi.spyOn(document, 'visibilityState', 'get');
             visibility.mockReturnValue('visible');
             harness = installIpcHarness({ ...baseResponders(), record_opened: null });
             selectionStore.selectedArticleId = 100;
             render(ReaderPane);
-            await flushIpc();
+            await vi.advanceTimersByTimeAsync(0);
+
+            vi.advanceTimersByTime(2_000);
+            // Covered by a full-screen app for a minute: paused, not ended.
+            visibility.mockReturnValue('hidden');
+            document.dispatchEvent(new Event('visibilitychange'));
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(harness.callsFor('record_opened')).toEqual([]);
+
+            visibility.mockReturnValue('visible');
+            document.dispatchEvent(new Event('visibilitychange'));
+            vi.advanceTimersByTime(1_600);
+            window.dispatchEvent(new Event('pagehide'));
+            await vi.advanceTimersByTimeAsync(0);
+            expect(harness.callsFor('record_opened')).toEqual([{ articleId: 100, dwellMs: 3_600 }]);
+        });
+
+        it('a window that stays in the background ends the session; coming back starts a fresh one', async () => {
+            vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] });
+            vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+            const visibility = vi.spyOn(document, 'visibilityState', 'get');
+            visibility.mockReturnValue('visible');
+            harness = installIpcHarness({ ...baseResponders(), record_opened: null });
+            selectionStore.selectedArticleId = 100;
+            render(ReaderPane);
+            await vi.advanceTimersByTimeAsync(0);
 
             vi.advanceTimersByTime(2_000);
             visibility.mockReturnValue('hidden');
             document.dispatchEvent(new Event('visibilitychange'));
-            await flushIpc();
+            await vi.advanceTimersByTimeAsync(HIDDEN_END_MS);
             expect(harness.callsFor('record_opened')).toEqual([{ articleId: 100, dwellMs: 2_000 }]);
 
             visibility.mockReturnValue('visible');
             document.dispatchEvent(new Event('visibilitychange'));
             vi.advanceTimersByTime(1_600);
             window.dispatchEvent(new Event('pagehide'));
-            await flushIpc();
+            await vi.advanceTimersByTimeAsync(0);
             expect(harness.callsFor('record_opened')).toEqual([
                 { articleId: 100, dwellMs: 2_000 },
                 { articleId: 100, dwellMs: 1_600 },
+            ]);
+        });
+
+        it('stops counting a reader who has gone quiet, and counts again on input', async () => {
+            vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+            vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+            harness = installIpcHarness({ ...baseResponders(), record_opened: null });
+            selectionStore.selectedArticleId = 100;
+            render(ReaderPane);
+            await flushIpc();
+
+            // Walked away (or the Mac slept) for an hour, window in front.
+            vi.advanceTimersByTime(60 * 60_000);
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+            vi.advanceTimersByTime(3_000);
+            selectionStore.selectedArticleId = null;
+            await flushIpc();
+            expect(harness.callsFor('record_opened')).toEqual([
+                { articleId: 100, dwellMs: IDLE_CAP_MS + 3_000 },
             ]);
         });
 
@@ -403,6 +448,29 @@ describe('ReaderPane', () => {
             selectionStore.selectedArticleId = null;
             await flushIpc();
             expect(harness.callsFor('set_read_progress')).toEqual([]);
+        });
+
+        it('keeps saving the position when the stored one could not be read', async () => {
+            harness = installIpcHarness({
+                ...baseResponders(),
+                get_article_state: rejectWith(commandErrorFixture()),
+                set_read_progress: true,
+            });
+            const runFrames = holdFrames();
+            selectionStore.selectedArticleId = 100;
+            const { container } = render(ReaderPane);
+            await flushIpc();
+            const body = layOut(container, 5_000, 1_000);
+            await runFrames();
+            expect(body.scrollTop).toBe(0); // nothing to resume
+
+            body.scrollTop = 2_000;
+            await fireEvent.scroll(body);
+            selectionStore.selectedArticleId = null;
+            await flushIpc();
+            expect(harness.callsFor('set_read_progress')).toEqual([
+                { articleId: 100, readPermille: 500 },
+            ]);
         });
 
         it('shows no progress bar for a body that fits without scrolling', async () => {

@@ -86,14 +86,21 @@ const TAKEOVER_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as con
  * Puts `body` back at `permille`, then holds it there while late layout
  * (images arriving, a web font swapping in) grows the content — re-pinning
  * the same fraction on every resize — until the reader scrolls themselves
- * or {@link RESUME_HOLD_MS} passes. The jump is instant even where the body
- * scrolls smoothly: a resume is not a glide. Returns a cancel.
+ * or {@link RESUME_HOLD_MS} passes. "Scrolls themselves" is an input on the
+ * body, or any scroll that leaves the body somewhere the pin did not put it:
+ * a page step from a global shortcut (Space with focus in the list) moves the
+ * body without an input landing on it, and must not be undone by the next
+ * image to load. The jump is instant even where the body scrolls smoothly: a
+ * resume is not a glide. Returns a cancel.
  */
 export function resumeScroll(body: HTMLElement, permille: number): () => void {
+    /** Where the last pin left the body (as the browser clamped it). */
+    let pinned = 0;
     const pin = (): void => {
         const previous = body.style.scrollBehavior;
         body.style.scrollBehavior = 'auto';
         body.scrollTop = scrollTopFor(permille, body.scrollHeight, body.clientHeight);
+        pinned = body.scrollTop;
         body.style.scrollBehavior = previous;
     };
     pin();
@@ -113,10 +120,32 @@ export function resumeScroll(body: HTMLElement, permille: number): () => void {
         for (const type of TAKEOVER_EVENTS) {
             body.removeEventListener(type, release);
         }
+        body.removeEventListener('scroll', onScroll);
+    };
+    // A pin's own scroll lands where the pin put it; anything else is the
+    // reader (or a shortcut acting for them) moving on.
+    const onScroll = (): void => {
+        if (Math.abs(body.scrollTop - pinned) > 1) {
+            release();
+        }
     };
     for (const type of TAKEOVER_EVENTS) {
         body.addEventListener(type, release, { passive: true });
     }
+    body.addEventListener('scroll', onScroll, { passive: true });
     timer = setTimeout(release, RESUME_HOLD_MS);
     return release;
+}
+
+/** One percent formatter per locale — rows format their progress on every render. */
+const percentFormats = new Map<string, Intl.NumberFormat>();
+
+/** `permille` as a percentage ("42 %") in `locale`'s own percent format. */
+export function formatPercent(permille: number, locale: string): string {
+    let format = percentFormats.get(locale);
+    if (format === undefined) {
+        format = new Intl.NumberFormat(locale, { style: 'percent' });
+        percentFormats.set(locale, format);
+    }
+    return format.format(permille / PERMILLE_END);
 }

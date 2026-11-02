@@ -126,7 +126,7 @@ import { localeStore, t } from '$lib/i18n';
 import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { listDateLabel } from '$lib/utils/article';
-import { PERMILLE_END, readMinutes } from '$lib/utils/reading';
+import { formatPercent, readMinutes } from '$lib/utils/reading';
 import { highlightSegments } from '$lib/utils/highlight';
 
 let {
@@ -182,9 +182,7 @@ const minutes = $derived(readMinutes(article.word_count));
 
 /** "42 %" in the active locale's own percent format. */
 function percentLabel(permille: number): string {
-    return new Intl.NumberFormat(localeStore.active, { style: 'percent' }).format(
-        permille / PERMILLE_END,
-    );
+    return formatPercent(permille, localeStore.active);
 }
 
 </script>

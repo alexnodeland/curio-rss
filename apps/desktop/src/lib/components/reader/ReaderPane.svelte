@@ -384,14 +384,20 @@ function onWindowActivity(): void {
     readingSession.setActive(windowActive());
 }
 
+/** Any input means the reader is still there (dwell's idle cap). */
+function onReaderInput(): void {
+    readingSession.touch();
+}
+
 /**
- * Hidden (minimised, another space, the window closing) or the page going
- * away ends the session while the webview can still deliver it; coming back
- * starts a fresh one on the same article.
+ * Hidden (minimised, covered by a full-screen window, another space) pauses
+ * the session and saves the position; it ends — recording the open — only if
+ * the window stays away (`HIDDEN_END_MS`). Coming back carries the same
+ * session on, so one read is one open. The page going away ends it at once.
  */
 function onVisibilityChange(): void {
     if (document.visibilityState === 'hidden') {
-        readingSession.end();
+        readingSession.hide();
     } else if (selectedId !== null && bodyLoaded) {
         readingSession.begin(selectedId, windowActive());
     }
@@ -423,7 +429,9 @@ function barPermille(): number | null {
 $effect(() => {
     const body = scrollBody;
     const articleId = selectedId;
-    const saved = stateQuery?.data?.read_permille;
+    // A state query that failed has no position to resume, but saving must
+    // still work: treat it as the top (no resume) rather than wait forever.
+    const saved = stateQuery?.data?.read_permille ?? (stateQuery?.error != null ? 0 : undefined);
     if (articleId === null) {
         // Closed: reopening the same article later resumes it again.
         resumeScheduledFor = null;
@@ -456,6 +464,7 @@ function onBodyScroll(event: Event): void {
     if (!(body instanceof HTMLElement) || articleId === null) {
         return;
     }
+    readingSession.touch();
     const permille = permilleAt(body);
     position = { articleId, permille };
     if (permille !== null && trackingFor === articleId) {
@@ -473,6 +482,10 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     onfocusin={onWindowFocusIn}
     onfocus={onWindowActivity}
     onblur={onWindowActivity}
+    onkeydown={onReaderInput}
+    onpointerdown={onReaderInput}
+    onpointermove={onReaderInput}
+    onwheel={onReaderInput}
     onpagehide={() => readingSession.end()}
 />
 <svelte:document onvisibilitychange={onVisibilityChange} />

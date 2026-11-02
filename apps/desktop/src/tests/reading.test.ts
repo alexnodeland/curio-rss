@@ -2,10 +2,17 @@
  * Reading aids (#153): the reading-time estimate, the scroll ↔ position
  * mapping, the resume pin, and the reading session's dwell + position saves.
  */
-import { DWELL_MIN_MS, PROGRESS_SAVE_MS, readingSession } from '$lib/state/reading-session';
+import {
+    DWELL_MIN_MS,
+    HIDDEN_END_MS,
+    IDLE_CAP_MS,
+    PROGRESS_SAVE_MS,
+    readingSession,
+} from '$lib/state/reading-session';
 import {
     PERMILLE_END,
     RESUME_HOLD_MS,
+    formatPercent,
     permilleAt,
     readMinutes,
     resumable,
@@ -28,6 +35,14 @@ describe('readMinutes', () => {
         expect(readMinutes(0)).toBeNull();
         expect(readMinutes(-3)).toBeNull();
         expect(readMinutes(Number.NaN)).toBeNull();
+    });
+});
+
+describe('formatPercent', () => {
+    it("formats thousandths in the locale's own percent style", () => {
+        expect(formatPercent(420, 'en')).toBe('42%');
+        expect(formatPercent(420, 'de')).toBe('42\u00a0%');
+        expect(formatPercent(420, 'en')).toBe('42%'); // cached, same result
     });
 });
 
@@ -124,6 +139,23 @@ describe('resumeScroll', () => {
         vi.unstubAllGlobals();
     });
 
+    it('lets go when something else scrolls the body (a page step from a global shortcut)', () => {
+        const resize = captureResize();
+        const element = body({ value: 5_000 });
+        resumeScroll(element, 500);
+
+        // The pin's own scroll lands where the pin put it: still held.
+        element.dispatchEvent(new Event('scroll'));
+        expect(resize.disconnected()).toBe(false);
+
+        // Space with focus in the list pages the body directly.
+        element.scrollTop = 2_900;
+        element.dispatchEvent(new Event('scroll'));
+        // Released: a late image no longer snaps the page step back.
+        expect(resize.disconnected()).toBe(true);
+        vi.unstubAllGlobals();
+    });
+
     it('returns a cancel', () => {
         const resize = captureResize();
         const cancel = resumeScroll(body({ value: 5_000 }), 300);
@@ -148,7 +180,7 @@ describe('readingSession', () => {
     }
 
     it('records the foreground dwell when the session ends', async () => {
-        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
         harness = install();
         readingSession.begin(7, true);
         vi.advanceTimersByTime(2_500);
@@ -166,7 +198,7 @@ describe('readingSession', () => {
     });
 
     it('a session begun in the background starts counting on focus', async () => {
-        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
         harness = install();
         readingSession.begin(7, false);
         vi.advanceTimersByTime(10_000);
@@ -180,7 +212,7 @@ describe('readingSession', () => {
     });
 
     it('records nothing for a pass shorter than a read, and ignores calls without a session', async () => {
-        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
         harness = install();
         readingSession.setActive(true);
         readingSession.end();
@@ -194,7 +226,7 @@ describe('readingSession', () => {
     });
 
     it('an external open of the session article records at once and restarts the count', async () => {
-        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
         harness = install();
         readingSession.begin(7, true);
         vi.advanceTimersByTime(900);
@@ -205,8 +237,78 @@ describe('readingSession', () => {
         expect(readingSession.dwellMs()).toBe(0);
     });
 
+    it('a short trip to the background pauses; a long one ends the session', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] });
+        harness = install();
+        readingSession.begin(7, true);
+        readingSession.trackProgress(7, 300);
+        vi.advanceTimersByTime(2_000);
+        readingSession.hide();
+        await vi.advanceTimersByTimeAsync(HIDDEN_END_MS - 1);
+        // Paused, with the position saved as it went.
+        expect(readingSession.articleId).toBe(7);
+        expect(readingSession.dwellMs()).toBe(2_000);
+        expect(harness.callsFor('set_read_progress')).toEqual([
+            { articleId: 7, readPermille: 300 },
+        ]);
+        expect(harness.callsFor('record_opened')).toEqual([]);
+
+        readingSession.begin(7, true); // back: the same session carries on
+        vi.advanceTimersByTime(1_000);
+        readingSession.touch();
+        // The pending end was called off (counting stops at the idle cap).
+        await vi.advanceTimersByTimeAsync(HIDDEN_END_MS);
+        expect(readingSession.articleId).toBe(7);
+        expect(readingSession.dwellMs()).toBe(3_000 + IDLE_CAP_MS);
+        expect(harness.callsFor('record_opened')).toEqual([]);
+
+        readingSession.hide();
+        readingSession.hide(); // a repeat restarts the wait, records nothing
+        await vi.advanceTimersByTimeAsync(HIDDEN_END_MS);
+        expect(readingSession.articleId).toBeNull();
+        expect(harness.callsFor('record_opened')).toEqual([
+            { articleId: 7, dwellMs: 3_000 + IDLE_CAP_MS },
+        ]);
+        readingSession.hide(); // no session: nothing to do
+    });
+
+    it('caps a quiet foreground stretch at the idle limit', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+        harness = install();
+        readingSession.touch(); // no session: ignored
+        readingSession.begin(7, true);
+        vi.advanceTimersByTime(30_000);
+        readingSession.touch(); // still there
+        vi.advanceTimersByTime(8 * 60 * 60_000); // overnight, window in front
+        expect(readingSession.dwellMs()).toBe(30_000 + IDLE_CAP_MS);
+
+        readingSession.touch(); // back: counting resumes from now
+        vi.advanceTimersByTime(4_000);
+        expect(readingSession.dwellMs()).toBe(30_000 + IDLE_CAP_MS + 4_000);
+
+        readingSession.setActive(false);
+        readingSession.touch(); // in the background: ignored
+        readingSession.end();
+        await flushIpc();
+        expect(harness.callsFor('record_opened')).toEqual([
+            { articleId: 7, dwellMs: 34_000 + IDLE_CAP_MS },
+        ]);
+    });
+
+    it('a wall-clock step backwards never makes the dwell negative', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+        harness = install();
+        readingSession.begin(7, true);
+        vi.advanceTimersByTime(2_000);
+        vi.setSystemTime(new Date(Date.now() - 60 * 60_000)); // NTP steps back an hour
+        vi.advanceTimersByTime(1_000);
+        readingSession.end();
+        await flushIpc();
+        expect(harness.callsFor('record_opened')).toEqual([{ articleId: 7, dwellMs: 3_000 }]);
+    });
+
     it('a write that throws (no Tauri runtime) is dropped, not an unhandled rejection', async () => {
-        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
         harness = installIpcHarness({}); // no responders: every invoke throws
         readingSession.begin(7, true);
         readingSession.trackProgress(7, 400);

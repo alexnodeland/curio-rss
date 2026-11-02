@@ -14,8 +14,10 @@
  *     resolve to nothing and silently drop the fill);
  *   • nothing rendered inside the reader's scroll surface fills or rules
  *     from --surface-*, --hairline or --bg;
- *   • the Settings preview mirrors the reader's reading-theme overrides and
- *     carries the attribute the tokens key off.
+ *   • the sepia/paper overrides live once in app.css and force the --ink the
+ *     tints mix from; neither the reader pane nor the Settings preview keeps
+ *     a local copy that could drift, and the preview carries the attribute
+ *     the tokens key off.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -193,20 +195,20 @@ describe('reader-surface tokens in the reader components', () => {
         }
     });
 
-    it('the Settings preview mirrors the reader pane reading-theme overrides', () => {
-        const overrides = (source: string, root: string, theme: string): string =>
-            (
-                rulesOf(styleOf(source)).find(
-                    (r) => r.selector === `${root}[data-reading-theme='${theme}']`,
-                )?.body ?? ''
-            )
-                .replace(/\s+/g, ' ')
-                .trim();
+    it('the reading-theme overrides are shared from app.css and force the ink', () => {
         for (const theme of ['sepia', 'paper']) {
-            const pane = overrides(component('reader/ReaderPane'), '.reader-scroll', theme);
-            const preview = overrides(component('reader/ReaderPreview'), '.preview-surface', theme);
-            expect(pane, theme).toContain('--ink:');
-            expect(preview, theme).toBe(pane);
+            const rule = appRule(`[data-reading-theme="${theme}"]`);
+            // The tints mix from --ink: the theme must force it on its root.
+            expect(rule['--ink'], theme).toBeDefined();
+            expect(rule['--reading-surface'], theme).toBeDefined();
+        }
+        // One source for both roots: a component-local override would let the
+        // pane and the Settings preview drift apart again.
+        for (const name of ['reader/ReaderPane', 'reader/ReaderPreview']) {
+            const local = rulesOf(styleOf(component(name))).filter((r) =>
+                r.selector.includes('data-reading-theme'),
+            );
+            expect(local, name).toEqual([]);
         }
     });
 });

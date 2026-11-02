@@ -505,6 +505,16 @@ export const commands = {
 	 *  between two file moves.
 	 */
 	quitApp: () => typedError<null, CommandError>(__TAURI_INVOKE("quit_app")),
+	/**
+	 *  The main window's chrome: overlay title bar or native, and fullscreen.
+	 * 
+	 *  # Errors
+	 * 
+	 *  Never — a fullscreen state the OS will not report reads as windowed
+	 *  (logged). The `Result` keeps the generated wrapper on the same typed
+	 *  `{ status, data | error }` shape as every other command.
+	 */
+	windowChrome: () => typedError<WindowChromeDto, CommandError>(__TAURI_INVOKE("window_chrome")),
 };
 
 /** Events */
@@ -512,6 +522,7 @@ export const events = {
 	articlesChanged: makeEvent<ArticlesChanged>("articles-changed"),
 	connectivityChanged: makeEvent<ConnectivityChanged>("connectivity-changed"),
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
+	fullscreenChanged: makeEvent<FullscreenChanged>("fullscreen-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
 	refreshProgress: makeEvent<RefreshProgress>("refresh-progress"),
@@ -965,6 +976,15 @@ export type FetchStatusDto =
 /**  Anything else (recorded, not raised). */
 "error";
 
+/**
+ *  The main window entered or left fullscreen. Fires on change only;
+ *  [`window_chrome`] answers the current state.
+ */
+export type FullscreenChanged = {
+	/**  Whether the window is now fullscreen. */
+	fullscreen: boolean,
+};
+
 /**  Mirror of [`ImportKind`] — what a dropped import row would have been. */
 export type ImportKindDto = 
 /**  A feed subscription. */
@@ -1327,6 +1347,18 @@ export type UnreadCountsDto = {
 	total: number,
 	/**  Per-feed unread counts as `(feed_id, unread)` pairs. */
 	by_feed: ([number, number])[],
+};
+
+/**  What chrome the main window was built with, for the frontend's layout. */
+export type WindowChromeDto = {
+	/**
+	 *  The OS title bar is overlaid on the webview (macOS): the traffic
+	 *  lights sit inside the leading pane header, and the headers must act
+	 *  as the window's drag regions. `false` = native decorations.
+	 */
+	overlay_title_bar: boolean,
+	/**  The window is fullscreen (macOS hides the traffic lights there). */
+	fullscreen: boolean,
 };
 
 /* Tauri Specta runtime */

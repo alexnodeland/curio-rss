@@ -197,7 +197,14 @@ function mk(
             content_text: title,
             source_updated_at: null,
         },
-        state: { read: false, starred: false, read_later: false, archived: false, ...state },
+        state: {
+            read: false,
+            starred: false,
+            read_later: false,
+            archived: false,
+            read_permille: 0,
+            ...state,
+        },
         tags,
     };
 }
@@ -305,7 +312,8 @@ export const previewArticles: PreviewArticle[] = [
 <p>Sixty-six characters. That is the number the typographers keep returning to, and they are not wrong. A comfortable measure is the difference between reading and <strong>skimming</strong>.</p>
 <blockquote>Set the text first. Everything else is decoration around a column of words.</blockquote>
 <p>A reader is, at bottom, a machine for setting text well. If it does that, the rest is polish. If it does not, no amount of polish will save it.</p>`,
-        { read_later: true },
+        // Half-read: the Read Later row shows its progress ring.
+        { read_later: true, read_permille: 420 },
         ['typography', 'design'],
     ),
     mk(

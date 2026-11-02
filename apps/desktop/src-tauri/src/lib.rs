@@ -81,6 +81,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::state::mark_all_read,
             commands::state::mark_read_many,
             commands::state::record_opened,
+            commands::state::set_read_progress,
             commands::state::set_archived,
             commands::state::set_starred,
             commands::state::set_read_later,
@@ -140,6 +141,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         .events(tauri_specta::collect_events![
             events::FeedsChanged,
             events::ArticlesChanged,
+            events::ReadProgressChanged,
             events::RefreshProgress,
             events::RefreshFinished,
             events::ConnectivityChanged,

@@ -215,6 +215,29 @@ describe('query cache', () => {
             unwire();
         });
 
+        it("ReadProgressChanged refetches only that article's state", async () => {
+            harness = installIpcHarness({});
+            const state7 = countingFetcher(() => 'state 7');
+            const state8 = countingFetcher(() => 'state 8');
+            const list = countingFetcher(() => 'all list');
+            const counts = countingFetcher(() => 'counts');
+            ensureQuery(queryKeys.articleState(7), state7.fetch);
+            ensureQuery(queryKeys.articleState(8), state8.fetch);
+            ensureQuery(queryKeys.articleList('feed=-'), list.fetch, { feedId: null });
+            ensureQuery(queryKeys.unreadCounts, counts.fetch);
+            const unwire = await wireInvalidation();
+            await flushIpc();
+
+            await events.readProgressChanged.emit({ article_id: 7 });
+            await flushIpc();
+
+            expect(state7.calls()).toBe(2);
+            expect(state8.calls()).toBe(1);
+            expect(list.calls()).toBe(1); // a position save moves no list
+            expect(counts.calls()).toBe(1);
+            unwire();
+        });
+
         it('unsubscribing stops invalidation', async () => {
             harness = installIpcHarness({});
             const feeds = countingFetcher(() => 'feeds');

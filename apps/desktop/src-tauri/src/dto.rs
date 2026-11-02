@@ -425,7 +425,8 @@ impl From<curio_core::SavedUrl> for SavedUrlDto {
     }
 }
 
-/// Mirror of [`ArticleState`] — the per-article flag projection.
+/// Mirror of [`ArticleState`] — the per-article flag projection plus the
+/// reading position.
 // Four independent booleans is the shape of the projection (core's
 // `ArticleState` is identical) — not a disguised state machine.
 #[allow(clippy::struct_excessive_bools)]
@@ -439,6 +440,11 @@ pub struct ArticleStateDto {
     pub read_later: bool,
     /// Archived.
     pub archived: bool,
+    /// How far through the body the reader last was, in thousandths of its
+    /// scroll extent: `0` (the top — also an article never opened) to
+    /// `1000` (the end). Whole numbers, so the wire type stays a plain
+    /// `number` and an unmoved position compares equal.
+    pub read_permille: u16,
 }
 
 impl From<ArticleState> for ArticleStateDto {
@@ -448,6 +454,7 @@ impl From<ArticleState> for ArticleStateDto {
             starred: state.starred,
             read_later: state.read_later,
             archived: state.archived,
+            read_permille: state.progress.permille(),
         }
     }
 }

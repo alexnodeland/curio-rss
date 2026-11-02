@@ -194,6 +194,7 @@ export function articleStateFixture(overrides: Partial<ArticleStateDto> = {}): A
         starred: false,
         read_later: false,
         archived: false,
+        read_permille: 0,
         ...overrides,
     };
 }

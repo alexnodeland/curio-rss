@@ -69,6 +69,6 @@ fn dispatch(app: &mut App, command: Command) -> anyhow::Result<ExitCode> {
         Command::Reddit(command) => reddit::run(app, command),
         Command::Events(command) => inspect::events(app, &command),
         Command::Doctor => inspect::doctor(app),
-        Command::Search { query, limit } => articles::search(app, &query, limit),
+        Command::Search { query, filters } => articles::search(app, &query, &filters),
     }
 }

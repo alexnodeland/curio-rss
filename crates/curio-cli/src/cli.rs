@@ -151,12 +151,14 @@ pub(crate) enum Command {
     Events(EventsCommand),
     /// Health checks: database integrity, FTS sync, events-log health.
     Doctor,
-    /// Full-text search over stored articles (FTS5).
+    /// Full-text search over stored articles (FTS5), best match first,
+    /// title hits ranked above body hits. The last word matches as a
+    /// prefix; `"a phrase"`, `word*`, `-excluded` and `a OR b` refine it.
+    /// Takes the same filters as `list`.
     Search {
         query: String,
-        /// Maximum number of hits.
-        #[arg(long, default_value_t = 20)]
-        limit: u32,
+        #[command(flatten)]
+        filters: ListArgs,
     },
 }
 

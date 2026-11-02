@@ -12,7 +12,9 @@ use curio_core::model::{
     ArticleContent, ArticleFlag, ArticleId, ArticleState, FeedId, ListedArticle, NewArticle,
     NewFeed, ReadProgress, SNIPPET_MAX_CHARS,
 };
-use curio_core::storage::{ListArticles, ListCursor, ListOrder, SearchArticles, Storage};
+use curio_core::storage::{
+    ListArticles, ListCursor, ListOrder, SearchArticles, Storage, StorageError,
+};
 use curio_types::Timestamp;
 use proptest::prelude::*;
 
@@ -497,9 +499,11 @@ fn published_order_pages_stably_while_the_library_changes() {
     assert_eq!(ids_of(&page1), [undated, today]);
     let cursor = ListCursor::from(&page1[1]);
     // A row newer than the cursor sits above the walk; a row older than
-    // it lands ahead of the walk, once; the cursor's own row goes away.
+    // it lands ahead of the walk, once; a row re-dated from below the
+    // cursor to above it leaves the walk; the cursor's own row goes away.
     let fresh = insert_dated(&storage, "fresh", Some("2025-06-02T10:00:00Z"));
     let late_backfill = insert_dated(&storage, "late", Some("2025-04-20T00:00:00Z"));
+    redate(&storage, "mid", "2025-06-03T00:00:00Z");
     storage.delete_article(today).unwrap();
     let page2 = published_page(&storage, Some(cursor));
     assert_eq!(
@@ -508,14 +512,18 @@ fn published_order_pages_stably_while_the_library_changes() {
         "the cursor's date carries it"
     );
     let page3 = published_page(&storage, page2.last().map(ListCursor::from));
-    assert_eq!(ids_of(&page3), [late_backfill, mid]);
+    assert_eq!(ids_of(&page3), [late_backfill, old]);
     let page4 = published_page(&storage, page3.last().map(ListCursor::from));
-    assert_eq!(ids_of(&page4), [old, older]);
-    assert_eq!(
-        published_page(&storage, page4.last().map(ListCursor::from)),
-        []
+    assert_eq!(ids_of(&page4), [older]);
+    let walked: Vec<ArticleId> = [&page2, &page3, &page4]
+        .into_iter()
+        .flat_map(|page| ids_of(page))
+        .collect();
+    assert!(!walked.contains(&fresh), "{walked:?}");
+    assert!(
+        !walked.contains(&mid),
+        "re-dated above the cursor: {walked:?}"
     );
-    assert!(!ids_of(&page2).contains(&fresh));
 
     // The count of what remains after a cursor matches the walk.
     assert_eq!(
@@ -526,8 +534,147 @@ fn published_order_pages_stably_while_the_library_changes() {
                 ..ListArticles::default()
             })
             .unwrap(),
-        6
+        5
     );
+}
+
+/// Re-ingests the article stored under `key` (see [`insert_dated`]) with a
+/// new publication date, as a feed that corrects a post's date does.
+fn redate(storage: &Storage, key: &str, published: &str) {
+    let mut new = article(None, key, "body");
+    new.published_at = Some(published.parse().unwrap());
+    assert_eq!(storage.upsert_articles(vec![new]).unwrap().updated, 1);
+}
+
+/// A bare-id cursor in the published order needs its row for the date it
+/// resumes from: once that row is deleted, the listing (rows, whole
+/// articles and count alike) fails as not found instead of returning an
+/// empty page that would read as the end of the list. A cursor that
+/// carries its date pages on, and the id orders never need the row.
+#[test]
+fn a_bare_id_cursor_of_a_deleted_row_fails_the_published_order_loudly() {
+    let (_dir, storage) = temp_storage();
+    let newer = insert_dated(&storage, "newer", Some("2025-02-01T00:00:00Z"));
+    let gone = insert_dated(&storage, "gone", Some("2025-01-01T00:00:00Z"));
+    let older = insert_dated(&storage, "older", Some("2024-01-01T00:00:00Z"));
+    let carried = ListCursor::from(&storage.get_article(gone).unwrap().unwrap());
+    storage.delete_article(gone).unwrap();
+
+    let params = ListArticles {
+        order: ListOrder::Published,
+        after: Some(ListCursor::id(gone)),
+        ..ListArticles::default()
+    };
+    assert!(matches!(
+        storage.list_article_rows(params.clone()),
+        Err(StorageError::NotFound { entity: "article" })
+    ));
+    assert!(matches!(
+        storage.list_articles(params.clone()),
+        Err(StorageError::NotFound { entity: "article" })
+    ));
+    assert!(matches!(
+        storage.count_listed_articles(params.clone()),
+        Err(StorageError::NotFound { entity: "article" })
+    ));
+    // The same in a membership view, which pages through another index.
+    storage.star_article(older).unwrap();
+    assert!(matches!(
+        storage.list_article_rows(ListArticles {
+            starred: Some(true),
+            ..params.clone()
+        }),
+        Err(StorageError::NotFound { entity: "article" })
+    ));
+
+    let rows = storage
+        .list_article_rows(ListArticles {
+            after: Some(carried),
+            ..params.clone()
+        })
+        .unwrap();
+    assert_eq!(ids_of(&rows), [older]);
+    for order in [ListOrder::Newest, ListOrder::Oldest] {
+        let rows = storage
+            .list_article_rows(ListArticles {
+                order,
+                ..params.clone()
+            })
+            .unwrap();
+        let expected = if order == ListOrder::Newest {
+            newer
+        } else {
+            older
+        };
+        assert_eq!(ids_of(&rows), [expected], "{order:?}");
+    }
+}
+
+/// A membership view in the published order pages through its own date
+/// index, whose key is a copy of each member's date: the copy is taken
+/// when the article joins the view and follows the article when a feed
+/// re-dates it, so the view always lists in the order the whole list
+/// does.
+#[test]
+fn a_membership_view_follows_its_members_dates() {
+    let (_dir, storage) = temp_storage();
+    let keys = ["m0", "m1", "m2", "m3", "m4", "m5"];
+    let ids: Vec<ArticleId> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let day = [3, 1, 5, 2, 6, 4][i];
+            insert_dated(&storage, key, Some(&format!("2025-03-0{day}T00:00:00Z")))
+        })
+        .collect();
+    // Members joined before and after a re-date; one left undated.
+    for id in &ids[..4] {
+        storage.star_article(*id).unwrap();
+    }
+    let starred = |storage: &Storage| {
+        paged(
+            &ListArticles {
+                order: ListOrder::Published,
+                starred: Some(true),
+                ..ListArticles::default()
+            },
+            2,
+            |p| storage.list_article_rows(p).unwrap(),
+            |row| row.id,
+        )
+    };
+    let reference = |storage: &Storage| {
+        paged(
+            &ListArticles {
+                order: ListOrder::Published,
+                ..ListArticles::default()
+            },
+            2,
+            |p| storage.list_article_rows(p).unwrap(),
+            |row| row.id,
+        )
+        .into_iter()
+        .filter(|id| storage.article_state(*id).unwrap().starred)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(starred(&storage), [ids[2], ids[0], ids[3], ids[1]]);
+
+    // A member re-dated from the bottom to the top moves with it; so does
+    // one a feed stops dating (it falls back to its save time, the latest).
+    redate(&storage, "m1", "2025-03-09T00:00:00Z");
+    let mut undated = article(None, "m3", "body");
+    undated.published_at = None;
+    storage.upsert_articles(vec![undated]).unwrap();
+    assert_eq!(starred(&storage), [ids[3], ids[1], ids[2], ids[0]]);
+    assert_eq!(starred(&storage), reference(&storage));
+
+    // A member that joins after its article was re-dated takes the new date.
+    redate(&storage, "m5", "2025-03-10T00:00:00Z");
+    storage.star_article(ids[5]).unwrap();
+    storage.unstar_article(ids[2]).unwrap();
+    storage.star_article(ids[2]).unwrap();
+    assert_eq!(starred(&storage), [ids[3], ids[5], ids[1], ids[2], ids[0]]);
+    assert_eq!(starred(&storage), reference(&storage));
 }
 
 fn ids_of(rows: &[ListedArticle]) -> Vec<ArticleId> {
@@ -802,74 +949,80 @@ proptest! {
 
 // ------------------------------------------------------------ migration
 
+/// A v11 database at `path` (migrations 0001–0011 applied by hand): two
+/// feeds, seven articles — feed 1 holds three, one read and one starred
+/// (the one article with a publication date); feed 2 two, one archived;
+/// two feedless, one read.
+fn seed_v11_database(path: &std::path::Path) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    for sql in [
+        include_str!("../src/storage/migrations/0001_init.sql"),
+        include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+        include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+        include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+        include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+        include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+        include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+        include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
+        include_str!("../src/storage/migrations/0009_fetch_error_kind.sql"),
+        include_str!("../src/storage/migrations/0010_feed_schedule.sql"),
+        include_str!("../src/storage/migrations/0011_screen_entry_links.sql"),
+    ] {
+        conn.execute_batch(sql).unwrap();
+    }
+    conn.pragma_update(None, "user_version", 11).unwrap();
+    for (id, url) in [(1, "https://a.example/feed"), (2, "https://b.example/feed")] {
+        conn.execute(
+            "INSERT INTO feeds (id, url, added_at, modified_at) \
+             VALUES (?1, ?2, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+            (id, url),
+        )
+        .unwrap();
+    }
+    // Feed 1: three articles, one read; feed 2: two, one archived;
+    // two feedless, one read.
+    for (id, feed) in [
+        (1, Some(1)),
+        (2, Some(1)),
+        (3, Some(1)),
+        (4, Some(2)),
+        (5, Some(2)),
+        (6, None),
+        (7, None),
+    ] {
+        conn.execute(
+            "INSERT INTO articles (id, curio_id, feed_id, dedupe_key, source_url, published_at, \
+             saved_at, modified_at) VALUES (?1, ?2, ?3, ?4, 'https://x.example/', ?5, \
+             '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+            (
+                id,
+                format!("019780f0-0000-7000-8000-{id:012}"),
+                feed,
+                format!("k{id}"),
+                (id == 2).then_some("2025-03-01T00:00:00.000Z"),
+            ),
+        )
+        .unwrap();
+    }
+    for (id, read, starred, archived) in [(1, 1, 0, 0), (2, 0, 1, 0), (4, 0, 0, 1), (6, 1, 0, 0)] {
+        conn.execute(
+            "INSERT INTO article_state (article_id, is_read, is_starred, is_archived, \
+             updated_at) VALUES (?1, ?2, ?3, ?4, '2026-01-01T00:00:00.000Z')",
+            (id, read, starred, archived),
+        )
+        .unwrap();
+    }
+}
+
 /// Migration 0012 backfills the counters from what a v11 database holds —
 /// untouched, read, archived and feedless articles alike — and the
-/// triggers carry on from there.
+/// triggers carry on from there; migration 0015 backfills the state rows'
+/// list dates.
 #[test]
 fn migration_0012_backfills_the_unread_counters() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("curio.db");
-    {
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        for sql in [
-            include_str!("../src/storage/migrations/0001_init.sql"),
-            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
-            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
-            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
-            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
-            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
-            include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
-            include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
-            include_str!("../src/storage/migrations/0009_fetch_error_kind.sql"),
-            include_str!("../src/storage/migrations/0010_feed_schedule.sql"),
-            include_str!("../src/storage/migrations/0011_screen_entry_links.sql"),
-        ] {
-            conn.execute_batch(sql).unwrap();
-        }
-        conn.pragma_update(None, "user_version", 11).unwrap();
-        for (id, url) in [(1, "https://a.example/feed"), (2, "https://b.example/feed")] {
-            conn.execute(
-                "INSERT INTO feeds (id, url, added_at, modified_at) \
-                 VALUES (?1, ?2, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
-                (id, url),
-            )
-            .unwrap();
-        }
-        // Feed 1: three articles, one read; feed 2: two, one archived;
-        // two feedless, one read.
-        for (id, feed) in [
-            (1, Some(1)),
-            (2, Some(1)),
-            (3, Some(1)),
-            (4, Some(2)),
-            (5, Some(2)),
-            (6, None),
-            (7, None),
-        ] {
-            conn.execute(
-                "INSERT INTO articles (id, curio_id, feed_id, dedupe_key, source_url, saved_at, \
-                 modified_at) VALUES (?1, ?2, ?3, ?4, 'https://x.example/', \
-                 '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
-                (
-                    id,
-                    format!("019780f0-0000-7000-8000-{id:012}"),
-                    feed,
-                    format!("k{id}"),
-                ),
-            )
-            .unwrap();
-        }
-        for (id, read, starred, archived) in
-            [(1, 1, 0, 0), (2, 0, 1, 0), (4, 0, 0, 1), (6, 1, 0, 0)]
-        {
-            conn.execute(
-                "INSERT INTO article_state (article_id, is_read, is_starred, is_archived, \
-                 updated_at) VALUES (?1, ?2, ?3, ?4, '2026-01-01T00:00:00.000Z')",
-                (id, read, starred, archived),
-            )
-            .unwrap();
-        }
-    }
+    seed_v11_database(&path);
 
     let storage = Storage::open(&path).unwrap();
     assert_eq!(
@@ -892,6 +1045,26 @@ fn migration_0012_backfills_the_unread_counters() {
         starred.iter().map(|r| r.id).collect::<Vec<_>>(),
         [ArticleId(2)]
     );
+    // Migration 0015 copies each state row's article date for the
+    // views' published order, and that order finds the member too.
+    let (rows, copied): (i64, i64) = side_conn(&dir)
+        .query_row(
+            "SELECT COUNT(*), \
+             COUNT(*) FILTER (WHERE s.dated IS COALESCE(a.published_at, a.saved_at)) \
+             FROM article_state s JOIN articles a ON a.id = s.article_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((rows, copied), (4, 4));
+    let starred = storage
+        .list_article_rows(ListArticles {
+            starred: Some(true),
+            order: ListOrder::Published,
+            ..ListArticles::default()
+        })
+        .unwrap();
+    assert_eq!(ids_of(&starred), [ArticleId(2)]);
 
     storage.mark_read(ArticleId(3), true).unwrap();
     assert_eq!(

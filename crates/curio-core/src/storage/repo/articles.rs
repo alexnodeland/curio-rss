@@ -3,7 +3,7 @@
 
 use super::listing::{
     Projection, RawListed, UNREAD_COUNTS, count_articles_query, list_articles_query, raw_listed,
-    search_articles_query,
+    resolve_cursor, search_articles_query,
 };
 use super::maintenance::is_tombstoned;
 use super::rows::{RawArticle, article_by_id, parse_ts, raw_article, scoped_dedupe_key};
@@ -277,9 +277,14 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Database or stored-value corruption errors.
+    /// Database or stored-value corruption errors;
+    /// [`StorageError::NotFound`] for a
+    /// [`ListOrder::Published`](super::ListOrder::Published) cursor of a
+    /// bare id whose row no longer exists (see
+    /// [`ListCursor::dated`](super::ListCursor::dated)).
     pub fn list_articles(&self, params: ListArticles) -> Result<Vec<Article>, StorageError> {
         self.read(move |conn| {
+            let params = resolve_cursor(conn, params)?;
             let (sql, binds) = list_articles_query(&params, Projection::Full);
             let mut stmt = conn.prepare_cached(&sql)?;
             let raws = stmt
@@ -298,12 +303,13 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Database or stored-value corruption errors.
+    /// As [`Self::list_articles`].
     pub fn list_article_rows(
         &self,
         params: ListArticles,
     ) -> Result<Vec<ListedArticle>, StorageError> {
         self.read(move |conn| {
+            let params = resolve_cursor(conn, params)?;
             let (sql, binds) = list_articles_query(&params, Projection::Listed);
             let mut stmt = conn.prepare_cached(&sql)?;
             let raws = stmt
@@ -354,9 +360,10 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Database errors.
+    /// As [`Self::list_articles`].
     pub fn count_listed_articles(&self, params: ListArticles) -> Result<u64, StorageError> {
         self.read(move |conn| {
+            let params = resolve_cursor(conn, params)?;
             let (sql, binds) = count_articles_query(&params);
             let n: i64 = conn.prepare_cached(&sql)?.query_row(
                 rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),

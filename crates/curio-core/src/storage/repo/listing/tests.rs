@@ -235,14 +235,6 @@ fn each_order_compiles_its_keyset() {
     );
     assert_eq!(binds.len(), 4, "date ×2 + id + limit");
 
-    // A bare id looks its date up from its row.
-    let (sql, binds) = compile(ListOrder::Published, Some(ListCursor::id(ArticleId(42))));
-    assert!(
-        sql.contains("<= (SELECT COALESCE(published_at, saved_at) FROM articles WHERE id = ?)"),
-        "{sql}"
-    );
-    assert_eq!(binds.len(), 4, "id (for the date) ×2 + id + limit");
-
     // The id orders ignore a cursor's date.
     let (sql, _) = compile(ListOrder::Newest, Some(dated_cursor()));
     assert!(!sql.contains("COALESCE"), "{sql}");
@@ -250,7 +242,11 @@ fn each_order_compiles_its_keyset() {
 
 #[test]
 fn a_membership_view_keeps_its_index_in_every_order() {
-    for order in [ListOrder::Oldest, ListOrder::Published] {
+    for (order, index) in [
+        (ListOrder::Newest, "idx_article_state_starred "),
+        (ListOrder::Oldest, "idx_article_state_starred "),
+        (ListOrder::Published, "idx_article_state_starred_dated "),
+    ] {
         let (sql, _) = list_articles_query(
             &ListArticles {
                 starred: Some(true),
@@ -260,11 +256,26 @@ fn a_membership_view_keeps_its_index_in_every_order() {
             },
             Projection::Listed,
         );
-        assert!(
-            sql.contains("INDEXED BY idx_article_state_starred"),
-            "{sql}"
-        );
+        assert!(sql.contains(&format!("INDEXED BY {index}")), "{sql}");
     }
+    let (sql, binds) = list_articles_query(
+        &ListArticles {
+            read_later: Some(true),
+            order: ListOrder::Published,
+            after: Some(dated_cursor()),
+            ..ListArticles::default()
+        },
+        Projection::Listed,
+    );
+    assert!(
+        sql.contains("WHERE s.dated <= ? AND (s.dated < ? OR s.article_id < ?)"),
+        "the view's copy of the date, and its id: {sql}"
+    );
+    assert!(
+        sql.ends_with("ORDER BY s.dated DESC, s.article_id DESC LIMIT ?"),
+        "{sql}"
+    );
+    assert_eq!(binds.len(), 4, "date ×2 + id + limit");
     let (sql, _) = list_articles_query(
         &ListArticles {
             starred: Some(true),
@@ -277,13 +288,75 @@ fn a_membership_view_keeps_its_index_in_every_order() {
     assert!(sql.ends_with("ORDER BY s.article_id ASC LIMIT ?"), "{sql}");
 }
 
+/// Asserts that a plan never sorts: a published-order page walks an index
+/// already in list order.
+fn assert_walks_without_sorting(steps: &[String], what: &str) {
+    assert!(
+        !steps.iter().any(|step| step.contains("TEMP B-TREE")),
+        "{what}: the index order is the list order — no sort: {steps:?}"
+    );
+}
+
+#[test]
+fn a_membership_view_pages_the_published_order_through_its_date_index() {
+    for (params, index) in [
+        (
+            ListArticles {
+                starred: Some(true),
+                archived: Some(false),
+                ..ListArticles::default()
+            },
+            "idx_article_state_starred_dated",
+        ),
+        (
+            ListArticles {
+                read_later: Some(true),
+                archived: Some(false),
+                ..ListArticles::default()
+            },
+            "idx_article_state_read_later_dated",
+        ),
+        (
+            ListArticles {
+                archived: Some(true),
+                ..ListArticles::default()
+            },
+            "idx_article_state_archived_dated",
+        ),
+    ] {
+        for after in [None, Some(dated_cursor())] {
+            let params = ListArticles {
+                order: ListOrder::Published,
+                after,
+                ..params.clone()
+            };
+            let (sql, binds) = list_articles_query(&params, Projection::Listed);
+            let steps = plan(&sql, &binds);
+            let walk = if after.is_some() { "SEARCH" } else { "SCAN" };
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| step.starts_with(&format!("{walk} s USING INDEX {index}"))),
+                "{params:?}: {steps:?}"
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| step.starts_with("SEARCH a USING INTEGER PRIMARY KEY")),
+                "each member is one article lookup: {steps:?}"
+            );
+            assert!(
+                !steps.iter().any(|step| step.starts_with("SCAN a")),
+                "no walk of the articles: {steps:?}"
+            );
+            assert_walks_without_sorting(&steps, &format!("{params:?}"));
+        }
+    }
+}
+
 #[test]
 fn the_published_list_walks_the_date_index_without_a_sort() {
-    for after in [
-        None,
-        Some(dated_cursor()),
-        Some(ListCursor::id(ArticleId(42))),
-    ] {
+    for after in [None, Some(dated_cursor())] {
         let params = ListArticles {
             order: ListOrder::Published,
             after,
@@ -298,10 +371,7 @@ fn the_published_list_walks_the_date_index_without_a_sort() {
                 .any(|step| step.contains("a USING INDEX idx_articles_dated")),
             "{after:?}: {steps:?}"
         );
-        assert!(
-            !steps.iter().any(|step| step.contains("TEMP B-TREE")),
-            "the index order is the list order — no sort: {steps:?}"
-        );
+        assert_walks_without_sorting(&steps, &format!("{after:?}"));
         if after.is_some() {
             assert!(
                 steps
@@ -311,6 +381,81 @@ fn the_published_list_walks_the_date_index_without_a_sort() {
             );
         }
     }
+}
+
+/// A migrated database holding one article (id 1), dated 2025-01-02 —
+/// published, or else saved then — for the cursor resolution tests.
+fn one_article_db(published: Option<&str>) -> (tempfile::TempDir, Connection) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    drop(crate::storage::Storage::open(&path).unwrap());
+    let conn = Connection::open(&path).unwrap();
+    conn.execute(
+        "INSERT INTO articles (id, curio_id, dedupe_key, source_url, published_at, saved_at, \
+         modified_at) VALUES (1, '019780f0-0000-7000-8000-000000000001', 'm:k1', \
+         'https://x.example/', ?1, ?2, ?2)",
+        (
+            published,
+            if published.is_some() {
+                "2026-01-01T00:00:00.000Z"
+            } else {
+                "2025-01-02T00:00:00.000Z"
+            },
+        ),
+    )
+    .unwrap();
+    (dir, conn)
+}
+
+#[test]
+fn a_bare_published_cursor_resolves_to_its_rows_date() {
+    for published in [Some("2025-01-02T00:00:00.000Z"), None] {
+        let (_dir, conn) = one_article_db(published);
+        let params = ListArticles {
+            order: ListOrder::Published,
+            after: Some(ListCursor::id(ArticleId(1))),
+            ..ListArticles::default()
+        };
+        let resolved = resolve_cursor(&conn, params.clone()).unwrap();
+        assert_eq!(
+            resolved.after,
+            Some(ListCursor {
+                id: ArticleId(1),
+                dated: Some("2025-01-02T00:00:00Z".parse().unwrap()),
+            }),
+            "{published:?}"
+        );
+        // Resolved, it compiles to a bound date — never a NULL.
+        let (_, binds) = list_articles_query(&resolved, Projection::Full);
+        assert_eq!(binds.len(), 4);
+
+        // A cursor that carries its date, or an id order, is left alone.
+        let carried = ListArticles {
+            after: Some(dated_cursor()),
+            ..params.clone()
+        };
+        assert_eq!(resolve_cursor(&conn, carried.clone()).unwrap(), carried);
+        let newest = ListArticles {
+            order: ListOrder::Newest,
+            after: Some(ListCursor::id(ArticleId(7))),
+            ..ListArticles::default()
+        };
+        assert_eq!(resolve_cursor(&conn, newest.clone()).unwrap(), newest);
+    }
+}
+
+#[test]
+fn a_bare_published_cursor_of_a_missing_row_is_not_found() {
+    let (_dir, conn) = one_article_db(None);
+    let params = ListArticles {
+        order: ListOrder::Published,
+        after: Some(ListCursor::id(ArticleId(2))),
+        ..ListArticles::default()
+    };
+    assert!(matches!(
+        resolve_cursor(&conn, params),
+        Err(StorageError::NotFound { entity: "article" })
+    ));
 }
 
 #[test]

@@ -95,8 +95,10 @@ pub struct ListCursor {
     /// The row's publication date as [`ListOrder::Published`] sorts it —
     /// `published_at`, else `saved_at`. Only that order reads it; `None`
     /// there looks the date up from the row `id` names, so a cursor of a
-    /// bare id still pages (but finds nothing after a row since deleted —
-    /// carry the date to page past one).
+    /// bare id still pages — until that row is deleted: the listing then
+    /// fails with [`StorageError::NotFound`] rather than return an empty
+    /// page that would read as the end of the list. Carry the date (build
+    /// the cursor with [`From`]) to page past a row since deleted.
     pub dated: Option<Timestamp>,
 }
 

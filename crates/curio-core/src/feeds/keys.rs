@@ -26,7 +26,7 @@ pub(super) fn unique_keys(entries: Vec<ParsedEntry>) -> Vec<ParsedEntry> {
             links_by_guid
                 .entry(guid)
                 .or_default()
-                .insert(entry.link.as_deref());
+                .insert(entry.key_link.as_deref());
         }
     }
     let reused: HashSet<String> = links_by_guid
@@ -39,7 +39,7 @@ pub(super) fn unique_keys(entries: Vec<ParsedEntry>) -> Vec<ParsedEntry> {
         .into_iter()
         .filter_map(|mut entry| {
             if let Some(guid) = entry.guid.as_deref().filter(|guid| reused.contains(*guid)) {
-                entry.dedupe_key = guid_link_key(guid, entry.link.as_deref());
+                entry.dedupe_key = guid_link_key(guid, entry.key_link.as_deref());
             }
             seen.insert(entry.dedupe_key.clone()).then_some(entry)
         })
@@ -59,7 +59,7 @@ enum GuidKey {
 fn alternate_key(entry: &ParsedEntry) -> Option<GuidKey> {
     let guid = entry.guid.as_deref()?;
     let plain = dedupe_key(Some(guid), None, "", None);
-    let reused = guid_link_key(guid, entry.link.as_deref());
+    let reused = guid_link_key(guid, entry.key_link.as_deref());
     if entry.dedupe_key == plain {
         Some(GuidKey::Plain(reused))
     } else if entry.dedupe_key == reused {
@@ -211,6 +211,21 @@ mod tests {
             rss(&[("same", A), ("same", "")]),
             &[("guid:same", FEED_URL)],
         );
+        assert_eq!(
+            keys,
+            ["guid+link:same\u{1f}https://example.com/a", "guid:same"]
+        );
+    }
+
+    /// #262: an item whose link the screen drops is stored under the feed
+    /// URL (migration 0011 moved older rows there too), so that is the row
+    /// it adopts — while its key still names the declared link.
+    #[test]
+    fn a_screened_out_link_adopts_the_plain_row_stored_under_the_feed_url() {
+        let feed = rss(&[("same", A), ("same", "foo://h/b")]);
+        assert_eq!(feed.entries[1].link, None);
+        assert_eq!(feed.entries[1].dedupe_key, "guid+link:same\u{1f}foo://h/b");
+        let keys = settled(feed, &[("guid:same", FEED_URL)]);
         assert_eq!(
             keys,
             ["guid+link:same\u{1f}https://example.com/a", "guid:same"]

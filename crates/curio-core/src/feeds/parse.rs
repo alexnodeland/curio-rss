@@ -19,7 +19,8 @@ use super::keys::unique_keys;
 pub struct ParsedFeedMeta {
     /// Feed title.
     pub title: Option<String>,
-    /// The feed's website.
+    /// The feed's website: `None` or an absolute `http(s)` URL (see
+    /// [`ParsedEntry::link`] for the screen).
     pub site_url: Option<String>,
     /// Feed self-description.
     pub description: Option<String>,
@@ -45,8 +46,22 @@ pub struct ParsedEntry {
     pub guid: Option<String>,
     /// Entry title (`(untitled)` when the source omitted it).
     pub title: String,
-    /// Canonical entry URL, if any.
+    /// Canonical entry URL: `None` or an absolute `http(s)` URL with a host
+    /// and no userinfo — the policed client's own screen
+    /// ([`crate::fetch::screen_url`]), which the opener's scheme gate passes
+    /// too. A relative href was already resolved against `xml:base`, else
+    /// the feed URL, while parsing. Any other declared link (`javascript:`,
+    /// a custom scheme, a relative href with no base) is dropped, so the
+    /// entry takes the link-less path: the feed URL as its source and
+    /// content base. It never becomes the stored `source_url`, the reader's
+    /// source link or the base relative content resolves against.
     pub link: Option<String>,
+    /// The declared link before that screen, exactly as the feed gave it:
+    /// the identity the dedupe chain's link tiers are built from. Keying on
+    /// it keeps every key stable across the screen's introduction (#262) —
+    /// a `link:foo://…` row stored before it keeps matching its item — and
+    /// keeps items whose only link is a custom-scheme one apart.
+    pub(crate) key_link: Option<String>,
     /// First author name, if any.
     pub author: Option<String>,
     /// Publication time: the source's `published`, else its `updated`
@@ -140,7 +155,7 @@ fn parse_utf8_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, F
 fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
     let meta = ParsedFeedMeta {
         title: feed.title.map(|t| t.content),
-        site_url: best_link(&feed.links).map(ToOwned::to_owned),
+        site_url: best_link(&feed.links).and_then(web_link),
         description: feed.description.map(|t| t.content),
         refresh_hint: feed
             .ttl
@@ -167,7 +182,8 @@ fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
         .map(|t| t.content)
         .filter(|t| !t.trim().is_empty())
         .unwrap_or_else(|| "(untitled)".to_owned());
-    let link = best_link(&entry.links).map(ToOwned::to_owned);
+    let key_link = best_link(&entry.links).map(ToOwned::to_owned);
+    let link = key_link.as_deref().and_then(web_link);
     let author = entry
         .authors
         .into_iter()
@@ -199,12 +215,18 @@ fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
     // The hash tier keeps hashing the source's own `published`: folding the
     // `updated` fallback in would re-key every date-less, link-less item —
     // once now, and again on each edit — duplicating it in the list.
-    let dedupe_key = dedupe_key(guid.as_deref(), link.as_deref(), &title, source_published);
+    let dedupe_key = dedupe_key(
+        guid.as_deref(),
+        key_link.as_deref(),
+        &title,
+        source_published,
+    );
     ParsedEntry {
         dedupe_key,
         guid,
         title,
         link,
+        key_link,
         author,
         published,
         updated,
@@ -241,14 +263,28 @@ fn escape_html_text(text: &str) -> String {
     out
 }
 
-/// The entry/site link: prefer an explicit `alternate` (or rel-less)
-/// link over `self`/`enclosure`/anything else.
+/// The entry/site link as declared — unscreened; [`web_link`] screens it:
+/// prefer an explicit `alternate` (or rel-less) link over
+/// `self`/`enclosure`/anything else.
 fn best_link(links: &[Link]) -> Option<&str> {
     links
         .iter()
         .find(|link| link.rel.is_none() || link.rel.as_deref() == Some("alternate"))
         .or_else(|| links.first())
         .map(|link| link.href.as_str())
+}
+
+/// `href` when the app may store, link to and fetch it: an absolute
+/// `http(s)` URL with a host and no userinfo ([`crate::fetch::screen_url`],
+/// the policed client's own screen — pure, no I/O). feed-rs has already
+/// resolved a relative href against `xml:base` / the feed URL, so one still
+/// relative here had no base and is dropped too. The href is kept as given
+/// (feed-rs serialized any it could parse), so a link that passes is stored
+/// byte-for-byte as before the screen existed.
+fn web_link(href: &str) -> Option<String> {
+    crate::fetch::screen_url(href)
+        .is_ok()
+        .then(|| href.to_owned())
 }
 
 /// The syndication module's namespace.
@@ -609,6 +645,95 @@ mod tests {
         let feed = parse_feed(xml, None).unwrap();
         assert_eq!(feed.entries.len(), 2);
         assert_eq!(feed.entries[1].dedupe_key, "guid+link:same\u{1f}");
+    }
+
+    /// #262: only an absolute http(s) link survives as the entry's link or
+    /// the feed's site; everything else reads as no link.
+    #[test]
+    fn entry_and_channel_links_are_screened_to_http() {
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0"><channel><title>t</title><link>javascript:alert(1)</link>
+<item><title>js</title><link>javascript:alert(1)</link></item>
+<item><title>spaced js</title><guid>g-js</guid><link>  JaVaScRiPt:alert(2)</link></item>
+<item><title>custom</title><guid>g-custom</guid><link>foo://h/dir/three</link></item>
+<item><title>lookalike</title><guid>g-like</guid><link>httpsupdated://xss.example.com/one</link></item>
+<item><title>ftp</title><guid>g-ftp</guid><link>ftp://files.example/pub/two</link></item>
+<item><title>data</title><guid>g-data</guid><link>data:text/html,x</link></item>
+<item><title>userinfo</title><guid>g-user</guid><link>https://user:pw@example.com/u</link></item>
+<item><title>hostless</title><guid>g-hostless</guid><link>file:///etc/passwd</link></item>
+<item><title>relative</title><guid>g-rel</guid><link>/posts/rel</link></item>
+<item><title>web</title><guid>g-web</guid><link>https://example.com/ok</link></item>
+<item><title>plain web</title><guid>g-plain</guid><link>http://example.com/plain</link></item>
+</channel></rss>"#;
+        let feed = parse_feed(xml, None).unwrap();
+        assert_eq!(feed.meta.site_url, None);
+        let links: Vec<(&str, Option<&str>)> = feed
+            .entries
+            .iter()
+            .map(|entry| (entry.title.as_str(), entry.link.as_deref()))
+            .collect();
+        assert_eq!(
+            links,
+            [
+                ("js", None),
+                ("spaced js", None),
+                ("custom", None),
+                ("lookalike", None),
+                ("ftp", None),
+                ("data", None),
+                ("userinfo", None),
+                ("hostless", None),
+                ("relative", None),
+                ("web", Some("https://example.com/ok")),
+                ("plain web", Some("http://example.com/plain")),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_relative_link_resolved_against_the_feed_url_is_kept() {
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0"><channel><title>t</title><link>/</link>
+<item><title>rel</title><link>/posts/rel</link></item>
+</channel></rss>"#;
+        let feed = parse_feed(xml, Some("https://example.com/feed.xml")).unwrap();
+        assert_eq!(feed.meta.site_url.as_deref(), Some("https://example.com/"));
+        assert_eq!(
+            feed.entries[0].link.as_deref(),
+            Some("https://example.com/posts/rel")
+        );
+        assert_eq!(
+            feed.entries[0].dedupe_key,
+            "link:https://example.com/posts/rel"
+        );
+    }
+
+    /// The screen never moves a dedupe key: a row stored under a link the
+    /// screen now drops keeps matching its item, and items told apart only
+    /// by such links stay apart.
+    #[test]
+    fn a_screened_out_link_still_keys_its_entry() {
+        let xml = br#"<?xml version="1.0"?>
+<rss version="2.0"><channel><title>t</title>
+<item><title>js</title><link>javascript:alert(1)</link></item>
+<item><title>one</title><guid>same</guid><link>foo://h/1</link></item>
+<item><title>two</title><guid>same</guid><link>foo://h/2</link></item>
+</channel></rss>"#;
+        let feed = parse_feed(xml, Some("https://example.com/feed.xml")).unwrap();
+        let keys: Vec<&str> = feed
+            .entries
+            .iter()
+            .map(|entry| entry.dedupe_key.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "link:javascript:alert(1)",
+                "guid+link:same\u{1f}foo://h/1",
+                "guid+link:same\u{1f}foo://h/2",
+            ]
+        );
+        assert!(feed.entries.iter().all(|entry| entry.link.is_none()));
     }
 
     #[test]

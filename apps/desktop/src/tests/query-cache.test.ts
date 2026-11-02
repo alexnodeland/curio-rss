@@ -10,11 +10,15 @@ import {
     invalidatePrefix,
     queryKeys,
     resetQueryCache,
+    seedQuery,
     wireInvalidation,
 } from '$lib/state/query-cache.svelte';
+import { seedRowDetails } from '$lib/state/row-details';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
     type IpcHarness,
+    articleStateFixture,
+    articleSummaryFixture,
     commandErrorFixture,
     flushIpc,
     installIpcHarness,
@@ -223,6 +227,77 @@ describe('query cache', () => {
 
             expect(feeds.calls()).toBe(1);
         });
+    });
+
+    it('a seeded entry is loaded without a fetch and refetches on invalidation', async () => {
+        const fetcher = countingFetcher(() => 'fetched');
+        seedQuery('article-state:7', fetcher.fetch, 'seeded');
+        const query = ensureQuery('article-state:7', fetcher.fetch);
+        await query.whenLoaded();
+        await flushIpc();
+        expect(query.data).toBe('seeded');
+        expect(query.loaded).toBe(true);
+        expect(fetcher.calls()).toBe(0);
+
+        invalidatePrefix('article-state:');
+        await flushIpc();
+        expect(query.data).toBe('fetched');
+        expect(fetcher.calls()).toBe(1);
+    });
+
+    it('seeding never overwrites an existing entry', async () => {
+        const fetcher = countingFetcher(() => 'fetched');
+        const query = ensureQuery('article-tags:7', fetcher.fetch);
+        await flushIpc();
+        seedQuery('article-tags:7', fetcher.fetch, 'seeded');
+        expect(query.data).toBe('fetched');
+        expect(ensureQuery('article-tags:7', fetcher.fetch)).toBe(query);
+    });
+
+    it('onData sees each landed result, never a superseded one', async () => {
+        const seen: string[] = [];
+        let payload = 'first';
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let calls = 0;
+        const query = ensureQuery(
+            'articles:x',
+            async (): Promise<CommandResult<string>> => {
+                calls += 1;
+                const data = payload;
+                if (calls === 1) {
+                    await gate; // the first fetch is overtaken
+                }
+                return { status: 'ok', data };
+            },
+            {},
+            (data) => seen.push(data),
+        );
+        await Promise.resolve();
+        payload = 'second';
+        await query.refetch();
+        release();
+        await flushIpc();
+        expect(query.data).toBe('second');
+        expect(seen).toEqual(['second']);
+    });
+
+    it('list rows seed their state and tags entries', async () => {
+        harness = installIpcHarness({});
+        const state = articleStateFixture({ starred: true });
+        seedRowDetails([articleSummaryFixture({ id: 9, state, tags: ['a'] })]);
+        const { commands } = await import('$lib/bindings');
+        const stateQuery = ensureQuery(queryKeys.articleState(9), () =>
+            commands.getArticleState(9),
+        );
+        const tagsQuery = ensureQuery(queryKeys.articleTags(9), () => commands.getArticleTags(9));
+        await flushIpc();
+        expect(stateQuery.data).toEqual(state);
+        expect(tagsQuery.data).toEqual(['a']);
+        expect(harness.callsFor('get_article_state')).toEqual([]);
+        expect(harness.callsFor('get_article_tags')).toEqual([]);
     });
 
     it('rejectWith produces the wire error shape end to end', async () => {

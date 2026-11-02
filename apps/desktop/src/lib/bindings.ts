@@ -215,8 +215,9 @@ export const commands = {
 	 */
 	connectivityOnline: () => typedError<boolean, CommandError>(__TAURI_INVOKE("connectivity_online")),
 	/**
-	 *  Lists article summaries. Filters and order are backend-owned — the
-	 *  frontend passes them through and never re-filters or re-sorts.
+	 *  Lists article summaries, each with its state flags and tags — one call
+	 *  renders a page. Filters and order are backend-owned — the frontend
+	 *  passes them through and never re-filters or re-sorts.
 	 */
 	listArticles: (params: ListArticlesDto) => typedError<ArticleSummaryDto[], CommandError>(__TAURI_INVOKE("list_articles", { params })),
 	/**  One full article (sanitized HTML included), if it exists. */
@@ -607,8 +608,9 @@ export type ArticleStateDto = {
 };
 
 /**
- *  A list row: everything the article list renders, plus a short text
- *  preview — never the full content payload (that stays on [`ArticleDto`]).
+ *  A list row: everything the article list renders — a short text
+ *  preview, the state flags and the tags included — in one IPC reply;
+ *  never the full content payload (that stays on [`ArticleDto`]).
  */
 export type ArticleSummaryDto = {
 	/**  Row id (keyset cursor currency). */
@@ -637,10 +639,18 @@ export type ArticleSummaryDto = {
 	image: string | null,
 	/**
 	 *  A whitespace-normalized, length-bounded preview of the extracted
-	 *  text (up to `SNIPPET_MAX_CHARS`, `…`-suffixed when truncated).
+	 *  text (up to 200 characters, `…`-suffixed when the text runs on),
+	 *  built in the engine from the start of the text only.
 	 *  `None` when the article has no extracted text.
 	 */
 	snippet: string | null,
+	/**
+	 *  The article's flags, read with the row — the list renders read /
+	 *  starred / read-later / archived state without a call per row.
+	 */
+	state: ArticleStateDto,
+	/**  The article's tags, sorted. */
+	tags: string[],
 };
 
 /**

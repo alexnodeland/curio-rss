@@ -49,6 +49,8 @@ function articleSummary(id: number): ArticleSummaryDto {
         lang: 'en',
         image: null,
         snippet: null,
+        state: { read: false, starred: false, read_later: false, archived: false },
+        tags: [],
     };
 }
 

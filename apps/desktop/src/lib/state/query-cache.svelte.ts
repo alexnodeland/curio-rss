@@ -35,14 +35,37 @@ export class Query<T> {
     loaded: boolean = $state(false);
 
     #fetcher: () => Promise<CommandResult<T>>;
+    #onData: ((data: T) => void) | undefined;
     #generation = 0;
     /** The newest refetch's promise (the one whose result will land). */
     #latest: Promise<void> | null = null;
 
-    constructor(key: string, fetcher: () => Promise<CommandResult<T>>, scope: QueryScope = {}) {
+    /**
+     * `onData` runs whenever a fetch's data lands — the newest fetch only, so
+     * a superseded result never reaches it.
+     */
+    constructor(
+        key: string,
+        fetcher: () => Promise<CommandResult<T>>,
+        scope: QueryScope = {},
+        onData?: (data: T) => void,
+    ) {
         this.key = key;
         this.scope = scope;
         this.#fetcher = fetcher;
+        this.#onData = onData;
+    }
+
+    /**
+     * Lands `data` as if a fetch had returned it, without one: the entry is
+     * loaded, and `start`/`whenLoaded` do not fetch. Later invalidation
+     * refetches it with its own fetcher like any other entry.
+     */
+    seed(data: T): void {
+        this.data = data;
+        this.error = null;
+        this.loaded = true;
+        this.#latest ??= Promise.resolve();
     }
 
     /** Runs the fetcher; a newer concurrent refetch wins (last-write-wins). */
@@ -101,6 +124,7 @@ export class Query<T> {
         if (result.status === 'ok') {
             this.data = result.data;
             this.error = null;
+            this.#onData?.(result.data);
         } else {
             this.error = result.error;
         }
@@ -120,13 +144,14 @@ export function ensureQuery<T>(
     key: string,
     fetcher: () => Promise<CommandResult<T>>,
     scope: QueryScope = {},
+    onData?: (data: T) => void,
 ): Query<T> {
     const existing = registry.get(key);
     if (existing !== undefined) {
         return existing as Query<T>;
     }
     return untrack(() => {
-        const created = new Query(key, fetcher, scope);
+        const created = new Query(key, fetcher, scope, onData);
         registry.set(key, created as Query<unknown>);
         // Deferred a microtask so a fetcher may close over state its owner
         // finishes constructing after `ensureQuery` returns. `start`, not
@@ -134,6 +159,23 @@ export function ensureQuery<T>(
         // reused rather than superseded by a second IPC round-trip.
         queueMicrotask(() => void created.start());
         return created;
+    });
+}
+
+/**
+ * Creates the entry under `key` already loaded with `data` — no fetch — when
+ * none exists; an existing entry is left alone (its own invalidation keeps it
+ * current). This is how a list page that carries each row's details fills
+ * those rows' detail entries, so rendering the page costs no call per row.
+ */
+export function seedQuery<T>(key: string, fetcher: () => Promise<CommandResult<T>>, data: T): void {
+    if (registry.has(key)) {
+        return;
+    }
+    untrack(() => {
+        const created = new Query(key, fetcher);
+        created.seed(data);
+        registry.set(key, created as Query<unknown>);
     });
 }
 

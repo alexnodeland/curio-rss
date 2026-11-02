@@ -104,14 +104,18 @@ describe('ArticleList', () => {
         expect(harness.callsFor('list_articles')).toHaveLength(2);
     });
 
-    it('rows surface backend per-article state: unread dot and star', async () => {
+    it('rows surface the per-article state the list rows carry: unread dot and star', async () => {
         harness = installIpcHarness({
-            list_articles: (args) => (paramsOf(args).before === null ? pageOf(500, 2) : []),
-            get_article_state: (args) =>
-                articleStateFixture({
-                    read: args.articleId !== 500,
-                    starred: args.articleId === 500,
-                }),
+            list_articles: (args) =>
+                paramsOf(args).before === null
+                    ? pageOf(500, 2).map((row) => ({
+                          ...row,
+                          state: articleStateFixture({
+                              read: row.id !== 500,
+                              starred: row.id === 500,
+                          }),
+                      }))
+                    : [],
             list_feeds: [],
         });
         const { container } = render(ArticleList);
@@ -127,6 +131,33 @@ describe('ArticleList', () => {
         expect(rows[0]?.textContent).toContain('Starred');
         expect(rows[1]?.classList.contains('unread')).toBe(false);
         expect(rows[1]?.querySelector('.row-star')).toBeNull();
+    });
+
+    it('a 50-row page renders with its state from the one list call', async () => {
+        harness = installIpcHarness({
+            list_articles: (args) =>
+                paramsOf(args).before === null
+                    ? pageOf(500, 50).map((row) => ({
+                          ...row,
+                          state: articleStateFixture({ read: row.id % 2 === 0 }),
+                          tags: ['kept'],
+                      }))
+                    : [],
+            list_feeds: [],
+        });
+        const { container } = render(ArticleList);
+        await flushIpc();
+
+        const rows = [...container.querySelectorAll('.article-row')];
+        expect(rows.length).toBeGreaterThan(0);
+        for (const row of rows) {
+            const id = Number(/Article (\d+)/.exec(row.textContent ?? '')?.[1]);
+            expect(id).toBeGreaterThan(450);
+            expect(row.classList.contains('unread')).toBe(id % 2 !== 0);
+        }
+        expect(harness.callsFor('list_articles')).toHaveLength(1);
+        expect(harness.callsFor('get_article_state')).toEqual([]);
+        expect(harness.callsFor('get_article_tags')).toEqual([]);
     });
 
     it('row state flips when the Rust-emitted invalidation event lands', async () => {

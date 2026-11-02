@@ -13,6 +13,7 @@
 import type {
     ArticleFlagDto,
     ArticleStateDto,
+    ArticleSummaryDto,
     CommandError,
     FeedDto,
     FetchErrorKindDto,
@@ -170,6 +171,13 @@ tokens:
 `;
 
     const byId = (id: number) => articles.find((a) => a.summary.id === id);
+    // A list row as the engine returns it: the summary with the article's
+    // current flags and tags joined in.
+    const row = (a: (typeof articles)[number]): ArticleSummaryDto => ({
+        ...structuredClone(a.summary),
+        state: { ...a.state },
+        tags: [...a.tags],
+    });
     // Mirrors core's `unread_counts`: archived items leave the reading flow
     // (badge included), and an article whose feed is gone still counts
     // toward the total, just under no feed.
@@ -374,16 +382,14 @@ tokens:
                         .sort((x, y) => y.summary.id - x.summary.id);
                     if (p.before != null)
                         rows = rows.filter((a) => a.summary.id < (p.before as number));
-                    return rows
-                        .slice(0, (p.limit as number) ?? 50)
-                        .map((a) => structuredClone(a.summary));
+                    return rows.slice(0, (p.limit as number) ?? 50).map(row);
                 }
                 case 'search_articles': {
                     const q = String(args.query ?? '').toLowerCase();
                     return articles
                         .filter((a) => a.summary.title.toLowerCase().includes(q))
                         .slice(0, (args.limit as number) ?? 20)
-                        .map((a) => structuredClone(a.summary));
+                        .map(row);
                 }
                 case 'get_article':
                     return structuredClone(byId(args.articleId as number)?.full ?? null);

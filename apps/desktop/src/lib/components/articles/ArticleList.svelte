@@ -46,7 +46,7 @@ import ArticleRow, {
     articleOptionId,
     buildArticleMenu,
 } from './ArticleRow.svelte';
-import BulkBar from './BulkBar.svelte';
+import BulkBar, { BULK_BAR_INSET } from './BulkBar.svelte';
 import ListEmpty from './ListEmpty.svelte';
 import VirtualList, { type ViewportReport } from './VirtualList.svelte';
 
@@ -351,6 +351,7 @@ function onViewport(report: ViewportReport): void {
                 initialScrollTop={openingScrollTop()}
                 label={t('list.label')}
                 multiselectable
+                bottomInset={selectionStore.multiActive ? BULK_BAR_INSET : 0}
                 {activeDescendantId}
                 focusNonce={focusRequest}
                 onnearend={() => void list.loadMore()}

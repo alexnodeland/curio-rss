@@ -12,6 +12,8 @@ let {
     onnearend = undefined,
     initialScrollTop = 0,
     onviewport = undefined,
+    bottomInset = 0,
+    multiselectable = false,
 }: {
     items: number[];
     rowHeight?: number;
@@ -22,6 +24,8 @@ let {
     onnearend?: () => void;
     initialScrollTop?: number;
     onviewport?: (report: ViewportReport) => void;
+    bottomInset?: number;
+    multiselectable?: boolean;
 } = $props();
 </script>
 
@@ -35,6 +39,8 @@ let {
     {onnearend}
     {initialScrollTop}
     {onviewport}
+    {bottomInset}
+    {multiselectable}
     key={(item) => item}
     label="test list"
 >

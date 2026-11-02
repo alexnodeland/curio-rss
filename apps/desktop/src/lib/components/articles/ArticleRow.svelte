@@ -193,12 +193,6 @@ const date = $derived(listDateLabel(article, dayClock.now));
     aria-posinset={index + 1}
     aria-setsize={setsize}
     tabindex="-1"
-    onmousedown={(event) => {
-        // Shift-click extends the selection — not a text selection across rows.
-        if (event.shiftKey) {
-            event.preventDefault();
-        }
-    }}
     onclick={(event) => onselect(article.id, selectGesture(event))}
     use:contextMenu={{ items: () => buildArticleMenu(article, flags()), ariaLabel: article.title }}
 >
@@ -242,6 +236,10 @@ const date = $derived(listDateLabel(article, dayClock.now));
         border-radius: var(--radius-lg);
         cursor: pointer;
         transition: background var(--dur-fast) var(--ease);
+        /* Rows are picked, not text: a Shift-click extends the selection
+           instead of dragging a text selection across rows. */
+        -webkit-user-select: none;
+        user-select: none;
     }
 
     /* Hairline between rows, inset so it doesn't touch the rounded edges. */

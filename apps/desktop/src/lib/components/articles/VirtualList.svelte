@@ -45,6 +45,7 @@ let {
     initialScrollTop = 0,
     label,
     multiselectable = false,
+    bottomInset = 0,
     activeDescendantId,
     focusNonce = 0,
     onnearend,
@@ -67,6 +68,10 @@ let {
     /** Whether several options can be selected at once (`aria-multiselectable`);
      *  the owner then sets each row's `aria-selected` from its selection. */
     multiselectable?: boolean;
+    /** Px at the viewport's bottom covered by an overlay (the bulk bar): the
+     *  list scrolls that much further, and scroll-into-view keeps the
+     *  selected row above it. */
+    bottomInset?: number;
     /** The `id` of the active option — mirrored into `aria-activedescendant`
      *  so a screen reader tracks selection while focus stays on the listbox. */
     activeDescendantId?: string;
@@ -282,8 +287,8 @@ $effect(() => {
     if (rowTop < viewport.scrollTop) {
         viewport.scrollTop = rowTop;
         scrollTop = rowTop;
-    } else if (rowBottom > viewport.scrollTop + viewportHeight) {
-        const target = rowBottom - viewportHeight;
+    } else if (rowBottom > viewport.scrollTop + viewportHeight - bottomInset) {
+        const target = rowBottom - viewportHeight + bottomInset;
         viewport.scrollTop = target;
         scrollTop = target;
     }
@@ -299,6 +304,7 @@ $effect(() => {
     aria-activedescendant={effectiveActiveDescendant}
     tabindex="0"
     bind:this={viewport}
+    style:padding-bottom={bottomInset > 0 ? `${bottomInset}px` : undefined}
     bind:clientHeight={measuredHeight}
     onscroll={onScroll}
     onkeydown={onKeydown}

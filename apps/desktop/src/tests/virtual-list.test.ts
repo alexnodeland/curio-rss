@@ -63,6 +63,32 @@ describe('VirtualList', () => {
         expect(listbox.scrollTop).toBe(400);
     });
 
+    it('keeps the selected row clear of a bottom overlay (the bulk bar)', async () => {
+        const { getByRole, rerender } = render(VirtualListHost, {
+            props: { items: manyItems(200), selectedIndex: 0, bottomInset: 64 },
+        });
+        const listbox = getByRole('listbox');
+        expect(listbox.style.paddingBottom).toBe('64px');
+
+        // Row 5 ends at 240px — inside the view, but under the 64px overlay.
+        await rerender({ items: manyItems(200), selectedIndex: 5, bottomInset: 64 });
+        expect(listbox.scrollTop).toBe(240 - 240 + 64);
+
+        // No overlay: no padding, and the same row would have fit as it was.
+        await rerender({ items: manyItems(200), selectedIndex: 0, bottomInset: 0 });
+        expect(listbox.style.paddingBottom).toBe('');
+    });
+
+    it('marks the listbox multiselectable only when asked', () => {
+        const single = render(VirtualListHost, { props: { items: manyItems(5) } });
+        expect(single.getByRole('listbox').hasAttribute('aria-multiselectable')).toBe(false);
+        single.unmount();
+        const multi = render(VirtualListHost, {
+            props: { items: manyItems(5), multiselectable: true },
+        });
+        expect(multi.getByRole('listbox').getAttribute('aria-multiselectable')).toBe('true');
+    });
+
     it('keeps the selected row rendered after scroll-into-view', async () => {
         const { container, rerender } = render(VirtualListHost, {
             props: { items: manyItems(200), selectedIndex: 0 },

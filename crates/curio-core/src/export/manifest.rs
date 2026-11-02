@@ -13,7 +13,7 @@
 //! of silently losing them. Only those sync-tool name shapes count: a
 //! `manifest.backup.json` of the user's own is never touched.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use curio_types::{CurioId, ManifestV1};
@@ -119,6 +119,25 @@ pub fn manifest_conflict_copies(root: &Path) -> Result<Vec<PathBuf>, ExportError
     }
     copies.sort();
     Ok(copies)
+}
+
+/// Every `curio_id` the destination's manifest — and each of its sync
+/// conflict copies — records as exported: what article retention must
+/// never reap. A pure read; nothing is merged or written.
+///
+/// # Errors
+///
+/// Unlike the exporter's merge, any manifest or conflict copy that does
+/// not load is an error ([`ExportError::ManifestParse`], or a filesystem
+/// error): a caller deciding what may be deleted must not guess.
+pub fn exported_ids(root: &Path) -> Result<BTreeSet<CurioId>, ExportError> {
+    let mut ids: BTreeSet<CurioId> = load_manifest(root)?.notes.into_keys().collect();
+    for path in manifest_conflict_copies(root)? {
+        let raw =
+            std::fs::read_to_string(&path).map_err(|source| ExportError::io(&path, source))?;
+        ids.extend(parse_manifest(&raw, path)?.notes.into_keys());
+    }
+    Ok(ids)
 }
 
 /// Folds every parseable conflict copy into `manifest`: the union of the

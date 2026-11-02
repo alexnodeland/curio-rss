@@ -9,7 +9,8 @@
 //! `events::EventEmitter`).
 //!
 //! The functions are one `impl Storage` block per table family: `feeds`,
-//! `articles`, `state`, `tags`, `fetch_log`, `settings` and `intents`.
+//! `articles`, `state`, `tags`, `fetch_log`, `settings` and `intents`,
+//! plus `maintenance` (retention, housekeeping, index upkeep).
 //! `rows` holds the helpers they share (tag normalization, dedupe-key
 //! scoping, the FTS query builder, the raw-row parsers) and `listing` the
 //! list/search query compilers and the list-row parser. This
@@ -21,12 +22,14 @@ mod feeds;
 mod fetch_log;
 mod intents;
 mod listing;
+mod maintenance;
 mod rows;
 mod settings;
 mod state;
 mod tags;
 
 pub use fetch_log::FETCH_LOG_KEEP;
+pub use maintenance::{MaintenanceCounts, MaintenancePlan};
 pub(crate) use settings::SettingsTx;
 
 use curio_types::{EventEnvelope, Timestamp};

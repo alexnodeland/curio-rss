@@ -1,6 +1,7 @@
 //! The key/value settings store heads keep their preferences in.
 
 use super::destinations::{DESTINATIONS_KEY, EXPORTED_DESTINATIONS_KEY, SEEDED_DESTINATIONS_KEY};
+use super::maintenance::RETENTION_POLICY_KEY;
 use super::{CoreError, CoreHandle};
 
 impl CoreHandle {
@@ -14,7 +15,9 @@ impl CoreHandle {
     /// [`CoreError::ReservedSettingKey`] for the facade-owned
     /// `"destinations"`, `"destinations.exported"` and
     /// `"destinations.seeded"` keys (raw paths never cross the facade —
-    /// read the registry with [`Self::destinations`]); storage errors.
+    /// read the registry with [`Self::destinations`]) and for
+    /// `"retention.policy"` (read it with [`Self::retention_policy`]);
+    /// storage errors.
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, CoreError> {
         reject_reserved(key)?;
         Ok(self.storage.get_setting(key)?)
@@ -29,7 +32,9 @@ impl CoreHandle {
     /// `"destinations.seeded"` keys — the destination registry changes
     /// only through [`Self::add_destination`] /
     /// [`Self::remove_destination`] /
-    /// [`Self::reconcile_destinations`] (and exports); storage errors.
+    /// [`Self::reconcile_destinations`] (and exports) — and for
+    /// `"retention.policy"`, which only [`Self::set_retention_policy`]
+    /// writes (validated); storage errors.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
         reject_reserved(key)?;
         Ok(self.storage.set_setting(key, value)?)
@@ -43,6 +48,7 @@ fn reject_reserved(key: &str) -> Result<(), CoreError> {
         DESTINATIONS_KEY,
         EXPORTED_DESTINATIONS_KEY,
         SEEDED_DESTINATIONS_KEY,
+        RETENTION_POLICY_KEY,
     ]
     .contains(&key)
     {

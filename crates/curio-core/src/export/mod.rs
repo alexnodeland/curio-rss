@@ -51,7 +51,7 @@ mod target;
 mod write;
 pub mod yaml;
 
-pub use manifest::{load_manifest, manifest_conflict_copies, write_manifest};
+pub use manifest::{exported_ids, load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
 pub use write::write_file_atomic;
 

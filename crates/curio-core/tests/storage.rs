@@ -1104,10 +1104,8 @@ fn state_events_carry_tags_in_payload() {
     ));
     assert!(storage.untag_article(id, "db").unwrap().is_none());
     assert_eq!(storage.article_tags(id).unwrap(), vec!["rust".to_owned()]);
-    assert_eq!(
-        storage.list_tags().unwrap(),
-        vec!["db".to_owned(), "rust".to_owned()]
-    );
+    // "db" left its last article, so the tag itself is gone (#137).
+    assert_eq!(storage.list_tags().unwrap(), vec!["rust".to_owned()]);
 }
 
 /// The published schemas require tags to be non-empty (`minLength: 1`);

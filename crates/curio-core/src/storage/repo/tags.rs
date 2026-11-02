@@ -50,6 +50,8 @@ impl Storage {
     /// Removes a tag from an article; stages the `article.untagged`
     /// negation. `None` when the article did not carry the tag. The tag
     /// is trimmed before matching, mirroring [`Storage::tag_article`].
+    /// Removing it from its last article deletes the tag, so
+    /// [`Storage::list_tags`] only names tags in use.
     ///
     /// # Errors
     ///
@@ -71,6 +73,13 @@ impl Storage {
                 )?
                 .execute((id.0, &tag))?;
             let envelope = if n > 0 {
+                // The last untag drops the tag itself: no ghost tags in
+                // `list_tags`.
+                tx.prepare_cached(
+                    "DELETE FROM tags WHERE name = ?1 \
+                     AND NOT EXISTS (SELECT 1 FROM article_tags WHERE tag_id = tags.id)",
+                )?
+                .execute([&tag])?;
                 let envelope = EventEnvelope::new(EventPayload::ArticleUntagged { curio_id, tag });
                 insert_intent(&tx, &envelope)?;
                 Some(envelope)

@@ -29,7 +29,10 @@ pub use netfs::{
 };
 pub use open::OpenError;
 pub(crate) use repo::SettingsTx;
-pub use repo::{FETCH_LOG_KEEP, FeedSchedule, ListArticles, PendingIntent, UpsertOutcome};
+pub use repo::{
+    FETCH_LOG_KEEP, FeedSchedule, ListArticles, MaintenanceCounts, MaintenancePlan, PendingIntent,
+    UpsertOutcome,
+};
 pub(crate) use writer::panic_message;
 
 use pool::ReadPool;
@@ -377,20 +380,25 @@ impl Storage {
     /// Runs `PRAGMA integrity_check` over the whole database — the
     /// doctor-surface health probe.
     ///
+    /// It runs on a fresh read-only connection, never a pooled one: the
+    /// check of the FTS5 index trusts the index structure a connection
+    /// cached at its last search, so on a pooled reader it reports a
+    /// healthy index as corrupt once another connection merged its
+    /// segments (an `optimize`, a `rebuild`, an automerge).
+    ///
     /// # Errors
     ///
     /// [`StorageError::IntegrityFailed`] with `SQLite`'s first finding if
     /// the database is damaged; [`StorageError::Sqlite`] if the pragma
     /// itself cannot run.
     pub fn integrity_check(&self) -> Result<(), StorageError> {
-        self.read(|conn| {
-            let verdict: String = conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
-            if verdict.eq_ignore_ascii_case("ok") {
-                Ok(())
-            } else {
-                Err(StorageError::IntegrityFailed { detail: verdict })
-            }
-        })
+        let conn = pool::open_reader(&self.path)?;
+        let verdict: String = conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        if verdict.eq_ignore_ascii_case("ok") {
+            Ok(())
+        } else {
+            Err(StorageError::IntegrityFailed { detail: verdict })
+        }
     }
 
     /// Asks FTS5 to verify the search index against the `articles` content
@@ -429,8 +437,14 @@ fn configure_write_connection(conn: &Connection) -> Result<(), StorageError> {
     }
     conn.pragma_update(None, "synchronous", "FULL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
+    conn.pragma_update(None, "journal_size_limit", JOURNAL_SIZE_LIMIT)?;
     Ok(())
 }
+
+/// The size (bytes) the `-wal` file is truncated back to after a
+/// checkpoint. Without it, a WAL that one big write (an import, a
+/// retention reap) grew stays that large on disk for good.
+pub(crate) const JOURNAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests {
@@ -603,5 +617,17 @@ mod tests {
             .write(|conn| Ok(conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?))
             .unwrap();
         assert_eq!(mode, "wal");
+    }
+
+    /// #137: the WAL shrinks back after checkpoints instead of keeping
+    /// its high-water size forever.
+    #[test]
+    fn the_writer_connection_caps_the_wal_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(dir.path().join("curio.db")).unwrap();
+        let limit: i64 = storage
+            .write(|conn| Ok(conn.query_row("PRAGMA journal_size_limit", [], |row| row.get(0))?))
+            .unwrap();
+        assert_eq!(limit, JOURNAL_SIZE_LIMIT);
     }
 }

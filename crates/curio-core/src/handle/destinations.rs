@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use curio_types::{Destination, DestinationName};
+use curio_types::{CurioId, Destination, DestinationName, Timestamp};
 
 use crate::content;
 use crate::export::{self, ExportDisposition, ExportInput};
@@ -170,6 +170,30 @@ impl CoreHandle {
             .collect())
     }
 
+    /// Every article exported to a registered destination, by `curio_id`,
+    /// as each destination's manifest (and its sync conflict copies)
+    /// lists it. The maintenance pass records these as exports, which
+    /// covers the exports made before [`Self::save_to_destination`]
+    /// recorded its own in the database.
+    ///
+    /// # Errors
+    ///
+    /// Fails rather than under-report: a destination that has exported
+    /// but whose root or `.curio/` marker is gone (an unmounted vault) is
+    /// [`ExportError::DestinationMissing`](crate::export::ExportError::DestinationMissing);
+    /// a manifest that does not load is its export error; settings errors.
+    pub(super) fn exported_curio_ids(&self) -> Result<BTreeSet<CurioId>, CoreError> {
+        let registry = Registry::read(&self.storage)?;
+        let mut ids = BTreeSet::new();
+        for (name, root) in &registry.roots {
+            if registry.exported.contains(name) {
+                export::require_marker(root)?;
+            }
+            ids.extend(export::exported_ids(root)?);
+        }
+        Ok(ids)
+    }
+
     /// Exports an article to a named destination and emits the matching
     /// contract event: `article.saved` on first export,
     /// `article.updated` on a changed re-export, nothing on the
@@ -231,6 +255,14 @@ impl CoreHandle {
             name: destination.clone(),
             root: root.clone(),
         };
+        // Recorded as exported BEFORE the note is written, so retention
+        // never reaps it: a maintenance pass running alongside either
+        // sees the record, or already deleted the article — and then no
+        // note is written for it. (An export that fails after this only
+        // leaves the article protected: the safe side.)
+        if !self.storage.mark_article_exported(id, Timestamp::now())? {
+            return Err(CoreError::NotFound { entity: "article" });
+        }
         // Ordering: note write → event intent → manifest write. The
         // intent is staged BEFORE the manifest commit — were it the
         // other way around, a crash between the two would make the

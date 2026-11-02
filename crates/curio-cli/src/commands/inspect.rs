@@ -90,7 +90,7 @@ pub(crate) fn doctor(app: &App) -> anyhow::Result<ExitCode> {
             "fts-sync",
             core.fts_integrity_check()
                 .map(|()| "FTS5 index matches the articles table".to_owned())
-                .map_err(|err| err.to_string()),
+                .map_err(|err| format!("{err} — repair it with `curio db rebuild-fts`")),
         ),
         events_check(app),
         gitignore_check(app),

@@ -1,10 +1,11 @@
 {
   "$schema": "gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "The single main window. Minimal ACL: IPC core, native file dialogs, and a URL-scoped opener for open-in-browser plus mailto/tel hand-off. No shell plugin, no fs plugin — all file IO happens in Rust commands behind the ipc_policy path gate.",
+  "description": "The single main window. Minimal ACL: IPC core, window dragging for the macOS overlay title bar's header drag regions, native file dialogs, and a URL-scoped opener for open-in-browser plus mailto/tel hand-off. No shell plugin, no fs plugin — all file IO happens in Rust commands behind the ipc_policy path gate.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "dialog:allow-open",
     "dialog:allow-save",
     "notification:default",

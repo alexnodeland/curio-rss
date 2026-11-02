@@ -283,15 +283,11 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
        line-height on .reader-article (from the typography controls); this
        governs vertical rhythm, emphasis, and the block elements. */
     .sanitized-content {
-        /* The body's own tints, mixed from the reading ink over a
-           transparent ground. The reading themes (sepia, paper) repaint
-           --ink but not the :root surface tokens, which follow the *app*
-           theme — so a fill built from --surface-* would be a dark box
-           under sepia ink on a dark app theme. These follow whichever
-           ground the reader shows. */
-        --reader-tint: color-mix(in srgb, transparent, var(--ink) 5%);
-        --reader-rule: color-mix(in srgb, transparent, var(--ink) 14%);
-
+        /* Fills and hairlines in the body use the --reader-* tints (app.css),
+           mixed from the reading ink over a transparent ground: the reading
+           themes (sepia, paper) repaint --ink but not the --surface-* tokens,
+           which follow the *app* theme — so a fill built from those would be
+           a dark box under sepia ink on a dark app theme. */
         color: var(--ink);
         overflow-wrap: break-word;
         font-kerning: normal;
@@ -306,8 +302,8 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         margin-bottom: var(--space-4);
         padding: var(--space-2) var(--space-3);
         border-radius: var(--radius-md);
-        border: 1px solid var(--hairline);
-        background: var(--surface-raised);
+        border: 1px solid var(--reader-hairline);
+        background: var(--reader-tint-strong);
         font-size: var(--text-sm);
         color: var(--fg-muted);
     }
@@ -537,8 +533,8 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         padding: var(--space-4);
         margin: 1.6em 0;
         overflow-x: auto;
-        background: var(--surface-inset);
-        border: 1px solid var(--hairline);
+        background: var(--reader-inset);
+        border: 1px solid var(--reader-hairline);
         border-radius: var(--radius-lg);
         font-family: var(--font-mono);
         font-size: 0.82em;
@@ -555,8 +551,8 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
     .sanitized-content :global(:not(pre) > code) {
         padding: 0.12em 0.38em;
         border-radius: var(--radius-sm);
-        background: var(--surface-inset);
-        border: 1px solid var(--hairline);
+        background: var(--reader-inset);
+        border: 1px solid var(--reader-hairline);
         font-size: 0.82em;
         /* Long paths and identifiers wrap instead of overflowing the
            column; each wrapped line keeps its own chip edges. */
@@ -597,7 +593,7 @@ function lightboxKeys(node: HTMLElement): { destroy(): void } {
         margin: 2.2em auto;
         width: 40%;
         border: none;
-        border-top: 1px solid var(--hairline-strong);
+        border-top: 1px solid var(--reader-hairline-strong);
     }
 
     .sanitized-content :global(a) {

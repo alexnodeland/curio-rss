@@ -114,8 +114,8 @@ function onKeydown(event: KeyboardEvent): void {
         gap: 3px;
         padding: 3px 3px 3px var(--space-2);
         border-radius: var(--radius-pill);
-        background: var(--surface-raised);
-        border: 1px solid var(--hairline);
+        background: var(--reader-tint-strong);
+        border: 1px solid var(--reader-hairline);
         color: var(--fg-muted);
         font-family: var(--font-family);
         font-size: var(--text-xs);
@@ -155,7 +155,7 @@ function onKeydown(event: KeyboardEvent): void {
         border-radius: var(--radius-pill);
         background: transparent;
         color: var(--fg);
-        border: 1px dashed var(--hairline-strong);
+        border: 1px dashed var(--reader-hairline-strong);
         font-family: var(--font-family);
         font-size: var(--text-xs);
     }

@@ -22,6 +22,7 @@ export const SETTING_KEYS = {
     hyphenate: 'ui.typography.hyphenate',
     readingTheme: 'ui.typography.reading-theme',
     sidebarCollapsed: 'ui.panes.sidebar-collapsed',
+    focusMode: 'ui.panes.focus-mode',
     sidebarWidth: 'ui.panes.sidebar-width',
     listWidth: 'ui.panes.list-width',
     promoteDestination: 'ui.promote.destination',

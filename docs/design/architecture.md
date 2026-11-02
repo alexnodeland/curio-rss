@@ -252,7 +252,16 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   page newest-first through partial indexes on `article_state`, and per-feed unread
   counts live in a `feed_unread` table that triggers on `articles`, `article_state`
   and `feeds` keep equal to the scan they replace, so a badge refresh reads one row per
-  feed. `just bench-list` measures all three on the 100k fixture (budget: p95 < 10 ms).
+  feed. `just bench-list` measures these, plus a published-order page, on the 100k
+  fixture (budget: p95 < 10 ms).
+- A listing pages in one of three orders (`ListOrder`): **Newest** (row id, latest
+  stored first — the default), **Oldest** (row id ascending, a queue read front to
+  back) and **Published** (`published_at`, an undated article at its `saved_at`, ties
+  broken by id). Every order is total and keyset-paged by a `ListCursor` built from the
+  previous page's last row, so a backfill or an OPML import lands at its posts' own
+  dates and rows written or deleted between pages never make a page repeat or skip
+  one. The published order walks an expression index on that date (migration 0015);
+  the heads still list newest-first until they grow a sort control (#150).
 - Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
   (`feed | manual | full_text | enriched`) records where the stored body came from; a
   refresh upsert replaces only `feed`/`manual` bodies (hydrated or enriched text is never

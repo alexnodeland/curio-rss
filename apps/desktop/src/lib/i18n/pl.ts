@@ -478,6 +478,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'doctor.rebuildFts': 'Odbuduj indeks wyszukiwania',
     'doctor.rebuiltFts': 'Indeks wyszukiwania odbudowany',
     'doctor.maintenance': 'Uruchom konserwację',
+    'doctor.maintenance.clean': 'Konserwacja zakończona: nie było nic do usunięcia',
     'doctor.maintenance.done':
         'Konserwacja zakończona: usunięto {articles, plural, one {# artykuł} few {# artykuły} many {# artykułów} other {# artykułu}}, {tags, plural, one {# nieużywany tag} few {# nieużywane tagi} many {# nieużywanych tagów} other {# nieużywanego tagu}} i {logs, plural, one {# stary plik dziennika} few {# stare pliki dziennika} many {# starych plików dziennika} other {# starego pliku dziennika}}',
     'doctor.maintenance.reapSkipped':

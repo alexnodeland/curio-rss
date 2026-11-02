@@ -445,6 +445,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'doctor.rebuildFts': '重建搜尋索引',
     'doctor.rebuiltFts': '搜尋索引已重建',
     'doctor.maintenance': '執行維護',
+    'doctor.maintenance.clean': '維護完成：冇嘢要移除',
     'doctor.maintenance.done':
         '維護完成：移除咗 {articles, plural, other {# 篇文章}}、{tags, plural, other {# 個冇用嘅標籤}}同 {logs, plural, other {# 個舊記錄檔}}',
     'doctor.maintenance.reapSkipped':

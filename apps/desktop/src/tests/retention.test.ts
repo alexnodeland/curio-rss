@@ -57,6 +57,13 @@ describe('retention helpers', () => {
         ]);
     });
 
+    it('says so when a routine pass found nothing to remove', () => {
+        const report = maintenanceReportFixture({ fetch_log_trimmed: 40 });
+        expect(maintenanceToasts(report, false)).toEqual([
+            { message: 'Maintenance finished: nothing needed removing', tone: 'success' },
+        ]);
+    });
+
     it('reports an orphan purge by what it purged', () => {
         const report = maintenanceReportFixture({ orphans_purged: 1 });
         expect(maintenanceToasts(report, true)).toEqual([

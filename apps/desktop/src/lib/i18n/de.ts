@@ -475,6 +475,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'doctor.rebuildFts': 'Suchindex neu aufbauen',
     'doctor.rebuiltFts': 'Suchindex neu aufgebaut',
     'doctor.maintenance': 'Wartung ausführen',
+    'doctor.maintenance.clean': 'Wartung abgeschlossen: Es gab nichts zu entfernen',
     'doctor.maintenance.done':
         'Wartung abgeschlossen: {articles, plural, one {# Artikel} other {# Artikel}}, {tags, plural, one {# ungenutzter Tag} other {# ungenutzte Tags}} und {logs, plural, one {# alte Protokolldatei} other {# alte Protokolldateien}} entfernt',
     'doctor.maintenance.reapSkipped':

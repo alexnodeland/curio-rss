@@ -41,7 +41,7 @@ export interface MaintenanceToast {
 
 /**
  * What a pass's report tells the user: a summary (the purge count for an
- * orphan purge), or why nothing was deleted when the exported set could not
+ * orphan purge; a plain "all tidy" when nothing went), or why nothing was deleted when the exported set could not
  * be read; plus a note when some upkeep is left for the next pass.
  */
 export function maintenanceToasts(
@@ -59,6 +59,8 @@ export function maintenanceToasts(
             message: t('doctor.purged', { count: report.orphans_purged }),
             tone: 'success',
         });
+    } else if (report.articles_reaped + report.tags_dropped + report.event_files_removed === 0) {
+        toasts.push({ message: t('doctor.maintenance.clean'), tone: 'success' });
     } else {
         toasts.push({
             message: t('doctor.maintenance.done', {

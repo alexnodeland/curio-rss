@@ -444,6 +444,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'doctor.rebuildFts': '重建搜索索引',
     'doctor.rebuiltFts': '搜索索引已重建',
     'doctor.maintenance': '运行维护',
+    'doctor.maintenance.clean': '维护完成：没有需要移除的内容',
     'doctor.maintenance.done':
         '维护完成：移除了 {articles, plural, other {# 篇文章}}、{tags, plural, other {# 个未使用的标签}}和 {logs, plural, other {# 个旧日志文件}}',
     'doctor.maintenance.reapSkipped':

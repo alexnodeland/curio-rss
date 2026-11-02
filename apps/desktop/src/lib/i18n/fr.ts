@@ -476,6 +476,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'doctor.rebuildFts': 'Reconstruire l’index de recherche',
     'doctor.rebuiltFts': 'Index de recherche reconstruit',
     'doctor.maintenance': 'Lancer la maintenance',
+    'doctor.maintenance.clean': 'Maintenance terminée : rien à retirer',
     'doctor.maintenance.done':
         'Maintenance terminée : {articles, plural, one {# article supprimé} other {# articles supprimés}}, {tags, plural, one {# étiquette inutilisée} other {# étiquettes inutilisées}} et {logs, plural, one {# ancien fichier journal} other {# anciens fichiers journaux}} retirés',
     'doctor.maintenance.reapSkipped':

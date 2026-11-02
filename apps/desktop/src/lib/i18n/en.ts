@@ -476,6 +476,7 @@ export const en = {
     'doctor.rebuildFts': 'Rebuild search index',
     'doctor.rebuiltFts': 'Search index rebuilt',
     'doctor.maintenance': 'Run maintenance',
+    'doctor.maintenance.clean': 'Maintenance finished: nothing needed removing',
     'doctor.maintenance.done':
         'Maintenance finished: removed {articles, plural, one {# article} other {# articles}}, {tags, plural, one {# unused tag} other {# unused tags}} and {logs, plural, one {# old log file} other {# old log files}}',
     'doctor.maintenance.reapSkipped':

@@ -2351,8 +2351,13 @@ fn migration_0010_schedules_existing_feeds_and_trims_their_fetch_log() {
     }
 
     let storage = Storage::open(&path).unwrap();
-    assert_eq!(storage.db_schema_version().unwrap(), 10);
-    assert!(dir.path().join("curio.db.pre-v10.bak").is_file());
+    let latest = Storage::schema_version();
+    assert_eq!(storage.db_schema_version().unwrap(), latest);
+    assert!(
+        dir.path()
+            .join(format!("curio.db.pre-v{latest}.bak"))
+            .is_file()
+    );
     let fetches = |id| storage.recent_fetches(FeedId(id), 1_000).unwrap();
     assert_eq!(fetches(1).len(), 50);
     assert_eq!(
@@ -2369,5 +2374,100 @@ fn migration_0010_schedules_existing_feeds_and_trims_their_fetch_log() {
         assert_eq!(feed.failing_since, None);
         assert_eq!(feed.auto_paused_at, None);
         assert!(feed.is_due(Timestamp::now()));
+    }
+}
+
+/// Migration 0011 (#262) moves a feed article whose stored source URL is no
+/// web address (`javascript:`, a custom scheme, a base-less relative link)
+/// to its feed's URL — the link-less shape today's ingest gives it — and
+/// keeps its dedupe key. http(s) sources, in any case, and rows without a
+/// feed are untouched.
+#[test]
+fn migration_0011_moves_non_web_source_urls_to_the_feed_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    let stale = "2026-01-01T00:00:00.000Z";
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../src/storage/migrations/0001_init.sql"),
+            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+            include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+            include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
+            include_str!("../src/storage/migrations/0009_fetch_error_kind.sql"),
+            include_str!("../src/storage/migrations/0010_feed_schedule.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 10).unwrap();
+        conn.execute(
+            "INSERT INTO feeds (id, url, added_at, modified_at) \
+             VALUES (1, 'https://a.example/feed', ?1, ?1)",
+            [stale],
+        )
+        .unwrap();
+        let mut insert = conn
+            .prepare(
+                "INSERT INTO articles (curio_id, feed_id, dedupe_key, title, source_url, \
+                 saved_at, modified_at) VALUES (?1, ?2, ?3, 't', ?4, ?5, ?5)",
+            )
+            .unwrap();
+        let rows: [(Option<i64>, &str, &str); 7] = [
+            (
+                Some(1),
+                "f1:link:javascript:alert(1)",
+                "javascript:alert(1)",
+            ),
+            (Some(1), "f1:guid:custom", "foo://h/dir/three"),
+            (Some(1), "f1:guid:relative", "/posts/relative"),
+            (Some(1), "f1:guid:web", "https://a.example/post"),
+            (Some(1), "f1:guid:shouting", "HTTP://A.EXAMPLE/LOUD"),
+            (Some(1), "f1:guid:plain", "http://a.example/plain"),
+            (None, "f2:link:foo://x", "foo://x"),
+        ];
+        for (n, (feed_id, key, source)) in rows.into_iter().enumerate() {
+            let curio_id = format!("0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b{n:02}");
+            insert
+                .execute((curio_id, feed_id, key, source, stale))
+                .unwrap();
+        }
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(
+        storage.db_schema_version().unwrap(),
+        Storage::schema_version()
+    );
+    drop(storage);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let source = |key: &str| -> (String, String) {
+        conn.query_row(
+            "SELECT source_url, modified_at FROM articles WHERE dedupe_key = ?1",
+            [key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    for key in [
+        "f1:link:javascript:alert(1)",
+        "f1:guid:custom",
+        "f1:guid:relative",
+    ] {
+        let (url, modified) = source(key);
+        assert_eq!(url, "https://a.example/feed", "{key}");
+        assert!(modified.as_str() > stale, "{key}: modified_at bumped");
+        modified.parse::<Timestamp>().unwrap();
+    }
+    for (key, kept) in [
+        ("f1:guid:web", "https://a.example/post"),
+        ("f1:guid:shouting", "HTTP://A.EXAMPLE/LOUD"),
+        ("f1:guid:plain", "http://a.example/plain"),
+        ("f2:link:foo://x", "foo://x"),
+    ] {
+        assert_eq!(source(key), (kept.to_owned(), stale.to_owned()), "{key}");
     }
 }

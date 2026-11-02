@@ -206,11 +206,10 @@ fn upgrades_a_v0_4_0_database() {
     assert_engine_replays("v0.4.0");
 }
 
-/// v0.6.0 (v0.5.0 was never released) shipped schema 10, today's: it opens
-/// in place with no backup, and becomes an upgrade case with the next
-/// migration.
+/// v0.6.0 (v0.5.0 was never released) shipped schema 10; migration 0011
+/// (#262) upgrades it.
 #[test]
-fn opens_a_v0_6_0_database() {
+fn upgrades_a_v0_6_0_database() {
     assert_upgrades("v0.6.0", 10);
     assert_engine_replays("v0.6.0");
 }

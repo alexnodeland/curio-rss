@@ -113,10 +113,41 @@ fn xss_corpus_output_is_inert() {
     assert!(markdown.contains("https://example.com/fine"));
 }
 
+/// The other half of the stored-XSS class (#245): payloads that are
+/// *escaped text* in the HTML, inside `<pre>` and `<code>`, which the
+/// sanitizer keeps on purpose. Code text is written unescaped, so the
+/// exported markdown is inert only if each lands where a renderer reads it
+/// as code — and it must still be there, as code.
+#[test]
+fn escaped_code_corpus_stays_code() {
+    let processed = process(
+        &html_fixture("xss-escaped-code.html"),
+        Some("https://example.com/posts/current"),
+    );
+    inert::audit_html(&processed.html).unwrap();
+    let markdown = to_markdown(&processed.html).unwrap();
+    inert::audit_markdown(&markdown).unwrap();
+    for payload in 1..=18 {
+        let call = format!("alert({payload})");
+        assert!(markdown.contains(&call), "lost {call} in:\n{markdown}");
+    }
+    for kept in [
+        "```\n<img src=x onerror=alert(1)>\n```",
+        "```\n<script>alert(1)</script>\n```",
+        "`<script>alert(2)</script> A`",
+        "```html\n<div onclick=\"alert(16)\"></div>\n```",
+        "> ```\n> <script>alert(10)</script>\n> ```",
+        "**content**",
+    ] {
+        assert!(markdown.contains(kept), "lost {kept:?} in:\n{markdown}");
+    }
+}
+
 /// The `content_pipeline` fuzz target's checks, replayed over every
 /// committed fixture (they are its seed corpus): both pipelines — feed
 /// fragment and full page — store HTML that passes the inertness audit, and
-/// both convert. A fuzz find pinned here as a fixture stays fixed.
+/// both export markdown that passes it too. A fuzz find pinned here as a
+/// fixture stays fixed.
 #[test]
 fn every_fixture_passes_the_content_pipeline_fuzz_checks() {
     const BASE: &str = "https://fuzz.example/posts/current";
@@ -128,11 +159,13 @@ fn every_fixture_passes_the_content_pipeline_fuzz_checks() {
         let fragment = process(&html, Some(BASE));
         inert::audit_html(&fragment.html).unwrap_or_else(|v| panic!("{name}: fragment: {v}"));
         let _ = plain_text(&fragment.html);
-        to_markdown(&fragment.html).unwrap();
+        inert::audit_markdown(&to_markdown(&fragment.html).unwrap())
+            .unwrap_or_else(|v| panic!("{name}: fragment markdown: {v}"));
         if let Ok(page) = process_page(&html, BASE) {
             inert::audit_html(&page.content.html)
                 .unwrap_or_else(|v| panic!("{name}: full page: {v}"));
-            to_markdown(&page.content.html).unwrap();
+            inert::audit_markdown(&to_markdown(&page.content.html).unwrap())
+                .unwrap_or_else(|v| panic!("{name}: full-page markdown: {v}"));
         }
     }
 }

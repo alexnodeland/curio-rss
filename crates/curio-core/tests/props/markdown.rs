@@ -4,12 +4,12 @@
 use curio_core::content::{process, to_markdown};
 use proptest::prelude::*;
 
-use crate::generators::{exportable_html, hostile_html};
+use crate::generators::hostile_html;
 use crate::inert;
 
 proptest! {
     #[test]
-    fn exported_markdown_is_inert(html in exportable_html()) {
+    fn exported_markdown_is_inert(html in hostile_html()) {
         let processed = process(&html, Some("https://example.com/posts/current"));
         inert::audit_html(&processed.html).map_err(TestCaseError::fail)?;
         let markdown = to_markdown(&processed.html)

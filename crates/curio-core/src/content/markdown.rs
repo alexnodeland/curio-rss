@@ -20,12 +20,16 @@
 //! full-page door stripped chrome may still carry it.
 //!
 //! Footnotes become `CommonMark` footnotes (`[^1]` / `[^1]: …`) and other
-//! in-page links keep only their text (see `footnotes`); a `pre`/`code`
-//! `language-*` class becomes the fence's info string.
+//! in-page links keep only their text (see `footnotes`). `pre` and
+//! `code` have their own handlers (see `code`): code text is written
+//! unescaped, so it must land where a renderer reads it as code — a fence
+//! longer than any backtick run, or a single-line inline span — and never
+//! as live raw HTML (#245). A `pre`/`code` `language-*` class becomes the
+//! fence's info string.
 
 use htmd::HtmlToMarkdown;
 
-use super::{ContentError, footnotes};
+use super::{ContentError, code, footnotes};
 
 /// Converts an HTML fragment to `CommonMark`.
 ///
@@ -37,7 +41,7 @@ pub fn to_markdown(html: &str) -> Result<String, ContentError> {
     let builder = HtmlToMarkdown::builder().skip_tags(vec![
         "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg", "canvas",
     ]);
-    let converter = footnotes::register(builder, html).build();
+    let converter = code::register(footnotes::register(builder, html)).build();
     Ok(converter.convert(html)?.trim().to_owned())
 }
 
@@ -146,10 +150,104 @@ mod tests {
         assert!(!md.contains('↩'), "back-reference leaked: {md}");
     }
 
+    /// The three #245 rows: escaped markup inside a `<pre>` or a
+    /// block-spanning `<code>` stays code, never live raw HTML.
+    #[test]
+    fn escaped_markup_in_a_bare_pre_is_fenced() {
+        assert_eq!(
+            to_markdown("<pre>&lt;img src=x onerror=alert(1)&gt;</pre>").unwrap(),
+            "```\n<img src=x onerror=alert(1)>\n```"
+        );
+        assert_eq!(
+            to_markdown("<pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre>").unwrap(),
+            "```\n<script>alert(1)</script>\n```"
+        );
+    }
+
+    #[test]
+    fn a_block_spanning_code_is_one_inline_span() {
+        assert_eq!(
+            to_markdown("<code>&lt;script&gt;alert(1)&lt;/script&gt;<p>A</p></code>").unwrap(),
+            "`<script>alert(1)</script> A`"
+        );
+        assert_eq!(
+            to_markdown("<p><code>a\n\n&lt;b&gt;\r- &lt;i&gt;</code></p>").unwrap(),
+            "`a <b> - <i>`"
+        );
+    }
+
+    #[test]
+    fn the_fence_outgrows_every_backtick_run() {
+        let md = to_markdown("<pre>```\n&lt;script&gt;\n````</pre>").unwrap();
+        assert_eq!(md, "`````\n```\n<script>\n````\n`````");
+        let md = to_markdown("<pre><code>`x`</code></pre>").unwrap();
+        assert_eq!(md, "```\n`x`\n```");
+    }
+
+    #[test]
+    fn a_span_outgrows_every_backtick_run_and_pads_edge_backticks() {
+        assert_eq!(to_markdown("<code>a`b</code>").unwrap(), "``a`b``");
+        assert_eq!(to_markdown("<code>``x</code>").unwrap(), "``` ``x ```");
+        assert_eq!(to_markdown("<code> </code>").unwrap(), "");
+    }
+
+    #[test]
+    fn adjacent_spans_never_merge_their_delimiters() {
+        // Unseparated, `a` + ` ``<x> ` would read as "`a```` ``<x> ```":
+        // the merged run leaves every delimiter unpaired and `<x>` live.
+        let md = to_markdown("<p><code>a</code><span><code>``&lt;x&gt;</code></span></p>").unwrap();
+        assert_eq!(md, "`a` ``` ``<x> ```");
+        let md = to_markdown("<p>x <code>a</code> <code>b</code></p>").unwrap();
+        assert_eq!(md, "x `a` `b`");
+        let md = to_markdown("<p>x<br><code>a</code></p>").unwrap();
+        assert!(md.ends_with("\n`a`"), "{md:?}");
+    }
+
+    #[test]
+    fn a_pre_that_cannot_stand_on_its_own_lines_is_a_span() {
+        for (html, expected) in [
+            ("<em><pre>&lt;x&gt;\ny</pre></em>", "*`<x> y`*"),
+            ("<h2>T <pre>&lt;x&gt;</pre></h2>", "## T `<x>`"),
+            (
+                "<a href=\"https://e.com/\"><pre>&lt;x&gt;</pre></a>",
+                "[`<x>`](https://e.com/)",
+            ),
+        ] {
+            assert_eq!(to_markdown(html).unwrap(), expected, "{html}");
+        }
+    }
+
+    #[test]
+    fn a_pre_in_a_list_or_quote_stays_fenced() {
+        let md = to_markdown("<ul><li><pre>&lt;x&gt;\ny</pre></li></ul>").unwrap();
+        assert_eq!(md, "*   ```\n    <x>\n    y\n    ```");
+        let md = to_markdown("<blockquote><pre>&lt;x&gt;</pre></blockquote>").unwrap();
+        assert_eq!(md, "> ```\n> <x>\n> ```");
+    }
+
+    #[test]
+    fn pre_text_keeps_breaks_and_block_lines() {
+        let md = to_markdown("<pre>a<br>b<p>c</p>d</pre>").unwrap();
+        assert_eq!(md, "```\na\nb\nc\nd\n```");
+        assert_eq!(to_markdown("<pre>\n\n</pre>").unwrap(), "");
+        let md = to_markdown("<pre>a&#13;&lt;x&gt;\r\nb</pre>").unwrap();
+        assert_eq!(md, "```\na\n<x>\nb\n```");
+        // The markdown property's minimal find against htmd's own handler:
+        // block children used to turn the `pre` into raw HTML.
+        let md = to_markdown("<pre><p>&lt;script&gt;alert(1)&lt;/script&gt;</p></pre>").unwrap();
+        assert_eq!(md, "```\n<script>alert(1)</script>\n```");
+    }
+
     #[test]
     fn code_fence_keeps_its_language() {
         let md = to_markdown("<pre><code class=\"language-rust\">let x = 1;</code></pre>").unwrap();
         assert!(md.starts_with("```rust\n"), "{md}");
+        // A bare `<pre>` carries its own language; one that could end the
+        // info string is dropped.
+        let md = to_markdown("<pre class=\"language-c++\">x</pre>").unwrap();
+        assert_eq!(md, "```c++\nx\n```");
+        let md = to_markdown("<pre class=\"language-a`b\">x</pre>").unwrap();
+        assert_eq!(md, "```\nx\n```");
     }
 
     #[test]

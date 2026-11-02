@@ -259,6 +259,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'toast.shareFailed': 'Nie udało się otworzyć menu udostępniania',
     'toast.readAloudFailed': 'Nie udało się przeczytać artykułu na głos',
     'toast.readAloudEmpty': 'Ten artykuł nie zawiera tekstu do przeczytania na głos',
+    'toast.readAloudNoVoice': 'Brak zainstalowanego głosu offline do czytania na głos',
     'toast.promote.unchanged': 'Już aktualne w {name}',
     'toast.markAllRead':
         '{count, plural, one {Oznaczono # jako przeczytany} few {Oznaczono # jako przeczytane} many {Oznaczono # jako przeczytane} other {Oznaczono # jako przeczytane}}',

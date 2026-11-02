@@ -97,6 +97,13 @@ describe('collectSentences', () => {
         expect(texts([body])).toEqual(['Kept.', 'Inline code stays, a note does not.']);
     });
 
+    it('reads only the summary of a closed <details>, all of an open one', () => {
+        const body = dom(
+            '<details><summary>Shut summary.</summary><p>Shut body.</p>Shut text.</details><details open><summary>Open summary.</summary><p>Open body.</p></details>',
+        );
+        expect(texts([body])).toEqual(['Shut summary.', 'Open summary.', 'Open body.']);
+    });
+
     it('gives each sentence the range of its rendered text and its block', () => {
         const body = dom('<p>Hello <em>wor</em>ld. Bye <strong>now</strong>.</p>');
         const sentences = collectSentences([body], 'en');
@@ -130,11 +137,12 @@ describe('pickVoice', () => {
         voice('Daniel', 'en-GB'),
     ];
 
-    it('never picks a network voice', () => {
+    it('never picks a network voice: with no local one there is none to pick', () => {
         expect(pickVoice([voice('Cloud', 'en-US', { local: false })], 'en-US')).toBeNull();
         expect(
             pickVoice([voice('Cloud', 'en-US', { local: false, isDefault: true })], null),
         ).toBeNull();
+        expect(pickVoice([], 'en')).toBeNull();
     });
 
     it('prefers the default voice for the exact language, then any for it', () => {
@@ -147,12 +155,20 @@ describe('pickVoice', () => {
         expect(pickVoice(voices, 'en')?.name).toBe('Samantha');
     });
 
-    it('is null for a language no local voice speaks', () => {
-        expect(pickVoice(voices, 'fr')).toBeNull();
+    it('for a language no local voice speaks, takes the default local voice', () => {
+        expect(pickVoice(voices, 'fr')?.name).toBe('Petra');
+        // Not the network voice that would speak it.
+        expect(
+            pickVoice([voice('Cloud fr', 'fr-FR', { local: false }), voice('Anna', 'de-DE')], 'fr')
+                ?.name,
+        ).toBe('Anna');
     });
 
-    it('with no language, takes the default local voice', () => {
+    it('with no language, takes the default local voice, else the first local one', () => {
         expect(pickVoice(voices, null)?.name).toBe('Petra');
-        expect(pickVoice([voice('Anna', 'de-DE')], null)).toBeNull();
+        expect(
+            pickVoice([voice('Cloud', 'en-US', { local: false }), voice('Anna', 'de-DE')], null)
+                ?.name,
+        ).toBe('Anna');
     });
 });

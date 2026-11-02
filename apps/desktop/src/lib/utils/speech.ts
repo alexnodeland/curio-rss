@@ -22,6 +22,8 @@ const SKIP_SELECTOR = [
     'button',
     '[aria-hidden="true"]',
     '[hidden]',
+    // A closed <details> shows only its summary.
+    'details:not([open]) > :not(summary)',
     '.sr-only',
     '.media-hint',
 ].join(', ');
@@ -166,7 +168,10 @@ function textRuns(root: Element): TextRun[] {
                         ? NodeFilter.FILTER_ACCEPT
                         : NodeFilter.FILTER_SKIP;
                 }
-                return NodeFilter.FILTER_ACCEPT;
+                // Bare text in a closed <details> is not shown either.
+                return node.parentElement?.matches('details:not([open])') === true
+                    ? NodeFilter.FILTER_REJECT
+                    : NodeFilter.FILTER_ACCEPT;
             },
         },
     );
@@ -240,16 +245,19 @@ function voiceLang(voice: SpeechSynthesisVoice): string {
  * and sends no article text anywhere. For a known language: the default
  * voice when it speaks that language, else any voice for the exact tag, else
  * any for the base language (`de-AT` → a `de-DE` voice). With no language,
- * the system's default voice. `null` leaves the choice to the engine — it
- * then speaks with its default voice for the utterance's language.
+ * or none installed for it, the system's default local voice (else the first
+ * local one). `null` only when the OS has no local voice at all — the reader
+ * then does not read, since the engine would pick its own (perhaps a network
+ * one).
  */
 export function pickVoice(
     voices: readonly SpeechSynthesisVoice[],
     lang: string | null,
 ): SpeechSynthesisVoice | null {
     const local = voices.filter((voice) => voice.localService);
+    const fallback = local.find((voice) => voice.default) ?? local[0] ?? null;
     if (lang === null) {
-        return local.find((voice) => voice.default) ?? null;
+        return fallback;
     }
     const want = lang.toLowerCase();
     const base = want.split('-')[0];
@@ -261,6 +269,6 @@ export function pickVoice(
         local.find(exact) ??
         local.find((voice) => voice.default && sameBase(voice)) ??
         local.find(sameBase) ??
-        null
+        fallback
     );
 }

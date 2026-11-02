@@ -241,6 +241,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'toast.shareFailed': '開唔到分享選單',
     'toast.readAloudFailed': '讀唔到呢篇文章',
     'toast.readAloudEmpty': '呢篇文章冇文字可以朗讀',
+    'toast.readAloudNoVoice': '冇安裝離線語音，讀唔到出聲',
     'toast.promote.unchanged': '{name} 入面已經係最新',
     'toast.markAllRead': '{count, plural, other {已標 # 篇為已睇}}',
     'nav.noMoreUnread': '冇更多未讀',

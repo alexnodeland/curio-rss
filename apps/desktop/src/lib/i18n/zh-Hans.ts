@@ -240,6 +240,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'toast.shareFailed': '无法打开共享菜单',
     'toast.readAloudFailed': '无法朗读这篇文章',
     'toast.readAloudEmpty': '这篇文章没有可朗读的文字',
+    'toast.readAloudNoVoice': '未安装可离线朗读的语音',
     'toast.promote.unchanged': '在 {name} 中已是最新',
     'toast.markAllRead': '{count, plural, other {已将 # 条标为已读}}',
     'nav.noMoreUnread': '没有更多未读',

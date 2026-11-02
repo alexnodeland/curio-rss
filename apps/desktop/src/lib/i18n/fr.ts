@@ -256,6 +256,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'toast.shareFailed': 'Impossible d’ouvrir le menu de partage',
     'toast.readAloudFailed': 'Impossible de lire l’article à voix haute',
     'toast.readAloudEmpty': 'Cet article n’a pas de texte à lire à voix haute',
+    'toast.readAloudNoVoice': 'Aucune voix hors ligne n’est installée pour la lecture à voix haute',
     'toast.promote.unchanged': 'Déjà à jour dans {name}',
     'toast.markAllRead':
         '{count, plural, one {# article marqué comme lu} other {# articles marqués comme lus}}',

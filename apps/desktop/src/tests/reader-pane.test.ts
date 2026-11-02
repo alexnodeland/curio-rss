@@ -1093,6 +1093,133 @@ describe('ReaderPane — read aloud and share (#153)', () => {
         }
     });
 
+    it('a scrolled article is read from the first sentence on screen', async () => {
+        const engine = installSpeech();
+        const at = (top: number): DOMRect =>
+            ({
+                top,
+                bottom: top + 20,
+                height: 20,
+                left: 0,
+                right: 0,
+                width: 0,
+                x: 0,
+                y: top,
+            }) as DOMRect;
+        Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+            // The title has scrolled off the top; the body's sentence is in view.
+            value(this: Range) {
+                return at(this.toString() === 'The article' ? -300 : 100);
+            },
+            configurable: true,
+        });
+        try {
+            const { container, getByRole } = await open();
+            const body = container.querySelector('.reader-scroll') as HTMLElement;
+            body.getBoundingClientRect = () =>
+                ({ top: 0, bottom: 600, height: 600 }) as unknown as DOMRect;
+            const scrollTo = vi.fn();
+            body.scrollTo = scrollTo as unknown as typeof body.scrollTo;
+            body.scrollTop = 400;
+            await fireEvent.click(getByRole('button', { name: 'Read aloud' }));
+            expect(engine.texts()).toEqual(['Hello world']);
+            expect(getByRole('toolbar', { name: 'Read aloud' }).textContent).toContain(
+                'Sentence 2 of 2',
+            );
+            // Already on screen: the view stays where the reader left it.
+            expect(scrollTo).not.toHaveBeenCalled();
+        } finally {
+            Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
+        }
+    });
+
+    it('a body that re-renders (Load full article) ends the read', async () => {
+        const engine = installSpeech();
+        const full = articleFixture({
+            id: 100,
+            title: 'The article',
+            content_html: '<p>Full body.</p>',
+        });
+        harness = installIpcHarness({
+            ...baseResponders(),
+            record_opened: null,
+            load_full_article: full,
+        });
+        const unwire = await wireInvalidation();
+        try {
+            selectionStore.selectedArticleId = 100;
+            const { getByRole, queryByRole } = render(ReaderPane);
+            await flushIpc();
+            await fireEvent.click(getByRole('button', { name: 'Read aloud' }));
+
+            // A refetch that brings the same body back leaves the read alone.
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
+            await flushIpc();
+            expect(engine.synth.cancel).not.toHaveBeenCalled();
+            expect(getByRole('toolbar', { name: 'Read aloud' })).toBeTruthy();
+
+            // The full article lands (Rust emits ArticlesChanged): a new body.
+            await fireEvent.click(getByRole('button', { name: 'Load full article' }));
+            harness?.respond('get_article', full);
+            await events.articlesChanged.emit({ feed_id: null, flags: null });
+            await flushIpc();
+            expect(engine.synth.cancel).toHaveBeenCalled();
+            expect(queryByRole('toolbar', { name: 'Read aloud' })).toBeNull();
+            engine.finish();
+            expect(engine.texts()).toEqual(['The article']);
+        } finally {
+            unwire();
+        }
+    });
+
+    it('closing the reader, or the page going away, ends the read', async () => {
+        const engine = installSpeech();
+        const first = await open();
+        await fireEvent.click(first.getByRole('button', { name: 'Read aloud' }));
+        window.dispatchEvent(new Event('pagehide'));
+        await tick();
+        expect(engine.synth.cancel).toHaveBeenCalledTimes(1);
+        expect(first.queryByRole('toolbar', { name: 'Read aloud' })).toBeNull();
+
+        await fireEvent.click(first.getByRole('button', { name: 'Read aloud' }));
+        first.unmount();
+        expect(engine.synth.cancel).toHaveBeenCalledTimes(2);
+        engine.finish();
+        expect(engine.texts()).toEqual(['The article', 'The article']);
+    });
+
+    it('listening counts as reading: the idle cap does not cut a long listen short', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'performance'] });
+        vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+        try {
+            const engine = installSpeech();
+            const { getByRole } = await open({
+                get_article: articleFixture({
+                    id: 100,
+                    title: 'The article',
+                    content_html: '<p>One. Two. Three. Four.</p>',
+                }),
+            });
+            await fireEvent.click(getByRole('button', { name: 'Read aloud' }));
+            // No input at all for three minutes, past the idle cap, while each
+            // sentence takes a minute to say.
+            for (let minute = 0; minute < 3; minute += 1) {
+                vi.advanceTimersByTime(60_000);
+                engine.finish();
+            }
+            expect(3 * 60_000).toBeGreaterThan(IDLE_CAP_MS);
+            vi.advanceTimersByTime(1_000);
+            selectionStore.selectedArticleId = null;
+            await flushIpc();
+            expect(harness?.callsFor('record_opened')).toEqual([
+                { articleId: 100, dwellMs: 3 * 60_000 + 1_000 },
+            ]);
+        } finally {
+            vi.useRealTimers();
+            vi.restoreAllMocks();
+        }
+    });
+
     it('offers no share where the webview has no share sheet', async () => {
         const { queryByRole } = await open();
         expect(queryByRole('button', { name: 'Share…' })).toBeNull();

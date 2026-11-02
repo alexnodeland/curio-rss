@@ -254,6 +254,7 @@ export const it: Partial<Record<MessageKey, string>> = {
     'toast.shareFailed': 'Impossibile aprire il menu di condivisione',
     'toast.readAloudFailed': 'Impossibile leggere l’articolo ad alta voce',
     'toast.readAloudEmpty': 'Questo articolo non ha testo da leggere ad alta voce',
+    'toast.readAloudNoVoice': 'Nessuna voce offline installata per la lettura ad alta voce',
     'toast.promote.unchanged': 'Già aggiornato in {name}',
     'toast.markAllRead': '{count, plural, one {# segnato come letto} other {# segnati come letti}}',
     'nav.noMoreUnread': 'Nessun non letto rimasto',

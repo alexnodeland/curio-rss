@@ -257,6 +257,7 @@ export const en = {
     'toast.shareFailed': 'Couldn’t open the share sheet',
     'toast.readAloudFailed': 'Couldn’t read the article aloud',
     'toast.readAloudEmpty': 'This article has no text to read aloud',
+    'toast.readAloudNoVoice': 'No offline voice is installed to read aloud',
     'toast.promote.unchanged': 'Already up to date in {name}',
     'toast.markAllRead': '{count, plural, one {Marked # read} other {Marked # read}}',
     'nav.noMoreUnread': 'No more unread',

@@ -257,6 +257,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'toast.shareFailed': 'Teilen-Menü konnte nicht geöffnet werden',
     'toast.readAloudFailed': 'Artikel konnte nicht vorgelesen werden',
     'toast.readAloudEmpty': 'Dieser Artikel enthält keinen Text zum Vorlesen',
+    'toast.readAloudNoVoice': 'Keine Offline-Stimme zum Vorlesen installiert',
     'toast.promote.unchanged': 'In {name} bereits aktuell',
     'toast.markAllRead':
         '{count, plural, one {# als gelesen markiert} other {# als gelesen markiert}}',

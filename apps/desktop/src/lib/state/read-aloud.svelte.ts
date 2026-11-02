@@ -1,7 +1,11 @@
 /**
  * Read aloud (#153): the reader speaks the article on screen through the Web
  * Speech API, with a voice the OS synthesizes locally (`pickVoice`), so it
- * works offline and no article text leaves the machine.
+ * works offline and no article text leaves the machine. The store always
+ * names that voice: where the OS has no local voice at all it says so and
+ * does not read, rather than letting the engine fall back on a network one.
+ * Chromium-family engines list no voices until `voiceschanged`, so a read's
+ * first sentence waits (briefly) for the list.
  *
  * The article is spoken one sentence per utterance. That gives the sentence
  * highlight a dependable clock (each utterance's start, rather than word
@@ -18,7 +22,13 @@
  *
  * A cancelled utterance still reports `end` or `error` — late, and after its
  * successor may have started — so every callback checks it belongs to the
- * current generation and does nothing otherwise.
+ * current generation and does nothing otherwise. A cancel error on the
+ * current generation is not the reader's doing (the OS cut the audio off):
+ * the read pauses on that sentence, so Resume picks it up.
+ *
+ * A read belongs to the rendered article: a sentence whose text has left the
+ * page (the body re-rendered) ends the read rather than speaking text that is
+ * no longer shown.
  */
 import { t } from '$lib/i18n';
 import { type SpokenSentence, pickVoice } from '$lib/utils/speech';
@@ -40,8 +50,11 @@ export const SPEECH_HIGHLIGHT = 'curio-read-aloud';
 /** The fallback highlight's attribute, on the spoken sentence's block. */
 export const SPEAKING_ATTR = 'data-speaking';
 
-/** The engine errors a cancel produces — the reader's own doing, not a failure. */
+/** The engine errors a cancel produces — an interruption, not a failure. */
 const CANCEL_ERRORS: ReadonlySet<string> = new Set(['interrupted', 'canceled']);
+
+/** How long a read waits for an engine that lists no voices yet (`voiceschanged`). */
+export const VOICES_WAIT_MS = 1_500;
 
 /** The page's speech engine, or `null` where the webview has none. */
 function engine(): SpeechSynthesis | null {
@@ -67,6 +80,8 @@ function parseRate(raw: string | undefined): number {
 export interface ReadAloudOptions {
     /** The article's language (a canonical tag), if it declares one. */
     readonly lang: string | null;
+    /** The sentence to start at (default: the first) — where the reader is. */
+    readonly from?: number;
     /** Called as each sentence starts (the reader follows it on screen). */
     readonly onSentence?: (sentence: SpokenSentence) => void;
 }
@@ -86,6 +101,8 @@ export class ReadAloudStore {
     #sentences: readonly SpokenSentence[] = [];
     #options: ReadAloudOptions = { lang: null };
     #generation = 0;
+    /** The local voice this read speaks in; `undefined` until it is chosen. */
+    #voice: SpeechSynthesisVoice | undefined = undefined;
     /**
      * Utterances the engine has not finished with — held so their callbacks
      * fire (an engine may let an unreferenced utterance be collected first).
@@ -110,9 +127,10 @@ export class ReadAloudStore {
     }
 
     /**
-     * Reads `sentences` from the first, replacing any read in progress.
-     * Returns whether it started (it does not without an engine, or with
-     * nothing to say — the latter is toasted).
+     * Reads `sentences` from `options.from` (default: the first), replacing
+     * any read in progress. Returns whether it started (it does not without
+     * an engine, or with nothing to say — the latter is toasted; a machine
+     * with no local voice is found out, and toasted, as the read begins).
      */
     start(
         articleId: number,
@@ -132,8 +150,9 @@ export class ReadAloudStore {
         this.#options = options;
         this.articleId = articleId;
         this.total = sentences.length;
+        this.index = Math.min(Math.max(0, Math.trunc(options.from ?? 0)), sentences.length - 1);
         this.status = 'playing';
-        this.#speak(synth, 0);
+        this.#play(synth, this.index);
         return true;
     }
 
@@ -154,7 +173,7 @@ export class ReadAloudStore {
             return;
         }
         this.status = 'playing';
-        this.#speak(synth, this.index);
+        this.#play(synth, this.index);
     }
 
     /** Play/pause. */
@@ -177,6 +196,7 @@ export class ReadAloudStore {
         this.#inFlight = [];
         this.#sentences = [];
         this.#options = { lang: null };
+        this.#voice = undefined;
         this.status = 'idle';
         this.articleId = null;
         this.index = 0;
@@ -197,7 +217,7 @@ export class ReadAloudStore {
         if (this.status === 'playing' && synth !== null) {
             this.#generation += 1;
             synth.cancel();
-            this.#speak(synth, this.index);
+            this.#play(synth, this.index);
         }
     }
 
@@ -207,9 +227,54 @@ export class ReadAloudStore {
         this.#rate = null;
     }
 
-    #speak(synth: SpeechSynthesis, index: number): void {
+    /**
+     * Speaks sentence `index` once the read's voice is known: at once when
+     * it is, else after the engine lists its voices (or {@link VOICES_WAIT_MS}
+     * passes). With no local voice to choose, the read ends and says why.
+     */
+    #play(synth: SpeechSynthesis, index: number): void {
+        if (this.#voice !== undefined) {
+            this.#speak(synth, this.#voice, index);
+            return;
+        }
+        this.#generation += 1;
+        const generation = this.#generation;
+        const choose = (): void => {
+            if (generation !== this.#generation) {
+                return;
+            }
+            const voice = pickVoice(synth.getVoices(), this.#options.lang);
+            if (voice === null) {
+                this.stop();
+                toastStore.showToast(t('toast.readAloudNoVoice'), 'error');
+                return;
+            }
+            this.#voice = voice;
+            this.#speak(synth, voice, index);
+        };
+        if (synth.getVoices().length > 0) {
+            choose();
+            return;
+        }
+        const listed = (): void => {
+            clearTimeout(timer);
+            synth.removeEventListener('voiceschanged', listed);
+            choose();
+        };
+        const timer = setTimeout(listed, VOICES_WAIT_MS);
+        synth.addEventListener('voiceschanged', listed);
+    }
+
+    #speak(synth: SpeechSynthesis, voice: SpeechSynthesisVoice, index: number): void {
         const sentence = this.#sentences[index];
-        if (sentence === undefined) {
+        // Past the last sentence, or the body re-rendered under the read: its
+        // text is gone from the page (a live range collapses when its nodes
+        // are removed), so there is nothing left to read or highlight.
+        if (
+            sentence === undefined ||
+            sentence.range.collapsed ||
+            !sentence.range.startContainer.isConnected
+        ) {
             this.stop();
             return;
         }
@@ -221,19 +286,23 @@ export class ReadAloudStore {
         if (lang !== null) {
             utterance.lang = lang;
         }
-        const voice = pickVoice(synth.getVoices(), lang);
-        if (voice !== null) {
-            utterance.voice = voice;
-        }
+        utterance.voice = voice;
         utterance.onend = () => {
             this.#release(utterance);
             if (generation === this.#generation) {
-                this.#speak(synth, index + 1);
+                this.#speak(synth, voice, index + 1);
             }
         };
         utterance.onerror = (event) => {
             this.#release(utterance);
-            if (generation !== this.#generation || CANCEL_ERRORS.has(event.error)) {
+            if (generation !== this.#generation) {
+                return;
+            }
+            if (CANCEL_ERRORS.has(event.error)) {
+                // Every cancel the reader makes moves the generation on first,
+                // so this one came from outside (the OS took the audio, or the
+                // engine dropped the sentence): hold the place, show Resume.
+                this.pause();
                 return;
             }
             this.stop();

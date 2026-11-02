@@ -4,7 +4,9 @@
  * utterance; a test then plays the engine's part — `finish(i)` fires the
  * utterance's `end`, `fail(i, error)` its `error` — and `cancel` records the
  * call without firing anything (a test fires the late `end` a real engine
- * may send after a cancel itself, to prove it is ignored).
+ * may send after a cancel itself, to prove it is ignored). `listVoices`
+ * plays a Chromium-family engine that lists its voices late: it swaps the
+ * list and fires `voiceschanged`.
  *
  * `installHighlights()` adds the CSS Custom Highlight registry jsdom also
  * lacks.
@@ -29,6 +31,8 @@ export interface SpeechFake {
         speak: ReturnType<typeof vi.fn>;
         cancel: ReturnType<typeof vi.fn>;
         getVoices: () => SpeechSynthesisVoice[];
+        addEventListener: (type: string, listener: () => void) => void;
+        removeEventListener: (type: string, listener: () => void) => void;
     };
     /** Every utterance handed to `speak`, in order. */
     readonly spoken: FakeUtterance[];
@@ -38,6 +42,10 @@ export interface SpeechFake {
     finish(index?: number): void;
     /** Fires the `error` of utterance `index` (default: the latest). */
     fail(error: string, index?: number): void;
+    /** Replaces the voice list and fires `voiceschanged`. */
+    listVoices(voices: SpeechSynthesisVoice[]): void;
+    /** How many `voiceschanged` listeners are attached. */
+    listeners(): number;
 }
 
 /** A voice as the engine lists it. */
@@ -49,15 +57,30 @@ export function voice(
     return { name, lang, localService: local, default: isDefault, voiceURI: name };
 }
 
+/** A local default voice, the one a read gets when a test names none. */
+export const SYSTEM_VOICE = voice('System', 'en-US', { isDefault: true });
+
 /** Installs the engine (undo with `vi.unstubAllGlobals()`). */
-export function installSpeech(voices: SpeechSynthesisVoice[] = []): SpeechFake {
+export function installSpeech(initial: SpeechSynthesisVoice[] = [SYSTEM_VOICE]): SpeechFake {
     const spoken: FakeUtterance[] = [];
+    let voices = initial;
+    const listeners = new Set<() => void>();
     const synth = {
         speak: vi.fn((utterance: FakeUtterance) => {
             spoken.push(utterance);
         }),
         cancel: vi.fn(),
         getVoices: () => voices,
+        addEventListener: (type: string, listener: () => void) => {
+            if (type === 'voiceschanged') {
+                listeners.add(listener);
+            }
+        },
+        removeEventListener: (type: string, listener: () => void) => {
+            if (type === 'voiceschanged') {
+                listeners.delete(listener);
+            }
+        },
     };
     vi.stubGlobal('speechSynthesis', synth);
     vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance);
@@ -74,6 +97,13 @@ export function installSpeech(voices: SpeechSynthesisVoice[] = []): SpeechFake {
         texts: () => spoken.map((utterance) => utterance.text),
         finish: (index) => at(index).onend?.(),
         fail: (error, index) => at(index).onerror?.({ error }),
+        listVoices: (next) => {
+            voices = next;
+            for (const listener of [...listeners]) {
+                listener();
+            }
+        },
+        listeners: () => listeners.size,
     };
 }
 

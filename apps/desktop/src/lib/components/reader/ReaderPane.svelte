@@ -498,7 +498,9 @@ const bodyHtml = $derived(articleQuery?.data?.content_html ?? null);
 
 // A read belongs to one rendered body: it ends as the selection moves on, or
 // as the body re-renders (a full-article load), which leaves its sentence
-// ranges pointing at nodes that are gone.
+// ranges pointing at nodes that are gone. (A re-render this does not see — a
+// locale switch re-wrapping the tables — the store catches as the next
+// sentence comes up: its text is no longer on the page.)
 $effect(() => {
     const articleId = selectedId;
     void bodyHtml;
@@ -513,7 +515,7 @@ onDestroy(() => readAloudStore.stop());
 
 /**
  * Starts reading the article on screen aloud — its title, then the sanitized
- * body as rendered — or stops the read in progress.
+ * body as rendered, from where the reader is — or stops the read in progress.
  */
 function toggleReadAloud(): void {
     if (readingAloud) {
@@ -528,10 +530,31 @@ function toggleReadAloud(): void {
     }
     const roots = [...body.querySelectorAll('.reader-title, .reader-body .sanitized-content')];
     const lang = speechLang(current.lang);
-    readAloudStore.start(articleId, collectSentences(roots, lang), {
+    const sentences = collectSentences(roots, lang);
+    readAloudStore.start(articleId, sentences, {
         lang,
+        from: firstInView(body, sentences),
         onSentence: followSentence,
     });
+}
+
+/**
+ * Where a read starts: the first sentence still on screen once the article
+ * is scrolled (a resumed one, say), so the read neither starts over at the
+ * title nor pulls the view — and with it the saved resume position — back to
+ * the top. The title when the article is at its top.
+ */
+function firstInView(body: HTMLElement, sentences: readonly SpokenSentence[]): number {
+    if (body.scrollTop <= 0) {
+        return 0;
+    }
+    const top = body.getBoundingClientRect().top;
+    const index = sentences.findIndex(
+        (sentence) =>
+            typeof sentence.range.getBoundingClientRect === 'function' &&
+            sentence.range.getBoundingClientRect().bottom > top,
+    );
+    return Math.max(0, index);
 }
 
 /**

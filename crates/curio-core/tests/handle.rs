@@ -2256,6 +2256,69 @@ async fn a_link_less_item_is_never_hydrated_against_the_feed_url() {
     server.verify().await;
 }
 
+/// #262: a `javascript:` / custom-scheme entry link never becomes the
+/// stored source URL — the entry is stored the link-less way, under the feed
+/// URL, and never hydrated — and the channel's `javascript:` link is no site
+/// URL. A row an earlier build stored under such a link keeps its key, so
+/// the refresh rewrites it in place (read state kept) instead of
+/// duplicating it.
+#[tokio::test]
+async fn a_non_web_entry_link_is_stored_link_less_and_keeps_its_row() {
+    let server = MockServer::start().await;
+    let feed_xml = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Hostile</title><link>javascript:alert(1)</link>
+        <item><title>Script</title><link>javascript:alert(1)</link>
+          <description>&lt;a href="rel/ok"&gt;rel&lt;/a&gt;</description></item>
+        <item><guid>g2</guid><title>Custom</title><link>foo://h/two</link>
+          <description>The custom one.</description></item>
+        </channel></rss>"#;
+    // expect(1): full-text mode must not hydrate either entry.
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed_url = format!("{}/feed.xml", server.uri());
+    let feed = subscribe(&core, &feed_url);
+    core.set_feed_full_text(feed.id, true).unwrap();
+    // What an earlier build stored for the first item: keyed by its link,
+    // with that link as its source.
+    let mut stale = manual_article("link:javascript:alert(1)", "Script");
+    stale.feed_id = Some(feed.id);
+    stale.source_url = "javascript:alert(1)".to_owned();
+    core.storage().upsert_articles(vec![stale]).unwrap();
+    let before = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    core.mark_read(before.id, true).unwrap();
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((outcome.new_articles, outcome.updated_articles), (1, 1));
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    assert_eq!(articles.len(), 2);
+    for article in &articles {
+        assert_eq!(article.source_url, feed_url, "{}", article.title);
+    }
+    let script = articles.iter().find(|a| a.title == "Script").unwrap();
+    assert_eq!(script.id, before.id, "the stored row is the one rewritten");
+    assert!(core.article_state(script.id).unwrap().read);
+    assert!(
+        script
+            .content
+            .html
+            .contains(&format!("{}/rel/ok", server.uri())),
+        "relative content resolves against the feed URL: {}",
+        script.content.html
+    );
+    assert_eq!(core.get_feed(feed.id).unwrap().unwrap().site_url, None);
+    server.verify().await;
+}
+
 /// #130: a stored article whose fetch lands on its feed's URL (e.g. a
 /// link-less entry stored under the feed's pre-redirect URL) keeps its
 /// body — the feed XML is never extracted as the article.

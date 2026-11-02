@@ -27,6 +27,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use curio_core::content::{first_image, process, to_markdown};
 use curio_core::feeds::{ParsedFeed, parse_feed};
+use curio_core::fetch::screen_url;
 
 /// The fetch URL every corpus input is parsed against.
 const BASE: &str = "https://corpus.example.com/feed.xml";
@@ -108,14 +109,24 @@ fn ingest(bytes: &[u8]) -> Result<Outcome, String> {
     Ok(Outcome::Parsed(feed.entries.len()))
 }
 
-/// Audits what one parsed feed would store. `entry.link` and
-/// `feed.meta.site_url` carry no policy yet. Both are stored unscreened
-/// (`javascript:` and custom schemes included; see `xss-feed.xml` and
-/// `custom-scheme-links.xml`), and #262 tracks screening them and asserting
-/// the result here. What this audit does cover is the dangerous half of the
-/// entry link: its use as the content base.
+/// Whether `url` is `None` or an absolute http(s) URL with a host and no
+/// userinfo: the only links ingest may store (#262).
+fn web_or_none(url: Option<&str>) -> bool {
+    url.is_none_or(|url| screen_url(url).is_ok())
+}
+
+/// Audits what one parsed feed would store: the entry and channel links
+/// (stored as `source_url` / `site_url`, rendered as the reader's source
+/// link) are web addresses or absent, and every entry's content is inert
+/// against the base it is stored with.
 fn audit_feed(feed: &ParsedFeed) -> Result<(), String> {
+    if !web_or_none(feed.meta.site_url.as_deref()) {
+        return Err(format!("non-http(s) site url {:?}", feed.meta.site_url));
+    }
     for entry in &feed.entries {
+        if !web_or_none(entry.link.as_deref()) {
+            return Err(format!("non-http(s) entry link {:?}", entry.link));
+        }
         if entry.dedupe_key.is_empty() {
             return Err(format!("entry {:?} has an empty dedupe key", entry.title));
         }
@@ -223,9 +234,9 @@ const HOSTILE_TOKENS: &[&[u8]] = &[
     b"</channel>",
     b"<guid></guid>",
     b"<link>javascript:alert(1)</link>",
-    // Parseable non-http(s) links: the entry link is the content base, so
-    // these reach the base-resolution path (cannot-be-a-base links like
-    // `javascript:` never do).
+    // Parseable non-http(s) links: the link screen must drop them before
+    // they become a stored source or the content base (`audit_feed` checks
+    // both).
     b"<link>foo://x/</link>",
     b"<link>httpsupdated://xss.example.com/one</link>",
     b"<link href=\"foo://x/dir/\"/>",
@@ -265,7 +276,8 @@ const TEXT_TOKENS: &[&str] = &[
     "🎌👍🏽 日本語",
     "javascript:alert(1)",
     // Spliced at the start of a `<link>`, these turn it into a parseable
-    // custom-scheme base; the relative URLs give that base work to do.
+    // custom-scheme link for the screen to drop; the relative URLs would
+    // give it work to do as a base.
     "foo://x/",
     "httpsupdated:",
     "&lt;img src=\"rel.png\"&gt;&lt;a href=\"rel/ok\"&gt;r&lt;/a&gt;&lt;a href=\"//cdn.example/p\"&gt;p&lt;/a&gt;",
@@ -883,6 +895,13 @@ fn html_served_as_a_feed_is_rejected_not_parsed() {
 #[test]
 fn the_xss_feed_stores_inert_content_and_keeps_the_story() {
     let feed = parse("nasty/xss-feed.xml");
+    // The channel's `javascript:` link is no site URL (#262); the entry's
+    // own http(s) link is kept.
+    assert_eq!(feed.meta.site_url, None);
+    assert_eq!(
+        feed.entries[0].link.as_deref(),
+        Some("https://xss.example.com/one")
+    );
     for entry in &feed.entries {
         let processed = process(&entry.content_html, entry.link.as_deref().or(Some(BASE)));
         inert::audit_html(&processed.html).unwrap();
@@ -902,13 +921,60 @@ fn the_xss_feed_stores_inert_content_and_keeps_the_story() {
 }
 
 /// The first `feed_parse` fuzz find, pinned: an entry link with a
-/// parseable custom scheme is the content base, and nothing relative may
-/// resolve onto it.
+/// parseable custom scheme. Ingest drops it (#262), so it is neither the
+/// stored source nor the content base, and the channel's `foo:` link is no
+/// site URL. The keys still name the declared links' items.
 #[test]
-fn a_custom_scheme_entry_link_plants_no_link_in_stored_content() {
+fn a_custom_scheme_entry_link_is_screened_out() {
     let feed = parse("nasty/custom-scheme-links.xml");
-    for entry in &feed.entries {
-        let base = entry.link.as_deref().unwrap_or(BASE);
+    assert_eq!(feed.meta.site_url, None);
+    let parsed: Vec<(&str, Option<&str>)> = feed
+        .entries
+        .iter()
+        .map(|entry| (entry.dedupe_key.as_str(), entry.link.as_deref()))
+        .collect();
+    assert_eq!(
+        parsed,
+        [
+            ("guid:scheme-1", None),
+            ("guid:scheme-2", None),
+            ("guid:scheme-3", None),
+        ]
+    );
+    // Stored the link-less way, the relative URLs resolve onto the feed URL.
+    let first = process(&feed.entries[0].content_html, Some(BASE));
+    inert::audit_html(&first.html).unwrap();
+    assert!(
+        first.html.contains("<strong>content</strong>"),
+        "{}",
+        first.html
+    );
+    assert!(
+        first
+            .html
+            .contains("href=\"https://corpus.example.com/relative/ok\""),
+        "{}",
+        first.html
+    );
+    assert!(
+        first.html.contains("href=\"https://ok.example/absolute\""),
+        "absolute http(s) links are unaffected:\n{}",
+        first.html
+    );
+}
+
+/// Defence in depth behind that screen: given the declared custom-scheme
+/// links as bases anyway, the sanitizer resolves nothing relative onto them.
+#[test]
+fn a_custom_scheme_base_plants_no_link_in_stored_content() {
+    let feed = parse("nasty/custom-scheme-links.xml");
+    let declared = [
+        "httpsupdated://xss.example.com/one",
+        "ftp://files.example/pub/two",
+        "foo://h/dir/three",
+    ];
+    assert_eq!(feed.entries.len(), declared.len());
+    for (entry, base) in feed.entries.iter().zip(declared) {
         let processed = process(&entry.content_html, Some(base));
         inert::audit_html(&processed.html).unwrap();
         let scheme = base.split(':').next().unwrap();
@@ -925,15 +991,7 @@ fn a_custom_scheme_entry_link_plants_no_link_in_stored_content() {
             processed.html
         );
     }
-    let first = process(
-        &feed.entries[0].content_html,
-        feed.entries[0].link.as_deref(),
-    );
-    assert!(
-        first.html.contains("<strong>content</strong>"),
-        "{}",
-        first.html
-    );
+    let first = process(&feed.entries[0].content_html, Some(declared[0]));
     assert!(
         first.html.contains("href=\"https://ok.example/absolute\""),
         "absolute http(s) links are unaffected:\n{}",

@@ -2351,8 +2351,13 @@ fn migration_0010_schedules_existing_feeds_and_trims_their_fetch_log() {
     }
 
     let storage = Storage::open(&path).unwrap();
-    assert_eq!(storage.db_schema_version().unwrap(), 10);
-    assert!(dir.path().join("curio.db.pre-v10.bak").is_file());
+    let latest = Storage::schema_version();
+    assert_eq!(storage.db_schema_version().unwrap(), latest);
+    assert!(
+        dir.path()
+            .join(format!("curio.db.pre-v{latest}.bak"))
+            .is_file()
+    );
     let fetches = |id| storage.recent_fetches(FeedId(id), 1_000).unwrap();
     assert_eq!(fetches(1).len(), 50);
     assert_eq!(
@@ -2370,4 +2375,135 @@ fn migration_0010_schedules_existing_feeds_and_trims_their_fetch_log() {
         assert_eq!(feed.auto_paused_at, None);
         assert!(feed.is_due(Timestamp::now()));
     }
+}
+
+/// The feed-article sources migration 0011's test seeds: every kind the
+/// ingest screen drops (13 of them), then sources it passes that a naive
+/// text match could get wrong.
+const MIGRATION_0011_SOURCES: [&str; 23] = [
+    "javascript:alert(1)",
+    "foo://h/dir/three",
+    "/posts/relative",
+    "ftp://files.example/pub/two",
+    "https://user:pw@a.example/secret",
+    "http://user@a.example/",
+    "HTTPS://USER@A.EXAMPLE/LOUD",
+    "https:///user@a.example/slashed",
+    "http://",
+    "https:///",
+    "https://?q=1",
+    "http://#frag",
+    "http://:80/port-only",
+    "https://a.example/post",
+    "HTTP://A.EXAMPLE/LOUD",
+    "http://a.example/plain",
+    "https://a.example:8443/port",
+    "https://a.example/path/user@x",
+    "https://a.example/?q=user@x",
+    "https://a.example#user@x",
+    "https://a.example\\path@x",
+    "http:///a.example/extra-slash",
+    "https://[::1]:8080/v6",
+];
+
+/// Builds a schema-v10 database at `path` holding feed 1
+/// (`https://a.example/feed`) and one article per `(feed_id, key, source)`
+/// row, every timestamp `stale`.
+fn seed_v10_articles(path: &std::path::Path, stale: &str, rows: &[(Option<i64>, &str, &str)]) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    for sql in [
+        include_str!("../src/storage/migrations/0001_init.sql"),
+        include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+        include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+        include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+        include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+        include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+        include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+        include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
+        include_str!("../src/storage/migrations/0009_fetch_error_kind.sql"),
+        include_str!("../src/storage/migrations/0010_feed_schedule.sql"),
+    ] {
+        conn.execute_batch(sql).unwrap();
+    }
+    conn.pragma_update(None, "user_version", 10).unwrap();
+    conn.execute(
+        "INSERT INTO feeds (id, url, added_at, modified_at) \
+         VALUES (1, 'https://a.example/feed', ?1, ?1)",
+        [stale],
+    )
+    .unwrap();
+    let mut insert = conn
+        .prepare(
+            "INSERT INTO articles (curio_id, feed_id, dedupe_key, title, source_url, \
+             saved_at, modified_at) VALUES (?1, ?2, ?3, 't', ?4, ?5, ?5)",
+        )
+        .unwrap();
+    for (n, (feed_id, key, source)) in rows.iter().enumerate() {
+        let curio_id = format!("0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b{n:02}");
+        insert
+            .execute((curio_id, feed_id, key, source, stale))
+            .unwrap();
+    }
+}
+
+/// Migration 0011 (#262) moves a feed article whose stored source URL the
+/// ingest screen ([`curio_core::fetch::screen_url`]) now drops —
+/// `javascript:`, a custom scheme, a base-less relative link, userinfo, an
+/// empty host — to its feed's URL: the link-less shape today's ingest gives
+/// it. It keeps the dedupe key. Every source the screen passes, in any case,
+/// and rows without a feed are untouched. Each row's fate is checked against
+/// the screen itself, so the SQL and the ingest screen cannot drift apart.
+#[test]
+fn migration_0011_moves_non_web_source_urls_to_the_feed_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    let stale = "2026-01-01T00:00:00.000Z";
+    let keys: Vec<String> = (0..MIGRATION_0011_SOURCES.len())
+        .map(|n| format!("f1:guid:{n}"))
+        .collect();
+    let mut rows: Vec<(Option<i64>, &str, &str)> = keys
+        .iter()
+        .zip(MIGRATION_0011_SOURCES)
+        .map(|(key, source)| (Some(1), key.as_str(), source))
+        .collect();
+    rows.push((None, "f2:link:foo://x", "foo://x"));
+    seed_v10_articles(&path, stale, &rows);
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(
+        storage.db_schema_version().unwrap(),
+        Storage::schema_version()
+    );
+    drop(storage);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let source = |key: &str| -> (String, String) {
+        conn.query_row(
+            "SELECT source_url, modified_at FROM articles WHERE dedupe_key = ?1",
+            [key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    let mut moved = 0;
+    for (key, declared) in keys.iter().zip(MIGRATION_0011_SOURCES) {
+        let (url, modified) = source(key);
+        if curio_core::fetch::screen_url(declared).is_ok() {
+            assert_eq!(
+                (url.as_str(), modified.as_str()),
+                (declared, stale),
+                "{declared}: the screen passes it, so it stays"
+            );
+        } else {
+            moved += 1;
+            assert_eq!(url, "https://a.example/feed", "{declared}: moved");
+            assert!(modified.as_str() > stale, "{declared}: modified_at bumped");
+            modified.parse::<Timestamp>().unwrap();
+        }
+    }
+    assert_eq!(moved, 13, "every dropped kind is represented");
+    assert_eq!(
+        source("f2:link:foo://x"),
+        ("foo://x".to_owned(), stale.to_owned()),
+        "a feed-less row is untouched"
+    );
 }

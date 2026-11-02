@@ -24,6 +24,7 @@ pub mod discover;
 mod entities;
 mod image;
 mod keys;
+mod link;
 mod opml;
 mod parse;
 

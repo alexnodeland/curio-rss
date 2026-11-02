@@ -72,7 +72,8 @@ pub fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
 /// Whether `c` is a CJK letter the index segments: Han ideographs, kana,
 /// Hangul and Bopomofo — the scripts written without spaces between
 /// words. Only letters and numbers: CJK punctuation (`。`, `・`, `「`) is
-/// a separator to `unicode61` already.
+/// a separator to `unicode61` already. Thai, Lao, Khmer and Myanmar, also
+/// written without spaces, are not segmented yet (#347).
 pub(crate) fn is_cjk(c: char) -> bool {
     matches!(
         c,

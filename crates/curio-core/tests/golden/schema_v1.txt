@@ -106,7 +106,8 @@ CREATE VIRTUAL TABLE articles_fts USING fts5(
     title,
     content_text,
     content='articles_fts_source',
-    content_rowid='id'
+    content_rowid='id',
+    prefix='1'
 )
 
 -- table articles_fts_config

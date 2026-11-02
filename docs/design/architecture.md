@@ -247,8 +247,11 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   index stores each run as its overlapping bigrams plus its last character, written by a
   Rust SQL function (`curio_fts_segment`) that the FTS triggers and the index's content
   view call; the query compiler segments the same way, so any substring of a run matches
-  as a bigram phrase. Every connection Curio opens registers the function; a tool that
-  writes `articles` through its own connection calls `storage::register_functions` first.
+  as a bigram phrase; a single character is a prefix query, served by a one-character
+  prefix index (`prefix='1'`). Every connection Curio opens registers the function; a
+  tool that writes `articles` through its own connection calls the doc-hidden
+  `storage::register_functions` first. Thai, Lao, Khmer and Myanmar are not segmented
+  yet (#347).
 - The list read paths never carry the article bodies (#136). A list or search page reads
   **list rows** (`ListedArticle`: the summary columns, a preview built from a bounded
   `substr` of the text, the state flags and the tags) — one read renders a page, never

@@ -1,7 +1,7 @@
 //! The search syntax's compiler: user input into an escaped FTS5
 //! expression (the SQL around it is compiled in `listing`).
 
-use crate::storage::fts::segment_query;
+use crate::storage::fts::{is_cjk, segment_query};
 
 /// One searchable unit of a parsed query: a bare word or a quoted phrase.
 #[derive(Debug, PartialEq, Eq)]
@@ -47,12 +47,19 @@ const IMPLICIT_PREFIX_MIN_CHARS: usize = 2;
 /// The length, in characters, of the token a trailing `*` on `text` would
 /// widen: its last run of letters and digits. FTS5's tokenizer splits on
 /// everything else, so the prefix lands on that token alone — `c++` and
-/// `C#` index as the one-letter token `c`, `write ahe` ends in `ahe`.
+/// `C#` index as the one-letter token `c`, `write ahe` ends in `ahe`. A
+/// switch between CJK and other letters ends a token too: the segmenter
+/// splits a CJK run from a word glued to it, so `東京a` ends in `a`.
 fn last_token_chars(text: &str) -> usize {
-    text.chars()
+    let mut tail = text
+        .chars()
         .rev()
         .skip_while(|c| !c.is_alphanumeric())
-        .take_while(|c| c.is_alphanumeric())
+        .peekable();
+    let Some(cjk) = tail.peek().map(|&c| is_cjk(c)) else {
+        return 0;
+    };
+    tail.take_while(|&c| c.is_alphanumeric() && is_cjk(c) == cjk)
         .count()
 }
 
@@ -335,6 +342,21 @@ mod tests {
             fts_match_expr("東京 OR 大阪"),
             Some("(\"東京\" OR \"大阪\"*)".to_owned())
         );
+    }
+
+    #[test]
+    fn a_cjk_run_and_a_glued_word_are_separate_tokens_to_the_implicit_prefix() {
+        assert_eq!(last_token_chars("東京a"), 1);
+        assert_eq!(last_token_chars("a東京"), 2);
+        assert_eq!(last_token_chars("rust東京ab!"), 2);
+        assert_eq!(last_token_chars("!!"), 0);
+        assert_eq!(
+            fts_match_expr("東京a"),
+            Some("\"東京 京 a\"".to_owned()),
+            "the prefix would widen the one-letter token `a`"
+        );
+        assert_eq!(fts_match_expr("東京ab"), Some("\"東京 京 ab\"*".to_owned()));
+        assert_eq!(fts_match_expr("ab東京"), Some("\"ab 東京\"*".to_owned()));
     }
 
     /// Property suite for the FTS query builder (issues #133, #138): no

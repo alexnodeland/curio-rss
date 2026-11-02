@@ -23,6 +23,7 @@ pub mod image_cache;
 pub mod ipc_policy;
 pub mod l10n;
 pub mod logging;
+pub mod maintenance_scheduler;
 pub mod menu;
 pub mod notify;
 pub mod paths;
@@ -116,10 +117,15 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             // health / doctor
             commands::health::integrity_check,
             commands::health::fts_integrity_check,
+            commands::health::rebuild_search_index,
             commands::health::vacuum_db,
             commands::health::db_stats,
             commands::health::sweep_event_retention,
             commands::health::legacy_profiles,
+            // retention / maintenance (#137)
+            commands::maintenance::retention_policy,
+            commands::maintenance::set_retention_policy,
+            commands::maintenance::run_maintenance,
             // platform
             commands::platform::get_cached_image,
             commands::platform::copy_diagnostics_bundle,

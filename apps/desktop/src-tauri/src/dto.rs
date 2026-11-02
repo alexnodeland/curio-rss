@@ -14,18 +14,19 @@
 //!   payloads small; only [`ArticleDto`] carries the sanitized HTML.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::path::Path;
 
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
     Article, ArticleFlag, ArticleState, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord,
-    FetchStatus, ListedArticle,
+    FetchStatus, ListedArticle, RetentionPolicy,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::{ArticleFilter, ListArticles, ListCursor, ListOrder, SearchArticles};
 use curio_core::{
-    ImportKind, ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, RejectReason,
-    Rejected, SaveOutcome,
+    ImportKind, ImportOutcome, ImportSource, MaintenanceReport, OpmlImportOutcome, RefreshOutcome,
+    RejectReason, Rejected, SaveOutcome,
 };
 use curio_types::Destination;
 use serde::{Deserialize, Serialize};
@@ -980,6 +981,78 @@ pub struct DbStatsDto {
     pub schema_version: i64,
     /// Absolute database path (display only).
     pub db_path: String,
+}
+
+/// Mirror of [`RetentionPolicy`] (#137). A limit crosses as a plain
+/// number; `null` — or `0`, which the UI never sends but a hand-made call
+/// might — means no limit, as `curio retention` treats it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct RetentionPolicyDto {
+    /// Reap feed articles first stored more than this many days ago.
+    pub max_age_days: Option<u32>,
+    /// Keep at most this many articles per feed (the newest stored).
+    pub max_per_feed: Option<u32>,
+    /// Never reap an unread article.
+    pub keep_unread: bool,
+}
+
+impl From<RetentionPolicy> for RetentionPolicyDto {
+    fn from(policy: RetentionPolicy) -> Self {
+        Self {
+            max_age_days: policy.max_age_days.map(NonZeroU32::get),
+            max_per_feed: policy.max_per_feed.map(NonZeroU32::get),
+            keep_unread: policy.keep_unread,
+        }
+    }
+}
+
+impl From<RetentionPolicyDto> for RetentionPolicy {
+    fn from(dto: RetentionPolicyDto) -> Self {
+        Self {
+            max_age_days: dto.max_age_days.and_then(NonZeroU32::new),
+            max_per_feed: dto.max_per_feed.and_then(NonZeroU32::new),
+            keep_unread: dto.keep_unread,
+        }
+    }
+}
+
+/// What one maintenance pass did (mirror of [`MaintenanceReport`]; the
+/// removed event-log files cross as a count).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct MaintenanceReportDto {
+    /// Feed articles the retention policy deleted.
+    pub articles_reaped: u64,
+    /// Articles of removed feeds deleted (only when a purge was asked for).
+    pub orphans_purged: u64,
+    /// Tags no article carried any more.
+    pub tags_dropped: u64,
+    /// Fetch-log rows beyond the per-feed cap.
+    pub fetch_log_trimmed: u64,
+    /// Event-log files past the retention window that were deleted.
+    pub event_files_removed: u64,
+    /// Why nothing was deleted although a limit or purge asked for it (a
+    /// destination's manifest could not be read).
+    pub reap_skipped: Option<String>,
+    /// Why the event-log sweep did not run.
+    pub event_sweep_skipped: Option<String>,
+    /// Why the database upkeep after the deletions stopped short.
+    pub upkeep_skipped: Option<String>,
+}
+
+impl From<MaintenanceReport> for MaintenanceReportDto {
+    fn from(report: MaintenanceReport) -> Self {
+        Self {
+            articles_reaped: report.articles_reaped,
+            orphans_purged: report.orphans_purged,
+            tags_dropped: report.tags_dropped,
+            fetch_log_trimmed: report.fetch_log_trimmed,
+            event_files_removed: u64::try_from(report.event_files_removed.len())
+                .unwrap_or(u64::MAX),
+            reap_skipped: report.reap_skipped,
+            event_sweep_skipped: report.event_sweep_skipped,
+            upkeep_skipped: report.upkeep_skipped,
+        }
+    }
 }
 
 /// An opaque, single-use handle to a dialog-picked filesystem path

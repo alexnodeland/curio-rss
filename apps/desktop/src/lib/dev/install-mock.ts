@@ -18,7 +18,9 @@ import type {
     FeedDto,
     FetchErrorKindDto,
     FlagField,
+    MaintenanceReportDto,
     NewFeedDto,
+    RetentionPolicyDto,
     StartupFailureClass,
     StartupFailureDto,
 } from '$lib/bindings';
@@ -263,6 +265,12 @@ tokens:
         edit(feed);
         return emitting(null, true, feedsChanged);
     }
+    /** The article-retention policy Settings → Data edits (off, as on a fresh profile). */
+    let retention: RetentionPolicyDto = {
+        max_age_days: null,
+        max_per_feed: null,
+        keep_unread: true,
+    };
     /** The id the next `add_feed` hands out. */
     let nextFeedId = Math.max(0, ...feeds.map((f) => f.id)) + 1;
 
@@ -658,10 +666,29 @@ tokens:
                     };
                 case 'integrity_check':
                 case 'fts_integrity_check':
+                case 'rebuild_search_index':
                 case 'vacuum_db':
                     return null;
                 case 'sweep_event_retention':
                     return [];
+                case 'retention_policy':
+                    return retention;
+                case 'set_retention_policy':
+                    retention = args.policy as RetentionPolicyDto;
+                    return retention;
+                // A pass that tidied bookkeeping only: nothing a view shows
+                // went away, so (like the real command) it emits nothing.
+                case 'run_maintenance':
+                    return {
+                        articles_reaped: 0,
+                        orphans_purged: 0,
+                        tags_dropped: 0,
+                        fetch_log_trimmed: 12,
+                        event_files_removed: 0,
+                        reap_skipped: null,
+                        event_sweep_skipped: null,
+                        upkeep_skipped: null,
+                    } satisfies MaintenanceReportDto;
                 case 'add_destination':
                     destinations.push({
                         name: String(args.name),

@@ -414,6 +414,12 @@ export const commands = {
 	integrityCheck: () => typedError<null, CommandError>(__TAURI_INVOKE("integrity_check")),
 	/**  FTS index ↔ content-table consistency check. */
 	ftsIntegrityCheck: () => typedError<null, CommandError>(__TAURI_INVOKE("fts_integrity_check")),
+	/**
+	 *  Rebuilds the full-text search index from the stored articles — the
+	 *  repair for a failed [`fts_integrity_check`]. Emits `ArticlesChanged` so
+	 *  cached search results refetch against the repaired index.
+	 */
+	rebuildSearchIndex: () => typedError<null, CommandError>(__TAURI_INVOKE("rebuild_search_index")),
 	/**  `VACUUM` — reclaims space after bulk deletes. */
 	vacuumDb: () => typedError<null, CommandError>(__TAURI_INVOKE("vacuum_db")),
 	/**  Article count, schema version, and database path. */
@@ -429,6 +435,21 @@ export const commands = {
 	 *  notice and the doctor panel. Empty when there were none.
 	 */
 	legacyProfiles: () => typedError<LegacyProfileDto[], CommandError>(__TAURI_INVOKE("legacy_profiles")),
+	/**  The persisted article-retention policy (off until one is set). */
+	retentionPolicy: () => typedError<RetentionPolicyDto, CommandError>(__TAURI_INVOKE("retention_policy")),
+	/**
+	 *  Stores the article-retention policy and returns it as stored (a `0`
+	 *  limit reads back as none). Nothing is deleted until the next
+	 *  maintenance pass.
+	 */
+	setRetentionPolicy: (policy: RetentionPolicyDto) => typedError<RetentionPolicyDto, CommandError>(__TAURI_INVOKE("set_retention_policy", { policy })),
+	/**
+	 *  Runs the maintenance pass now — retention, unused tags, fetch log,
+	 *  index upkeep, expired event logs — and, with `purge_orphans`, deletes
+	 *  the unprotected articles of removed feeds. Emits the invalidations
+	 *  when anything a list shows went away.
+	 */
+	runMaintenance: (purgeOrphans: boolean) => typedError<MaintenanceReportDto, CommandError>(__TAURI_INVOKE("run_maintenance", { purgeOrphans })),
 	/**
 	 *  The local path of a cached copy of `url`, fetched through the policed
 	 *  client on a miss. The frontend serves it via the `asset:` protocol —
@@ -1226,6 +1247,32 @@ export type ListArticlesDto = {
 };
 
 /**
+ *  What one maintenance pass did (mirror of [`MaintenanceReport`]; the
+ *  removed event-log files cross as a count).
+ */
+export type MaintenanceReportDto = {
+	/**  Feed articles the retention policy deleted. */
+	articles_reaped: number,
+	/**  Articles of removed feeds deleted (only when a purge was asked for). */
+	orphans_purged: number,
+	/**  Tags no article carried any more. */
+	tags_dropped: number,
+	/**  Fetch-log rows beyond the per-feed cap. */
+	fetch_log_trimmed: number,
+	/**  Event-log files past the retention window that were deleted. */
+	event_files_removed: number,
+	/**
+	 *  Why nothing was deleted although a limit or purge asked for it (a
+	 *  destination's manifest could not be read).
+	 */
+	reap_skipped: string | null,
+	/**  Why the event-log sweep did not run. */
+	event_sweep_skipped: string | null,
+	/**  Why the database upkeep after the deletions stopped short. */
+	upkeep_skipped: string | null,
+};
+
+/**
  *  A native menu item was chosen — the head emits its id and the frontend
  *  routes it through the same action layer as a keyboard shortcut (so the
  *  menu, shortcuts, and toolbars stay one source of behavior). `id` is a
@@ -1372,6 +1419,20 @@ export type RefreshProgress = {
 	feed_id: number | null,
 	/**  Its outcome; none when a page did. */
 	outcome: RefreshOutcomeDto | null,
+};
+
+/**
+ *  Mirror of [`RetentionPolicy`] (#137). A limit crosses as a plain
+ *  number; `null` — or `0`, which the UI never sends but a hand-made call
+ *  might — means no limit, as `curio retention` treats it.
+ */
+export type RetentionPolicyDto = {
+	/**  Reap feed articles first stored more than this many days ago. */
+	max_age_days: number | null,
+	/**  Keep at most this many articles per feed (the newest stored). */
+	max_per_feed: number | null,
+	/**  Never reap an unread article. */
+	keep_unread: boolean,
 };
 
 /**  Mirror of [`SaveOutcome`] — what a promote wrote. */

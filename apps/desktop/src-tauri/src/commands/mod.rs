@@ -24,6 +24,8 @@ pub mod feeds;
 #[allow(clippy::missing_errors_doc)]
 pub mod health;
 #[allow(clippy::missing_errors_doc)]
+pub mod maintenance;
+#[allow(clippy::missing_errors_doc)]
 pub mod opml;
 #[allow(clippy::missing_errors_doc)]
 pub mod platform;

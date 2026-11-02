@@ -35,7 +35,7 @@ use tauri::{AppHandle, Manager as _};
 
 use crate::commands::{self, SharedCore};
 use crate::error::{CommandError, ErrorCode};
-use crate::{image_cache, paths, refresh_scheduler};
+use crate::{image_cache, maintenance_scheduler, paths, refresh_scheduler};
 
 /// The database file inside a profile.
 const DB_FILE: &str = "curio.db";
@@ -284,6 +284,9 @@ pub fn install(app: &AppHandle, core: CoreHandle) -> Result<(), StartupFailure> 
     let scheduler = Arc::new(refresh_scheduler::RefreshScheduler::load(&core));
     app.manage(Arc::clone(&scheduler));
     refresh_scheduler::spawn(app.clone(), Arc::clone(&core), scheduler);
+    // Routine maintenance (#137): retention, tidy-up, index + WAL upkeep and
+    // the event-log sweep, shortly after launch and about daily.
+    maintenance_scheduler::spawn(app.clone(), Arc::clone(&core));
     // Optional Reddit API credentials from the OS keychain (D15) —
     // best-effort; absence just means the unauthenticated tier.
     tauri::async_runtime::spawn_blocking(move || {

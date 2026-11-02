@@ -73,6 +73,11 @@ classes of request the app can make; there are no others:
 - **No accounts.** There is no Curio service to sign in to.
 - **No third parties.** Your data is never sent to, shared with, or sold to
   anyone, because it never leaves your machine.
+- **No cloud voices.** *Read aloud* speaks with the voices your operating
+  system synthesizes on your machine; Curio never picks a network voice, so
+  an article's text is not sent anywhere to be spoken, and reading aloud
+  works offline. *Share* hands an article's link to your OS share sheet, and
+  only reaches the app or person you pick there.
 
 ## Your data, your files
 

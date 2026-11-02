@@ -241,6 +241,37 @@ mod tests {
     }
 
     #[test]
+    fn promote_all_reports_the_articles_it_could_not_export() {
+        let (dir, core) = temp_core();
+        let id = seed_article(&core, "garbled");
+        seed_article(&core, "fine");
+        add_destination_impl(&core, "notes", dir.path().join("notes")).unwrap();
+        let note = promote_article_impl(&core, id, "notes").unwrap().path;
+        std::fs::write(dir.path().join("notes").join(note), "not a note any more\n").unwrap();
+
+        let outcome = promote_all_impl(
+            &core,
+            "notes",
+            ListArticlesDto {
+                feed_id: None,
+                before: None,
+                limit: 0,
+                read: None,
+                starred: None,
+                read_later: None,
+                archived: None,
+                tag: None,
+                feed_tag: None,
+            },
+        )
+        .unwrap();
+        assert_eq!((outcome.created, outcome.failed), (1, 1));
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].article_id, id);
+        assert_eq!(outcome.failures[0].title, "garbled");
+    }
+
+    #[test]
     fn promoting_to_an_unknown_name_is_a_user_error() {
         let (_dir, core) = temp_core();
         let id = seed_article(&core, "lost");

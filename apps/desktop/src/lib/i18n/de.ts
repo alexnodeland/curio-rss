@@ -238,6 +238,8 @@ export const de: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll': 'Alles exportieren',
     'destinations.exportAll.running': 'Exportieren…',
     'destinations.exportAll.done': '{written} Notiz(en) exportiert; {unchanged} bereits aktuell',
+    'destinations.exportAll.partial':
+        '{written} Notiz(en) exportiert; {unchanged} bereits aktuell; {failed} nicht exportierbar (zuerst: „{title}“)',
     'destinations.needNameAndFolder': 'Gib zuerst einen Namen ein und wähle einen Ordner.',
     'toast.promote.saved': 'In {name} gespeichert',
     'toast.promote.unchanged': 'In {name} bereits aktuell',

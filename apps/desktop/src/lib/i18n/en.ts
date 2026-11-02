@@ -237,6 +237,8 @@ export const en = {
     'destinations.exportAll': 'Export all',
     'destinations.exportAll.running': 'Exporting…',
     'destinations.exportAll.done': 'Exported {written} note(s); {unchanged} already up to date',
+    'destinations.exportAll.partial':
+        'Exported {written} note(s); {unchanged} already up to date; {failed} could not be exported (first: “{title}”)',
     'destinations.needNameAndFolder': 'Enter a name and choose a folder first.',
 
     'toast.promote.saved': 'Saved to {name}',

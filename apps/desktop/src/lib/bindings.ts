@@ -673,6 +673,20 @@ export type ArticlesChanged = {
 	flags: FlagChange | null,
 };
 
+/**
+ *  Mirror of [`curio_core::BulkSaveFailure`] — one article a bulk export
+ *  skipped. The engine's error text stays in the log: the webview names
+ *  the article, never the engine message.
+ */
+export type BulkSaveFailureDto = {
+	/**  The article's row id. */
+	article_id: number,
+	/**  The article's identity. */
+	curio_id: string,
+	/**  The article's title. */
+	title: string,
+};
+
 /**  Mirror of [`curio_core::BulkSaveOutcome`] — what a bulk note export did. */
 export type BulkSaveOutcomeDto = {
 	/**  Notes written for the first time. */
@@ -681,6 +695,16 @@ export type BulkSaveOutcomeDto = {
 	updated: number,
 	/**  Idempotency hits — already exported and unchanged. */
 	unchanged: number,
+	/**
+	 *  Articles that could not be exported; the export carried on past
+	 *  them (the engine logs why).
+	 */
+	failed: number,
+	/**
+	 *  The first failed articles, in export order (`failed` stays exact
+	 *  past the cap).
+	 */
+	failures: BulkSaveFailureDto[],
 };
 
 /**  The serializable error every command returns. */

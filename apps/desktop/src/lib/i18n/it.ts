@@ -235,6 +235,8 @@ export const it: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll': 'Esporta tutto',
     'destinations.exportAll.running': 'Esportazione…',
     'destinations.exportAll.done': '{written} nota/e esportate; {unchanged} già aggiornate',
+    'destinations.exportAll.partial':
+        '{written} nota/e esportate; {unchanged} già aggiornate; {failed} non esportabili (la prima: «{title}»)',
     'destinations.needNameAndFolder': 'Inserisci prima un nome e scegli una cartella.',
     'toast.promote.saved': 'Salvato in {name}',
     'toast.promote.unchanged': 'Già aggiornato in {name}',

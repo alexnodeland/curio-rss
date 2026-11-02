@@ -5,11 +5,12 @@
  */
 import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import type { DestinationDto } from '$lib/bindings';
-import { localeStore } from '$lib/i18n';
+import { localeStore, t } from '$lib/i18n';
 import { fr } from '$lib/i18n/fr';
 import { destinationsStore } from '$lib/state/destinations.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { settingsStore } from '$lib/state/settings.svelte';
+import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -94,7 +95,7 @@ describe('destinations store', () => {
 
     it('exportAll bulk-promotes the whole library into a destination', async () => {
         harness = installIpcHarness({
-            promote_all: { created: 4, updated: 1, unchanged: 7 },
+            promote_all: { created: 4, updated: 1, unchanged: 7, failed: 0, failures: [] },
         });
         const result = await destinationsStore.exportAll('vault');
         expect(result.status).toBe('ok');
@@ -118,9 +119,20 @@ describe('destinations manager', () => {
         localeStore.reset();
         resetQueryCache();
         destinationsStore.reset();
+        toastStore.reset();
         harness?.teardown();
         harness = null;
     });
+
+    function exportAllButton(): HTMLButtonElement {
+        const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+            (b) => b.textContent?.trim() === t('destinations.exportAll'),
+        );
+        if (button === undefined) {
+            throw new Error('no Export all button rendered');
+        }
+        return button;
+    }
 
     it('shows a failed registry load in the active locale, never the engine text', async () => {
         const engine = 'destination registry is unreadable: expected `=` at line 1';
@@ -135,6 +147,53 @@ describe('destinations manager', () => {
         const alert = document.querySelector('[role="alert"]');
         expect(alert?.textContent).toBe(fr['app.error.internal']);
         expect(alert?.textContent).not.toContain('registry');
+    });
+
+    it('reports a clean export-all as a success', async () => {
+        harness = installIpcHarness({
+            list_destinations: [dest('vault')],
+            promote_all: { created: 4, updated: 1, unchanged: 7, failed: 0, failures: [] },
+        });
+        render(DestinationsManager);
+        await flushIpc();
+        exportAllButton().click();
+        await flushIpc();
+        const toast = toastStore.toasts.at(-1);
+        expect(toast?.tone).toBe('success');
+        expect(toast?.message).toBe(t('destinations.exportAll.done', { written: 5, unchanged: 7 }));
+    });
+
+    it('names the first article an export-all had to skip, as a warning', async () => {
+        harness = installIpcHarness({
+            list_destinations: [dest('vault')],
+            promote_all: {
+                created: 4,
+                updated: 1,
+                unchanged: 7,
+                failed: 2,
+                failures: [
+                    { article_id: 3, curio_id: 'c3', title: 'Weekly links' },
+                    { article_id: 5, curio_id: 'c5', title: 'Second' },
+                ],
+            },
+        });
+        localeStore.active = 'fr';
+        render(DestinationsManager);
+        await flushIpc();
+        exportAllButton().click();
+        await flushIpc();
+        const toast = toastStore.toasts.at(-1);
+        expect(toast?.tone).toBe('warning');
+        expect(toast?.message).toBe(
+            t('destinations.exportAll.partial', {
+                written: 5,
+                unchanged: 7,
+                failed: 2,
+                title: 'Weekly links',
+            }),
+        );
+        expect(toast?.message).toContain('« Weekly links »');
+        expect(toast?.message).not.toContain('Second');
     });
 
     it('shows a busy profile as its localized line, without the lock path', async () => {

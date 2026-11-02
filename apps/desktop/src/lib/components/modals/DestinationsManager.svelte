@@ -100,14 +100,24 @@ async function exportAll(name: string): Promise<void> {
             toastCommandError(result.error);
             return;
         }
-        const written = result.data.created + result.data.updated;
-        toastStore.showToast(
-            t('destinations.exportAll.done', {
-                written,
-                unchanged: result.data.unchanged,
-            }),
-            'success',
-        );
+        const { created, updated, unchanged, failed, failures } = result.data;
+        const written = created + updated;
+        // Articles the export skipped (the engine logs why): the run still
+        // exported the rest, so this is a warning naming the first one.
+        const first = failures[0];
+        if (failed > 0 && first !== undefined) {
+            toastStore.showToast(
+                t('destinations.exportAll.partial', {
+                    written,
+                    unchanged,
+                    failed,
+                    title: first.title,
+                }),
+                'warning',
+            );
+            return;
+        }
+        toastStore.showToast(t('destinations.exportAll.done', { written, unchanged }), 'success');
     } catch {
         toastStore.showToast(t('app.error.internal'), 'error');
     } finally {

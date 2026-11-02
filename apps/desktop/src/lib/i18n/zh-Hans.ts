@@ -221,6 +221,8 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll': '全部导出',
     'destinations.exportAll.running': '导出中…',
     'destinations.exportAll.done': '已导出 {written} 篇笔记；{unchanged} 篇已是最新',
+    'destinations.exportAll.partial':
+        '已导出 {written} 篇笔记；{unchanged} 篇已是最新；{failed} 篇无法导出（第一篇：“{title}”）',
     'destinations.needNameAndFolder': '请先输入名称并选择文件夹。',
     'toast.promote.saved': '已保存到 {name}',
     'toast.promote.unchanged': '在 {name} 中已是最新',

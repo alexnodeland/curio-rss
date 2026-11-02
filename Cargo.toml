@@ -128,7 +128,7 @@ brotli = "9"
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 flate2 = "1"
 insta = { version = "1", features = ["glob"] }
-jsonschema = { version = "0.33", default-features = false }
+jsonschema = { version = "0.49", default-features = false }
 predicates = "3"
 proptest = "1"
 # A throwaway self-signed certificate, minted at test time (no key material

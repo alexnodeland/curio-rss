@@ -343,15 +343,20 @@ pub enum ArticleFlag {
 /// (`…` added when the text runs on).
 pub const SNIPPET_MAX_CHARS: usize = 200;
 
-/// How much of the extracted text a listing reads to build the preview,
-/// in characters. Enough slack over [`SNIPPET_MAX_CHARS`] for the
-/// whitespace the preview collapses, so the body itself is never read
-/// whole for a list row.
+/// How much of the extracted text a listing hands back to build the
+/// preview, in characters. Enough slack over [`SNIPPET_MAX_CHARS`] for the
+/// whitespace the preview collapses, so the body is never copied into Rust
+/// (or over IPC) for a list row. SQLite itself still reads the row's whole
+/// record, body overflow pages included — `substr` loads the full value,
+/// and columns stored after the body sit behind it — so what this bounds is
+/// the copy and the allocation, not the page reads.
 pub(crate) const SNIPPET_SOURCE_CHARS: usize = 4 * SNIPPET_MAX_CHARS;
 
 /// One row of an article list or search: what a list renders, in one
 /// read — the summary columns, a bounded text preview, the article's
-/// state flags and its tags. Never the body; that stays on [`Article`].
+/// state flags and its tags. Never the body; that stays on [`Article`]
+/// (SQLite still pages through the stored body to reach the row's later
+/// columns; the row just never carries it — see `SNIPPET_SOURCE_CHARS`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedArticle {
     /// Row id (the keyset cursor).

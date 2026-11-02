@@ -222,10 +222,12 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
-- The list read paths stay off the article bodies (#136). A list or search page reads
+- The list read paths never carry the article bodies (#136). A list or search page reads
   **list rows** (`ListedArticle`: the summary columns, a preview built from a bounded
   `substr` of the text, the state flags and the tags) — one read renders a page, never
-  a state query per row. The sparse membership views (Starred, Read later, Archived)
+  a state query per row. The bodies stay out of Rust and off the IPC wire; SQLite still
+  pages through each row's stored body (`substr` loads the whole value, and later
+  columns sit behind it), so a cold page cache still pays for those reads. The sparse membership views (Starred, Read later, Archived)
   page newest-first through partial indexes on `article_state`, and per-feed unread
   counts live in a `feed_unread` table that triggers on `articles`, `article_state`
   and `feeds` keep equal to the scan they replace, so a badge refresh reads one row per

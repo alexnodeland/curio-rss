@@ -10,7 +10,10 @@
 //! The budget is p95 < 10 ms for each. Criterion reports the mean; before
 //! it runs, a plain timing pass prints p50 / p95 / max per read to stderr,
 //! since the budget is a tail latency. The handle is opened once, so this
-//! is warm-cache query latency — what the UI sees after start-up.
+//! is warm-cache query latency — what the UI sees after start-up. A cold
+//! page cache is not measured: there, a list row still costs SQLite the
+//! reads of its stored body's overflow pages (see
+//! `curio_core::model::ListedArticle`), which this bench never sees.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::hint::black_box;

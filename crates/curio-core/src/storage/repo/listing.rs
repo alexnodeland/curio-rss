@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sparsest_required_membership_drives() {
+    fn the_first_required_membership_in_index_order_drives() {
         let (sql, _) = list_articles_query(
             &ListArticles {
                 starred: Some(true),

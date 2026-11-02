@@ -1,6 +1,8 @@
 //! The search syntax's compiler: user input into an escaped FTS5
 //! expression (the SQL around it is compiled in `listing`).
 
+use crate::storage::fts::{is_cjk, segment_query};
+
 /// One searchable unit of a parsed query: a bare word or a quoted phrase.
 #[derive(Debug, PartialEq, Eq)]
 struct Atom {
@@ -18,10 +20,14 @@ struct Atom {
 
 impl Atom {
     /// The atom as one FTS5 string (embedded quotes doubled) — always a
-    /// valid FTS5 phrase, whatever the text holds.
+    /// valid FTS5 phrase, whatever the text holds. CJK runs are segmented
+    /// the way the index stores them (see `storage::fts`), so a substring
+    /// of a run matches as a phrase of its bigrams; an atom ending on a
+    /// lone CJK character matches it as a prefix.
     fn render(&self) -> String {
-        let star = if self.prefix { "*" } else { "" };
-        format!("\"{}\"{star}", self.text.replace('"', "\"\""))
+        let (text, lone_cjk) = segment_query(&self.text);
+        let star = if self.prefix || lone_cjk { "*" } else { "" };
+        format!("\"{}\"{star}", text.replace('"', "\"\""))
     }
 }
 
@@ -41,12 +47,19 @@ const IMPLICIT_PREFIX_MIN_CHARS: usize = 2;
 /// The length, in characters, of the token a trailing `*` on `text` would
 /// widen: its last run of letters and digits. FTS5's tokenizer splits on
 /// everything else, so the prefix lands on that token alone — `c++` and
-/// `C#` index as the one-letter token `c`, `write ahe` ends in `ahe`.
+/// `C#` index as the one-letter token `c`, `write ahe` ends in `ahe`. A
+/// switch between CJK and other letters ends a token too: the segmenter
+/// splits a CJK run from a word glued to it, so `東京a` ends in `a`.
 fn last_token_chars(text: &str) -> usize {
-    text.chars()
+    let mut tail = text
+        .chars()
         .rev()
         .skip_while(|c| !c.is_alphanumeric())
-        .take_while(|c| c.is_alphanumeric())
+        .peekable();
+    let Some(cjk) = tail.peek().map(|&c| is_cjk(c)) else {
+        return 0;
+    };
+    tail.take_while(|&c| c.is_alphanumeric() && is_cjk(c) == cjk)
         .count()
 }
 
@@ -303,6 +316,49 @@ mod tests {
         assert_eq!(fts_match_expr("- * -- OR"), None);
     }
 
+    #[test]
+    fn fts_match_expr_segments_cjk_runs_into_bigram_phrases() {
+        assert_eq!(fts_match_expr("天気"), Some("\"天気\"*".to_owned()));
+        assert_eq!(
+            fts_match_expr("都の天気"),
+            Some("\"都の の天 天気\"*".to_owned()),
+            "a run is the phrase of its bigrams, so it matches anywhere inside a longer run"
+        );
+        assert_eq!(
+            fts_match_expr("天"),
+            Some("\"天\"*".to_owned()),
+            "a lone character is a prefix: it may open a bigram"
+        );
+        assert_eq!(
+            fts_match_expr("-天 rust"),
+            Some("(\"rust\"*) NOT (\"天\"*)".to_owned())
+        );
+        assert_eq!(
+            fts_match_expr("\"東京 tower\""),
+            Some("\"東京 京 tower\"".to_owned()),
+            "a run followed by more words ends there, as the index wrote it"
+        );
+        assert_eq!(
+            fts_match_expr("東京 OR 大阪"),
+            Some("(\"東京\" OR \"大阪\"*)".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_cjk_run_and_a_glued_word_are_separate_tokens_to_the_implicit_prefix() {
+        assert_eq!(last_token_chars("東京a"), 1);
+        assert_eq!(last_token_chars("a東京"), 2);
+        assert_eq!(last_token_chars("rust東京ab!"), 2);
+        assert_eq!(last_token_chars("!!"), 0);
+        assert_eq!(
+            fts_match_expr("東京a"),
+            Some("\"東京 京 a\"".to_owned()),
+            "the prefix would widen the one-letter token `a`"
+        );
+        assert_eq!(fts_match_expr("東京ab"), Some("\"東京 京 ab\"*".to_owned()));
+        assert_eq!(fts_match_expr("ab東京"), Some("\"ab 東京\"*".to_owned()));
+    }
+
     /// Property suite for the FTS query builder (issues #133, #138): no
     /// user input compiles to a query FTS5 rejects, FTS5 keywords in the
     /// input are matched literally, and every plain word finds the row
@@ -313,16 +369,20 @@ mod tests {
         use proptest::prelude::*;
 
         use super::super::{Item, fts_match_expr, lex_query};
+        use crate::storage::fts::{is_cjk, segment_index};
 
         /// An FTS5 table shaped like `articles_fts` (same columns, default
-        /// tokenizer), holding `rows`.
+        /// tokenizer, CJK-segmented text), holding `rows`.
         fn index(rows: &[&str]) -> rusqlite::Connection {
             let conn = rusqlite::Connection::open_in_memory().unwrap();
             conn.execute_batch("CREATE VIRTUAL TABLE t USING fts5(title, content_text);")
                 .unwrap();
             for row in rows {
-                conn.execute("INSERT INTO t(title, content_text) VALUES ('', ?1)", [row])
-                    .unwrap();
+                conn.execute(
+                    "INSERT INTO t(title, content_text) VALUES ('', ?1)",
+                    [segment_index(row)],
+                )
+                .unwrap();
             }
             conn
         }
@@ -425,6 +485,26 @@ mod tests {
                 let expr = fts_match_expr(&input).unwrap();
                 let result = hits(&conn, &expr);
                 prop_assert!(result.is_ok(), "{count} terms: {result:?}");
+            }
+
+            #[test]
+            fn a_cjk_query_hits_exactly_the_rows_holding_it_inside_a_run(
+                doc in "[東京都天気 。a]{0,24}",
+                query in "[東京都天気]{1,4}",
+            ) {
+                // Substring semantics inside a run, whatever the run's
+                // length or where the query falls in it — and no hit
+                // across a run boundary.
+                let conn = index(&[&doc]);
+                let expected = doc
+                    .split(|c: char| !is_cjk(c))
+                    .any(|run| run.contains(query.as_str()));
+                let expr = fts_match_expr(&query).unwrap();
+                prop_assert_eq!(
+                    hits(&conn, &expr).unwrap(),
+                    i64::from(expected),
+                    "{:?} in {:?} → {}", query, doc, expr
+                );
             }
 
             #[test]

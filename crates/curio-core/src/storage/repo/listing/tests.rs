@@ -390,6 +390,9 @@ fn one_article_db(published: Option<&str>) -> (tempfile::TempDir, Connection) {
     let path = dir.path().join("curio.db");
     drop(crate::storage::Storage::open(&path).unwrap());
     let conn = Connection::open(&path).unwrap();
+    // The insert's search-index trigger segments through Curio's SQL
+    // function, which a connection of our own must register.
+    crate::storage::fts::register_functions(&conn).unwrap();
     conn.execute(
         "INSERT INTO articles (id, curio_id, dedupe_key, source_url, published_at, saved_at, \
          modified_at) VALUES (1, '019780f0-0000-7000-8000-000000000001', 'm:k1', \

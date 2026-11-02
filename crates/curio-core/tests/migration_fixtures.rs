@@ -48,6 +48,9 @@ fn profile_with(version: &str) -> (tempfile::TempDir, PathBuf) {
 
 fn raw_counts(path: &Path) -> Vec<(&'static str, i64)> {
     let conn = rusqlite::Connection::open(path).unwrap();
+    // Counting `articles_fts` reads its content view, which (from schema
+    // 16) segments through Curio's SQL function.
+    curio_core::storage::register_functions(&conn).unwrap();
     EXPECTED
         .iter()
         .map(|(table, _)| {

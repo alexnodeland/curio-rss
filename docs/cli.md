@@ -400,6 +400,7 @@ never raw FTS5, so no input is a syntax error:
 | `"write ahe` | an unterminated phrase runs to the end, its last word as a prefix (`ahe` → `ahead`) |
 | `rust -async` | `rust`, but not articles mentioning `async` (also `-"a phrase"`) |
 | `rust OR go tutorial` | (`rust` or `go`) and `tutorial` — upper-case `OR` only |
+| `天気` | Chinese, Japanese and Korean match anywhere inside a run of text, not only at word starts (`天気` finds `東京都の天気`; a single character finds every occurrence) |
 
 A query of exclusions alone matches nothing. Other FTS5 operators (`AND`,
 `NOT`, `NEAR`, `title:` …) are searched for as plain words.

@@ -105,8 +105,9 @@ CREATE TABLE articles (
 CREATE VIRTUAL TABLE articles_fts USING fts5(
     title,
     content_text,
-    content='articles',
-    content_rowid='id'
+    content='articles_fts_source',
+    content_rowid='id',
+    prefix='1'
 )
 
 -- table articles_fts_config
@@ -213,13 +214,13 @@ END
 -- trigger articles_fts_ad
 CREATE TRIGGER articles_fts_ad AFTER DELETE ON articles BEGIN
     INSERT INTO articles_fts(articles_fts, rowid, title, content_text)
-    VALUES ('delete', old.id, old.title, old.content_text);
+    VALUES ('delete', old.id, curio_fts_segment(old.title), curio_fts_segment(old.content_text));
 END
 
 -- trigger articles_fts_ai
 CREATE TRIGGER articles_fts_ai AFTER INSERT ON articles BEGIN
     INSERT INTO articles_fts(rowid, title, content_text)
-    VALUES (new.id, new.title, new.content_text);
+    VALUES (new.id, curio_fts_segment(new.title), curio_fts_segment(new.content_text));
 END
 
 -- trigger articles_fts_au
@@ -227,9 +228,9 @@ CREATE TRIGGER articles_fts_au AFTER UPDATE OF title, content_text ON articles
 WHEN old.title IS NOT new.title OR old.content_text IS NOT new.content_text
 BEGIN
     INSERT INTO articles_fts(articles_fts, rowid, title, content_text)
-    VALUES ('delete', old.id, old.title, old.content_text);
+    VALUES ('delete', old.id, curio_fts_segment(old.title), curio_fts_segment(old.content_text));
     INSERT INTO articles_fts(rowid, title, content_text)
-    VALUES (new.id, new.title, new.content_text);
+    VALUES (new.id, curio_fts_segment(new.title), curio_fts_segment(new.content_text));
 END
 
 -- trigger feed_unread_article_ai
@@ -302,3 +303,10 @@ BEGIN
      WHERE a.id = new.article_id AND new.is_read = 0 AND new.is_archived = 0
     ON CONFLICT (feed_key) DO UPDATE SET unread = unread + excluded.unread;
 END
+
+-- view articles_fts_source
+CREATE VIEW articles_fts_source AS
+SELECT id,
+       curio_fts_segment(title)        AS title,
+       curio_fts_segment(content_text) AS content_text
+FROM articles

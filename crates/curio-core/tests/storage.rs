@@ -1903,6 +1903,62 @@ fn search_ranks_a_title_hit_above_a_body_hit() {
 }
 
 #[test]
+fn search_finds_a_cjk_substring_inside_a_run() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "ja", "東京都の天気", "明日は晴れのち雨。");
+    insert_one(&storage, "zh", "Rust製のツール", "北京的天气很好");
+    insert_one(&storage, "ko", "서울 소식", "오늘 서울의 날씨는 맑음");
+    insert_one(&storage, "en", "Weather in Tokyo", "sunny");
+    let titles = |query: &str| sorted(search_titles(&storage, SearchArticles::new(query, 10)));
+    // The middle and the end of a run, not only its start.
+    assert_eq!(titles("天気"), ["東京都の天気"]);
+    assert_eq!(titles("京都の"), ["東京都の天気"]);
+    assert_eq!(titles("晴れ"), ["東京都の天気"], "body text too");
+    assert_eq!(titles("天气"), ["Rust製のツール"]);
+    assert_eq!(titles("날씨"), ["서울 소식"], "Hangul glued to a particle");
+    // A lone character, wherever it stands in its run.
+    assert_eq!(titles("気"), ["東京都の天気"]);
+    assert_eq!(titles("天"), ["Rust製のツール", "東京都の天気"]);
+    // Mixed with Latin, phrases, exclusions.
+    assert_eq!(titles("Rust製"), ["Rust製のツール"]);
+    assert_eq!(titles("\"東京都の天気\""), ["東京都の天気"]);
+    assert_eq!(titles("天 -天気"), ["Rust製のツール"]);
+    assert_eq!(titles("tokyo"), ["Weather in Tokyo"]);
+    // Characters that never stand next to each other do not match.
+    assert_eq!(titles("京天"), [] as [String; 0]);
+    assert_eq!(titles("気天"), [] as [String; 0]);
+}
+
+#[test]
+fn the_cjk_index_follows_content_updates_and_deletes() {
+    let (_dir, storage) = temp_storage();
+    let id = insert_one(&storage, "a", "ニュース", "東京都の天気");
+    insert_one(&storage, "b", "Other", "大阪の天気");
+    storage
+        .update_article_content(
+            id,
+            &ArticleContent {
+                html: "<p>京都の紅葉</p>".to_owned(),
+                text: "京都の紅葉".to_owned(),
+            },
+            None,
+            ContentOrigin::FullText,
+        )
+        .unwrap();
+    let titles = |query: &str| search_titles(&storage, SearchArticles::new(query, 10));
+    assert_eq!(titles("天気"), ["Other"], "the old body left the index");
+    assert_eq!(titles("紅葉"), ["ニュース"]);
+    storage.delete_article(id).unwrap();
+    assert_eq!(titles("紅葉"), [] as [String; 0]);
+    // The triggers wrote exactly what FTS5 reads back from the content
+    // view, and a rebuild from that view reproduces the index.
+    storage.fts_integrity_check().unwrap();
+    storage.rebuild_fts().unwrap();
+    storage.fts_integrity_check().unwrap();
+    assert_eq!(titles("天気"), ["Other"]);
+}
+
+#[test]
 fn search_applies_the_list_filters() {
     let (_dir, storage) = temp_storage();
     let folder = |url: &str, tag: &str| {

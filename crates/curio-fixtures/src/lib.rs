@@ -131,6 +131,8 @@ pub fn generate(dir: impl AsRef<Path>, spec: &FixtureSpec) -> Result<FixtureRepo
 
     let mut conn = Connection::open(&db_path)?;
     conn.pragma_update(None, "foreign_keys", true)?;
+    // The search index's triggers segment through Curio's SQL functions.
+    curio_core::storage::register_functions(&conn)?;
     write_rows(&mut conn, spec)?;
     finalize(&conn)?;
     drop(conn);

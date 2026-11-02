@@ -6,12 +6,16 @@
 //! read-only pool for queries. The sketch's `Mutex<Connection>` pattern
 //! (which serialized every reader behind every writer and blocked async
 //! executors) is banned by design; nothing above this module ever sees a
-//! `rusqlite` type or a line of SQL.
+//! `rusqlite` type or a line of SQL — except the doc-hidden
+//! `register_functions`, for a tool that writes the database through a
+//! connection of its own (the fixture generator): the search index's
+//! triggers call Curio's SQL functions.
 //!
 //! Schema lives in the private `migrations` module; every query goes through
 //! the typed repo functions in the private `repo` module.
 
 mod backup;
+mod fts;
 mod migrations;
 mod netfs;
 mod open;
@@ -24,6 +28,11 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 pub use backup::{PreMigrationBackup, pre_migration_backups};
+// Hidden from the documented API: only for a tool that writes the database
+// through a connection of its own (the fixture generator, the migration
+// fixture tests) — head crates go through `Storage` and never need it.
+#[doc(hidden)]
+pub use fts::register_functions;
 pub use netfs::{
     ALLOW_NETWORK_FS_ENV, NetworkFsKind, detect_network_fs, network_fs_override_from_env,
 };
@@ -438,6 +447,7 @@ fn configure_write_connection(conn: &Connection) -> Result<(), StorageError> {
     conn.pragma_update(None, "synchronous", "FULL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     conn.pragma_update(None, "journal_size_limit", JOURNAL_SIZE_LIMIT)?;
+    fts::register_functions(conn)?;
     Ok(())
 }
 

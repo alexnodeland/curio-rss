@@ -3,7 +3,7 @@
 use anyhow::{Context as _, bail};
 use curio_core::CoreHandle;
 use curio_core::model::{Article, Feed, FeedId};
-use curio_core::storage::ListArticles;
+use curio_core::storage::{ListArticles, ListCursor};
 
 use crate::output::short_id;
 
@@ -21,17 +21,17 @@ pub(crate) fn article_by_prefix(core: &CoreHandle, fragment: &str) -> anyhow::Re
         bail!("empty article id — run `curio list` to find one");
     }
     let mut matches: Vec<Article> = Vec::new();
-    let mut before = None;
+    let mut after = None;
     loop {
         let page = core.list_articles(ListArticles {
             feed_id: None,
-            before,
+            after,
             limit: PAGE,
             ..ListArticles::default()
         })?;
         let page_len = page.len();
         for article in page {
-            before = Some(article.id);
+            after = Some(ListCursor::from(&article));
             if article.curio_id.to_string().contains(&needle) {
                 matches.push(article);
             }

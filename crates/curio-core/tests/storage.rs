@@ -13,8 +13,8 @@ use curio_core::model::{
     FetchRecord, FetchStatus, NewArticle, NewFeed, ReadProgress,
 };
 use curio_core::storage::{
-    ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, OpenError, SearchArticles, Storage,
-    StorageError,
+    ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, ListCursor, OpenError,
+    SearchArticles, Storage, StorageError,
 };
 use curio_types::{EventPayload, Timestamp};
 
@@ -631,7 +631,7 @@ fn list_articles_paginates_by_keyset() {
     let page2 = storage
         .list_articles(ListArticles {
             limit: 4,
-            before: Some(page1.last().unwrap().id),
+            after: Some(ListCursor::from(page1.last().unwrap())),
             ..ListArticles::default()
         })
         .unwrap();
@@ -764,7 +764,7 @@ fn list_articles_filters_by_read_state_flags() {
     );
     assert_eq!(
         count(ListArticles {
-            before: Some(k1),
+            after: Some(ListCursor::id(k1)),
             ..ListArticles::default()
         }),
         1,
@@ -823,7 +823,7 @@ fn list_articles_filters_by_tag_without_reordering_the_keyset() {
             tag: Some("rust".to_owned()),
             feed_id: Some(feed.id),
             limit: 2,
-            before: Some(page1.last().unwrap().id),
+            after: Some(ListCursor::from(page1.last().unwrap())),
             ..ListArticles::default()
         })
         .unwrap();

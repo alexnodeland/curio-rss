@@ -269,11 +269,11 @@ impl Storage {
         })
     }
 
-    /// Keyset-paginated listing of whole articles (body included), newest
-    /// row id first — for walks that need the content, such as a bulk
-    /// export. A list a head renders reads [`Self::list_article_rows`]
-    /// instead. See [`ListArticles`] for the filter semantics; filters
-    /// never change the order.
+    /// Keyset-paginated listing of whole articles (body included), in
+    /// [`ListArticles::order`] — for walks that need the content, such as
+    /// a bulk export. A list a head renders reads
+    /// [`Self::list_article_rows`] instead. See [`ListArticles`] for the
+    /// filter semantics; filters never change the order.
     ///
     /// # Errors
     ///
@@ -349,7 +349,7 @@ impl Storage {
     }
 
     /// How many articles [`Self::list_articles`] would walk with `params`
-    /// across every page: its filters and `before` cursor apply, its
+    /// across every page: its filters and `after` cursor apply, its
     /// `limit` does not.
     ///
     /// # Errors

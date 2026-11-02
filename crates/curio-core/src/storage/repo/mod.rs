@@ -38,7 +38,7 @@ use curio_types::{EventEnvelope, Timestamp};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use super::StorageError;
-use crate::model::{ArticleId, FeedId, FeedStatus};
+use crate::model::{Article, ArticleId, FeedId, FeedStatus, ListedArticle};
 
 /// Begins a write-intent transaction on the writer connection.
 ///
@@ -65,19 +65,83 @@ pub struct UpsertOutcome {
     pub updated: u64,
 }
 
+/// The order an article list pages in. Every order is total — ties on a
+/// date fall back to the row id — so keyset paging never skips or repeats
+/// a row, and filters never change it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ListOrder {
+    /// Newest stored row first (`id DESC`): the order articles arrived in,
+    /// latest on top.
+    #[default]
+    Newest,
+    /// Oldest stored row first (`id ASC`) — a queue read front to back.
+    Oldest,
+    /// Latest publication first: by `published_at`, an undated article
+    /// standing at the time Curio first saved it (`saved_at`), then by id
+    /// newest first. An OPML import or a backfilled feed lands at its
+    /// posts' own dates instead of above today's.
+    Published,
+}
+
+/// Where the next page of a list resumes: strictly after this row, in the
+/// list's [`ListOrder`]. Build it from the previous page's last row with
+/// [`From`] — `ListCursor::from(&row)` — which carries both halves of the
+/// key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListCursor {
+    /// The row's id: the whole key of [`ListOrder::Newest`] and
+    /// [`ListOrder::Oldest`], and the tie-break of [`ListOrder::Published`].
+    pub id: ArticleId,
+    /// The row's publication date as [`ListOrder::Published`] sorts it —
+    /// `published_at`, else `saved_at`. Only that order reads it; `None`
+    /// there looks the date up from the row `id` names, so a cursor of a
+    /// bare id still pages (but finds nothing after a row since deleted —
+    /// carry the date to page past one).
+    pub dated: Option<Timestamp>,
+}
+
+impl ListCursor {
+    /// A cursor of the row id alone (see [`Self::dated`]).
+    #[must_use]
+    pub const fn id(id: ArticleId) -> Self {
+        Self { id, dated: None }
+    }
+}
+
+impl From<&Article> for ListCursor {
+    fn from(row: &Article) -> Self {
+        Self {
+            id: row.id,
+            dated: Some(row.published_at.unwrap_or(row.saved_at)),
+        }
+    }
+}
+
+impl From<&ListedArticle> for ListCursor {
+    fn from(row: &ListedArticle) -> Self {
+        Self {
+            id: row.id,
+            dated: Some(row.published_at.unwrap_or(row.saved_at)),
+        }
+    }
+}
+
 /// Keyset-paginated article listing parameters.
 ///
 /// Filters are backend-owned so heads never re-filter client-side: every
 /// `Some` filter is `AND`ed into the query. An article with no
 /// `article_state` row counts as unread/unstarred/not-read-later/
-/// unarchived. The keyset order is fixed — `id DESC` (newest row first),
-/// paginated by `before` — and filters never change it.
+/// unarchived. Rows come in `order`, paginated by `after` — and filters
+/// never change the order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListArticles {
     /// Restrict to one feed; `None` lists across feeds.
     pub feed_id: Option<FeedId>,
-    /// Keyset cursor: return articles with `id` strictly below this.
-    pub before: Option<ArticleId>,
+    /// The order rows come in (default [`ListOrder::Newest`]).
+    pub order: ListOrder,
+    /// Keyset cursor: the previous page's last row — return the rows that
+    /// come strictly after it in `order`.
+    pub after: Option<ListCursor>,
     /// Page size.
     pub limit: u32,
     /// Keep only (un)read articles.
@@ -102,7 +166,8 @@ impl Default for ListArticles {
     fn default() -> Self {
         Self {
             feed_id: None,
-            before: None,
+            order: ListOrder::Newest,
+            after: None,
             limit: 50,
             read: None,
             starred: None,
@@ -115,7 +180,8 @@ impl Default for ListArticles {
 }
 
 impl ListArticles {
-    /// The filter dimensions of this listing (everything but the cursor).
+    /// The filter dimensions of this listing (everything but the order
+    /// and the cursor).
     fn filter(&self) -> ArticleFilter {
         ArticleFilter {
             feed_id: self.feed_id,

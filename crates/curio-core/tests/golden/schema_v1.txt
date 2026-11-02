@@ -13,6 +13,9 @@ CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id)
 -- index idx_article_tombstones_feed_id
 CREATE INDEX idx_article_tombstones_feed_id ON article_tombstones(feed_id)
 
+-- index idx_articles_dated
+CREATE INDEX idx_articles_dated ON articles(COALESCE(published_at, saved_at))
+
 -- index idx_articles_feed_id
 CREATE INDEX idx_articles_feed_id ON articles(feed_id)
 

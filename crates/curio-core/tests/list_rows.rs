@@ -9,10 +9,11 @@
 use std::collections::BTreeMap;
 
 use curio_core::model::{
-    ArticleContent, ArticleFlag, ArticleId, ArticleState, FeedId, NewArticle, NewFeed,
-    ReadProgress, SNIPPET_MAX_CHARS,
+    ArticleContent, ArticleFlag, ArticleId, ArticleState, FeedId, ListedArticle, NewArticle,
+    NewFeed, ReadProgress, SNIPPET_MAX_CHARS,
 };
-use curio_core::storage::{ListArticles, SearchArticles, Storage};
+use curio_core::storage::{ListArticles, ListCursor, ListOrder, SearchArticles, Storage};
+use curio_types::Timestamp;
 use proptest::prelude::*;
 
 fn temp_storage() -> (tempfile::TempDir, Storage) {
@@ -237,34 +238,48 @@ fn keeps(want: Option<bool>, have: bool) -> bool {
     want.is_none_or(|want| want == have)
 }
 
-/// Pages a listing through `before` in pages of `limit`, as heads do.
+/// Pages a listing through its `after` cursor in pages of `limit`, as
+/// heads do — the cursor built from each page's last row.
 fn paged<T>(
     params: &ListArticles,
     limit: u32,
     mut page: impl FnMut(ListArticles) -> Vec<T>,
     id: impl Fn(&T) -> ArticleId,
-) -> Vec<ArticleId> {
+) -> Vec<ArticleId>
+where
+    for<'a> ListCursor: From<&'a T>,
+{
     let mut out = Vec::new();
-    let mut before = None;
+    let mut after = None;
     loop {
         let rows = page(ListArticles {
-            before,
+            after,
             limit,
             ..params.clone()
         });
-        let len = rows.len();
         out.extend(rows.iter().map(&id));
-        before = out.last().copied();
-        if len < limit as usize {
+        after = rows.last().map(ListCursor::from);
+        if rows.len() < limit as usize {
             return out;
         }
     }
 }
 
+/// `ids` (each with its publication-order date) sorted into `order`.
+fn in_order(mut ids: Vec<(ArticleId, Timestamp)>, order: ListOrder) -> Vec<ArticleId> {
+    match order {
+        ListOrder::Newest => ids.sort_by_key(|a| std::cmp::Reverse(a.0)),
+        ListOrder::Oldest => ids.sort_by_key(|a| a.0),
+        ListOrder::Published => ids.sort_by_key(|a| std::cmp::Reverse((a.1, a.0))),
+    }
+    ids.into_iter().map(|(id, _)| id).collect()
+}
+
 /// Every combination of the four state filters (each unset / true /
-/// false), across feeds and within one, paged through the keyset: the
-/// list rows, the full listing and a model of the filter semantics agree
-/// — including on the membership views that page through a partial index.
+/// false), across feeds and within one, in every order, paged through the
+/// keyset: the list rows, the full listing and a model of the filter and
+/// order semantics agree — including on the membership views that page
+/// through a partial index.
 #[test]
 fn list_rows_match_the_filter_semantics_under_every_state_filter() {
     let (_dir, storage) = temp_storage();
@@ -275,7 +290,14 @@ fn list_rows_match_the_filter_semantics_under_every_state_filter() {
     let batch: Vec<NewArticle> = (0..48)
         .map(|i| {
             let feed = if i % 3 == 0 { None } else { Some(feeds[i % 2]) };
-            article(feed, &format!("k{i}"), "body")
+            let mut article = article(feed, &format!("k{i}"), "body");
+            // Publication dates out of insertion order, with ties (and
+            // every fifth undated, standing at its save time).
+            if i % 5 != 0 {
+                let day = (i * 7) % 11 + 1;
+                article.published_at = Some(format!("2024-03-{day:02}T08:00:00Z").parse().unwrap());
+            }
+            article
         })
         .collect();
     storage.upsert_articles(batch).unwrap();
@@ -291,46 +313,56 @@ fn list_rows_match_the_filter_semantics_under_every_state_filter() {
         if index >= 4 {
             apply_state(&storage, *id, state);
         }
-        let feed = storage.get_article(*id).unwrap().unwrap().feed_id;
-        model.push((*id, feed, state));
+        let stored = storage.get_article(*id).unwrap().unwrap();
+        let dated = stored.published_at.unwrap_or(stored.saved_at);
+        model.push((*id, stored.feed_id, state, dated));
     }
 
     let choices = [None, Some(true), Some(false)];
-    for read in choices {
-        for starred in choices {
-            for read_later in choices {
-                for archived in choices {
-                    for feed_id in [None, Some(feeds[0])] {
-                        let params = ListArticles {
-                            feed_id,
-                            read,
-                            starred,
-                            read_later,
-                            archived,
-                            ..ListArticles::default()
-                        };
-                        let mut expected: Vec<ArticleId> = model
-                            .iter()
-                            .filter(|(_, feed, state)| {
-                                feed_id.is_none_or(|want| *feed == Some(want))
-                                    && keeps(read, state.read)
-                                    && keeps(starred, state.starred)
-                                    && keeps(read_later, state.read_later)
-                                    && keeps(archived, state.archived)
-                            })
-                            .map(|(id, _, _)| *id)
-                            .collect();
-                        expected.reverse();
-                        let rows = paged(
-                            &params,
-                            3,
-                            |p| storage.list_article_rows(p).unwrap(),
-                            |row| row.id,
-                        );
-                        let full =
-                            paged(&params, 3, |p| storage.list_articles(p).unwrap(), |a| a.id);
-                        assert_eq!(rows, expected, "rows under {params:?}");
-                        assert_eq!(full, expected, "full under {params:?}");
+    let orders = [ListOrder::Newest, ListOrder::Oldest, ListOrder::Published];
+    for order in orders {
+        for read in choices {
+            for starred in choices {
+                for read_later in choices {
+                    for archived in choices {
+                        for feed_id in [None, Some(feeds[0])] {
+                            let params = ListArticles {
+                                feed_id,
+                                order,
+                                read,
+                                starred,
+                                read_later,
+                                archived,
+                                ..ListArticles::default()
+                            };
+                            let kept = model
+                                .iter()
+                                .filter(|(_, feed, state, _)| {
+                                    feed_id.is_none_or(|want| *feed == Some(want))
+                                        && keeps(read, state.read)
+                                        && keeps(starred, state.starred)
+                                        && keeps(read_later, state.read_later)
+                                        && keeps(archived, state.archived)
+                                })
+                                .map(|(id, _, _, dated)| (*id, *dated))
+                                .collect();
+                            let expected = in_order(kept, order);
+                            let rows = paged(
+                                &params,
+                                3,
+                                |p| storage.list_article_rows(p).unwrap(),
+                                |row| row.id,
+                            );
+                            let full =
+                                paged(&params, 3, |p| storage.list_articles(p).unwrap(), |a| a.id);
+                            assert_eq!(rows, expected, "rows under {params:?}");
+                            assert_eq!(full, expected, "full under {params:?}");
+                            assert_eq!(
+                                storage.count_listed_articles(params.clone()).unwrap(),
+                                expected.len() as u64,
+                                "count under {params:?}"
+                            );
+                        }
                     }
                 }
             }
@@ -394,6 +426,140 @@ fn tag_and_folder_filters_compose_with_a_membership_view() {
     let got: Vec<ArticleId> = starred_tagged.iter().map(|r| r.id).collect();
     assert_eq!(got, [ids[2], ids[1]]);
     assert!(starred_tagged.iter().all(|r| r.tags == ["keep"]));
+}
+
+/// Stores one article published at `published` (`None` = undated) and
+/// returns its id.
+fn insert_dated(storage: &Storage, key: &str, published: Option<&str>) -> ArticleId {
+    let mut new = article(None, key, "body");
+    new.published_at = published.map(|at| at.parse().unwrap());
+    storage.upsert_articles(vec![new]).unwrap();
+    *all_ids(storage).last().unwrap()
+}
+
+fn published_page(storage: &Storage, after: Option<ListCursor>) -> Vec<ListedArticle> {
+    storage
+        .list_article_rows(ListArticles {
+            order: ListOrder::Published,
+            after,
+            limit: 2,
+            ..ListArticles::default()
+        })
+        .unwrap()
+}
+
+/// The published order puts a backfill at its posts' own dates, not on
+/// top, and pages stably: rows written, deleted or re-dated between pages
+/// never make a page repeat or skip a row that kept its place.
+#[test]
+fn published_order_pages_stably_while_the_library_changes() {
+    let (_dir, storage) = temp_storage();
+    let today = insert_dated(&storage, "today", Some("2025-06-02T09:00:00Z"));
+    let undated = insert_dated(&storage, "undated", None);
+    let tie_a = insert_dated(&storage, "tie-a", Some("2025-05-01T12:00:00Z"));
+    let tie_b = insert_dated(&storage, "tie-b", Some("2025-05-01T12:00:00Z"));
+    let mid = insert_dated(&storage, "mid", Some("2025-04-15T00:00:00Z"));
+    // A backfill — an OPML import's first refresh — arrives last.
+    let old = insert_dated(&storage, "old", Some("2019-05-05T05:05:05Z"));
+    let older = insert_dated(&storage, "older", Some("2018-01-01T00:00:00Z"));
+
+    let newest: Vec<ArticleId> = storage
+        .list_article_rows(ListArticles::default())
+        .unwrap()
+        .iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(newest[..2], [older, old], "insertion order puts it on top");
+
+    // Undated stands at its save time (now, the latest); a date tie falls
+    // back to the id, newest first; the backfill sinks to its own dates.
+    let expected = [undated, today, tie_b, tie_a, mid, old, older];
+    let mut walked = Vec::new();
+    let mut after = None;
+    loop {
+        let page = published_page(&storage, after);
+        walked.extend(page.iter().map(|row| row.id));
+        after = page.last().map(ListCursor::from);
+        if page.len() < 2 {
+            break;
+        }
+    }
+    assert_eq!(walked, expected);
+
+    // A bare-id cursor resumes at the same place while its row exists.
+    let first = published_page(&storage, None);
+    let carried = published_page(&storage, Some(ListCursor::from(&first[1])));
+    let by_id = published_page(&storage, Some(ListCursor::id(first[1].id)));
+    assert_eq!(carried, by_id);
+
+    // Now walk again, changing the library between pages.
+    let page1 = published_page(&storage, None);
+    assert_eq!(ids_of(&page1), [undated, today]);
+    let cursor = ListCursor::from(&page1[1]);
+    // A row newer than the cursor sits above the walk; a row older than
+    // it lands ahead of the walk, once; the cursor's own row goes away.
+    let fresh = insert_dated(&storage, "fresh", Some("2025-06-02T10:00:00Z"));
+    let late_backfill = insert_dated(&storage, "late", Some("2025-04-20T00:00:00Z"));
+    storage.delete_article(today).unwrap();
+    let page2 = published_page(&storage, Some(cursor));
+    assert_eq!(
+        ids_of(&page2),
+        [tie_b, tie_a],
+        "the cursor's date carries it"
+    );
+    let page3 = published_page(&storage, page2.last().map(ListCursor::from));
+    assert_eq!(ids_of(&page3), [late_backfill, mid]);
+    let page4 = published_page(&storage, page3.last().map(ListCursor::from));
+    assert_eq!(ids_of(&page4), [old, older]);
+    assert_eq!(
+        published_page(&storage, page4.last().map(ListCursor::from)),
+        []
+    );
+    assert!(!ids_of(&page2).contains(&fresh));
+
+    // The count of what remains after a cursor matches the walk.
+    assert_eq!(
+        storage
+            .count_listed_articles(ListArticles {
+                order: ListOrder::Published,
+                after: Some(cursor),
+                ..ListArticles::default()
+            })
+            .unwrap(),
+        6
+    );
+}
+
+fn ids_of(rows: &[ListedArticle]) -> Vec<ArticleId> {
+    rows.iter().map(|row| row.id).collect()
+}
+
+/// The oldest-first order is the newest-first walk reversed, cursor and
+/// all — the order a read-later queue is read in.
+#[test]
+fn oldest_order_pages_front_to_back() {
+    let (_dir, storage) = temp_storage();
+    let ids: Vec<ArticleId> = (0..5)
+        .map(|i| insert_dated(&storage, &format!("q{i}"), None))
+        .collect();
+    let params = ListArticles {
+        order: ListOrder::Oldest,
+        ..ListArticles::default()
+    };
+    let walked = paged(
+        &params,
+        2,
+        |p| storage.list_article_rows(p).unwrap(),
+        |r| r.id,
+    );
+    assert_eq!(walked, ids);
+    let rest = storage
+        .list_articles(ListArticles {
+            after: Some(ListCursor::id(ids[2])),
+            ..params
+        })
+        .unwrap();
+    assert_eq!(rest.iter().map(|a| a.id).collect::<Vec<_>>(), ids[3..]);
 }
 
 #[test]

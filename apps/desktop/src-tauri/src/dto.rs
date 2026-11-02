@@ -22,7 +22,7 @@ use curio_core::model::{
     FetchStatus, ListedArticle,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
-use curio_core::storage::{ArticleFilter, ListArticles, SearchArticles};
+use curio_core::storage::{ArticleFilter, ListArticles, ListCursor, ListOrder, SearchArticles};
 use curio_core::{
     ImportKind, ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, RejectReason,
     Rejected, SaveOutcome,
@@ -548,7 +548,10 @@ impl From<ListArticlesDto> for ListArticles {
     fn from(params: ListArticlesDto) -> Self {
         Self {
             feed_id: params.feed_id.map(FeedId),
-            before: params.before.map(curio_core::model::ArticleId),
+            order: ListOrder::Newest,
+            after: params
+                .before
+                .map(|id| ListCursor::id(curio_core::model::ArticleId(id))),
             limit: params.limit,
             read: params.read,
             starred: params.starred,
@@ -1163,7 +1166,11 @@ mod tests {
             feed_tag: Some("Tech/Databases".into()),
         });
         assert_eq!(params.feed_id, Some(FeedId(7)));
-        assert_eq!(params.before, Some(curio_core::model::ArticleId(100)));
+        assert_eq!(params.order, ListOrder::Newest);
+        assert_eq!(
+            params.after,
+            Some(ListCursor::id(curio_core::model::ArticleId(100)))
+        );
         assert_eq!(params.limit, 25);
         assert_eq!(params.read, Some(false));
         assert_eq!(params.tag.as_deref(), Some("rust"));

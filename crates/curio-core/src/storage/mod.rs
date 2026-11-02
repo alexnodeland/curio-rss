@@ -30,8 +30,8 @@ pub use netfs::{
 pub use open::OpenError;
 pub(crate) use repo::SettingsTx;
 pub use repo::{
-    ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, MaintenanceCounts, MaintenancePlan,
-    PendingIntent, SearchArticles, UpsertOutcome,
+    ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, ListCursor, ListOrder,
+    MaintenanceCounts, MaintenancePlan, PendingIntent, SearchArticles, UpsertOutcome,
 };
 pub(crate) use writer::panic_message;
 

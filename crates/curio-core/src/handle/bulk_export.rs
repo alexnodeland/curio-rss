@@ -24,7 +24,7 @@ use curio_types::{CurioId, Destination, DestinationName, EventPayload, Timestamp
 
 use crate::export::{self, ExportBatch, ExportDisposition, StageError};
 use crate::model::{Article, ArticleId, Feed, FeedId};
-use crate::storage::ListArticles;
+use crate::storage::{ListArticles, ListCursor};
 
 use super::destinations::{load_exported, load_roots};
 use super::{CoreError, CoreHandle};
@@ -164,7 +164,8 @@ impl CoreHandle {
     /// [`Self::save_to_destination`] (frontmatter, managed region,
     /// manifest idempotency, `article.saved`/`article.updated` events), so
     /// re-running a bulk export only rewrites what actually changed.
-    /// `filter.before`/`limit` are pagination internals and are ignored.
+    /// `filter.after`/`limit` are pagination internals and are ignored;
+    /// `filter.order` is the order the notes are written in.
     ///
     /// The notes go in batches of [`BULK_SAVE_BATCH`] (see the module
     /// docs); `on_progress` is called after each batch commits. An article
@@ -200,7 +201,7 @@ impl CoreHandle {
             root,
         };
         let mut page_filter = filter.clone();
-        page_filter.before = None;
+        page_filter.after = None;
         page_filter.limit = BULK_SAVE_BATCH;
         let total = self.storage.count_listed_articles(page_filter.clone())?;
         let mut feeds = HashMap::new();
@@ -226,7 +227,7 @@ impl CoreHandle {
                 outcome.cancelled = true;
                 break;
             }
-            page_filter.before = Some(last.id);
+            page_filter.after = Some(ListCursor::from(last));
             let full = page.len() == BULK_SAVE_BATCH as usize;
             self.export_batch(&dest, page, &mut feeds, cancel, &mut outcome)?;
             if !marked && outcome.total() > 0 {

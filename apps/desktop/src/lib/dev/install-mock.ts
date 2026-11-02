@@ -9,6 +9,7 @@
 import type {
     ArticleStateDto,
     CommandError,
+    FetchErrorKindDto,
     StartupFailureClass,
     StartupFailureDto,
 } from '$lib/bindings';
@@ -90,8 +91,37 @@ export async function installDevMock(): Promise<void> {
     const { mockIPC } = await import('@tauri-apps/api/mocks');
     const { previewFeeds, previewArticles, previewDestinations } = await import('./preview-data');
 
-    const feeds = structuredClone(previewFeeds);
-    const articles = structuredClone(previewArticles);
+    // Preview scenarios for the zero/error states: `?library=empty` is the
+    // first run (no feeds, nothing saved); `?feedError=<kind>` adds a feed
+    // whose last fetch failed with that class; `?fail=<command>` (repeatable)
+    // fails that command's first call, so its error state and Retry show.
+    const scenario = new URLSearchParams(window.location.search);
+    const emptyLibrary = scenario.get('library') === 'empty';
+    const feeds = structuredClone(previewFeeds).filter(() => !emptyLibrary);
+    const articles = structuredClone(previewArticles).filter(() => !emptyLibrary);
+    const feedError = scenario.get('feedError') as FetchErrorKindDto | null;
+    if (feedError !== null && feeds.length > 0) {
+        // An extra, article-less feed whose fetches fail: its empty list
+        // shows the failing-feed state.
+        feeds.push({
+            ...structuredClone(feeds[0]),
+            id: Math.max(...feeds.map((feed) => feed.id)) + 1,
+            url: 'https://broken.example.org/feed.xml',
+            title: 'Broken feed',
+            tags: [],
+            last_error: `dev: ${feedError}`,
+            last_error_kind: feedError,
+            consecutive_failures: 3,
+        });
+    }
+    const failOnce = new Set(scenario.getAll('fail'));
+    const devFailure: CommandError = {
+        kind: 'user',
+        code: 'IO',
+        params: {},
+        message: 'The library could not be read (dev preview failure).',
+        recoverable: true,
+    };
     const destinations = structuredClone(previewDestinations);
     const settings = new Map<string, string>([
         ['ui.theme', 'dark'],
@@ -224,6 +254,9 @@ tokens:
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a flat 1:1 IPC dispatch table for the dev mock; splitting it would obscure the mapping
         (cmd, raw) => {
             const args = (raw ?? {}) as Record<string, unknown>;
+            if (failOnce.delete(cmd)) {
+                return Promise.reject(devFailure);
+            }
             switch (cmd) {
                 case 'list_feeds':
                     return structuredClone(feeds);

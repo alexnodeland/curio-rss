@@ -41,6 +41,7 @@ import {
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
@@ -57,12 +58,28 @@ import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
 import { untrack } from 'svelte';
 
+type HintPart = { readonly ids: readonly ShortcutId[]; readonly label: MessageKey };
+
 /** The empty-state hint, as registry actions: each part prints its bound keys. */
-const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: MessageKey }[] = [
+const HINT: readonly HintPart[] = [
     { ids: ['nav.previousArticle', 'nav.nextArticle'], label: 'reader.hint.move' },
     { ids: ['nav.focusReader'], label: 'reader.hint.read' },
     { ids: ['help.toggle'], label: 'reader.hint.help' },
 ];
+
+/** Focus mode hides the toolbar's way out along with the article, so the
+ *  empty reader names the key that leaves it. */
+const FOCUS_HINT: readonly HintPart[] = [
+    ...HINT.slice(0, 2),
+    { ids: ['view.toggleFocusMode'], label: 'reader.hint.exitFocus' },
+    ...HINT.slice(2),
+];
+
+const hintParts = $derived(layoutStore.focusMode ? FOCUS_HINT : HINT);
+
+const focusModeLabel = $derived(
+    layoutStore.focusMode ? t('reader.action.exitFocusMode') : t('reader.action.focusMode'),
+);
 
 /**
  * What the header needs — carried by both the full `ArticleDto` and the list
@@ -333,7 +350,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     {#if selectedId === null}
         <EmptyState icon="sparkle" title={t('reader.empty')}>
             {#snippet hint()}
-                {#each HINT as part, index (part.label)}
+                {#each hintParts as part, index (part.label)}
                     {#if index > 0}
                         <span class="hint-sep" aria-hidden="true">·</span>
                     {/if}
@@ -373,6 +390,17 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
             <!-- Mounted for the whole selection — including while the body is
                  still loading — so j/k never unmounts it or resets its state. -->
             <div class="reader-toolbar" role="toolbar" aria-label={t('reader.toolbar')}>
+                <button
+                    class="tool"
+                    class:on={layoutStore.focusMode}
+                    aria-pressed={layoutStore.focusMode}
+                    aria-label={focusModeLabel}
+                    use:tooltip={{ text: focusModeLabel, kbd: shortcutKbd('view.toggleFocusMode') }}
+                    onclick={() => void layoutStore.toggleFocusMode()}
+                >
+                    <Icon name={layoutStore.focusMode ? 'focus-exit' : 'focus'} />
+                </button>
+                <span class="toolbar-divider" aria-hidden="true"></span>
                 <button
                     class="tool"
                     class:on={flags()?.read === true}
@@ -675,6 +703,15 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
     .toolbar-spring {
         flex: 1 1 auto;
+    }
+
+    /* Sets the layout toggle apart from the article's own actions. */
+    .toolbar-divider {
+        flex: 0 0 1px;
+        align-self: center;
+        height: 18px;
+        margin: 0 var(--space-1);
+        background: var(--hairline);
     }
 
     .tool {

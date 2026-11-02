@@ -122,12 +122,19 @@ command-key chords).
 | <kbd>o</kbd> | Open in browser | | <kbd>p</kbd> | Save to notes |
 | <kbd>Space</kbd> / <kbd>⇧ Space</kbd> | Page the article down / up — <kbd>Space</kbd> at the end opens the next unread | | <kbd>A</kbd> | Mark all read in the current view |
 | <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
+| <kbd>&#92;</kbd> | Show / hide the sidebar | | <kbd>f</kbd> | Focus mode — the article alone |
 
 The article list is a standard listbox: <kbd>↑</kbd>/<kbd>↓</kbd> move like
 <kbd>j</kbd>/<kbd>k</kbd>, <kbd>Home</kbd>/<kbd>End</kbd>/<kbd>Page Up</kbd>/<kbd>Page Down</kbd>
 jump, and <kbd>Enter</kbd> or <kbd>→</kbd> moves focus into the article so the
 arrow and page keys scroll it; <kbd>←</kbd> or <kbd>Esc</kbd> returns to the
 list. Reorder a feed inside its folder with <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
+
+The sidebar and focus mode are remembered across launches (the View menu has
+them as <kbd>⌥⌘S</kbd> / <kbd>⌥⌘F</kbd>, and each pane has a toolbar button). In a
+window 1000 px wide or less the sidebar folds away on its own so the list and
+the article keep their room; <kbd>&#92;</kbd> peeks it back open until the
+window is resized.
 
 A feed entry published without a link of its own has no page to open, so
 <kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it

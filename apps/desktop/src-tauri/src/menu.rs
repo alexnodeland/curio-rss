@@ -80,7 +80,20 @@ pub fn build_for(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<Wry>> {
     let refresh = MenuItemBuilder::with_id("app.refreshAll", text.refresh_all)
         .accelerator("CmdOrCtrl+R")
         .build(app)?;
-    let view = SubmenuBuilder::new(app, text.view).item(&refresh).build()?;
+    // The layout toggles: in the window they are the registry's bare `\` and
+    // `f`; the menu carries modifier chords that work from anywhere.
+    let toggle_sidebar = MenuItemBuilder::with_id("view.toggleSidebar", text.toggle_sidebar)
+        .accelerator("CmdOrCtrl+Alt+S")
+        .build(app)?;
+    let focus_mode = MenuItemBuilder::with_id("view.toggleFocusMode", text.focus_mode)
+        .accelerator("CmdOrCtrl+Alt+F")
+        .build(app)?;
+    let view = SubmenuBuilder::new(app, text.view)
+        .item(&refresh)
+        .separator()
+        .item(&toggle_sidebar)
+        .item(&focus_mode)
+        .build()?;
 
     let all = MenuItemBuilder::with_id("view.all", text.all_articles)
         .accelerator("CmdOrCtrl+1")

@@ -111,6 +111,7 @@ export const en = {
     'reader.hint.move': 'to move',
     'reader.hint.read': 'to read',
     'reader.hint.help': 'for shortcuts',
+    'reader.hint.exitFocus': 'to leave focus mode',
     'reader.imagesOff': 'Images are off in this article.',
     'reader.imagesOff.enable': 'Turn on',
     'reader.tableScroll': 'Scrollable table',
@@ -130,6 +131,8 @@ export const en = {
     'reader.action.loadFull': 'Load full article',
     'reader.action.promote': 'Save to notes',
     'reader.action.typography': 'Typography',
+    'reader.action.focusMode': 'Focus mode',
+    'reader.action.exitFocusMode': 'Exit focus mode',
     'reader.meta.words': '{count, plural, one {# word} other {# words}}',
     'article.date.firstSeen': 'First seen {date}',
     'article.date.firstSeenHint': 'The feed gave no publication date',
@@ -499,6 +502,8 @@ export const en = {
     'connectivity.offline.hint': 'No network — background refresh is paused',
 
     'pane.sidebar.resize': 'Resize sidebar',
+    'pane.sidebar.show': 'Show sidebar',
+    'pane.sidebar.hide': 'Hide sidebar',
     'pane.list.resize': 'Resize article list',
 
     'toast.dismiss': 'Dismiss',
@@ -539,6 +544,8 @@ export const en = {
     'shortcut.pageUp': 'Page up',
     'shortcut.toggleArchived': 'Archive / unarchive article',
     'shortcut.markAllRead': 'Mark all read in the current view',
+    'shortcut.toggleSidebar': 'Show / hide the sidebar',
+    'shortcut.toggleFocusMode': 'Focus mode: the article alone',
     'key.space': 'Space',
 
     'recovery.title.corrupt': 'Curio can’t read its database',

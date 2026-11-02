@@ -43,6 +43,8 @@ export type ShortcutId =
     | 'view.readLater'
     | 'view.archived'
     | 'view.feeds'
+    | 'view.toggleSidebar'
+    | 'view.toggleFocusMode'
     | 'app.addFeed'
     | 'app.settings'
     | 'help.toggle';
@@ -177,6 +179,18 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         category: 'views',
     },
     { id: 'view.feeds', keys: ['g', 'f'], description: 'shortcut.viewFeeds', category: 'views' },
+    {
+        id: 'view.toggleSidebar',
+        keys: ['\\'],
+        description: 'shortcut.toggleSidebar',
+        category: 'views',
+    },
+    {
+        id: 'view.toggleFocusMode',
+        keys: ['f'],
+        description: 'shortcut.toggleFocusMode',
+        category: 'views',
+    },
     { id: 'app.addFeed', keys: ['a'], description: 'shortcut.addFeed', category: 'app' },
     { id: 'app.settings', keys: [','], description: 'shortcut.settings', category: 'app' },
     { id: 'help.toggle', keys: ['?'], description: 'shortcut.help', category: 'app' },
@@ -309,6 +323,30 @@ const PANE_KEYS: Record<PaneScope, ReadonlyMap<string, ShortcutId>> = {
  */
 export function paneShortcut(scope: PaneScope, key: string): ShortcutId | null {
     return PANE_KEYS[scope].get(key) ?? null;
+}
+
+/**
+ * The layout toggles: they change the frame, not a pane's content, so they
+ * stay live while the sidebar tree owns the keyboard (where every other
+ * global key is swallowed) — `\` can hide the very sidebar it is pressed in.
+ */
+const FRAME_SHORTCUTS: ReadonlySet<ShortcutId> = new Set<ShortcutId>([
+    'view.toggleSidebar',
+    'view.toggleFocusMode',
+]);
+
+/**
+ * Resolves a single key (an {@link eventKeyName} value) to a layout toggle,
+ * or `null` for any other key.
+ */
+export function frameShortcut(key: string): ShortcutId | null {
+    const shortcut = SHORTCUTS.find(
+        (candidate) =>
+            FRAME_SHORTCUTS.has(candidate.id) &&
+            candidate.keys.length === 1 &&
+            candidate.keys[0] === key,
+    );
+    return shortcut?.id ?? null;
 }
 
 /**

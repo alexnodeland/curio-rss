@@ -186,10 +186,8 @@ export const en = {
     'search.loading': 'Searching…',
     'search.empty': 'No matches',
     'search.results': '{count, plural, one {# result} other {# results}}',
-    'search.scope.in': 'In {scope}',
+    'search.scope.label': 'Search in',
     'search.scope.everywhere': 'Everywhere',
-    'search.scope.widen': 'Search everywhere',
-    'search.scope.only': 'Only {scope}',
 
     'destinations.title': 'Destinations',
     'destinations.open': 'Destinations',

@@ -254,7 +254,7 @@ describe('SearchResults', () => {
         expect(getByText('No matches')).toBeTruthy();
     });
 
-    it('names the scope and widens it with the everywhere toggle', async () => {
+    it('names the scope and switches to everywhere', async () => {
         harness = installIpcHarness({
             search_articles: [articleSummaryFixture({ id: 7 }), articleSummaryFixture({ id: 8 })],
             get_article_state: articleStateFixture(),
@@ -267,19 +267,24 @@ describe('SearchResults', () => {
         await flushIpc();
 
         expect(getByText('2 results')).toBeTruthy();
-        expect(getByText('In Lobsters')).toBeTruthy();
-        const toggle = getByRole('button', { name: 'Search everywhere' });
-        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+        expect(getByRole('group', { name: 'Search in' })).toBeTruthy();
+        const here = getByRole('button', { name: 'Lobsters' });
+        const everywhere = getByRole('button', { name: 'Everywhere' });
+        expect(here.getAttribute('aria-pressed')).toBe('true');
+        expect(everywhere.getAttribute('aria-pressed')).toBe('false');
 
-        await fireEvent.click(toggle);
+        await fireEvent.click(everywhere);
         await flushIpc();
         expect(searchStore.everywhere).toBe(true);
-        expect(getByText('Everywhere')).toBeTruthy();
-        expect(getByRole('button', { name: 'Only Lobsters' }).getAttribute('aria-pressed')).toBe(
-            'true',
-        );
+        expect(here.getAttribute('aria-pressed')).toBe('false');
+        expect(everywhere.getAttribute('aria-pressed')).toBe('true');
         const calls = harness.callsFor('search_articles') as { params: { feed_id: unknown } }[];
         expect(calls.at(-1)?.params.feed_id).toBeNull();
+
+        await fireEvent.click(here);
+        await flushIpc();
+        expect(searchStore.everywhere).toBe(false);
+        expect(harness.callsFor('search_articles')).toHaveLength(3);
     });
 
     it('names a built-in view when no feed or folder is selected', async () => {
@@ -287,9 +292,26 @@ describe('SearchResults', () => {
         articlesStore.filters = { ...ALL_ARTICLES, starred: true };
         searchStore.setQuery('x', 0);
         await flushIpc();
-        const { getByText } = render(SearchResults);
+        const { getByRole, queryByText } = render(SearchResults);
         await flushIpc();
-        expect(getByText('In Starred')).toBeTruthy();
+        expect(getByRole('button', { name: 'Starred' })).toBeTruthy();
+        expect(queryByText('0 results')).toBeNull(); // the empty state says it
+    });
+
+    it('names a folder or tag scope', async () => {
+        harness = installIpcHarness({ search_articles: [], list_feeds: [] });
+        articlesStore.filters = { ...ALL_ARTICLES, feedTag: 'Tech/Databases' };
+        searchStore.setQuery('x', 0);
+        await flushIpc();
+        const { getByRole, unmount } = render(SearchResults);
+        await flushIpc();
+        expect(getByRole('button', { name: 'Tech/Databases' })).toBeTruthy();
+        unmount();
+
+        articlesStore.filters = { ...ALL_ARTICLES, tag: 'later' };
+        const again = render(SearchResults);
+        await flushIpc();
+        expect(again.getByRole('button', { name: '#later' })).toBeTruthy();
     });
 
     it('does not flash "No matches" while the query is still pending', () => {

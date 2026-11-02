@@ -182,10 +182,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'search.loading': 'Recherche…',
     'search.empty': 'Aucun résultat',
     'search.results': '{count, plural, one {# résultat} other {# résultats}}',
-    'search.scope.in': 'Dans {scope}',
+    'search.scope.label': 'Rechercher dans',
     'search.scope.everywhere': 'Partout',
-    'search.scope.widen': 'Rechercher partout',
-    'search.scope.only': 'Uniquement {scope}',
     'destinations.title': 'Destinations',
     'destinations.open': 'Destinations',
     'destinations.empty':

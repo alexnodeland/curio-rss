@@ -1,7 +1,7 @@
 <script lang="ts">
 /**
- * The middle pane while a search is active: a scope bar (hit count, where the
- * search runs, and the "search everywhere" toggle) over the FTS result window
+ * The middle pane while a search is active: a scope bar (hit count, and a
+ * switch between the current view and everywhere) over the FTS result window
  * (a fixed, backend-ranked list — no keyset paging) through the same
  * virtualizer and row as the filter list. Selection reads `activeItems`,
  * which is the search results during a search, so j/k and the reader work
@@ -50,6 +50,7 @@ function viewName(filters: ArticleFilters): string {
     return t('view.all');
 }
 
+/** The view the "this view" half of the scope switch names. */
 const scopeName = $derived(viewName(articlesStore.filters));
 
 /** The listbox's active option: the selected result, when one is selected. */
@@ -114,27 +115,26 @@ function openSelectedMenu(): void {
 
 <div class="search-results">
     <div class="scope-bar">
-        <span class="scope-summary truncate">
-            {#if searchStore.settled && searchStore.error === null}
-                <span class="scope-count">{t('search.results', { count: searchStore.results.length })}</span>
-                <span class="scope-sep" aria-hidden="true">·</span>
+        <span class="scope-count">
+            {#if searchStore.settled && searchStore.error === null && searchStore.results.length > 0}
+                {t('search.results', { count: searchStore.results.length })}
             {/if}
-            <span class="scope-where">
-                {searchStore.everywhere
-                    ? t('search.scope.everywhere')
-                    : t('search.scope.in', { scope: scopeName })}
-            </span>
         </span>
-        <button
-            class="scope-toggle truncate"
-            type="button"
-            aria-pressed={searchStore.everywhere}
-            onclick={() => searchStore.setEverywhere(!searchStore.everywhere)}
-        >
-            {searchStore.everywhere
-                ? t('search.scope.only', { scope: scopeName })
-                : t('search.scope.widen')}
-        </button>
+        <div class="scope-switch" role="group" aria-label={t('search.scope.label')}>
+            <button
+                class="scope-option truncate"
+                type="button"
+                aria-pressed={!searchStore.everywhere}
+                onclick={() => searchStore.setEverywhere(false)}>{scopeName}</button
+            >
+            <button
+                class="scope-option"
+                type="button"
+                aria-pressed={searchStore.everywhere}
+                onclick={() => searchStore.setEverywhere(true)}
+                >{t('search.scope.everywhere')}</button
+            >
+        </div>
     </div>
     {#if searchStore.error !== null}
         <p class="status error" role="alert">{resultsError}</p>
@@ -186,45 +186,59 @@ function openSelectedMenu(): void {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--space-3);
-        min-height: 32px;
-        padding: var(--space-1) var(--space-4);
+        gap: var(--space-2);
+        min-height: 34px;
+        padding: var(--space-1) var(--space-3) var(--space-1) var(--space-4);
         border-bottom: 1px solid var(--hairline);
         background: var(--surface-list);
         font-size: var(--text-xs);
-        color: var(--fg-muted);
-    }
-
-    .scope-summary {
-        min-width: 0;
     }
 
     .scope-count {
-        color: var(--fg);
+        flex: 0 0 auto;
+        color: var(--fg-muted);
         font-weight: 500;
         font-variant-numeric: tabular-nums;
     }
 
-    .scope-sep {
-        margin: 0 var(--space-1);
-        color: var(--fg-subtle);
+    /* A two-way segmented switch: the current view, or the whole library. */
+    .scope-switch {
+        flex: 0 1 auto;
+        display: flex;
+        min-width: 0;
+        padding: 2px;
+        gap: 2px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-inset);
+        border: 1px solid var(--hairline);
     }
 
-    .scope-toggle {
-        flex: 0 1 auto;
-        min-width: 0;
-        max-width: 50%;
-        padding: 2px var(--space-2);
-        border-radius: var(--radius-sm);
+    .scope-option {
+        flex: 0 0 auto;
+        padding: 1px var(--space-2);
+        border-radius: calc(var(--radius-sm) - 2px);
         background: transparent;
-        color: var(--accent);
+        color: var(--fg-muted);
         font-size: var(--text-xs);
         font-weight: 500;
-        transition: background var(--dur-fast) var(--ease);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
     }
 
-    .scope-toggle:hover {
-        background: var(--bg-hover);
+    .scope-option.truncate {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 12rem;
+    }
+
+    .scope-option:hover {
+        color: var(--fg);
+    }
+
+    .scope-option[aria-pressed='true'] {
+        background: var(--accent-muted);
+        color: var(--accent);
     }
 
     .status {

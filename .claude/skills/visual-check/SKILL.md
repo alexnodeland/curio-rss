@@ -8,7 +8,11 @@ description: Visually validate a desktop UI change — run the Svelte frontend i
 The frontend runs without Tauri: in a plain browser, `+layout.ts` installs
 `src/lib/dev/install-mock.ts`, a mock IPC backed by `src/lib/dev/preview-data.ts`
 (feeds, folders, articles of every view mode). That makes the whole UI
-screenshot-able headlessly.
+screenshot-able headlessly. Its mutating handlers change the in-memory data
+and emit the `FeedsChanged` / `ArticlesChanged` events the real commands emit,
+so badges, lists and the sidebar react as in the app; a new mutating handler
+must do the same (`src/tests/dev-mock.test.ts` pins it), or the screenshots
+show a UI that never reacts.
 
 ## Loop
 

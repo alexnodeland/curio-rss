@@ -51,52 +51,6 @@ const ELEMENTS: &[&str] = &[
     "x-custom",
 ];
 
-/// [`ELEMENTS`] minus `pre` and `code`, for the export (markdown) suite
-/// only: htmd currently writes escaped text inside a `<pre>`, or a
-/// `<code>` that spans blocks, back out as *live* raw HTML (issue #245).
-/// Re-merge with [`ELEMENTS`] when that is fixed.
-const EXPORT_ELEMENTS: &[&str] = &[
-    "p",
-    "div",
-    "span",
-    "a",
-    "img",
-    "b",
-    "em",
-    "strong",
-    "ul",
-    "li",
-    "table",
-    "td",
-    "h1",
-    "h2",
-    "blockquote",
-    "br",
-    "article",
-    "nav",
-    "aside",
-    "footer",
-    "script",
-    "style",
-    "iframe",
-    "svg",
-    "math",
-    "form",
-    "input",
-    "button",
-    "object",
-    "embed",
-    "base",
-    "meta",
-    "link",
-    "noscript",
-    "template",
-    "video",
-    "audio",
-    "frame",
-    "x-custom",
-];
-
 /// URL-attribute values, weighted toward the ones the scheme allowlist
 /// exists for — including the case/whitespace/entity disguises.
 const URLS: &[&str] = &[
@@ -208,11 +162,6 @@ fn attribute() -> impl Strategy<Value = String> {
 /// attributes from [`URLS`] / [`ATTRS`], text, and raw tag soup.
 pub fn hostile_html() -> impl Strategy<Value = String> {
     html_from(ELEMENTS)
-}
-
-/// [`hostile_html`] without the code elements issue #245 is about.
-pub fn exportable_html() -> impl Strategy<Value = String> {
-    html_from(EXPORT_ELEMENTS)
 }
 
 fn html_from(elements: &'static [&'static str]) -> impl Strategy<Value = String> {

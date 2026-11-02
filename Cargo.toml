@@ -131,6 +131,9 @@ insta = { version = "1", features = ["glob"] }
 jsonschema = { version = "0.33", default-features = false }
 predicates = "3"
 proptest = "1"
+# The markdown inertness audit (curio-core tests/common/inert.rs) asks a
+# real CommonMark parser what is code; the parser alone, no HTML renderer.
+pulldown-cmark = { version = "0.13", default-features = false }
 # A throwaway self-signed certificate, minted at test time (no key material
 # in the repo), for the hermetic TLS-failure fetch test. ring, not aws-lc:
 # ring is the provider already in the tree via reqwest's rustls.

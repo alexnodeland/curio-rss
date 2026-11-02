@@ -1,11 +1,10 @@
 //! Arbitrary HTML → both content pipelines (feed fragment and full page)
 //! and the export converter. Whatever is stored must pass the same
-//! structural inertness audit the integration suites use.
+//! structural inertness audit the integration suites use, and so must the
+//! markdown it exports.
 
 #![no_main]
 
-// The markdown half of the audit is not run here yet (#245).
-#[allow(dead_code)]
 #[path = "../../crates/curio-core/tests/common/inert.rs"]
 mod inert;
 
@@ -21,11 +20,20 @@ fuzz_target!(|data: &[u8]| {
         panic!("feed-fragment pipeline stored live content: {violation}");
     }
     let _ = plain_text(&fragment.html);
-    let _ = to_markdown(&fragment.html);
+    audit_export(&fragment.html, "feed-fragment");
     if let Ok(page) = process_page(&html, BASE) {
         if let Err(violation) = inert::audit_html(&page.content.html) {
             panic!("full-page pipeline stored live content: {violation}");
         }
-        let _ = to_markdown(&page.content.html);
+        audit_export(&page.content.html, "full-page");
     }
 });
+
+/// Stored HTML exports to markdown that is inert too.
+fn audit_export(stored: &str, pipeline: &str) {
+    if let Ok(markdown) = to_markdown(stored)
+        && let Err(violation) = inert::audit_markdown(&markdown)
+    {
+        panic!("{pipeline} pipeline exported live markdown: {violation}");
+    }
+}

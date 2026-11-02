@@ -577,6 +577,47 @@ async fn bulk_save_exports_the_library_idempotently() {
     );
     assert_eq!(again["created"], 0);
     assert_eq!(again["unchanged"], 3);
+    assert_eq!(again["failed"], 0);
+
+    // A note that no longer parses is skipped, not the end of the run: the
+    // others are still accounted for, the summary names it, and the exit
+    // status tells a script that something failed.
+    let note = std::fs::read_dir(vault.path().join("curio"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::write(&note, "frontmatter and markers gone\n").unwrap();
+    let partial = stdout_json(
+        &curio(profile.path())
+            .args(["save", "--all", "--dest", "vault", "--json"])
+            .assert()
+            .code(1),
+    );
+    assert_eq!(
+        (partial["unchanged"].as_u64(), partial["failed"].as_u64()),
+        (Some(2), Some(1))
+    );
+    let failure = &partial["failures"][0];
+    assert!(failure["title"].is_string(), "{failure}");
+    assert!(failure["curio_id"].is_string(), "{failure}");
+    let note_name = note.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(
+        failure["error"].as_str().unwrap().contains(&note_name),
+        "{failure}"
+    );
+    curio(profile.path())
+        .args(["save", "--all", "--dest", "vault"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("2 unchanged, 1 failed"))
+        .stderr(predicate::str::contains("could not export"));
+    std::fs::remove_file(&note).unwrap();
+    curio(profile.path())
+        .args(["save", "--all", "--dest", "vault"])
+        .assert()
+        .success();
 
     // A filtered bulk export walks only the matching set.
     let starred = stdout_json(

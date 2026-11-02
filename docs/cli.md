@@ -616,7 +616,13 @@ upkeep, the deletions stand and the run warns (`upkeep_skipped` in
 `--json`); the next run catches up. With `--purge-orphans` it also
 deletes the articles of feeds you unsubscribed from (`curio feed rm`
 keeps them), with the same protections. A scheduled `curio maintenance`
-(cron, launchd) once a day is plenty.
+(cron, launchd) once a day is plenty. The desktop app runs the same pass
+by itself — shortly after launch when a day has passed since the last
+one, and once a day while it stays open — and edits the same policy under
+**Settings → Data → Article retention**; its doctor (**Settings →
+Advanced**) has **Run maintenance**, **Delete articles of removed feeds…**
+(the `--purge-orphans` pass) and **Rebuild search index** (`curio db
+rebuild-fts`). The app's routine pass never purges orphans.
 
 ## Upgrades and backups
 

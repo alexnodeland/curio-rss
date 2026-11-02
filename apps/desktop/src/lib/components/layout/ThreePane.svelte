@@ -2,7 +2,8 @@
 /**
  * The reader's frame: sidebar | article list | reader, the first two
  * resizable with widths owned by `layoutStore` and persisted to the settings
- * table on resize end. The reader takes whatever remains.
+ * table on resize end. The reader takes whatever remains. A `welcome`
+ * snippet (first run) takes the list and reader's place as one pane.
  *
  * The two left panes can leave the screen — the sidebar collapsed (by hand,
  * or on its own in a narrow window), both in focus mode. A hidden pane stays
@@ -25,10 +26,13 @@ let {
     sidebar,
     list,
     reader,
+    welcome,
 }: {
     sidebar: Snippet;
     list: Snippet;
     reader: Snippet;
+    /** When set, rendered across the list + reader area instead of them. */
+    welcome?: Snippet;
 } = $props();
 
 // Under the macOS overlay title bar the sidebar header also holds the
@@ -90,28 +94,34 @@ $effect(() => {
             {@render sidebar()}
         </ResizablePane>
     </div>
-    <div
-        class="pane-slot"
-        class:parked={!layoutStore.listVisible}
-        data-pane="list"
-        inert={!layoutStore.listVisible}
-        bind:clientWidth={listSlotWidth}
-        style:margin-inline-start={parked(layoutStore.listVisible, listSlotWidth)}
-    >
-        <ResizablePane
-            bind:width={layoutStore.listWidth}
-            min={PANE_LIMITS.list.min}
-            max={PANE_LIMITS.list.max}
-            label={t('pane.list.resize')}
-            variant="list"
-            onresizeend={persistListWidth}
+    {#if welcome}
+        <section class="reader-slot">
+            {@render welcome()}
+        </section>
+    {:else}
+        <div
+            class="pane-slot"
+            class:parked={!layoutStore.listVisible}
+            data-pane="list"
+            inert={!layoutStore.listVisible}
+            bind:clientWidth={listSlotWidth}
+            style:margin-inline-start={parked(layoutStore.listVisible, listSlotWidth)}
         >
-            {@render list()}
-        </ResizablePane>
-    </div>
-    <section class="reader-slot">
-        {@render reader()}
-    </section>
+            <ResizablePane
+                bind:width={layoutStore.listWidth}
+                min={PANE_LIMITS.list.min}
+                max={PANE_LIMITS.list.max}
+                label={t('pane.list.resize')}
+                variant="list"
+                onresizeend={persistListWidth}
+            >
+                {@render list()}
+            </ResizablePane>
+        </div>
+        <section class="reader-slot">
+            {@render reader()}
+        </section>
+    {/if}
 </div>
 
 <style>

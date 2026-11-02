@@ -42,6 +42,34 @@ export const HN_PRESETS: readonly HnPreset[] = [
 ] as const;
 
 /**
+ * The welcome view's starter sources: each opens the add-feed modal with a
+ * pattern to finish (`r/` + a subreddit) or, for Hacker News, a whole feed
+ * URL and the folder the modal's own HN preset suggests. The same patterns
+ * the modal's presets row fills in.
+ */
+export interface StarterPreset {
+    id: SourceKind;
+    labelKey: MessageKey;
+    /** What the URL field opens with. */
+    url: string;
+    /** The folder tag to suggest ('' = none). */
+    tags: string;
+}
+
+export const STARTER_PRESETS: readonly StarterPreset[] = [
+    { id: 'reddit', labelKey: 'presets.reddit', url: 'r/', tags: '' },
+    { id: 'youtube', labelKey: 'presets.youtube', url: 'https://www.youtube.com/@', tags: '' },
+    { id: 'mastodon', labelKey: 'presets.mastodon', url: '@', tags: '' },
+    { id: 'github', labelKey: 'presets.github', url: 'https://github.com/', tags: '' },
+    {
+        id: 'hackernews',
+        labelKey: 'presets.hn',
+        url: HN_PRESETS[0].feedUrl,
+        tags: 'Community/Hacker News',
+    },
+] as const;
+
+/**
  * Kill the Newsletter (kill-the-newsletter.com): a free email-to-feed bridge.
  * Each inbox it creates is an address `<id>@kill-the-newsletter.com` whose
  * mail becomes the Atom feed `https://kill-the-newsletter.com/feeds/<id>.xml`.

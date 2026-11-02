@@ -3,6 +3,7 @@
 // primary TS linter/formatter — the TS blocks here stay deliberately thin.
 import tsParser from '@typescript-eslint/parser';
 import svelte from 'eslint-plugin-svelte';
+import { noRawText } from './eslint-rules/no-raw-text.js';
 import svelteConfig from './svelte.config.js';
 
 // The generated bindings file is the ONE module allowed to import
@@ -45,6 +46,28 @@ export default [
             },
         },
         rules: rawInvokeBan,
+    },
+    // Every word a user reads comes from the i18n catalogs (#155). Test
+    // fixtures under src/tests are not shipped UI and stay out of scope.
+    {
+        files: ['src/lib/**/*.svelte', 'src/routes/**/*.svelte'],
+        plugins: { curio: { rules: { 'no-raw-text': noRawText } } },
+        rules: {
+            'curio/no-raw-text': [
+                'error',
+                {
+                    allow: [
+                        // Reddit's own subreddit / user sigils (`r/rust`, `u/name`).
+                        'r/',
+                        'u/',
+                        // The protocol name before a status code (`HTTP 304`).
+                        'HTTP',
+                        // Reddit's wordmark on the post header (aria-hidden branding).
+                        'reddit',
+                    ],
+                },
+            ],
+        },
     },
     {
         files: ['**/*.ts', '**/*.svelte.ts'],

@@ -215,13 +215,25 @@ fn audit_tag_prose(prose: &str, markdown: &str) -> Result<(), String> {
         let rest = &prose[at + 1..];
         let tag_end = rest.find(['>', '\n']).unwrap_or(rest.len());
         let tag = &rest[..tag_end];
-        let name: String = tag
-            .trim_start_matches('/')
+        let named = tag.trim_start_matches('/');
+        let name: String = named
             .chars()
-            .take_while(char::is_ascii_alphanumeric)
+            .take_while(|&c| c.is_ascii_alphanumeric() || c == '-')
             .collect();
-        if name.is_empty() {
-            continue; // `a < b`, `<3`: not a tag
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            // `a < b`, `<3`, `<0 onerror=…>`: a tag name starts with a
+            // letter, so none of these opens a tag.
+            continue;
+        }
+        if named[name.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace() && c != '/')
+        {
+            // A tag name ends at whitespace, `/` or `>` (or the line's end,
+            // past which a tag may go on): `<x\<img onerror=…>` opens
+            // nothing, and its escaped `\<` nothing either.
+            continue;
         }
         if FORBIDDEN_ELEMENTS.contains(&name.as_str()) {
             return Err(format!("markdown carries a live <{name}> tag:\n{markdown}"));
@@ -251,14 +263,16 @@ fn scriptable(scheme: &str) -> Option<&'static str> {
 struct Parsed {
     /// The markdown with every byte the parser reads as code — fenced and
     /// indented code blocks and inline code spans, delimiters included —
-    /// blanked to a space (line breaks kept, so the line-based scans see
-    /// the same lines).
+    /// and every link reference definition (which renders nothing; its
+    /// destination is judged like a link's) blanked to a space (line breaks
+    /// kept, so the line-based scans see the same lines).
     prose: String,
     /// [`Self::prose`] with the destinations of inline links and images
     /// blanked too: `[x](<https://a.example/ b>)` is a link, not a tag.
     tag_prose: String,
     /// The first link or image destination (any kind: inline, reference,
-    /// autolink) whose scheme is scriptable.
+    /// autolink), or reference definition destination, whose scheme is
+    /// scriptable.
     scriptable_destination: Option<String>,
 }
 
@@ -278,7 +292,8 @@ fn parse(markdown: &str, options: pulldown_cmark::Options) -> Parsed {
     let mut prose = markdown.as_bytes().to_vec();
     let mut destinations = Vec::new();
     let mut scriptable_destination = None;
-    for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
+    let mut events = Parser::new_ext(markdown, options).into_offset_iter();
+    for (event, range) in &mut events {
         match event {
             Event::Code(_) | Event::Start(Tag::CodeBlock(_)) => blank(&mut prose, range),
             Event::Start(
@@ -309,6 +324,17 @@ fn parse(markdown: &str, options: pulldown_cmark::Options) -> Parsed {
             }
             _ => {}
         }
+    }
+    // A reference definition renders nothing: what a renderer does with
+    // it is follow its destination from a link, so that is what is judged
+    // (a renderer without footnotes reads `[^1]: `x`` as one).
+    for (_, definition) in events.reference_definitions().iter() {
+        if scriptable_destination.is_none()
+            && browser_scheme(&definition.dest).is_some_and(|s| scriptable(&s).is_some())
+        {
+            scriptable_destination = Some(definition.dest.to_string());
+        }
+        blank(&mut prose, definition.span.clone());
     }
     let mut tag_prose = prose.clone();
     for range in destinations {

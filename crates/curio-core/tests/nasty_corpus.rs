@@ -878,11 +878,15 @@ fn the_inertness_audit_flags_live_payloads_only() {
         // Destinations the `](` scan never sees: a reference definition
         // and an autolink.
         "[x][1]\n\n[1]: javascript:alert(1)",
+        "[1]: javascript:alert(1)",
         "<javascript:alert(1)>",
         // A link's text is prose; and with no link at all, a `](<` opens
         // no destination.
         "[<script>alert(1)</script>](https://x.example/)",
         "foo](<script>alert(1)</script>",
+        // A tag name may carry hyphens, and any whitespace ends it.
+        "<x-custom onclick=alert(1)>",
+        "<x-custom\tonclick=alert(1)>",
     ] {
         assert!(
             inert::audit_markdown(live).is_err(),
@@ -894,6 +898,14 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "`<script>` in a code span",
         "```html\n<script>alert(1)</script>\n```",
         "a < b and <3",
+        // No tag name starts with a digit, and the escaped `\<` opens
+        // nothing (the markdown property's find once its generator wrote
+        // escaped payloads next to arbitrary text).
+        "<0\\<img src=x onerror=alert(1)>",
+        "<unterminated\\<img src=x onerror=alert(1)>.",
+        // Without footnotes on, a one-span definition is a reference
+        // definition: its text is a destination, never rendered.
+        "x[^1]\n\n[^1]: `<script>alert(1)</script>`",
         "[ok](https://x.example/)",
         "``a ` <script>alert(1)</script> ``",
         "``a`<script>alert(1)</script>`",

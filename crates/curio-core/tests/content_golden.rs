@@ -143,6 +143,54 @@ fn escaped_code_corpus_stays_code() {
     }
 }
 
+/// Review finds against the first #245 fix, judged by the real parser
+/// (plain `CommonMark` and GFM): two spans either side of a block that
+/// renders as nothing, a span right after a `<pre>` that had to become a
+/// span itself, and a footnote definition that opens with a `<pre>`.
+#[test]
+fn escaped_code_never_turns_live_between_or_after_blocks() {
+    const SCRIPT: &str = "&lt;script&gt;alert(1)&lt;/script&gt;";
+    let mut cases = Vec::new();
+    for separator in [
+        "<pre></pre>",
+        "<pre>\n</pre>",
+        "<ul></ul>",
+        "<table></table>",
+    ] {
+        cases.push(format!(
+            "<div><code>a</code>{separator}<code>``{SCRIPT}</code></div>"
+        ));
+    }
+    for (open, close) in [
+        ("<em>", "</em>"),
+        ("<h2>T ", "</h2>"),
+        ("<table><tr><td>", "</td></tr></table>"),
+        ("<a href=\"https://example.com/x\">", "</a>"),
+    ] {
+        cases.push(format!("{open}<pre>{SCRIPT}</pre><code>``x</code>{close}"));
+    }
+    for body in [
+        format!("<pre>{SCRIPT}</pre>"),
+        format!("<blockquote><pre>{SCRIPT}</pre></blockquote>"),
+        format!("<blockquote><p>see</p><pre>{SCRIPT}</pre></blockquote>"),
+        format!("<ul><li><pre>{SCRIPT}</pre></li></ul>"),
+    ] {
+        cases.push(format!(
+            "<p>x<a href=\"#fn1\">1</a></p><ol><li id=\"fn1\">{body}</li></ol>"
+        ));
+    }
+    for html in cases {
+        let processed = process(&html, Some("https://example.com/posts/current"));
+        inert::audit_html(&processed.html).unwrap();
+        let markdown = to_markdown(&processed.html).unwrap();
+        inert::audit_markdown(&markdown).unwrap_or_else(|v| panic!("{html}: {v}"));
+        assert!(
+            markdown.contains("alert(1)"),
+            "{html}: lost the code:\n{markdown}"
+        );
+    }
+}
+
 /// The `content_pipeline` fuzz target's checks, replayed over every
 /// committed fixture (they are its seed corpus): both pipelines — feed
 /// fragment and full page — store HTML that passes the inertness audit, and

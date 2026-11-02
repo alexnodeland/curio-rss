@@ -204,6 +204,106 @@ mod tests {
     }
 
     #[test]
+    fn a_block_that_renders_nothing_still_separates_adjacent_spans() {
+        // An empty block between two spans renders as nothing: its tag
+        // alone must not count as a line break, or the delimiters merge.
+        for separator in [
+            "<pre></pre>",
+            "<pre>\n</pre>",
+            "<ul></ul>",
+            "<table></table>",
+        ] {
+            let html = format!(
+                "<div><code>a</code>{separator}<code>``&lt;script&gt;alert(1)&lt;/script&gt;</code></div>"
+            );
+            assert_eq!(
+                to_markdown(&html).unwrap(),
+                "`a` ``` ``<script>alert(1)</script> ```",
+                "{html}"
+            );
+        }
+        // A block that did render ends its line: no gap is needed.
+        let md = to_markdown("<div><code>a</code><p>p</p><code>``&lt;x&gt;</code></div>").unwrap();
+        assert_eq!(md, "`a`\n\np\n\n``` ``<x> ```");
+        let md = to_markdown("<div><pre>p</pre><code>``&lt;x&gt;</code></div>").unwrap();
+        assert_eq!(md, "```\np\n```\n\n``` ``<x> ```");
+    }
+
+    #[test]
+    fn every_one_of_many_sibling_spans_is_judged_by_its_own_neighbour() {
+        // Positions among siblings are indexed once per parent (the walk
+        // stays linear), and each span still sees the sibling before it.
+        const PAIRS: usize = 300;
+        let html = format!(
+            "<p>{}</p>",
+            "<code>a</code><b></b><code>``b</code> t<code>c</code>. ".repeat(PAIRS)
+        );
+        let md = to_markdown(&html).unwrap();
+        assert_eq!(md, "`a` ``` ``b ``` t`c`. ".repeat(PAIRS).trim_end());
+    }
+
+    #[test]
+    fn a_span_after_an_inline_pre_keeps_its_distance() {
+        // Where a `<pre>` becomes an inline span, it is no block boundary
+        // to the span after it.
+        for (html, expected) in [
+            (
+                "<em><pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre><code>``x</code></em>",
+                "*`<script>alert(1)</script>` ``` ``x ```*",
+            ),
+            (
+                "<h2>T <pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre><code>``x</code></h2>",
+                "## T `<script>alert(1)</script>` ``` ``x ```",
+            ),
+            (
+                "<table><tr><td><pre>&lt;x&gt;</pre><code>``y</code></td></tr></table>",
+                "`<x>` ``` ``y ```",
+            ),
+            (
+                "<a href=\"https://e.com/\"><pre>&lt;x&gt;</pre><code>``y</code></a>",
+                "[`<x>` ``` ``y ```](https://e.com/)",
+            ),
+        ] {
+            assert_eq!(to_markdown(html).unwrap(), expected, "{html}");
+        }
+        // A block flattened into an inline line is no boundary either.
+        let md = to_markdown("<em><code>a</code><p><code>``x</code></p></em>").unwrap();
+        assert_eq!(md, "*`a`\n\n ``` ``x ```*");
+    }
+
+    #[test]
+    fn a_definition_that_opens_with_code_starts_below_its_label() {
+        // On the label line, a fence would be inline text to a renderer
+        // without footnotes, and its code text live raw HTML.
+        let md = to_markdown(
+            "<p>x<a href=\"#user-content-fn1\">1</a></p><ol><li id=\"user-content-fn1\">\
+             <pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre></li></ol>",
+        )
+        .unwrap();
+        assert_eq!(
+            md,
+            "x[^1]\n\n[^1]:\n\n    ```\n    <script>alert(1)</script>\n    ```"
+        );
+        let md = to_markdown(
+            "<p>x<a href=\"#user-content-fn1\">1</a></p><ol><li id=\"user-content-fn1\">\
+             <blockquote><p>q</p><pre>&lt;x&gt;</pre></blockquote></li></ol>",
+        )
+        .unwrap();
+        assert_eq!(
+            md,
+            "x[^1]\n\n[^1]:\n\n    > q\n    >\n    > ```\n    > <x>\n    > ```"
+        );
+        // Text first: the label line keeps it, and the fence follows a
+        // blank line as before.
+        let md = to_markdown(
+            "<p>x<a href=\"#user-content-fn1\">1</a></p><ol><li id=\"user-content-fn1\">\
+             <p>see</p><pre>&lt;x&gt;</pre></li></ol>",
+        )
+        .unwrap();
+        assert_eq!(md, "x[^1]\n\n[^1]: see\n\n    ```\n    <x>\n    ```");
+    }
+
+    #[test]
     fn a_pre_that_cannot_stand_on_its_own_lines_is_a_span() {
         for (html, expected) in [
             ("<em><pre>&lt;x&gt;\ny</pre></em>", "*`<x> y`*"),

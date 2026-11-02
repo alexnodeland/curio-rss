@@ -86,6 +86,64 @@ describe('locale switching', () => {
         expect(t('list.empty')).toBe('呢度冇文章'); // genuine colloquial Cantonese (冇, 呢度)
     });
 
+    it.each([
+        { id: 'en', forms: ['1 min read', '2 min read', '5 min read', '22 min read'] },
+        {
+            id: 'es',
+            forms: [
+                '1 minuto de lectura',
+                '2 minutos de lectura',
+                '5 minutos de lectura',
+                '22 minutos de lectura',
+            ],
+        },
+        {
+            id: 'fr',
+            forms: [
+                '1 minute de lecture',
+                '2 minutes de lecture',
+                '5 minutes de lecture',
+                '22 minutes de lecture',
+            ],
+        },
+        {
+            id: 'de',
+            forms: [
+                '1 Minute Lesezeit',
+                '2 Minuten Lesezeit',
+                '5 Minuten Lesezeit',
+                '22 Minuten Lesezeit',
+            ],
+        },
+        {
+            id: 'it',
+            forms: [
+                '1 minuto di lettura',
+                '2 minuti di lettura',
+                '5 minuti di lettura',
+                '22 minuti di lettura',
+            ],
+        },
+        // Polish: one (1), few (2–4, 22–24), many (5–21).
+        {
+            id: 'pl',
+            forms: [
+                '1 minuta czytania',
+                '2 minuty czytania',
+                '5 minut czytania',
+                '22 minuty czytania',
+            ],
+        },
+        {
+            id: 'zh-Hans',
+            forms: ['阅读约 1 分钟', '阅读约 2 分钟', '阅读约 5 分钟', '阅读约 22 分钟'],
+        },
+        { id: 'yue', forms: ['大約睇 1 分鐘', '大約睇 2 分鐘', '大約睇 5 分鐘', '大約睇 22 分鐘'] },
+    ] as const)('$id pluralises the minutes-read estimate', ({ id, forms }) => {
+        localeStore.active = id;
+        expect([1, 2, 5, 22].map((count) => t('reader.meta.minutes', { count }))).toEqual(forms);
+    });
+
     it('interpolates placeholders in the active locale', () => {
         localeStore.active = 'zh-Hans';
         expect(t('shell.unread.count', { count: 3 })).toBe('3 条未读');

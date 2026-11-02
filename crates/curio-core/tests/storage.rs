@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use curio_core::model::{
     ArticleContent, ArticleFlag, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchErrorKind,
-    FetchRecord, FetchStatus, NewArticle, NewFeed,
+    FetchRecord, FetchStatus, NewArticle, NewFeed, ReadProgress,
 };
 use curio_core::storage::{
     ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, OpenError, SearchArticles, Storage,
@@ -1227,6 +1227,72 @@ fn state_ops_on_a_missing_article_report_not_found() {
     assert!(matches!(
         storage.record_opened(ghost, None),
         Err(StorageError::NotFound { entity: "article" })
+    ));
+    assert!(matches!(
+        storage.set_read_progress(ghost, ReadProgress::END),
+        Err(StorageError::NotFound { entity: "article" })
+    ));
+}
+
+/// The reading position is DB-local state beside the flags: it round-trips
+/// through the projection, an unmoved position is a no-op, and setting it
+/// stages no event and leaves the flags alone.
+#[test]
+fn read_progress_round_trips_idempotently_without_an_event() {
+    let (_dir, storage) = temp_storage();
+    let id = insert_one(&storage, "progress", "Long read", "body");
+
+    // Never touched: the top. Saving the top creates nothing to change.
+    assert_eq!(
+        storage.article_state(id).unwrap().progress,
+        ReadProgress::START
+    );
+    assert!(!storage.set_read_progress(id, ReadProgress::START).unwrap());
+
+    let halfway = ReadProgress::from_fraction(0.5);
+    assert!(storage.set_read_progress(id, halfway).unwrap());
+    assert!(!storage.set_read_progress(id, halfway).unwrap());
+    assert_eq!(storage.article_state(id).unwrap().progress, halfway);
+
+    // Flags and position share the row without clobbering each other.
+    assert!(storage.star_article(id).unwrap().is_some());
+    let state = storage.article_state(id).unwrap();
+    assert!(state.starred);
+    assert_eq!(state.progress, halfway);
+    assert!(storage.set_read_progress(id, ReadProgress::END).unwrap());
+    let state = storage.article_state(id).unwrap();
+    assert!(state.starred);
+    assert_eq!(state.progress, ReadProgress::END);
+
+    // Only the star staged an event.
+    let types: Vec<&str> = storage
+        .pending_intents()
+        .unwrap()
+        .iter()
+        .map(|p| p.envelope.event.event_type())
+        .collect();
+    assert_eq!(types, ["article.starred"]);
+}
+
+/// The column's CHECK keeps the position in range; a value written past it
+/// (a hand-edited file) reads back as a typed corrupt-value error.
+#[test]
+fn an_out_of_range_stored_progress_is_a_corrupt_value() {
+    let (dir, storage) = temp_storage();
+    let id = insert_one(&storage, "corrupt", "Edited", "body");
+    let conn = side_conn(&dir);
+    let insert = "INSERT INTO article_state (article_id, read_permille, updated_at) \
+                  VALUES (?1, 1500, '2026-01-01T00:00:00.000Z')";
+    assert!(conn.execute(insert, [id.0]).is_err(), "CHECK refuses 1500");
+    conn.pragma_update(None, "ignore_check_constraints", true)
+        .unwrap();
+    conn.execute(insert, [id.0]).unwrap();
+    assert!(matches!(
+        storage.article_state(id),
+        Err(StorageError::Corrupt {
+            column: "article_state.read_permille",
+            ..
+        })
     ));
 }
 
@@ -2955,4 +3021,55 @@ fn migration_0011_moves_non_web_source_urls_to_the_feed_url() {
         ("foo://x".to_owned(), stale.to_owned()),
         "a feed-less row is untouched"
     );
+}
+
+/// Migration 0014 adds the reading position: a v13 profile's stated
+/// articles keep their flags and start at the top.
+#[test]
+fn migration_0014_starts_existing_articles_at_the_top() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("curio.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in [
+            include_str!("../src/storage/migrations/0001_init.sql"),
+            include_str!("../src/storage/migrations/0002_feed_scoped_dedupe.sql"),
+            include_str!("../src/storage/migrations/0003_feed_tags.sql"),
+            include_str!("../src/storage/migrations/0004_article_lead_image.sql"),
+            include_str!("../src/storage/migrations/0005_feed_sort_order.sql"),
+            include_str!("../src/storage/migrations/0006_feed_full_text.sql"),
+            include_str!("../src/storage/migrations/0007_article_content_origin.sql"),
+            include_str!("../src/storage/migrations/0008_event_intents_dead.sql"),
+            include_str!("../src/storage/migrations/0009_fetch_error_kind.sql"),
+            include_str!("../src/storage/migrations/0010_feed_schedule.sql"),
+            include_str!("../src/storage/migrations/0011_screen_entry_links.sql"),
+            include_str!("../src/storage/migrations/0012_list_read_paths.sql"),
+            include_str!("../src/storage/migrations/0013_retention.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 13).unwrap();
+        conn.execute(
+            "INSERT INTO articles (id, curio_id, dedupe_key, source_url, saved_at, modified_at) \
+             VALUES (1, '0190f6e2-7b4a-7c3d-9e8f-0123456789ab', 'm:a', 'https://a.example/1', \
+             '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO article_state (article_id, is_read, is_starred, updated_at) \
+             VALUES (1, 1, 1, '2026-01-01T00:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let storage = Storage::open(&path).unwrap();
+    assert_eq!(
+        storage.db_schema_version().unwrap(),
+        Storage::schema_version()
+    );
+    let state = storage.article_state(ArticleId(1)).unwrap();
+    assert!(state.read && state.starred);
+    assert_eq!(state.progress, ReadProgress::START);
 }

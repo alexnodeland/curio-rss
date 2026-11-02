@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use curio_core::model::{
     ArticleContent, ArticleFlag, ArticleId, ArticleState, FeedId, NewArticle, NewFeed,
-    SNIPPET_MAX_CHARS,
+    ReadProgress, SNIPPET_MAX_CHARS,
 };
 use curio_core::storage::{ListArticles, SearchArticles, Storage};
 use proptest::prelude::*;
@@ -110,6 +110,8 @@ fn a_list_row_carries_state_tags_and_a_preview_but_no_body() {
     storage.star_article(a).unwrap();
     storage.tag_article(a, "zeta").unwrap();
     storage.tag_article(a, "alpha").unwrap();
+    let halfway = ReadProgress::from_permille(420).unwrap();
+    storage.set_read_progress(a, halfway).unwrap();
 
     let rows = storage.list_article_rows(ListArticles::default()).unwrap();
     assert_eq!(rows.len(), 2);
@@ -143,8 +145,11 @@ fn a_list_row_carries_state_tags_and_a_preview_but_no_body() {
             starred: true,
             read_later: false,
             archived: false,
-        }
+            progress: halfway,
+        },
+        "the reading position rides along with the flags"
     );
+    assert_eq!(row_a.state, storage.article_state(a).unwrap());
     assert_eq!(row_a.tags, ["alpha", "zeta"], "sorted, as article_tags");
     assert_eq!(row_a.tags, storage.article_tags(a).unwrap());
 }
@@ -211,6 +216,7 @@ fn state_for(index: usize) -> ArticleState {
         starred: index & 2 != 0,
         read_later: index & 4 != 0,
         archived: index & 8 != 0,
+        progress: ReadProgress::START,
     }
 }
 

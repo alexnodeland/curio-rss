@@ -10,13 +10,13 @@
 use std::sync::Arc;
 
 use curio_core::CoreHandle;
-use curio_core::model::{ArticleId, FeedId};
+use curio_core::model::{ArticleId, FeedId, ReadProgress};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
 use crate::dto::ArticleFlagDto;
 use crate::error::CommandError;
-use crate::events::{ArticlesChanged, FlagField, emit_or_log};
+use crate::events::{ArticlesChanged, FlagField, ReadProgressChanged, emit_or_log};
 
 /// Marks read/unread. Returns whether anything changed.
 #[tauri::command]
@@ -104,6 +104,29 @@ pub async fn record_opened(
         record_opened_impl(&core, article_id, dwell_ms)
     })
     .await
+}
+
+/// Stores how far through the body the reader is, in thousandths of its
+/// scroll extent (`0`–`1000`; anything past `1000` is the end). Returns
+/// whether the stored position moved, and only then emits
+/// [`ReadProgressChanged`] — that article's state alone, no list refresh.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_read_progress(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    article_id: i64,
+    read_permille: u16,
+) -> Result<bool, CommandError> {
+    let core = Arc::clone(core.inner());
+    let changed = run_blocking("set_read_progress", move || {
+        set_read_progress_impl(&core, article_id, read_permille)
+    })
+    .await?;
+    if changed {
+        emit_or_log(&app, &ReadProgressChanged { article_id });
+    }
+    Ok(changed)
 }
 
 /// Archives / unarchives. Returns whether anything changed.
@@ -242,6 +265,15 @@ fn record_opened_impl(
     dwell_ms: Option<u64>,
 ) -> Result<(), CommandError> {
     Ok(core.record_opened(ArticleId(article_id), dwell_ms)?)
+}
+
+fn set_read_progress_impl(
+    core: &CoreHandle,
+    article_id: i64,
+    read_permille: u16,
+) -> Result<bool, CommandError> {
+    let progress = ReadProgress::from_permille(read_permille).unwrap_or(ReadProgress::END);
+    Ok(core.set_read_progress(ArticleId(article_id), progress)?)
 }
 
 fn set_archived_impl(
@@ -386,6 +418,29 @@ mod tests {
         let id = seed_article(&core, "opened");
         record_opened_impl(&core, id, None).unwrap();
         record_opened_impl(&core, id, Some(1500)).unwrap();
+    }
+
+    #[test]
+    fn read_progress_reports_change_clamps_and_round_trips_through_the_dto() {
+        let (_dir, core) = temp_core();
+        let id = seed_article(&core, "progress");
+
+        assert!(set_read_progress_impl(&core, id, 457).unwrap());
+        assert!(
+            !set_read_progress_impl(&core, id, 457).unwrap(),
+            "an unmoved position is a no-op (no event)"
+        );
+        let dto = crate::dto::ArticleStateDto::from(article_state_of(&core, id));
+        assert_eq!(dto.read_permille, 457);
+
+        // Past the end is the end, not a failed save.
+        assert!(set_read_progress_impl(&core, id, 7_000).unwrap());
+        assert_eq!(article_state_of(&core, id).progress, ReadProgress::END);
+        assert!(set_read_progress_impl(&core, id, 0).unwrap());
+        assert_eq!(article_state_of(&core, id).progress, ReadProgress::START);
+
+        let error = set_read_progress_impl(&core, 424_242, 500).unwrap_err();
+        assert_eq!(error.code, ErrorCode::NotFound);
     }
 
     #[test]

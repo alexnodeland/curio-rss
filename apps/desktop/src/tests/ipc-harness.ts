@@ -163,7 +163,13 @@ export function articleSummaryFixture(
         lang: 'en',
         image: null,
         snippet: 'A short preview of the article body.',
-        state: { read: false, starred: false, read_later: false, archived: false },
+        state: {
+            read: false,
+            starred: false,
+            read_later: false,
+            archived: false,
+            read_permille: 0,
+        },
         tags: [],
         ...overrides,
     };
@@ -194,6 +200,7 @@ export function articleStateFixture(overrides: Partial<ArticleStateDto> = {}): A
         starred: false,
         read_later: false,
         archived: false,
+        read_permille: 0,
         ...overrides,
     };
 }

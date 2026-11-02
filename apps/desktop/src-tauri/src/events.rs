@@ -101,6 +101,17 @@ impl From<ArticleFlagDto> for FlagField {
     }
 }
 
+/// One article's reading position moved (`set_read_progress` stored a new
+/// value). Narrower than [`ArticlesChanged`] on purpose: a position save
+/// changes no list, count or tag, so only that article's state query
+/// refreshes — the reader saves as you scroll, and a list-wide refetch per
+/// save would be waste.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+pub struct ReadProgressChanged {
+    /// The article whose position changed.
+    pub article_id: i64,
+}
+
 /// A feed or a full-text page finished during a `refresh_all` sweep —
 /// drive the progress UI ("12/300", then "Loading full text… 3/12").
 /// Feeds refresh concurrently, so progress arrives in completion order. A

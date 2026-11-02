@@ -38,6 +38,7 @@ import {
     type CommandError,
     type FlagChange,
     type FlagField,
+    type ReadProgressChanged,
 } from '$lib/bindings';
 import { untrack } from 'svelte';
 import { SvelteMap, SvelteSet, createSubscriber } from 'svelte/reactivity';
@@ -878,6 +879,14 @@ export function applyArticlesChanged(payload: ArticlesChanged): void {
     }
 }
 
+/**
+ * Applies a `ReadProgressChanged` payload: that one article's state entry
+ * refetches — a position save touches no list, count or tag.
+ */
+export function applyReadProgressChanged(payload: ReadProgressChanged): void {
+    invalidateWhere((query) => query.key === queryKeys.articleState(payload.article_id));
+}
+
 /** Applies a `FeedsChanged` signal to the cache. */
 export function applyFeedsChanged(): void {
     invalidatePrefix(queryKeys.feeds);
@@ -896,6 +905,9 @@ export async function wireInvalidation(): Promise<() => void> {
         }),
         events.articlesChanged.listen((event) => {
             applyArticlesChanged(event.payload);
+        }),
+        events.readProgressChanged.listen((event) => {
+            applyReadProgressChanged(event.payload);
         }),
     ]);
     return () => {

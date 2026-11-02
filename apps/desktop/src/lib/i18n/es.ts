@@ -132,6 +132,7 @@ export const es: Partial<Record<MessageKey, string>> = {
     'list.filter.all': 'Mostrar todos los artículos',
     'list.row.unread': 'Sin leer',
     'list.row.starred': 'Destacado',
+    'list.row.progress': '{percent} leído',
     'reader.empty': 'Selecciona un artículo para leer',
     'reader.hint.move': 'para moverte',
     'reader.hint.read': 'para leer',
@@ -158,7 +159,10 @@ export const es: Partial<Record<MessageKey, string>> = {
     'reader.action.typography': 'Tipografía',
     'reader.action.focusMode': 'Modo concentración',
     'reader.action.exitFocusMode': 'Salir del modo concentración',
+    'reader.action.copyLink': 'Copiar enlace',
     'reader.meta.words': '{count, plural, one {# palabra} other {# palabras}}',
+    'reader.meta.minutes':
+        '{count, plural, one {# minuto de lectura} other {# minutos de lectura}}',
     'article.date.firstSeen': 'Visto por primera vez: {date}',
     'article.date.firstSeenHint': 'El feed no indica fecha de publicación',
     'reddit.postedBy': 'Publicado por u/{author}',
@@ -236,6 +240,8 @@ export const es: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll.done': '{written} nota(s) exportadas; {unchanged} ya al día',
     'destinations.needNameAndFolder': 'Introduce un nombre y elige una carpeta primero.',
     'toast.promote.saved': 'Guardado en {name}',
+    'toast.linkCopied': 'Enlace copiado',
+    'toast.linkCopyFailed': 'No se pudo copiar el enlace',
     'toast.promote.unchanged': 'Ya está actualizado en {name}',
     'toast.markAllRead':
         '{count, plural, one {# marcado como leído} other {# marcados como leídos}}',

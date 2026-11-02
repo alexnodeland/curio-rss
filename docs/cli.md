@@ -412,7 +412,14 @@ fail with a helpful message.
 
 `open` uses `$BROWSER` when set, else the platform opener (`open` /
 `xdg-open`). The `article.opened` event is written first — the record is
-the point.
+the point. It carries no `dwell_ms`: the CLI cannot see how long you read
+in the browser. (The desktop reader records `article.opened` as you leave
+an article, with the time it spent in front of you as `dwell_ms`.)
+
+With `--json`, every article listing (`list`, `search`, `show`) carries
+`word_count` and `progress` — how far through the body the desktop reader
+last was, from `0` (the top, or never opened) to `1` (the end). It is what
+the app resumes at when you reopen the article.
 
 ## State
 

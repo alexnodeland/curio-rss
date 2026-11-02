@@ -49,7 +49,13 @@ function articleSummary(id: number): ArticleSummaryDto {
         lang: 'en',
         image: null,
         snippet: null,
-        state: { read: false, starred: false, read_later: false, archived: false },
+        state: {
+            read: false,
+            starred: false,
+            read_later: false,
+            archived: false,
+            read_permille: 0,
+        },
         tags: [],
     };
 }
@@ -228,7 +234,11 @@ describe('shell keyboard wiring', () => {
         const opens = harness.callsFor('plugin:opener|open_url');
         expect(opens).toHaveLength(1);
         expect(opens[0]?.url).toBe('https://example.org/post/500');
-        expect(harness.callsFor('record_opened')).toEqual([{ articleId: 500, dwellMs: null }]);
+        // The reader's article: its session records the open, with the
+        // time read so far as the dwell.
+        expect(harness.callsFor('record_opened')).toEqual([
+            { articleId: 500, dwellMs: expect.any(Number) },
+        ]);
     });
 
     it('? toggles the help overlay; Escape closes it; shortcuts stay inert under it', async () => {

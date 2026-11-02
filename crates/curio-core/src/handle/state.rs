@@ -1,6 +1,7 @@
-//! Per-article state: star, read-later, archive, read, opened, tags.
+//! Per-article state: star, read-later, archive, read, reading position,
+//! opened, tags.
 
-use crate::model::{ArticleFlag, ArticleId, FeedId};
+use crate::model::{ArticleFlag, ArticleId, FeedId, ReadProgress};
 
 use super::{CoreError, CoreHandle};
 
@@ -99,6 +100,21 @@ impl CoreHandle {
         let changed = self.storage.set_flag_many(ids, flag, value)?;
         self.emit_if(flag != ArticleFlag::Read && !changed.is_empty());
         Ok(changed)
+    }
+
+    /// Records how far through the body the reader is — what a reopen
+    /// resumes at. DB-local, no event. Idempotent: `false` when the stored
+    /// position is already `progress`.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::NotFound`] for an unknown article.
+    pub fn set_read_progress(
+        &self,
+        id: ArticleId,
+        progress: ReadProgress,
+    ) -> Result<bool, CoreError> {
+        Ok(self.storage.set_read_progress(id, progress)?)
     }
 
     /// Records an open-for-reading; emits `article.opened`.

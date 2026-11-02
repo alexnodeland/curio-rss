@@ -120,6 +120,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     markAllRead: { args: [1], response: [7, 8, 9] },
     markReadMany: { args: [[7, 8, 9], false], response: 3 },
     recordOpened: { args: [100, 1500], response: null },
+    setReadProgress: { args: [100, 420], response: true },
     setArchived: { args: [100, true], response: true },
     setStarred: { args: [100, true], response: true },
     setReadLater: { args: [100, true], response: true },

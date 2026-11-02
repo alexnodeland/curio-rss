@@ -302,6 +302,13 @@ export const commands = {
 	 *  optional dwell time). No invalidation — opening changes no list.
 	 */
 	recordOpened: (articleId: number, dwellMs: number | null) => typedError<null, CommandError>(__TAURI_INVOKE("record_opened", { articleId, dwellMs })),
+	/**
+	 *  Stores how far through the body the reader is, in thousandths of its
+	 *  scroll extent (`0`–`1000`; anything past `1000` is the end). Returns
+	 *  whether the stored position moved, and only then emits
+	 *  [`ReadProgressChanged`] — that article's state alone, no list refresh.
+	 */
+	setReadProgress: (articleId: number, readPermille: number) => typedError<boolean, CommandError>(__TAURI_INVOKE("set_read_progress", { articleId, readPermille })),
 	/**  Archives / unarchives. Returns whether anything changed. */
 	setArchived: (articleId: number, archived: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("set_archived", { articleId, archived })),
 	/**  Stars / unstars. Returns whether anything changed. */
@@ -536,6 +543,7 @@ export const events = {
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
 	fullscreenChanged: makeEvent<FullscreenChanged>("fullscreen-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
+	readProgressChanged: makeEvent<ReadProgressChanged>("read-progress-changed"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
 	refreshProgress: makeEvent<RefreshProgress>("refresh-progress"),
 };
@@ -597,7 +605,10 @@ export type ArticleFlagDto =
 /**  Archived. */
 "archived";
 
-/**  Mirror of [`ArticleState`] — the per-article flag projection. */
+/**
+ *  Mirror of [`ArticleState`] — the per-article flag projection plus the
+ *  reading position.
+ */
 export type ArticleStateDto = {
 	/**  Read/unread. */
 	read: boolean,
@@ -607,6 +618,13 @@ export type ArticleStateDto = {
 	read_later: boolean,
 	/**  Archived. */
 	archived: boolean,
+	/**
+	 *  How far through the body the reader last was, in thousandths of its
+	 *  scroll extent: `0` (the top — also an article never opened) to
+	 *  `1000` (the end). Whole numbers, so the wire type stays a plain
+	 *  `number` and an unmoved position compares equal.
+	 */
+	read_permille: number,
 };
 
 /**
@@ -1236,6 +1254,18 @@ export type PathTokenDto = {
 	token: string,
 	/**  Absolute path, for display only — never accepted back as input. */
 	path: string,
+};
+
+/**
+ *  One article's reading position moved (`set_read_progress` stored a new
+ *  value). Narrower than [`ArticlesChanged`] on purpose: a position save
+ *  changes no list, count or tag, so only that article's state query
+ *  refreshes — the reader saves as you scroll, and a list-wide refetch per
+ *  save would be waste.
+ */
+export type ReadProgressChanged = {
+	/**  The article whose position changed. */
+	article_id: number,
 };
 
 /**  What a recovery action did. */

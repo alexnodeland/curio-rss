@@ -8,8 +8,10 @@
 
 use curio_types::{ArticleSnapshot, Checksum, CurioId, DestinationName, Timestamp};
 
+mod progress;
 mod retention;
 
+pub use progress::ReadProgress;
 pub use retention::RetentionPolicy;
 
 /// Row id of a feed (`feeds.id`, an `INTEGER PRIMARY KEY` rowid alias).
@@ -327,6 +329,9 @@ pub struct ArticleState {
     pub read_later: bool,
     /// Member of the archived set.
     pub archived: bool,
+    /// How far through the body the reader last was. DB-local, like
+    /// [`Self::read`]: no contract event narrates it.
+    pub progress: ReadProgress,
 }
 
 /// One of the four [`ArticleState`] flags — what a batch flip

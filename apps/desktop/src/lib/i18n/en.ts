@@ -129,6 +129,7 @@ export const en = {
     'list.filter.all': 'Show all articles',
     'list.row.unread': 'Unread',
     'list.row.starred': 'Starred',
+    'list.row.progress': '{percent} read',
 
     'reader.empty': 'Select an article to read',
     'reader.hint.move': 'to move',
@@ -156,8 +157,10 @@ export const en = {
     'reader.action.typography': 'Typography',
     'reader.action.focusMode': 'Focus mode',
     'reader.action.exitFocusMode': 'Exit focus mode',
+    'reader.action.copyLink': 'Copy link',
     'reader.meta.words': '{count, plural, one {# word} other {# words}}',
     'article.date.firstSeen': 'First seen: {date}',
+    'reader.meta.minutes': '{count, plural, one {# min read} other {# min read}}',
     'article.date.firstSeenHint': 'The feed gave no publication date',
     'reddit.postedBy': 'Posted by u/{author}',
 
@@ -240,6 +243,8 @@ export const en = {
     'destinations.needNameAndFolder': 'Enter a name and choose a folder first.',
 
     'toast.promote.saved': 'Saved to {name}',
+    'toast.linkCopied': 'Link copied',
+    'toast.linkCopyFailed': 'Couldn’t copy the link',
     'toast.promote.unchanged': 'Already up to date in {name}',
     'toast.markAllRead': '{count, plural, one {Marked # read} other {Marked # read}}',
     'nav.noMoreUnread': 'No more unread',

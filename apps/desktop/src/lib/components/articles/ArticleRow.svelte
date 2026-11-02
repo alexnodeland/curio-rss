@@ -1,6 +1,7 @@
 <script lang="ts" module>
 import type { ArticleStateDto, ArticleSummaryDto } from '$lib/bindings';
 import {
+    copyLink,
     markAllRead,
     openInBrowser,
     toggleArchived,
@@ -46,8 +47,8 @@ export function selectGesture(
 
 /**
  * The context-menu items for one article row — star, read, read-later, archive,
- * open-in-browser (omitted for a link-less entry, whose only "source" is the
- * feed XML), and mark-all-read-in-feed. Labels flip on the live state
+ * open-in-browser and copy-link (both omitted for a link-less entry, whose only
+ * "source" is the feed XML), and mark-all-read-in-feed. Labels flip on the live state
  * (from the per-article state query). Shared by the row's own right-click and
  * the list's keyboard menu key so both surfaces stay identical.
  */
@@ -87,6 +88,11 @@ export function buildArticleMenu(
             separatorBefore: true,
             onSelect: () => void openInBrowser(article.id, article.source_url),
         });
+        items.push({
+            id: 'copyLink',
+            labelKey: 'reader.action.copyLink',
+            onSelect: () => void copyLink(article.source_url),
+        });
     }
     const feedId = article.feed_id;
     if (feedId !== null) {
@@ -116,10 +122,11 @@ import { commands } from '$lib/bindings';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import Icon from '$components/common/Icon.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
-import { t } from '$lib/i18n';
+import { localeStore, t } from '$lib/i18n';
 import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { listDateLabel } from '$lib/utils/article';
+import { formatPercent, readMinutes } from '$lib/utils/reading';
 import { highlightSegments } from '$lib/utils/highlight';
 
 let {
@@ -170,6 +177,14 @@ function feedTitle(): string | null {
  *  to its age against the day clock, so it moves on when the day turns. */
 const date = $derived(listDateLabel(article, dayClock.now));
 
+/** Estimated minutes to read — shown on Read Later rows. */
+const minutes = $derived(readMinutes(article.word_count));
+
+/** "42 %" in the active locale's own percent format. */
+function percentLabel(permille: number): string {
+    return formatPercent(permille, localeStore.active);
+}
+
 </script>
 
 <!-- Renders text with the active search query's terms wrapped in <mark>. Each
@@ -219,6 +234,27 @@ const date = $derived(listDateLabel(article, dayClock.now));
             {/if}
             {#if date !== null}
                 <span data-first-seen={date.firstSeen || undefined}>{date.text}</span>
+            {/if}
+            {#if flags()?.read_later === true && minutes !== null}
+                {@const permille = flags()?.read_permille ?? 0}
+                <!-- The queue is for long reads: how long, and how far in. -->
+                <span class="row-readtime" data-testid="row-readtime">
+                    {#if permille > 0}
+                        <svg class="row-ring" viewBox="0 0 12 12" aria-hidden="true">
+                            <circle class="ring-track" cx="6" cy="6" r="4.5" />
+                            <circle
+                                class="ring-fill"
+                                cx="6"
+                                cy="6"
+                                r="4.5"
+                                pathLength="1000"
+                                stroke-dasharray="{permille} 1000"
+                            />
+                        </svg>
+                        <span class="sr-only">{t('list.row.progress', { percent: percentLabel(permille) })}</span>
+                    {/if}
+                    {t('reader.meta.minutes', { count: minutes })}
+                </span>
             {/if}
         </span>
     </div>
@@ -360,15 +396,52 @@ const date = $derived(listDateLabel(article, dayClock.now));
         color: var(--fg-subtle);
     }
 
+    /* The feed name gives way first in a narrow list, so a queued row's
+       reading time stays whole. */
     .row-feed {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: var(--fg-muted);
         font-weight: var(--weight-medium);
     }
 
-    .row-meta .row-feed + span::before {
+    .row-meta .row-feed + span::before,
+    .row-meta span + .row-readtime::before {
         content: '·';
         margin-right: var(--space-2);
         color: var(--fg-subtle);
+    }
+
+    .row-readtime {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        flex: 0 0 auto;
+    }
+
+    /* Reading progress on a queued article: a track with the read share in
+       accent, starting at twelve o'clock. */
+    .row-ring {
+        width: 12px;
+        height: 12px;
+        flex: 0 0 auto;
+        transform: rotate(-90deg);
+    }
+
+    .row-ring circle {
+        fill: none;
+        stroke-width: 2;
+    }
+
+    .ring-track {
+        stroke: var(--hairline-strong);
+    }
+
+    .ring-fill {
+        stroke: var(--accent);
+        stroke-linecap: round;
     }
 
     /* The same filled-star glyph the reader toolbar uses, in the status hue. */

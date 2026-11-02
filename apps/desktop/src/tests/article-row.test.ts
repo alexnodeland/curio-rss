@@ -5,7 +5,7 @@
  * first-seen date, marked as such.
  */
 import ArticleRow, { buildArticleMenu } from '$components/articles/ArticleRow.svelte';
-import type { ArticleSummaryDto } from '$lib/bindings';
+import type { ArticleStateDto, ArticleSummaryDto } from '$lib/bindings';
 import { DAY_CHECK_INTERVAL_MS } from '$lib/state/clock';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
@@ -205,5 +205,67 @@ describe('ArticleRow — date and title polish', () => {
         cleanup();
         const compact = await renderRow(articleSummaryFixture({ id: 2 }), true);
         expect(compact.querySelector('.row-title')?.classList.contains('truncate')).toBe(true);
+    });
+});
+
+describe('ArticleRow — reading aids (#153)', () => {
+    let installed: IpcHarness | null = null;
+
+    afterEach(() => {
+        cleanup();
+        resetQueryCache();
+        resetUiStores();
+        menuStore.reset();
+        installed?.teardown();
+        installed = null;
+    });
+
+    function withState(state: Partial<ArticleStateDto>): IpcHarness {
+        return installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, url: FEED_URL, title: 'Example Feed' })],
+            get_article_state: articleStateFixture(state),
+        });
+    }
+
+    it('a queued row shows its reading time and a progress ring once started', async () => {
+        installed = withState({ read_later: true, read_permille: 420 });
+        const row = await renderRow(articleSummaryFixture({ word_count: 1_840 }));
+        const readTime = row.querySelector('[data-testid="row-readtime"]');
+        expect(readTime?.textContent).toContain('8 min read');
+        expect(readTime?.textContent).toContain('42% read');
+        const fill = row.querySelector('.ring-fill');
+        expect(fill?.getAttribute('stroke-dasharray')).toBe('420 1000');
+    });
+
+    it('a queued row not yet started shows the time without a ring', async () => {
+        installed = withState({ read_later: true });
+        const row = await renderRow(articleSummaryFixture({ word_count: 400 }));
+        expect(row.querySelector('[data-testid="row-readtime"]')?.textContent?.trim()).toBe(
+            '2 min read',
+        );
+        expect(row.querySelector('.row-ring')).toBeNull();
+    });
+
+    it('a row outside the queue shows no reading time', async () => {
+        installed = withState({ read_later: false, read_permille: 500 });
+        const row = await renderRow(articleSummaryFixture({ word_count: 1_000 }));
+        expect(row.querySelector('[data-testid="row-readtime"]')).toBeNull();
+    });
+
+    it('a queued row without a word count shows no reading time', async () => {
+        installed = withState({ read_later: true });
+        const row = await renderRow(articleSummaryFixture({ word_count: null }));
+        expect(row.querySelector('[data-testid="row-readtime"]')).toBeNull();
+    });
+
+    it('the context menu copies the link, except for a link-less entry', async () => {
+        installed = withState({});
+        const row = await renderRow(articleSummaryFixture({ feed_id: 1 }));
+        expect(await menuIds(row)).toContain('copyLink');
+        const linkless = buildArticleMenu(
+            articleSummaryFixture({ feed_id: 1, source_url: FEED_URL }),
+            undefined,
+        );
+        expect(linkless.some((item) => item.id === 'copyLink')).toBe(false);
     });
 });

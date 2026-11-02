@@ -464,6 +464,13 @@ tokens:
                     return flipOne(args.articleId, 'archived', args.archived);
                 case 'record_opened':
                     return null;
+                case 'set_read_progress': {
+                    const a = byId(args.articleId as number);
+                    const permille = Math.min(1000, args.readPermille as number);
+                    if (!a || a.state.read_permille === permille) return false;
+                    a.state.read_permille = permille;
+                    return true;
+                }
                 case 'tag_article': {
                     const a = byId(args.articleId as number);
                     const tag = args.tag as string;
@@ -838,7 +845,7 @@ tokens:
 
     function flip(
         a: { state: ArticleStateDto } | undefined,
-        key: keyof ArticleStateDto,
+        key: 'read' | 'starred' | 'read_later' | 'archived',
         value: boolean,
     ): boolean {
         if (!a) return false;

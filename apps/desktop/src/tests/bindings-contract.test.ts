@@ -108,6 +108,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     setArchived: { args: [100, true], response: true },
     setStarred: { args: [100, true], response: true },
     setReadLater: { args: [100, true], response: true },
+    setFlagMany: { args: [[7, 8, 9], 'read_later', true], response: [7, 9] },
     tagArticle: { args: [100, 'rust'], response: true },
     untagArticle: { args: [100, 'rust'], response: true },
     listTags: { args: [], response: ['rust'] },

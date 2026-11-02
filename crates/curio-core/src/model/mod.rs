@@ -325,6 +325,20 @@ pub struct ArticleState {
     pub archived: bool,
 }
 
+/// One of the four [`ArticleState`] flags — what a batch flip
+/// ([`crate::CoreHandle::set_flag_many`]) writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArticleFlag {
+    /// Read/unread (DB-local: no event).
+    Read,
+    /// The starred set (`article.starred` / `article.unstarred`).
+    Starred,
+    /// The read-later set (`article.read_later.added` / `.removed`).
+    ReadLater,
+    /// The archived set (`article.archived` / `article.unarchived`).
+    Archived,
+}
+
 /// Outcome of a fetch attempt, recorded in `fetch_log`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchStatus {

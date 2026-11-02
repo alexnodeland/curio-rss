@@ -11,6 +11,7 @@
  * inside the packaged app.
  */
 import type {
+    ArticleFlagDto,
     ArticleStateDto,
     CommandError,
     FeedDto,
@@ -410,6 +411,13 @@ tokens:
                 }
                 case 'set_starred':
                     return flipOne(args.articleId, 'starred', args.starred);
+                case 'set_flag_many': {
+                    // The ids actually flipped, in the order given (the undo set).
+                    const flipped = (args.articleIds as number[]).filter((id) =>
+                        flip(byId(id), args.flag as ArticleFlagDto, args.value as boolean),
+                    );
+                    return emitting(flipped, flipped.length > 0, articlesChanged());
+                }
                 case 'set_read_later':
                     return flipOne(args.articleId, 'read_later', args.readLater);
                 case 'set_archived':

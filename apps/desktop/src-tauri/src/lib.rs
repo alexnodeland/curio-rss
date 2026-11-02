@@ -84,6 +84,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::state::set_archived,
             commands::state::set_starred,
             commands::state::set_read_later,
+            commands::state::set_flag_many,
             // tags
             commands::tags::tag_article,
             commands::tags::untag_article,

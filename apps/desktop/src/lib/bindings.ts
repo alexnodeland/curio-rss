@@ -308,6 +308,15 @@ export const commands = {
 	 *  changed.
 	 */
 	setReadLater: (articleId: number, readLater: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("set_read_later", { articleId, readLater })),
+	/**
+	 *  Sets one flag on many articles in one transaction — the batch behind
+	 *  the bulk actions (one IPC call, one commit, each changed article's event
+	 *  staged inside it). Ids that no longer exist are skipped. Returns the ids
+	 *  that changed, in the order given, which the UI keeps for an exact undo
+	 *  (the same call with the opposite `value`). Invalidates only if any
+	 *  changed.
+	 */
+	setFlagMany: (articleIds: number[], flag: ArticleFlagDto, value: boolean) => typedError<number[], CommandError>(__TAURI_INVOKE("set_flag_many", { articleIds, flag, value })),
 	/**  Tags an article. Returns whether anything changed (idempotent). */
 	tagArticle: (articleId: number, tag: string) => typedError<boolean, CommandError>(__TAURI_INVOKE("tag_article", { articleId, tag })),
 	/**  Untags an article. Returns whether anything changed (idempotent). */
@@ -573,6 +582,17 @@ export type ArticleDto = {
 	/**  Source-declared update time (RFC 3339 UTC). */
 	source_updated_at: string | null,
 };
+
+/**  Mirror of [`ArticleFlag`] — which flag a bulk action writes. */
+export type ArticleFlagDto = 
+/**  Read/unread. */
+"read" | 
+/**  Starred. */
+"starred" | 
+/**  In the read-later queue. */
+"read_later" | 
+/**  Archived. */
+"archived";
 
 /**  Mirror of [`ArticleState`] — the per-article flag projection. */
 export type ArticleStateDto = {

@@ -22,7 +22,7 @@ members = [
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 # The true floor for the headless engine crates (curio-core/-types/-cli/
 # -fixtures, xtask): let-chains are stable only since 1.88. curio-desktop
@@ -35,8 +35,8 @@ repository = "https://github.com/alexnodeland/curio-rss"
 authors = ["Alex Nodeland <nodeland.alex@gmail.com>"]
 
 [workspace.dependencies]
-curio-core = { path = "crates/curio-core", version = "0.5.0" }
-curio-types = { path = "crates/curio-types", version = "0.5.0" }
+curio-core = { path = "crates/curio-core", version = "0.6.0" }
+curio-types = { path = "crates/curio-types", version = "0.6.0" }
 
 ammonia = "4"
 anyhow = "1"

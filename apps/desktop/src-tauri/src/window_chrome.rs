@@ -90,8 +90,10 @@ pub async fn window_chrome(window: tauri::WebviewWindow) -> Result<WindowChromeD
 }
 
 /// The window's fullscreen state, recorded as the tracker's baseline (a
-/// reloaded webview re-seeds it). One the OS will not report reads as
-/// windowed (logged) — the inset stays, the safe side.
+/// reloaded webview re-seeds it). A fullscreen state the OS will not report
+/// reads as windowed (logged): the header inset stays on, which in
+/// fullscreen only costs some leading room, while a wrongly dropped inset
+/// would put the traffic lights over the brand mark.
 fn fullscreen_or_windowed(window: &tauri::WebviewWindow) -> bool {
     let fullscreen = window.is_fullscreen().unwrap_or_else(|error| {
         tracing::warn!(%error, "could not read the window's fullscreen state");
@@ -178,18 +180,30 @@ mod tests {
         assert!(!overlay_title_bar(&undecorated, true));
     }
 
+    fn grants(capability: &serde_json::Value, permission: &str) -> bool {
+        capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|granted| granted == permission)
+    }
+
     /// The drag regions call `start_dragging`, which `core:default` does
     /// not grant; double-click zoom's `internal_toggle_maximize` it does.
+    /// Only macOS marks drag regions, so only macOS gets the permission.
     #[test]
-    fn the_capability_lets_drag_regions_move_the_window() {
-        let capability = read("capabilities/main.json");
-        let permissions = capability["permissions"].as_array().unwrap();
+    fn only_the_macos_capability_lets_drag_regions_move_the_window() {
+        const DRAGGING: &str = "core:window:allow-start-dragging";
+        let chrome = read("capabilities/macos-window-chrome.json");
+        assert_eq!(chrome["platforms"], serde_json::json!(["macOS"]));
+        assert_eq!(chrome["windows"], serde_json::json!([crate::MAIN_WINDOW]));
+        assert!(grants(&chrome, DRAGGING), "the macOS capability grants it");
+        let main = read("capabilities/main.json");
         assert!(
-            permissions
-                .iter()
-                .any(|permission| permission == "core:window:allow-start-dragging"),
-            "main.json grants core:window:allow-start-dragging"
+            main.get("platforms").is_none(),
+            "main.json is every platform's"
         );
+        assert!(!grants(&main, DRAGGING), "Linux/Windows never get it");
     }
 
     #[test]

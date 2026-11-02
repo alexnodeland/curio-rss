@@ -1,0 +1,8 @@
+{
+  "$schema": "gen/schemas/desktop-schema.json",
+  "identifier": "macos-window-chrome",
+  "description": "macOS only: under the overlay title bar (#148) the main window's pane headers are its drag regions, which call start_dragging. Linux and Windows keep their native decorations, never mark a drag region, and so never get the permission.",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "permissions": ["core:window:allow-start-dragging"]
+}

@@ -3,7 +3,8 @@
  * welcome view takes the list and reader's place, its actions reach the
  * add-feed modal (pre-filled by a starter source) and every importer, its
  * primer names the registry's keys, and it steps aside once a feed lands. A
- * feed-less library of imported saves, or another view, keeps the panes.
+ * feed-less library of imported saves, a list that failed to load, or
+ * another view, keeps the panes.
  */
 import { events } from '$lib/bindings';
 import { selectView } from '$lib/state/actions';
@@ -19,9 +20,11 @@ import {
     type Responder,
     articleStateFixture,
     articleSummaryFixture,
+    commandErrorFixture,
     feedFixture,
     flushIpc,
     installIpcHarness,
+    rejectWith,
     unreadCountsFixture,
 } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
@@ -144,6 +147,29 @@ describe('welcome view', () => {
         expect(keys).toEqual(['j', 'k', 's', '?']);
     });
 
+    it('with the sidebar off screen, its top edge offers the sidebar back', async () => {
+        harness = installIpcHarness(firstRun());
+        const { getByTestId, queryByRole, getByRole } = render(Page);
+        await flushIpc();
+        // The sidebar is on screen: the list header's toggle has nothing to add.
+        expect(queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+
+        layoutStore.sidebarCollapsed = true;
+        await flushIpc();
+        expect(getByTestId('welcome')).toBeTruthy();
+        const toggle = getByRole('button', { name: 'Show sidebar' });
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+        await fireEvent.click(toggle);
+        await flushIpc();
+        expect(layoutStore.sidebarVisible).toBe(true);
+        expect(queryByRole('button', { name: 'Show sidebar' })).toBeNull();
+        expect(harness.callsFor('set_setting')).toContainEqual({
+            key: 'ui.panes.sidebar-collapsed',
+            value: 'false',
+        });
+    });
+
     it('steps aside once a subscription lands', async () => {
         harness = installIpcHarness(firstRun());
         const unwire = await wireInvalidation();
@@ -169,6 +195,22 @@ describe('welcome view', () => {
         await flushIpc();
         expect(queryByTestId('welcome')).toBeNull();
         expect(getByText('Saved')).toBeTruthy();
+    });
+
+    it('a failed first list load keeps its error state and Retry', async () => {
+        harness = installIpcHarness(
+            firstRun({
+                list_articles: rejectWith(
+                    commandErrorFixture({ kind: 'user', code: 'IO', message: 'disk went away' }),
+                ),
+            }),
+        );
+        const { queryByTestId, getByRole } = render(Page);
+        await flushIpc();
+        // A load that failed says nothing about the library being empty.
+        expect(queryByTestId('welcome')).toBeNull();
+        expect(document.querySelector('.article-list')).not.toBeNull();
+        expect(getByRole('button', { name: 'Retry' })).toBeTruthy();
     });
 
     it('another view keeps its own empty state', async () => {

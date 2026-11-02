@@ -7,14 +7,22 @@
  * keys come from the shortcut registry — so it never names an unbound key.
  * It steps aside on its own: the first feed or saved article lands through
  * the usual invalidation events and the panes return.
+ *
+ * Its top edge stands in for the list header it replaces: under the macOS
+ * overlay title bar (#148) it drags the window, and while the sidebar is off
+ * screen (collapsed, folded away by a narrow window, or focus mode) it holds
+ * the sidebar toggle — clear of the traffic lights — so the sidebar's
+ * Settings and feeds stay one click away.
  */
 import Icon from '$components/common/Icon.svelte';
 import type { ImportSourceDto } from '$lib/bindings';
+import { tooltip } from '$lib/actions/tooltip';
 import { type MessageKey, t } from '$lib/i18n';
 import { shortcutKbd } from '$lib/keyboard/labels';
 import type { ShortcutId } from '$lib/keyboard/registry';
 import { importFromFile } from '$lib/state/actions';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { STARTER_PRESETS } from '$lib/utils/source-presets';
 
 const IMPORTS: readonly { source: ImportSourceDto; label: MessageKey }[] = [
@@ -30,6 +38,10 @@ const PRIMER: readonly { ids: readonly ShortcutId[]; label: MessageKey }[] = [
     { ids: ['help.toggle'], label: 'reader.hint.help' },
 ];
 
+const sidebarLabel = $derived(
+    layoutStore.sidebarVisible ? t('pane.sidebar.hide') : t('pane.sidebar.show'),
+);
+
 /** The printed keys of one primer row (only keys the registry binds). */
 function primerKeys(ids: readonly ShortcutId[]): string[] {
     return ids.flatMap((id) => {
@@ -39,62 +51,130 @@ function primerKeys(ids: readonly ShortcutId[]): string[] {
 }
 </script>
 
-<section class="welcome" aria-labelledby="welcome-title" data-testid="welcome">
-    <div class="welcome-inner">
-        <header class="welcome-head">
-            <div class="welcome-mark" aria-hidden="true">
-                <Icon name="rss" size={30} strokeWidth={1.5} />
-            </div>
-            <h1 id="welcome-title" class="welcome-title">{t('welcome.title')}</h1>
-            <p class="welcome-intro">{t('welcome.intro')}</p>
-            <button class="state-action primary welcome-cta" type="button" onclick={() => layoutStore.openAddFeed()}>
-                <Icon name="plus" size={16} />
-                {t('emptyState.addFeed')}
-            </button>
-        </header>
+<div class="welcome-frame">
+    {#if windowChromeStore.dragRegion !== undefined || !layoutStore.sidebarVisible}
+        <div
+            class="welcome-bar"
+            class:leading={!layoutStore.sidebarVisible}
+            data-tauri-drag-region={windowChromeStore.dragRegion}
+        >
+            {#if !layoutStore.sidebarVisible}
+                <button
+                    class="bar-tool"
+                    type="button"
+                    aria-expanded={layoutStore.sidebarVisible}
+                    aria-label={sidebarLabel}
+                    use:tooltip={{ text: sidebarLabel, kbd: shortcutKbd('view.toggleSidebar') }}
+                    onclick={() => void layoutStore.toggleSidebar()}
+                >
+                    <Icon name="sidebar" />
+                </button>
+            {/if}
+        </div>
+    {/if}
+    <section class="welcome" aria-labelledby="welcome-title" data-testid="welcome">
+        <div class="welcome-inner">
+            <header class="welcome-head">
+                <div class="welcome-mark" aria-hidden="true">
+                    <Icon name="rss" size={30} strokeWidth={1.5} />
+                </div>
+                <h1 id="welcome-title" class="welcome-title">{t('welcome.title')}</h1>
+                <p class="welcome-intro">{t('welcome.intro')}</p>
+                <button class="state-action primary welcome-cta" type="button" onclick={() => layoutStore.openAddFeed()}>
+                    <Icon name="plus" size={16} />
+                    {t('emptyState.addFeed')}
+                </button>
+            </header>
 
-        <section class="welcome-group" aria-labelledby="welcome-presets">
-            <h2 id="welcome-presets" class="welcome-label">{t('presets.title')}</h2>
-            <div class="welcome-row">
-                {#each STARTER_PRESETS as preset (preset.id)}
-                    <button
-                        class="state-action"
-                        type="button"
-                        onclick={() => layoutStore.openAddFeed({ url: preset.url, tags: preset.tags })}
-                        >{t(preset.labelKey)}</button
-                    >
-                {/each}
-            </div>
-        </section>
+            <section class="welcome-group" aria-labelledby="welcome-presets">
+                <h2 id="welcome-presets" class="welcome-label">{t('presets.title')}</h2>
+                <div class="welcome-row">
+                    {#each STARTER_PRESETS as preset (preset.id)}
+                        <button
+                            class="state-action"
+                            type="button"
+                            onclick={() => layoutStore.openAddFeed({ url: preset.url, tags: preset.tags })}
+                            >{t(preset.labelKey)}</button
+                        >
+                    {/each}
+                </div>
+            </section>
 
-        <section class="welcome-group" aria-labelledby="welcome-import">
-            <h2 id="welcome-import" class="welcome-label">{t('welcome.import')}</h2>
-            <div class="welcome-row">
-                {#each IMPORTS as entry (entry.source)}
-                    <button class="state-action" type="button" onclick={() => void importFromFile(entry.source)}
-                        >{t(entry.label)}</button
-                    >
-                {/each}
-            </div>
-        </section>
+            <section class="welcome-group" aria-labelledby="welcome-import">
+                <h2 id="welcome-import" class="welcome-label">{t('welcome.import')}</h2>
+                <div class="welcome-row">
+                    {#each IMPORTS as entry (entry.source)}
+                        <button class="state-action" type="button" onclick={() => void importFromFile(entry.source)}
+                            >{t(entry.label)}</button
+                        >
+                    {/each}
+                </div>
+            </section>
 
-        <section class="welcome-group" aria-labelledby="welcome-keys">
-            <h2 id="welcome-keys" class="welcome-label">{t('welcome.keys')}</h2>
-            <ul class="welcome-keys">
-                {#each PRIMER as row (row.label)}
-                    <li>
-                        <span class="keys">
-                            {#each primerKeys(row.ids) as key (key)}<kbd>{key}</kbd>{/each}
-                        </span>
-                        {t(row.label)}
-                    </li>
-                {/each}
-            </ul>
-        </section>
-    </div>
-</section>
+            <section class="welcome-group" aria-labelledby="welcome-keys">
+                <h2 id="welcome-keys" class="welcome-label">{t('welcome.keys')}</h2>
+                <ul class="welcome-keys">
+                    {#each PRIMER as row (row.label)}
+                        <li>
+                            <span class="keys">
+                                {#each primerKeys(row.ids) as key (key)}<kbd>{key}</kbd>{/each}
+                            </span>
+                            {t(row.label)}
+                        </li>
+                    {/each}
+                </ul>
+            </section>
+        </div>
+    </section>
+</div>
 
 <style>
+    .welcome-frame {
+        position: relative;
+        flex: 1 1 auto;
+        display: flex;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    /* Out of flow, so the centred column does not move; it stays put while
+       the column scrolls under it. Laid out like the list header it stands in
+       for, minus the rule: nothing sits under it to divide from. */
+    .welcome-bar {
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        height: var(--header-height);
+        padding: 0 var(--space-3);
+    }
+
+    /* The leftmost header (sidebar off screen) keeps the traffic lights clear,
+       on the sidebar header's 16px leading edge. */
+    :global(:root[data-titlebar='overlay']) .welcome-bar.leading {
+        padding-left: calc(var(--space-4) + var(--titlebar-inset));
+    }
+
+    .bar-tool {
+        display: inline-grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid transparent;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .bar-tool:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
     .welcome {
         flex: 1 1 auto;
         display: flex;
@@ -138,7 +218,7 @@ function primerKeys(ids: readonly ShortcutId[]): string[] {
 
     .welcome-title {
         font-size: var(--text-xl);
-        font-weight: 620;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-tight);
         color: var(--fg);
     }
@@ -165,7 +245,7 @@ function primerKeys(ids: readonly ShortcutId[]): string[] {
 
     .welcome-label {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);

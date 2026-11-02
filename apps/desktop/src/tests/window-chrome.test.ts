@@ -19,6 +19,7 @@ import { resolve } from 'node:path';
 import ListPane from '$components/layout/ListPane.svelte';
 import RecoveryScreen from '$components/layout/RecoveryScreen.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
+import WelcomeView from '$components/layout/WelcomeView.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { events } from '$lib/bindings';
@@ -442,7 +443,9 @@ describe('window chrome', () => {
             const banner = getByRole('alert');
             const reader = query(container, '.reader');
             expect(reader.firstElementChild?.classList.contains('reader-toolbar')).toBe(true);
-            expect(query(container, '.reader-toolbar').nextElementSibling).toBe(banner);
+            expect(query(container, '.reader-toolbar').nextElementSibling).toBe(
+                banner.closest('.reader-banner'),
+            );
             expect(startsDrag(query(container, '.toolbar-spring'))).toBe(true);
         });
 
@@ -453,6 +456,23 @@ describe('window chrome', () => {
             const strip = query(container, '.drag-strip');
             expect(startsDrag(strip)).toBe(true);
             expect(startsDrag(getByText('Select an article to read'))).toBe(false);
+        });
+
+        it('the first-run welcome drags by its top edge and leads with the sidebar away', async () => {
+            harness = installIpcHarness(shellResponders());
+            emulateOverlay();
+            const { container, getByText, getByLabelText } = render(WelcomeView);
+            const bar = query(container, '.welcome-bar');
+            expect(bar.getAttribute(DRAG_REGION_ATTR)).toBe('deep');
+            expect(startsDrag(bar)).toBe(true);
+            expect(startsDrag(getByText('Welcome to Curio'))).toBe(false);
+            expect(bar.classList.contains('leading')).toBe(false);
+
+            layoutStore.toggleSidebar();
+            await tick();
+            expect(bar.classList.contains('leading')).toBe(true);
+            // The toggle it carries then is a control, never a drag handle.
+            expect(startsDrag(getByLabelText('Show sidebar'))).toBe(false);
         });
 
         it('with the sidebar collapsed the list header leads, past the traffic lights', async () => {
@@ -515,8 +535,9 @@ describe('window chrome', () => {
                 const sidebar = render(Sidebar);
                 const list = render(ListPane);
                 const reader = render(ReaderPane);
+                const welcome = render(WelcomeView);
                 await flushIpc();
-                for (const { container } of [sidebar, list, reader]) {
+                for (const { container } of [sidebar, list, reader, welcome]) {
                     expect(container.querySelector(`[${DRAG_REGION_ATTR}]`)).toBeNull();
                 }
             });

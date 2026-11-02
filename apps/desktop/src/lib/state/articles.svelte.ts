@@ -19,7 +19,13 @@ import {
 import { untrack } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ListPositions } from './list-position';
-import { type CommandResult, type Query, ensureQuery, queryKeys } from './query-cache.svelte';
+import {
+    type CommandResult,
+    type Query,
+    ensureQuery,
+    isCached,
+    queryKeys,
+} from './query-cache.svelte';
 import { type HeldRow, captureHeld, mergeHeld } from './read-hold';
 import { landRowDetails, rowDetails } from './row-details';
 import { searchStore } from './search.svelte';
@@ -125,7 +131,15 @@ export class ArticleListState {
         this.query = ensureQuery(
             queryKeys.articleList(filterKey(filters)),
             () => this.#fetchLoadedRange(),
-            { feedId: filters.feedId },
+            {
+                feedId: filters.feedId,
+                flagFilter: {
+                    read: filters.read,
+                    starred: filters.starred,
+                    read_later: filters.readLater,
+                    archived: filters.archived,
+                },
+            },
             rowDetails,
         );
     }
@@ -294,18 +308,32 @@ export class ArticlesStore {
      * The list state for an arbitrary filter combination (cached). Creation
      * is `untrack`ed so templates may reach for `current` directly —
      * registry bookkeeping is not a reactive dependency of the caller.
+     *
+     * A list whose window the query cache has evicted (an idle view past the
+     * cache's cap) is replaced by a fresh one, and every other evicted list
+     * is let go with it — so this registry stays as bounded as the cache.
      */
     list(filters: ArticleFilters): ArticleListState {
         const key = filterKey(filters);
         const existing = this.#lists.get(key);
-        if (existing !== undefined) {
+        if (existing !== undefined && isCached(existing.query as Query<unknown>)) {
             return existing;
         }
         return untrack(() => {
+            for (const [staleKey, state] of this.#lists) {
+                if (!isCached(state.query as Query<unknown>)) {
+                    this.#lists.delete(staleKey);
+                }
+            }
             const created = new ArticleListState(filters);
             this.#lists.set(key, created);
             return created;
         });
+    }
+
+    /** How many list states are registered (tests). */
+    get listCount(): number {
+        return untrack(() => this.#lists.size);
     }
 
     /** The list state for the current filters. */
@@ -381,7 +409,8 @@ export class ArticlesStore {
 
     // Mutations are thin pass-throughs: Rust emits `ArticlesChanged` only
     // when state actually flipped (the idempotency `bool`), and the query
-    // cache reacts to the event — no optimistic client bookkeeping.
+    // cache reacts to the event. Optimistic flag patches (and their rollback)
+    // live in the action layer, which owns the failure toasts.
 
     markRead(articleId: number, read: boolean): Promise<CommandResult<boolean>> {
         return commands.markRead(articleId, read);

@@ -111,7 +111,7 @@ describe('article list state', () => {
         expect(list.items).toHaveLength(100);
         const callsBefore = harness.callsFor('list_articles').length;
 
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await flushIpc();
 
         // The refetch walked the loaded range page by page (2 pages).
@@ -128,11 +128,11 @@ describe('article list state', () => {
         expect(list.loaded).toBe(true);
         const callsBefore = harness.callsFor('list_articles').length;
 
-        await events.articlesChanged.emit({ feed_id: 3 });
+        await events.articlesChanged.emit({ feed_id: 3, flags: null });
         await flushIpc();
         expect(harness.callsFor('list_articles')).toHaveLength(callsBefore);
 
-        await events.articlesChanged.emit({ feed_id: 7 });
+        await events.articlesChanged.emit({ feed_id: 7, flags: null });
         await flushIpc();
         expect(harness.callsFor('list_articles')).toHaveLength(callsBefore + 1);
         unwire();

@@ -63,12 +63,7 @@ pub async fn add_feed(
     tauri::async_runtime::spawn(async move {
         if refresh_feed_impl(&core, feed_id).await.is_ok() {
             emit_or_log(&app, &FeedsChanged);
-            emit_or_log(
-                &app,
-                &ArticlesChanged {
-                    feed_id: Some(feed_id),
-                },
-            );
+            emit_or_log(&app, &ArticlesChanged::rows(Some(feed_id)));
         }
     });
     Ok(feed)
@@ -91,7 +86,7 @@ pub async fn remove_feed(
     pending.unstage(feed_id);
     removed?;
     emit_or_log(&app, &FeedsChanged);
-    emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    emit_or_log(&app, &ArticlesChanged::rows(None));
     Ok(())
 }
 
@@ -346,12 +341,7 @@ pub async fn refresh_feed(
     let core = Arc::clone(core.inner());
     let outcome = logged("refresh_feed", refresh_feed_impl(&core, feed_id).await)?;
     emit_or_log(&app, &FeedsChanged);
-    emit_or_log(
-        &app,
-        &ArticlesChanged {
-            feed_id: Some(feed_id),
-        },
-    );
+    emit_or_log(&app, &ArticlesChanged::rows(Some(feed_id)));
     Ok(outcome)
 }
 
@@ -409,7 +399,7 @@ pub(crate) async fn refresh_all_and_emit(
     if !sweep.joined {
         emit_or_log(app, &sweep.finished);
         emit_or_log(app, &FeedsChanged);
-        emit_or_log(app, &ArticlesChanged { feed_id: None });
+        emit_or_log(app, &ArticlesChanged::rows(None));
     }
     Ok(sweep)
 }

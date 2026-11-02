@@ -44,7 +44,7 @@ describe('ArticleTags', () => {
 
         // Rust emits ArticlesChanged after a real tag change → the list refetches.
         harness.respond('get_article_tags', ['rust']);
-        await events.articlesChanged.emit({ feed_id: null });
+        await events.articlesChanged.emit({ feed_id: null, flags: null });
         await flushIpc();
         expect(getByText('rust')).toBeTruthy();
         unwire();

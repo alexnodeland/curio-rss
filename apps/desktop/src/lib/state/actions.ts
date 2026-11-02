@@ -2,9 +2,11 @@
  * The action layer between input surfaces (keyboard shortcuts, toolbar
  * buttons, sidebar clicks) and the backend: every mutation goes through the
  * generated wrappers, failures become toasts, and list/count updates arrive
- * via the Rust-emitted invalidation events — never client-side bookkeeping.
- * Toggles read the authoritative flag first (`get_article_state`), then
- * write the flip; core's idempotency `bool` makes double-fires harmless.
+ * via the Rust-emitted invalidation events. The one exception is a flag the
+ * user just flipped: the cached flag changes at once (optimistic), and a
+ * failed write puts it back and toasts. A toggle flips the cached flag when
+ * it is loaded and reads the authoritative one (`get_article_state`) only
+ * when it is not; core's idempotency `bool` makes double-fires harmless.
  */
 import {
     events,
@@ -12,6 +14,7 @@ import {
     type ArticleSummaryDto,
     type CommandError,
     type ErrorCode,
+    type FlagField,
     type ImportSourceDto,
     commands,
 } from '$lib/bindings';
@@ -33,7 +36,15 @@ import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import { feedsStore } from './feeds.svelte';
 import { feedInFolder } from './folder-ops';
 import { layoutStore } from './layout.svelte';
-import { type CommandResult, ensureQuery, queryKeys } from './query-cache.svelte';
+import {
+    type CommandResult,
+    cachedArticleFlag,
+    ensureQuery,
+    patchArticleFlag,
+    pinArticleFlag,
+    queryKeys,
+    unpinArticleFlag,
+} from './query-cache.svelte';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
 import { type ToastOptions, toastStore } from './toasts.svelte';
@@ -153,23 +164,34 @@ export function runCommand<T>(
     });
 }
 
-type ToggleField = 'starred' | 'read' | 'read_later' | 'archived';
+type ToggleField = FlagField;
 
 /**
  * Per-article-field toggle serialization. A naive toggle reads the backend flag
  * then writes its negation; two fast presses both read the *pre-write* value
  * concurrently and both write the same negation, so the second press is
  * silently dropped. Serializing per key (chained promise) makes the second
- * press run only after the first settles, and `#toggleDesired` carries the
- * last-written value so the follow-up alternates without a redundant read.
+ * press's write run only after the first settles, and `toggleDesired` carries
+ * the last value pressed for so the follow-up alternates without a read. While
+ * a pressed value is pending, the query cache holds it pinned
+ * (`pinArticleFlag`), so an earlier write's event cannot flash the previous
+ * value back.
  */
 const toggleChain = new Map<string, Promise<unknown>>();
 const toggleDesired = new Map<string, boolean>();
 
 type FlagWrite = (id: number, value: boolean) => Promise<CommandResult<boolean>>;
 
+/** The `read` flag's write. */
+const markRead: FlagWrite = (id, value) => commands.markRead(id, value);
+
 /** Runs `step` after every earlier step on the same flag has settled. */
-async function onFlagChain<T>(key: string, step: () => Promise<T>): Promise<T> {
+async function onFlagChain<T>(
+    articleId: number,
+    field: ToggleField,
+    step: () => Promise<T>,
+): Promise<T> {
+    const key = `${field}:${articleId}`;
     const previous = toggleChain.get(key) ?? Promise.resolve();
     const task = previous.then(step);
     toggleChain.set(key, task);
@@ -177,51 +199,104 @@ async function onFlagChain<T>(key: string, step: () => Promise<T>): Promise<T> {
     // Drain once this press is the tail of the chain, so the maps don't grow.
     if (toggleChain.get(key) === task) {
         toggleChain.delete(key);
-        toggleDesired.delete(key);
+        forgetPressed(articleId, field);
     }
     return outcome;
 }
 
 /**
- * Writes an absolute flag value; the value written, or `undefined` when the
- * write failed (toasted). A failed write's Retry writes that same value —
- * never a fresh flip, which would mean the opposite once the flag changed in
- * between (the toast stays until dismissed) — and a later successful write
- * of the flag withdraws the failure (same key).
+ * Shows `value` in the cached flag now (optimistic) and remembers it as the
+ * pressed value, pinned until the flag's writes settle; returns the undo for
+ * a failed write (see `patchArticleFlag`).
  */
-async function writeFlag(
+function showFlag(articleId: number, field: ToggleField, value: boolean): (() => void) | null {
+    toggleDesired.set(`${field}:${articleId}`, value);
+    return pinArticleFlag(articleId, field, value);
+}
+
+/** Drops the pressed value (and its pin): the cache is the truth again. */
+function forgetPressed(articleId: number, field: ToggleField): void {
+    toggleDesired.delete(`${field}:${articleId}`);
+    unpinArticleFlag(articleId, field);
+}
+
+/**
+ * Writes an absolute flag value (run on the flag's chain); the value written,
+ * or `undefined` when the write failed (toasted). A failure puts the cached
+ * flag back (`rollback`, unless a newer press or event rewrote it since). Its
+ * Retry writes that same value — never a fresh flip, which would mean the
+ * opposite once the flag changed in between (the toast stays until
+ * dismissed) — and a later successful write of the flag withdraws the
+ * failure (same key).
+ */
+async function commitFlag(
     articleId: number,
     field: ToggleField,
     write: FlagWrite,
     value: boolean,
+    rollback: (() => void) | null,
 ): Promise<boolean | undefined> {
     const key = `${field}:${articleId}`;
-    toggleDesired.set(key, value);
     const ok = await run(() => write(articleId, value), {
         key,
-        run: () => void onFlagChain(key, () => writeFlag(articleId, field, write, value)),
+        run: () => void setFlag(articleId, field, write, value),
     });
     if (ok === undefined) {
-        // The write failed (toast already fired) — forget the optimistic
-        // value so the next press reads the real backend flag again.
-        toggleDesired.delete(key);
+        if (toggleDesired.get(key) === value) {
+            // Forget the pressed value, so the next press starts from the cache.
+            forgetPressed(articleId, field);
+        }
+        rollback?.();
         return undefined;
     }
     return value;
 }
 
-/** Flips a flag; the value written, or `undefined` when nothing was (toasted). */
-async function toggleFlag(
+/** Shows `value` at once and queues its write behind the flag's earlier ones. */
+function setFlag(
+    articleId: number,
+    field: ToggleField,
+    write: FlagWrite,
+    value: boolean,
+): Promise<boolean | undefined> {
+    const rollback = showFlag(articleId, field, value);
+    return onFlagChain(articleId, field, () =>
+        commitFlag(articleId, field, write, value, rollback),
+    );
+}
+
+/**
+ * The flag value a press flips: the value the last press asked for while its
+ * write is pending, else the cached flag — unless an earlier press on the
+ * flag is still reading the backend, whose answer this press must follow.
+ */
+function pressedFrom(articleId: number, field: ToggleField): boolean | undefined {
+    const key = `${field}:${articleId}`;
+    if (toggleDesired.has(key)) {
+        return toggleDesired.get(key);
+    }
+    return toggleChain.has(key) ? undefined : cachedArticleFlag(articleId, field);
+}
+
+/**
+ * Flips a flag; the value written, or `undefined` when nothing was (toasted).
+ * With the flag cached, the flip shows in the same frame as the press; with
+ * nothing cached it reads the backend flag first.
+ */
+function toggleFlag(
     articleId: number,
     field: ToggleField,
     write: FlagWrite,
 ): Promise<boolean | undefined> {
+    const current = pressedFrom(articleId, field);
+    if (current !== undefined) {
+        return setFlag(articleId, field, write, !current);
+    }
     const key = `${field}:${articleId}`;
-    return onFlagChain(key, async (): Promise<boolean | undefined> => {
-        let current: boolean;
-        if (toggleDesired.has(key)) {
-            current = toggleDesired.get(key) as boolean;
-        } else {
+    return onFlagChain(articleId, field, async (): Promise<boolean | undefined> => {
+        // Queued behind an earlier press: flip the value that one asked for.
+        let current = toggleDesired.get(key);
+        if (current === undefined) {
             // A failed read decided nothing, so its Retry is the whole toggle.
             const state = await run(() => commands.getArticleState(articleId), {
                 key,
@@ -232,7 +307,8 @@ async function toggleFlag(
             }
             current = state[field];
         }
-        return writeFlag(articleId, field, write, !current);
+        const rollback = showFlag(articleId, field, !current);
+        return commitFlag(articleId, field, write, !current, rollback);
     });
 }
 
@@ -253,7 +329,7 @@ export async function toggleReadLater(articleId: number): Promise<void> {
  */
 export async function toggleRead(articleId: number): Promise<void> {
     articlesStore.holdRead(articleId);
-    await toggleFlag(articleId, 'read', (id, value) => commands.markRead(id, value));
+    await toggleFlag(articleId, 'read', markRead);
 }
 
 /**
@@ -393,30 +469,51 @@ function toastBulkDone(changed: readonly number[], flag: ArticleFlagDto, value: 
  * emits nothing when it already was). The `article.opened` contract event
  * is reserved for a real open-in-browser, so the log stays truthful under
  * j/k scanning.
+ *
+ * The mark is a press of the `read` flag like `m` is — the same chain, so an
+ * `m` right after the open queues behind its write instead of racing it, and
+ * flips the value the open asked for.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
     // Held first: in an unread-only view the open must not drop the row (and
     // the selection with it) — it stays until the view changes.
     articlesStore.holdRead(articleId);
-    await run(() => commands.markRead(articleId, true), {
-        key: `read:${articleId}`,
-        run: () => void markReadOnOpen(articleId),
-    });
+    // The unread dot clears with the open, not a round trip later.
+    await setFlag(articleId, 'read', markRead, true);
 }
 
 /**
- * Mark-on-scroll: a row that scrolled up out of the list marks itself read.
- * Silent by design — this is a background sweep that can fire once per row,
- * so a transient failure must never raise a toast. Core no-ops when the row
- * was already read, so re-scrolling the same rows costs nothing.
+ * Mark-on-scroll: the rows that scrolled up out of the list mark themselves
+ * read — one `mark_read_many` for every row one viewport report passed, not
+ * one call (and one cache event) per row. Silent by design — this is a
+ * background sweep, so a transient failure must never raise a toast; the
+ * rows' dots come back instead. Core skips rows already read, so re-scrolling
+ * the same rows costs nothing.
  */
-export async function markReadOnScroll(articleId: number): Promise<void> {
-    // Held so the scrolled-past rows don't vanish and shift the list up.
-    articlesStore.holdRead(articleId);
+export async function markReadOnScroll(articleIds: readonly number[]): Promise<void> {
+    if (articleIds.length === 0) {
+        return;
+    }
+    const rollbacks: (() => void)[] = [];
+    for (const articleId of articleIds) {
+        // Held so the scrolled-past rows don't vanish and shift the list up.
+        articlesStore.holdRead(articleId);
+        const rollback = patchArticleFlag(articleId, 'read', true);
+        if (rollback !== null) {
+            rollbacks.push(rollback);
+        }
+    }
+    let failed: boolean;
     try {
-        await commands.markRead(articleId, true);
+        failed = (await commands.markReadMany([...articleIds], true)).status === 'error';
     } catch {
+        failed = true;
+    }
+    if (failed) {
         // A background read-mark that fails is not worth interrupting for.
+        for (const rollback of rollbacks) {
+            rollback();
+        }
     }
 }
 
@@ -642,19 +739,15 @@ export async function deleteFolder(path: string, name: string): Promise<void> {
 /** How many unread rows one mark-view-read listing page asks for. */
 const MARK_VIEW_PAGE = 200;
 
-/** Marks each id read, one command apiece; stops at (and toasts) the first failure. */
-async function markEachRead(articleIds: readonly number[]): Promise<number | undefined> {
-    let changed = 0;
-    for (const articleId of articleIds) {
-        const flipped = await run(() => commands.markRead(articleId, true));
-        if (flipped === undefined) {
-            return undefined;
-        }
-        if (flipped) {
-            changed += 1;
-        }
+/**
+ * Marks the ids read in one `mark_read_many` transaction (all or nothing, one
+ * cache event); the count that changed, or `undefined` on failure (toasted).
+ */
+async function markIdsRead(articleIds: readonly number[]): Promise<number | undefined> {
+    if (articleIds.length === 0) {
+        return 0;
     }
-    return changed;
+    return run(() => commands.markReadMany([...articleIds], true));
 }
 
 /** One page of a view's unread rows strictly below `before`. */
@@ -714,7 +807,7 @@ async function markFolderFeedsRead(path: string): Promise<number | undefined> {
 async function markViewReadCount(): Promise<number | undefined> {
     if (searchStore.active) {
         // Search results are a fixed FTS window: mark exactly what is listed.
-        return markEachRead(articlesStore.activeItems.map((article) => article.id));
+        return markIdsRead(articlesStore.activeItems.map((article) => article.id));
     }
     const filters = articlesStore.filters;
     if (filters.read === true) {
@@ -728,7 +821,7 @@ async function markViewReadCount(): Promise<number | undefined> {
         return markFolderFeedsRead(filters.feedTag);
     }
     const ids = await unreadIdsInView(filters);
-    return ids === undefined ? undefined : markEachRead(ids);
+    return ids === undefined ? undefined : markIdsRead(ids);
 }
 
 /**

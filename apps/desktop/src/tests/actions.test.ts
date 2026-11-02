@@ -1,15 +1,17 @@
 /**
- * The action layer over mockIPC: toggles read the authoritative backend
- * flag before writing the flip, failures land in toasts (user tier
+ * The action layer over mockIPC: toggles flip a cached flag at once
+ * (optimistic, rolled back on failure) and read the authoritative backend
+ * flag only when none is cached, failures land in toasts (user tier
  * verbatim, internal generic), view selection swaps the backend filter
  * set, and unwired registry ids are deliberate no-ops.
  */
-import type { ListArticlesDto } from '$lib/bindings';
+import { events, type ArticleStateDto, type ListArticlesDto } from '$lib/bindings';
 import {
     activeView,
     goToNextUnread,
     handleShortcut,
     importFromFile,
+    markReadOnOpen,
     markViewRead,
     openInBrowser,
     pageReader,
@@ -18,12 +20,19 @@ import {
     selectFolder,
     selectView,
     toggleArchived,
+    toggleRead,
     toggleStar,
 } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
-import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import {
+    type Query,
+    ensureQuery,
+    queryKeys,
+    resetQueryCache,
+    wireInvalidation,
+} from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -88,6 +97,175 @@ describe('actions — toggles', () => {
         ]);
         // The backend flag was read once; the follow-up alternated from cache.
         expect(harness.callsFor('get_article_state')).toHaveLength(1);
+    });
+
+    /** A cached, loaded flag row for article 7 (what a rendered row holds). */
+    async function cachedState(starred: boolean): Promise<Query<ArticleStateDto>> {
+        const query = ensureQuery(queryKeys.articleState(7), () =>
+            Promise.resolve({ status: 'ok' as const, data: articleStateFixture({ starred }) }),
+        );
+        await flushIpc();
+        return query;
+    }
+
+    it('with the flag cached, the star flips before the write settles and nothing is read', async () => {
+        let settle: (changed: boolean) => void = () => undefined;
+        harness = installIpcHarness({
+            set_starred: () =>
+                new Promise<boolean>((resolve) => {
+                    settle = resolve;
+                }),
+        });
+        const state = await cachedState(false);
+
+        const pressed = toggleStar(7);
+        // Same frame as the keypress: no await between the press and the patch.
+        expect(state.data?.starred).toBe(true);
+
+        await flushIpc();
+        settle(true);
+        await pressed;
+        expect(state.data?.starred).toBe(true);
+        expect(harness.callsFor('set_starred')).toEqual([{ articleId: 7, starred: true }]);
+        expect(harness.callsFor('get_article_state')).toHaveLength(0);
+    });
+
+    it('a failed write puts the cached flag back and toasts', async () => {
+        harness = installIpcHarness({
+            set_starred: rejectWith(
+                commandErrorFixture({ kind: 'internal', code: 'STORAGE', recoverable: true }),
+            ),
+        });
+        const state = await cachedState(false);
+
+        const pressed = toggleStar(7);
+        expect(state.data?.starred).toBe(true);
+        await pressed;
+
+        expect(state.data?.starred).toBe(false);
+        expect(toastStore.toasts).toHaveLength(1);
+        expect(toastStore.toasts[0]?.tone).toBe('error');
+    });
+
+    it('fast presses on a cached flag alternate, and a failed first write keeps the second', async () => {
+        let call = 0;
+        harness = installIpcHarness({
+            set_starred: () => {
+                call += 1;
+                return call === 1
+                    ? Promise.reject(commandErrorFixture({ kind: 'internal', code: 'STORAGE' }))
+                    : true;
+            },
+        });
+        const state = await cachedState(false);
+
+        const first = toggleStar(7);
+        const second = toggleStar(7);
+        expect(state.data?.starred).toBe(false); // star, then unstar — both shown at once
+        await Promise.all([first, second]);
+
+        expect(harness.callsFor('set_starred')).toEqual([
+            { articleId: 7, starred: true },
+            { articleId: 7, starred: false },
+        ]);
+        // The failed first write must not roll the flag back over the second press.
+        expect(state.data?.starred).toBe(false);
+    });
+
+    /**
+     * A flag write the test settles by hand: settling emits the flag event
+     * the Rust command does, then resolves the command.
+     */
+    interface HeldWrite {
+        readonly value: boolean;
+        readonly settle: () => Promise<void>;
+    }
+
+    function heldWrites(
+        field: 'starred' | 'read',
+        arg: 'starred' | 'read',
+    ): { writes: HeldWrite[]; respond: (args: Record<string, unknown>) => Promise<boolean> } {
+        const writes: HeldWrite[] = [];
+        return {
+            writes,
+            respond: (args) =>
+                new Promise<boolean>((resolve) => {
+                    const value = args[arg] as boolean;
+                    writes.push({
+                        value,
+                        settle: async () => {
+                            await events.articlesChanged.emit({
+                                feed_id: null,
+                                flags: { article_ids: [7], field, value },
+                            });
+                            resolve(true);
+                            await flushIpc();
+                        },
+                    });
+                }),
+        };
+    }
+
+    it("an earlier press's event never flashes the old value back over a pending press", async () => {
+        const held = heldWrites('starred', 'starred');
+        harness = installIpcHarness({ set_starred: held.respond });
+        const unwire = await wireInvalidation();
+        const state = await cachedState(false);
+        const seen: (boolean | undefined)[] = [];
+
+        const first = toggleStar(7);
+        const second = toggleStar(7);
+        seen.push(state.data?.starred);
+        await flushIpc();
+        await held.writes[0]?.settle(); // star committed; its event arrives
+        seen.push(state.data?.starred);
+        await held.writes[1]?.settle(); // unstar committed
+        seen.push(state.data?.starred);
+        await Promise.all([first, second]);
+
+        expect(held.writes.map((write) => write.value)).toEqual([true, false]);
+        expect(seen).toEqual([false, false, false]);
+
+        // Settled: the next change from anywhere shows as usual.
+        await events.articlesChanged.emit({
+            feed_id: null,
+            flags: { article_ids: [7], field: 'starred', value: true },
+        });
+        await flushIpc();
+        expect(state.data?.starred).toBe(true);
+        unwire();
+    });
+
+    it("m right after an open queues behind the open's write and flips the value it asked for", async () => {
+        const held = heldWrites('read', 'read');
+        harness = installIpcHarness({ mark_read: held.respond });
+        const unwire = await wireInvalidation();
+        const state = ensureQuery(queryKeys.articleState(7), () =>
+            Promise.resolve({ status: 'ok' as const, data: articleStateFixture({ read: false }) }),
+        );
+        await flushIpc();
+
+        const opened = markReadOnOpen(7);
+        expect(state.data?.read).toBe(true); // the dot clears with the open
+        const pressed = toggleRead(7);
+        expect(state.data?.read).toBe(false); // and `m` brings it back at once
+        await flushIpc();
+        // One write at a time: the `m` waits for the open's mark.
+        expect(held.writes.map((write) => write.value)).toEqual([true]);
+
+        await held.writes[0]?.settle();
+        expect(state.data?.read).toBe(false); // the open's event doesn't win
+        expect(held.writes.map((write) => write.value)).toEqual([true, false]);
+        await held.writes[1]?.settle();
+        await Promise.all([opened, pressed]);
+
+        expect(harness.callsFor('mark_read')).toEqual([
+            { articleId: 7, read: true },
+            { articleId: 7, read: false },
+        ]);
+        expect(harness.callsFor('get_article_state')).toHaveLength(0);
+        expect(state.data?.read).toBe(false);
+        unwire();
     });
 
     it('a user-tier failure surfaces verbatim as a toast and stops the flip', async () => {
@@ -383,7 +561,8 @@ describe('actions — mark the current view read (Shift+A)', () => {
                 const params = args.params as ListArticlesDto;
                 return params.before === null ? page(1000, 200) : page(800, 3);
             },
-            mark_read: (args) => (args.articleId as number) !== 799, // one already read
+            // One of the 203 was already read.
+            mark_read_many: (args) => (args.articleIds as number[]).length - 1,
         });
         selectView('starred');
 
@@ -395,20 +574,23 @@ describe('actions — mark the current view read (Shift+A)', () => {
         expect(listings[0]).toMatchObject({ starred: true, read: false, before: null, limit: 200 });
         expect(listings[1]).toMatchObject({ starred: true, read: false, before: 801 });
         expect(harness.callsFor('mark_all_read')).toHaveLength(0);
-        expect(harness.callsFor('mark_read')).toHaveLength(203);
+        // Every listed id goes in one batch: one IPC call, one transaction.
+        expect(harness.callsFor('mark_read')).toHaveLength(0);
+        const batches = harness.callsFor('mark_read_many');
+        expect(batches).toHaveLength(1);
+        expect(batches[0]?.read).toBe(true);
+        expect(batches[0]?.articleIds).toHaveLength(203);
         expect(lastToast()).toBe('Marked 202 read');
     });
 
     it('search results mark exactly the listed rows', async () => {
-        harness = installIpcHarness({ mark_read: true });
+        harness = installIpcHarness({ mark_read_many: 2 });
         searchStore.setQuery('rust', 0);
         searchStore.results = [articleSummaryFixture({ id: 5 }), articleSummaryFixture({ id: 6 })];
 
         await markViewRead();
-        expect(harness.callsFor('mark_read')).toEqual([
-            { articleId: 5, read: true },
-            { articleId: 6, read: true },
-        ]);
+        expect(harness.callsFor('mark_read_many')).toEqual([{ articleIds: [5, 6], read: true }]);
+        expect(harness.callsFor('mark_read')).toHaveLength(0);
         expect(harness.callsFor('mark_all_read')).toHaveLength(0);
     });
 
@@ -420,14 +602,16 @@ describe('actions — mark the current view read (Shift+A)', () => {
         expect(lastToast()).toBe('Marked 0 read');
     });
 
-    it('a failure stops the sweep and toasts the error instead of a count', async () => {
+    it('a failed batch marks nothing and toasts the error instead of a count', async () => {
         harness = installIpcHarness({
             list_articles: [articleSummaryFixture({ id: 9 }), articleSummaryFixture({ id: 8 })],
-            mark_read: rejectWith(commandErrorFixture({ kind: 'internal', message: 'disk full' })),
+            mark_read_many: rejectWith(
+                commandErrorFixture({ kind: 'internal', message: 'disk full' }),
+            ),
         });
         selectView('readLater');
         await markViewRead();
-        expect(harness.callsFor('mark_read')).toHaveLength(1);
+        expect(harness.callsFor('mark_read_many')).toHaveLength(1);
         expect(toastStore.toasts.some((toast) => toast.tone === 'error')).toBe(true);
         expect(toastStore.toasts.some((toast) => toast.tone === 'success')).toBe(false);
     });

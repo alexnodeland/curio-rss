@@ -209,9 +209,12 @@ describe('shell keyboard wiring', () => {
 
         await fireEvent.keyDown(window, { key: 'm' });
         await flushIpc();
-        // fixture state says unread → m marks read (after the open's auto-mark)
-        const markReads = harness.callsFor('mark_read');
-        expect(markReads[markReads.length - 1]).toEqual({ articleId: 500, read: true });
+        // The open's auto-mark already shows the row read (optimistically, in
+        // the cached flag), so m flips it back to unread.
+        expect(harness.callsFor('mark_read')).toEqual([
+            { articleId: 500, read: true },
+            { articleId: 500, read: false },
+        ]);
     });
 
     it('o opens the selection externally and records the contract open', async () => {

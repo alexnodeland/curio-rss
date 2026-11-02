@@ -2,7 +2,7 @@
  * Mark-on-scroll: when the setting is on, rows that scroll up past the top
  * of the list mark themselves read (once each); when off, scrolling touches
  * nothing. The virtualizer reports the scrolled-past count; ArticleList
- * marks the newly passed rows through a silent `mark_read`.
+ * marks the newly passed rows through one silent `mark_read_many` per report.
  */
 import ArticleList, { ROW_HEIGHT } from '$components/articles/ArticleList.svelte';
 import { articlesStore } from '$lib/state/articles.svelte';
@@ -30,7 +30,7 @@ function harnessWithArticles(): IpcHarness {
         list_articles: ARTICLES,
         list_feeds: [],
         get_article_state: articleStateFixture(),
-        mark_read: true,
+        mark_read_many: (args) => (args.articleIds as number[]).length,
     });
 }
 
@@ -42,12 +42,12 @@ async function scrollTo(container: HTMLElement, scrollTop: number): Promise<void
     await flushIpc();
 }
 
-/** The article ids passed to `mark_read` with read=true, in call order. */
+/** The article ids batched into `mark_read_many` with read=true, in call order. */
 function markedIds(harness: IpcHarness): number[] {
     return harness
-        .callsFor('mark_read')
+        .callsFor('mark_read_many')
         .filter((args) => args.read === true)
-        .map((args) => args.articleId as number);
+        .flatMap((args) => args.articleIds as number[]);
 }
 
 describe('mark-on-scroll', () => {
@@ -73,6 +73,9 @@ describe('mark-on-scroll', () => {
         // Scroll three rows up out of view: floor(3*ROW_HEIGHT / ROW_HEIGHT) = 3.
         await scrollTo(container, ROW_HEIGHT * 3);
         expect(markedIds(harness)).toEqual([1000, 1001, 1002]);
+        // One batch for the three rows that one scroll passed, never a call per row.
+        expect(harness.callsFor('mark_read_many')).toHaveLength(1);
+        expect(harness.callsFor('mark_read')).toHaveLength(0);
 
         // Scrolling further only marks the newly passed rows (no repeats).
         await scrollTo(container, ROW_HEIGHT * 5);

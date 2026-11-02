@@ -27,7 +27,7 @@ pub async fn tag_article(
     })
     .await?;
     if changed {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(&app, &ArticlesChanged::rows(None));
     }
     Ok(changed)
 }
@@ -47,7 +47,7 @@ pub async fn untag_article(
     })
     .await?;
     if changed {
-        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+        emit_or_log(&app, &ArticlesChanged::rows(None));
     }
     Ok(changed)
 }

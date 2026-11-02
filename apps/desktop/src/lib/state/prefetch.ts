@@ -6,17 +6,18 @@
  *
  * The prefetcher owns only the body queries it created itself, and drops each
  * one once the selection has moved more than `PREFETCH_RADIUS` rows away from
- * it — every live detail query is refetched on each `ArticlesChanged`, so an
- * unbounded trail of prefetched bodies would make every mark-read fan out
- * across the whole scan history. Queries created by anyone else (the reader
- * for a directly selected article, list rows for flags) are never dropped.
+ * it — a body nothing shows yet is refetched on every row-changing
+ * `ArticlesChanged` (a refresh, a full-text load), so an unbounded trail of
+ * prefetched bodies would make every refresh fan out across the whole scan
+ * history. Queries created by anyone else (the reader for a directly selected
+ * article, list rows for flags) are never dropped.
  *
  * Flag (`articleState`) queries are ensured but never owned or dropped: the
  * list rows already create them for every rendered row (ArticleRow,
  * ArticleList, SearchResults), so the prefetch adds at most the few rows just
- * outside the rendered slice. Each is one tiny state row, and the trail is
- * bounded by the rows the session has scrolled past — not worth an ownership
- * protocol shared with the list.
+ * outside the rendered slice. Each is one tiny state row, a flag flip patches
+ * it in place, and the query cache's idle cap bounds the trail — not worth an
+ * ownership protocol shared with the list.
  */
 import { commands } from '$lib/bindings';
 import { untrack } from 'svelte';

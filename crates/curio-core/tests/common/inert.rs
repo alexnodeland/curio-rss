@@ -152,30 +152,56 @@ fn value_is_filtered(element: &str, attr: &str, value: &str) -> bool {
 /// reads it: no scriptable link/image destination, and no *live* raw HTML
 /// tag that is forbidden or carries a handler / scriptable URL.
 ///
-/// Code (fenced blocks, inline spans) and backslash-escaped `\<` are text
-/// to a renderer, so `\<script>` — how htmd writes literal angle brackets
-/// that were plain text in the source — is inert and passes.
+/// Code (fenced and indented blocks, inline spans) and backslash-escaped
+/// `\<` are text to a renderer, so `\<script>` — how htmd writes literal
+/// angle brackets that were plain text in the source — is inert and
+/// passes. What counts as code, and where a link's destination sits, is
+/// decided by a real `CommonMark` parser (see [`parse`]); everything else
+/// is scanned as prose, conservatively.
 ///
 /// # Errors
 ///
 /// A description of the first violation found.
 pub fn audit_markdown(markdown: &str) -> Result<(), String> {
-    let prose = strip_code(markdown).to_lowercase();
+    // Plain `CommonMark`, and the GFM-style extensions note apps and
+    // static-site generators turn on (a table splits its row into cells
+    // first, so a span the plain parse pairs may not pair there).
+    let gfm = pulldown_cmark::Options::ENABLE_TABLES
+        | pulldown_cmark::Options::ENABLE_FOOTNOTES
+        | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
+        | pulldown_cmark::Options::ENABLE_TASKLISTS;
+    for options in [pulldown_cmark::Options::empty(), gfm] {
+        let parsed = parse(markdown, options);
+        if let Some(destination) = parsed.scriptable_destination {
+            return Err(format!(
+                "markdown links to a scriptable destination {destination:?}:\n{markdown}"
+            ));
+        }
+        audit_link_prose(&parsed.prose.to_lowercase(), markdown)?;
+        audit_tag_prose(&parsed.tag_prose.to_lowercase(), markdown)?;
+    }
+    Ok(())
+}
+
+/// Every `](` destination in `prose`, read like the scheme of an `href`
+/// (see `browser_scheme`), so `]( java\tscript:…)` cannot slip past —
+/// whether or not the parser saw a link there.
+fn audit_link_prose(prose: &str, markdown: &str) -> Result<(), String> {
     for (at, _) in prose.match_indices("](") {
-        // The destination, read like the scheme of an `href` (see
-        // `browser_scheme`), so `]( java\tscript:…)` cannot slip past.
         let rest = prose[at + 2..].trim_start_matches(|c: char| c <= ' ' || c == '<');
         let end = rest.find([')', '>', '\n']).unwrap_or(rest.len());
-        if let Some(scheme) = browser_scheme(&rest[..end]).and_then(|scheme| {
-            SCRIPTABLE_SCHEMES
-                .iter()
-                .find(|listed| listed.strip_suffix(':') == Some(scheme.as_str()))
-        }) {
+        if let Some(scheme) = browser_scheme(&rest[..end]).and_then(|scheme| scriptable(&scheme)) {
             return Err(format!(
                 "markdown links to a {scheme} destination:\n{markdown}"
             ));
         }
     }
+    Ok(())
+}
+
+/// Every `<` in `prose` that is not escaped and opens something tag-shaped:
+/// a forbidden element, or a tag carrying a handler or a scriptable URL.
+fn audit_tag_prose(prose: &str, markdown: &str) -> Result<(), String> {
     let bytes = prose.as_bytes();
     for (at, _) in prose.match_indices('<') {
         let backslashes = bytes[..at]
@@ -213,98 +239,96 @@ pub fn audit_markdown(markdown: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `markdown` with fenced code blocks and inline code spans blanked out —
-/// exactly what a `CommonMark` renderer reads as code, and nothing more, so
-/// live HTML can never hide behind something that only *looks* like code:
-///
-/// - a fence opens only at 0–3 spaces of indentation (four or more is an
-///   indented code *line*, audited here, never a fence that would hide
-///   every line after it), with three or more of one marker, and closes on
-///   the same marker at least as long, followed by nothing but spaces;
-/// - an inline span opens on a backtick run and closes on the next run of
-///   the *same length*; an unmatched run is literal text, and a
-///   backslash-escaped backtick opens nothing.
-///
-/// Spans are matched within a line, never across lines: a span a renderer
-/// would continue onto the next line is audited as prose instead — a false
-/// positive at worst, never a hiding place.
-fn strip_code(markdown: &str) -> String {
-    let mut out = String::with_capacity(markdown.len());
-    let mut fence: Option<(char, usize)> = None;
-    for line in markdown.lines() {
-        match fence {
-            Some((marker, len)) => {
-                if fence_run(line).is_some_and(|(close, run, rest)| {
-                    close == marker && run >= len && rest.trim_matches(' ').is_empty()
-                }) {
-                    fence = None;
-                }
-            }
-            None => match fence_run(line) {
-                // A backtick fence's info string may not hold a backtick
-                // (such a line is inline spans instead).
-                Some((marker, run, info)) if marker == '~' || !info.contains('`') => {
-                    fence = Some((marker, run));
-                }
-                _ => out.push_str(&strip_spans(line)),
-            },
-        }
-        out.push('\n');
-    }
-    out
+/// The listed scriptable scheme `scheme` names, if any.
+fn scriptable(scheme: &str) -> Option<&'static str> {
+    SCRIPTABLE_SCHEMES
+        .iter()
+        .find(|listed| listed.strip_suffix(':') == Some(scheme))
+        .copied()
 }
 
-/// A fence run opening `line`: its marker, its length (three or more) and
-/// the rest of the line. `None` past three spaces of indentation.
-fn fence_run(line: &str) -> Option<(char, usize, &str)> {
-    let body = line.trim_start_matches(' ');
-    if line.len() - body.len() > 3 {
-        return None;
-    }
-    let marker = body.chars().next().filter(|c| matches!(c, '`' | '~'))?;
-    let run = body.len() - body.trim_start_matches(marker).len();
-    (run >= 3).then(|| (marker, run, &body[run..]))
+/// What one `CommonMark` parse of exported markdown says.
+struct Parsed {
+    /// The markdown with every byte the parser reads as code — fenced and
+    /// indented code blocks and inline code spans, delimiters included —
+    /// blanked to a space (line breaks kept, so the line-based scans see
+    /// the same lines).
+    prose: String,
+    /// [`Self::prose`] with the destinations of inline links and images
+    /// blanked too: `[x](<https://a.example/ b>)` is a link, not a tag.
+    tag_prose: String,
+    /// The first link or image destination (any kind: inline, reference,
+    /// autolink) whose scheme is scriptable.
+    scriptable_destination: Option<String>,
 }
 
-/// One line with its inline code spans removed (see [`strip_code`]).
-fn strip_spans(line: &str) -> String {
-    let bytes = line.as_bytes();
-    let run_at = |from: usize| bytes[from..].iter().take_while(|&&b| b == b'`').count();
-    let mut kept = String::with_capacity(line.len());
-    let mut at = 0;
-    while let Some(&byte) = bytes.get(at) {
-        if byte == b'\\' && bytes.get(at + 1).is_some_and(u8::is_ascii_punctuation) {
-            // An escaped punctuation character is literal — an escaped
-            // backtick opens no span. The escape is kept so the tag check
-            // still reads `\<` as a literal bracket.
-            kept.push_str(&line[at..at + 2]);
-            at += 2;
-        } else if byte == b'`' {
-            let run = run_at(at);
-            let mut from = at + run;
-            let mut close = None;
-            while let Some(offset) = bytes[from..].iter().position(|&b| b == b'`') {
-                let start = from + offset;
-                let len = run_at(start);
-                if len == run {
-                    close = Some(start);
-                    break;
+/// Parses `markdown` once with `options`.
+///
+/// A real parser, because what is code depends on the containers around
+/// it: a fence inside a block quote opens after its `> ` marker, one inside
+/// a list item after the item's indentation, and a span pairs only within
+/// one paragraph — and on a run of the *same length*, never after an
+/// escaped backtick (#245). A line scanner either reads container code as
+/// prose, or guesses at containers and hides prose when it guesses wrong.
+/// Anything the parser does not read as code stays in the prose, so live
+/// HTML can never hide behind something that only *looks* like code.
+fn parse(markdown: &str, options: pulldown_cmark::Options) -> Parsed {
+    use pulldown_cmark::{Event, LinkType, Parser, Tag};
+
+    let mut prose = markdown.as_bytes().to_vec();
+    let mut destinations = Vec::new();
+    let mut scriptable_destination = None;
+    for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
+        match event {
+            Event::Code(_) | Event::Start(Tag::CodeBlock(_)) => blank(&mut prose, range),
+            Event::Start(
+                Tag::Link {
+                    link_type,
+                    dest_url,
+                    ..
                 }
-                from = start + len;
+                | Tag::Image {
+                    link_type,
+                    dest_url,
+                    ..
+                },
+            ) => {
+                if scriptable_destination.is_none()
+                    && browser_scheme(&dest_url).is_some_and(|s| scriptable(&s).is_some())
+                {
+                    scriptable_destination = Some(dest_url.to_string());
+                }
+                // An inline link's destination (and title) follows its
+                // last `](`: everything before it is the link text, which
+                // stays in the prose.
+                if link_type == LinkType::Inline
+                    && let Some(at) = markdown[range.clone()].rfind("](")
+                {
+                    destinations.push(range.start + at + 2..range.end);
+                }
             }
-            if let Some(start) = close {
-                at = start + run; // the span, delimiters included, is code
-            } else {
-                kept.push_str(&line[at..at + run]); // unmatched: literal
-                at += run;
-            }
-        } else {
-            let Some(ch) = line[at..].chars().next() else {
-                break;
-            };
-            kept.push(ch);
-            at += ch.len_utf8();
+            _ => {}
         }
     }
-    kept
+    let mut tag_prose = prose.clone();
+    for range in destinations {
+        blank(&mut tag_prose, range);
+    }
+    // Ranges fall on character boundaries and only ASCII spaces are
+    // written, so these are still UTF-8 (lossy only to keep a panic path
+    // out).
+    Parsed {
+        prose: String::from_utf8_lossy(&prose).into_owned(),
+        tag_prose: String::from_utf8_lossy(&tag_prose).into_owned(),
+        scriptable_destination,
+    }
+}
+
+/// Blanks `range` of `bytes` to spaces, keeping line breaks.
+fn blank(bytes: &mut [u8], range: std::ops::Range<usize>) {
+    for byte in &mut bytes[range] {
+        if *byte != b'\n' {
+            *byte = b' ';
+        }
+    }
 }

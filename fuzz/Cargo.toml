@@ -21,7 +21,9 @@ cargo-fuzz = true
 curio-core = { path = "../crates/curio-core" }
 libfuzzer-sys = "0.4"
 # The inertness audit (crates/curio-core/tests/common/inert.rs) is shared
-# with the integration suites by `#[path]`; it parses with scraper.
+# with the integration suites by `#[path]`; it parses HTML with scraper and
+# markdown with pulldown-cmark.
+pulldown-cmark = { version = "0.13", default-features = false }
 scraper = "0.27"
 
 [workspace]

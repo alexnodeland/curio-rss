@@ -7,6 +7,8 @@
 
 mod support;
 
+use std::collections::BTreeSet;
+
 use curio_core::events::{FoldedState, read_all};
 use curio_types::CurioId;
 use predicates::prelude::predicate;
@@ -1280,4 +1282,235 @@ async fn feed_pause_and_resume_take_a_feed_out_of_fetches_and_back() {
         .args(["feed", "resume", "nope"])
         .assert()
         .failure();
+}
+
+/// #137: `curio retention` shows and sets the policy, `curio maintenance`
+/// applies it (never to a starred article) and `curio db rebuild-fts`
+/// leaves the index in sync.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retention_maintenance_and_the_fts_rebuild() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    seed(profile.path(), &server);
+    let list = || {
+        stdout_json(
+            &curio(profile.path())
+                .args(["list", "--json", "--limit", "50"])
+                .assert()
+                .success(),
+        )
+    };
+    let stored = list().as_array().unwrap().len();
+    assert!(stored >= 3, "the fixture feed has several items");
+    let starred = article_id_by_title(profile.path(), "With a guid");
+    curio(profile.path())
+        .args(["star", &starred[starred.len() - 8..]])
+        .assert()
+        .success();
+
+    let shown = stdout_json(
+        &curio(profile.path())
+            .args(["retention", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(shown["enabled"], false);
+    assert_eq!(shown["keep_unread"], true);
+    curio(profile.path())
+        .arg("retention")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("retention: off"));
+
+    // Nothing is deleted while the policy is off.
+    let report = stdout_json(
+        &curio(profile.path())
+            .args(["maintenance", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(report["articles_reaped"], 0);
+    assert_eq!(list().as_array().unwrap().len(), stored);
+
+    // Keep one per feed, unread included: everything but the newest and
+    // the starred article goes.
+    let set = stdout_json(
+        &curio(profile.path())
+            .args([
+                "retention",
+                "--max-per-feed",
+                "1",
+                "--keep-unread",
+                "off",
+                "--json",
+            ])
+            .assert()
+            .success(),
+    );
+    assert_eq!(set["enabled"], true);
+    assert_eq!(set["max_per_feed"], 1);
+    assert_eq!(set["keep_unread"], false);
+    curio(profile.path())
+        .arg("maintenance")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reaped"));
+    let left = list();
+    let left = left.as_array().unwrap();
+    assert!(left.len() <= 2 && left.len() < stored, "{left:?}");
+    assert!(left.iter().any(|a| a["curio_id"] == starred.as_str()));
+
+    // Off again (0 = no limit).
+    let off = stdout_json(
+        &curio(profile.path())
+            .args(["retention", "--max-per-feed", "0", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(off["enabled"], false);
+
+    curio(profile.path())
+        .args(["db", "rebuild-fts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rebuilt"));
+    let doctor = stdout_json(
+        &curio(profile.path())
+            .args(["doctor", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(doctor["ok"], true);
+}
+
+/// #137: `curio maintenance --purge-orphans` deletes an unsubscribed
+/// feed's articles but the protected ones; a run whose exported set is
+/// unreadable (an unmounted vault) deletes nothing and exits 3, its JSON
+/// report still printed; and an export stays protected after its
+/// destination is re-rooted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_orphan_purge_and_a_skipped_reap() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let moved = tempfile::tempdir().unwrap();
+    seed(profile.path(), &server);
+    let list = || {
+        stdout_json(
+            &curio(profile.path())
+                .args(["list", "--json", "--limit", "50"])
+                .assert()
+                .success(),
+        )
+        .as_array()
+        .unwrap()
+        .clone()
+    };
+    let stored = list();
+    assert!(stored.len() >= 3, "the fixture feed has several items");
+    let starred = article_id_by_title(profile.path(), "With a guid");
+    curio(profile.path())
+        .args(["star", &starred[starred.len() - 8..]])
+        .assert()
+        .success();
+    let exported = stored
+        .iter()
+        .map(|article| article["curio_id"].as_str().unwrap().to_owned())
+        .find(|id| *id != starred)
+        .unwrap();
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(vault.path())
+        .assert()
+        .success();
+    curio(profile.path())
+        .args(["save", &exported[exported.len() - 8..], "--dest", "vault"])
+        .assert()
+        .success();
+    curio(profile.path())
+        .args(["feed", "rm"])
+        .arg(format!("{server}/feed.xml"))
+        .assert()
+        .success();
+
+    // The vault is unmounted: nothing is deleted, and the run says so in
+    // its exit status as well as its report.
+    std::fs::remove_dir_all(vault.path().join(".curio")).unwrap();
+    let skipped = stdout_json(
+        &curio(profile.path())
+            .args(["maintenance", "--purge-orphans", "--json"])
+            .assert()
+            .code(3),
+    );
+    assert!(skipped["reap_skipped"].is_string(), "{skipped}");
+    assert_eq!(skipped["orphans_purged"], 0);
+    curio(profile.path())
+        .args(["maintenance", "--purge-orphans"])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("no article was deleted"));
+    assert_eq!(list().len(), stored.len());
+
+    // Re-rooted at a fresh folder: the old manifest is out of sight, yet
+    // the export stays protected along with the starred article.
+    curio(profile.path())
+        .args(["dest", "add", "vault"])
+        .arg(moved.path())
+        .assert()
+        .success();
+    let purged = stdout_json(
+        &curio(profile.path())
+            .args(["maintenance", "--purge-orphans", "--json"])
+            .assert()
+            .success(),
+    );
+    assert!(purged["reap_skipped"].is_null(), "{purged}");
+    assert_eq!(purged["orphans_purged"], stored.len() - 2);
+    let left: BTreeSet<String> = list()
+        .iter()
+        .map(|article| article["curio_id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(left, BTreeSet::from([starred, exported]));
+}
+
+/// #137: `curio db rebuild-fts` repairs a search index `curio doctor`
+/// found out of step (an index entry with no article behind it).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rebuild_fts_repairs_a_desynced_index() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    seed(profile.path(), &server);
+    let db = rusqlite::Connection::open(profile.path().join("curio.db")).unwrap();
+    db.execute(
+        "INSERT INTO articles_fts (rowid, title, content_text) VALUES (9999, 'ghost', 'ghost')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let doctor = stdout_json(
+        &curio(profile.path())
+            .args(["doctor", "--json"])
+            .assert()
+            .failure(),
+    );
+    assert_eq!(doctor["ok"], false);
+    curio(profile.path())
+        .args(["db", "rebuild-fts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("it matches the articles table"));
+    let doctor = stdout_json(
+        &curio(profile.path())
+            .args(["doctor", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(doctor["ok"], true);
+    let hits = stdout_json(
+        &curio(profile.path())
+            .args(["search", "ghost", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(hits.as_array().unwrap().len(), 0);
 }

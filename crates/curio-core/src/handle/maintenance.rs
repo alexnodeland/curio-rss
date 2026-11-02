@@ -1,18 +1,188 @@
 //! Maintenance: the database health probes and housekeeping the doctor
 //! panels run (schema version, integrity checks, `VACUUM`, staged
-//! intents), and the event-log retention sweep the facade owns.
+//! intents, the search-index rebuild), the event-log retention sweep the
+//! facade owns, and the routine [`CoreHandle::maintenance`] pass with its
+//! article-retention policy.
 
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
 use std::sync::atomic::Ordering;
 
 use curio_types::Timestamp;
+use serde::{Deserialize, Serialize};
 
 use crate::events::EventsError;
+use crate::model::RetentionPolicy;
+use crate::storage::MaintenancePlan;
 
 use super::{CoreError, CoreHandle};
 
+/// Settings key holding the article-retention policy (JSON; facade-owned —
+/// see [`CoreHandle::retention_policy`]).
+pub(super) const RETENTION_POLICY_KEY: &str = "retention.policy";
+
+/// What a [`CoreHandle::maintenance`] pass does beyond its routine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MaintenanceOptions {
+    /// Also delete the articles a feed removal left behind (unprotected
+    /// ones only — starred, read-later, tagged and exported stay). Off by
+    /// default: orphans are purged on request.
+    pub purge_orphans: bool,
+}
+
+/// What a [`CoreHandle::maintenance`] pass did.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MaintenanceReport {
+    /// Feed articles the retention policy reaped.
+    pub articles_reaped: u64,
+    /// Orphaned articles purged (with [`MaintenanceOptions::purge_orphans`]).
+    pub orphans_purged: u64,
+    /// Tags no article carried any more.
+    pub tags_dropped: u64,
+    /// Retention tombstones forgotten (their item has left its feed).
+    pub tombstones_pruned: u64,
+    /// `fetch_log` rows beyond the per-feed cap.
+    pub fetch_log_trimmed: u64,
+    /// Event-log files past the retention window that were deleted.
+    pub event_files_removed: Vec<PathBuf>,
+    /// Why no article was reaped this pass although a reap was asked for:
+    /// the exported set could not be read (a vault that is unmounted or
+    /// whose manifest does not load), and nothing is deleted on a guess.
+    pub reap_skipped: Option<String>,
+    /// Why the event-log sweep did not run (another process holds the
+    /// events lock, a filesystem error); the rest of the pass still ran.
+    pub event_sweep_skipped: Option<String>,
+    /// Why the database upkeep after the reap (the search-index merge,
+    /// `PRAGMA optimize`, the WAL checkpoint) stopped short — another
+    /// process held the write lock too long, say. What was deleted stays
+    /// deleted and is counted; the next pass catches up.
+    pub upkeep_skipped: Option<String>,
+}
+
+/// The persisted form of a [`RetentionPolicy`].
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredPolicy {
+    max_age_days: Option<NonZeroU32>,
+    max_per_feed: Option<NonZeroU32>,
+    keep_unread: bool,
+}
+
 impl CoreHandle {
+    /// The article-retention policy as persisted (the default — off,
+    /// keep unread — until one is set).
+    ///
+    /// # Errors
+    ///
+    /// Storage errors; [`CoreError::Settings`] for a stored value that
+    /// does not parse.
+    pub fn retention_policy(&self) -> Result<RetentionPolicy, CoreError> {
+        let Some(raw) = self.storage.get_setting(RETENTION_POLICY_KEY)? else {
+            return Ok(RetentionPolicy::default());
+        };
+        let stored: StoredPolicy = serde_json::from_str(&raw)?;
+        Ok(RetentionPolicy {
+            max_age_days: stored.max_age_days,
+            max_per_feed: stored.max_per_feed,
+            keep_unread: stored.keep_unread,
+        })
+    }
+
+    /// Persists the article-retention policy. Nothing is reaped until the
+    /// next [`Self::maintenance`] pass.
+    ///
+    /// # Errors
+    ///
+    /// Storage or serialization errors.
+    pub fn set_retention_policy(&self, policy: RetentionPolicy) -> Result<(), CoreError> {
+        let stored = StoredPolicy {
+            max_age_days: policy.max_age_days,
+            max_per_feed: policy.max_per_feed,
+            keep_unread: policy.keep_unread,
+        };
+        let raw = serde_json::to_string(&stored)?;
+        Ok(self.storage.set_setting(RETENTION_POLICY_KEY, &raw)?)
+    }
+
+    /// The routine maintenance pass — for heads to run at startup and
+    /// about daily, and on demand (`curio maintenance`).
+    ///
+    /// - applies the [`Self::retention_policy`] (and, with
+    ///   [`MaintenanceOptions::purge_orphans`], the orphan purge), never
+    ///   reaping a starred, read-later, tagged or exported article — nor
+    ///   an unread one while the policy keeps unread. A reaped article
+    ///   does not come back while its feed keeps listing it;
+    /// - drops unused tags and trims the per-feed fetch log;
+    /// - runs a bounded incremental search-index merge (after deletes),
+    ///   `PRAGMA optimize` and a WAL checkpoint;
+    /// - sweeps event-log files past the retention window, as
+    ///   [`Self::sweep_event_retention`].
+    ///
+    /// "Exported" is every article [`Self::save_to_destination`] ever
+    /// exported — recorded in the database before the note is written, so
+    /// an export running alongside the pass is never reaped, and the
+    /// record outlives the destination being removed or moved — plus,
+    /// for exports made before Curio recorded them, what each registered
+    /// destination's manifest lists (recorded by the pass in turn). If
+    /// any of those manifests cannot be read, the pass reaps nothing (see
+    /// [`MaintenanceReport::reap_skipped`]) and does the rest. An event
+    /// sweep or upkeep step that cannot run is reported the same way
+    /// ([`MaintenanceReport::event_sweep_skipped`],
+    /// [`MaintenanceReport::upkeep_skipped`]).
+    ///
+    /// # Errors
+    ///
+    /// Storage or settings errors.
+    pub fn maintenance(&self, options: MaintenanceOptions) -> Result<MaintenanceReport, CoreError> {
+        let mut plan = MaintenancePlan {
+            retention: self.retention_policy()?,
+            purge_orphans: options.purge_orphans,
+            exported: std::collections::BTreeSet::new(),
+            now: Timestamp::now(),
+        };
+        let mut reap_skipped = None;
+        if plan.retention.is_enabled() || plan.purge_orphans {
+            match self.exported_curio_ids() {
+                Ok(exported) => plan.exported = exported,
+                Err(err) => {
+                    tracing::warn!(%err, "maintenance reaps nothing: the exported set is unreadable");
+                    reap_skipped = Some(err.to_string());
+                    plan.retention = RetentionPolicy::default();
+                    plan.purge_orphans = false;
+                }
+            }
+        }
+        let counts = self.storage.run_maintenance(plan)?;
+        let (event_files_removed, event_sweep_skipped) = match self.sweep_event_retention() {
+            Ok(removed) => (removed, None),
+            Err(err) => {
+                tracing::warn!(%err, "maintenance skipped the event-log sweep");
+                (Vec::new(), Some(err.to_string()))
+            }
+        };
+        Ok(MaintenanceReport {
+            articles_reaped: counts.articles_reaped,
+            orphans_purged: counts.orphans_purged,
+            tags_dropped: counts.tags_dropped,
+            tombstones_pruned: counts.tombstones_pruned,
+            fetch_log_trimmed: counts.fetch_log_trimmed,
+            event_files_removed,
+            reap_skipped,
+            event_sweep_skipped,
+            upkeep_skipped: counts.upkeep_skipped,
+        })
+    }
+
+    /// Rebuilds the full-text search index from the stored articles — the
+    /// repair when [`Self::fts_integrity_check`] reports it out of step.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn rebuild_search_index(&self) -> Result<(), CoreError> {
+        Ok(self.storage.rebuild_fts()?)
+    }
+
     /// Path of the profile's `curio.db`.
     #[must_use]
     pub fn db_path(&self) -> &Path {

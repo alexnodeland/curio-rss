@@ -211,6 +211,7 @@ curio dest add vault ~/notes/reading        # name a destination directory once
 curio save 3e9f10aa --dest vault            # export the note per curio.frontmatter.v1
 curio events tail -n 5                      # watch the curio.events.v1 stream
 curio doctor                                # db integrity, FTS sync, events-log health
+curio maintenance                           # retention (opt-in: curio retention), tidy-up, WAL checkpoint
 ```
 
 Full command walkthrough + `curio.toml` format: [docs/cli.md](docs/cli.md).

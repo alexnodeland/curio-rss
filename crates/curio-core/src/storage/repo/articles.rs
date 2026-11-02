@@ -5,6 +5,7 @@ use super::listing::{
     Projection, RawListed, UNREAD_COUNTS, article_cols_prefixed, list_articles_query, raw_listed,
     search_listed_query,
 };
+use super::maintenance::is_tombstoned;
 use super::rows::{
     RawArticle, article_by_id, fts_match_expr, parse_ts, raw_article, scoped_dedupe_key,
 };
@@ -55,6 +56,11 @@ impl Storage {
     /// - a row whose columns already hold the incoming values is not
     ///   written at all (no `modified_at` bump, no FTS reindex), so
     ///   [`UpsertOutcome::updated`] counts rows that *actually changed*.
+    ///
+    /// A feed entry whose key the retention policy reaped (a tombstone —
+    /// see [`Self::run_maintenance`]) is skipped, not re-inserted: a feed
+    /// that keeps listing a reaped item never brings it back as a new
+    /// unread article. The skip counts as neither inserted nor updated.
     ///
     /// A `published_at` later than the article's first-seen time
     /// (`saved_at`; *now* for an insert) is clamped to it: nothing is
@@ -132,6 +138,9 @@ impl Storage {
                         ))?
                     };
                     outcome.updated += u64::try_from(changed).unwrap_or_default();
+                } else if article.feed_id.is_some() && is_tombstoned(&tx, &dedupe_key, now_ts)? {
+                    // Reaped by retention while the feed still lists it:
+                    // it stays gone (see `Storage::run_maintenance`).
                 } else {
                     let origin = if article.feed_id.is_some() {
                         ContentOrigin::Feed
@@ -228,6 +237,11 @@ impl Storage {
     /// read for a whole fetch. Refresh settles reused-guid keys with it
     /// ([`crate::feeds::ParsedFeed::settle_keys`]).
     ///
+    /// A key retention reaped counts as stored, with the reaped row's
+    /// `source_url` (see [`Self::run_maintenance`]): the item then settles
+    /// on the tombstoned key whichever form this fetch gave it, and stays
+    /// gone instead of coming back under the other form.
+    ///
     /// # Errors
     ///
     /// Database errors.
@@ -237,8 +251,12 @@ impl Storage {
         dedupe_keys: Vec<String>,
     ) -> Result<HashMap<String, String>, StorageError> {
         self.read(move |conn| {
-            let mut stmt =
-                conn.prepare_cached("SELECT source_url FROM articles WHERE dedupe_key = ?1")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT source_url FROM articles WHERE dedupe_key = ?1 \
+                 UNION ALL \
+                 SELECT source_url FROM article_tombstones WHERE dedupe_key = ?1 \
+                 LIMIT 1",
+            )?;
             let mut found = HashMap::new();
             for key in dedupe_keys {
                 let scoped = scoped_dedupe_key(feed_id, &key);

@@ -109,6 +109,27 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   the run; so does a successful manual refresh of an auto-paused feed. A page host's 429
   during full-text hydration is `RateLimited`, which drops that feed's remaining queued
   pages. `fetch_log` keeps the newest 50 rows per feed.
+- **Maintenance** (`CoreHandle::maintenance`, `storage/repo/maintenance.rs`) is the
+  routine pass heads run (`curio maintenance`): the opt-in article-retention policy
+  (age and/or per-feed count, stored as the facade-owned `retention.policy` setting)
+  reaps feed articles but never a starred, read-later, tagged or exported one, nor an
+  unread one unless configured. "Exported" is the `article_exports` table: an export
+  records its article there *before* writing the note (so a pass running alongside, in
+  any process, either sees the record inside its reap transaction or already deleted
+  the article and the export fails), and the record outlives the destination. Each pass
+  also records what every registered destination's manifest lists (exports from before
+  the table existed); an unreadable manifest cancels the reap. A reaped key leaves an
+  `article_tombstones` row (with the row's `source_url`, so reused-guid key settling
+  finds it under either key form) so a feed still listing the item does not resurrect
+  it; the row goes once a successful fetch more than a day after its last sighting no
+  longer lists it, or with its feed. The pass also purges orphans on request, drops
+  unused tags (untag drops a tag at its last use too) and trims the fetch log; after
+  its transaction, best effort (a failure is reported, never undoes the reap): a
+  bounded incremental FTS5 `merge` (2 000 pages; a full `optimize` rewrites the whole
+  index under the write lock), `PRAGMA optimize`, `wal_checkpoint(TRUNCATE)` (the
+  writer sets `journal_size_limit` = 64 MiB); then the event-retention sweep.
+  `PRAGMA integrity_check` runs on a fresh connection: a pooled reader's cached FTS5
+  structure goes stale when another connection merges segments.
 - **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
   both heads: 8 feeds in flight by default, so a few hung hosts cost about one request
   timeout between them. The slots are shared fairly between hosts: a politeness-paced

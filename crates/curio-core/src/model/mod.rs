@@ -8,6 +8,10 @@
 
 use curio_types::{ArticleSnapshot, Checksum, CurioId, DestinationName, Timestamp};
 
+mod retention;
+
+pub use retention::RetentionPolicy;
+
 /// Row id of a feed (`feeds.id`, an `INTEGER PRIMARY KEY` rowid alias).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FeedId(pub i64);

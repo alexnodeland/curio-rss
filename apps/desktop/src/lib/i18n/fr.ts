@@ -561,6 +561,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'shortcut.toggleSidebar': 'Afficher / masquer la barre latérale',
     'shortcut.toggleFocusMode': 'Mode concentration : l’article seul',
     'key.space': 'Espace',
+    'key.ctrl': 'Ctrl',
 
     'recovery.title.corrupt': 'Curio ne peut pas lire sa base de données',
     'recovery.title.tooNew': 'Cette base de données vient d’un Curio plus récent',
@@ -617,4 +618,45 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'recovery.recovered.title': 'Curio est prêt',
     'recovery.recovered.body': 'Votre bibliothèque s’est ouverte.',
     'recovery.recovered.setAside': 'L’ancienne base de données a été déplacée dans {path}.',
+
+    'bulk.toolbar': 'Actions sur la sélection',
+    'bulk.count': '{count, plural, one {# sélectionné} other {# sélectionnés}}',
+    'bulk.clear': 'Effacer la sélection',
+    'reader.multiSelected':
+        '{count, plural, one {# article sélectionné} other {# articles sélectionnés}}',
+    'reader.multiSelected.hint':
+        'Agissez sur eux depuis la barre sous la liste, ou appuyez sur Échap pour effacer la sélection.',
+    'toast.bulk.unread':
+        '{count, plural, one {# article marqué comme non lu} other {# articles marqués comme non lus}}',
+    'toast.bulk.starred':
+        '{count, plural, one {# article mis en favori} other {# articles mis en favoris}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {# article retiré des favoris} other {# articles retirés des favoris}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {# article ajouté à la liste à lire} other {# articles ajoutés à la liste à lire}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {# article retiré de la liste à lire} other {# articles retirés de la liste à lire}}',
+    'toast.bulk.archived': '{count, plural, one {# article archivé} other {# articles archivés}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {# article désarchivé} other {# articles désarchivés}}',
+    'toast.bulk.undone': '{count, plural, one {# article rétabli} other {# articles rétablis}}',
+    'shortcut.extendDown': 'Étendre la sélection vers le bas',
+    'shortcut.extendUp': 'Étendre la sélection vers le haut',
+    'toast.bulk.noChange': 'Rien à changer',
+    'shortcut.commandPalette': 'Palette de commandes',
+    'palette.title': 'Palette de commandes',
+    'palette.placeholder': 'Rechercher des commandes, flux, dossiers, paramètres et thèmes…',
+    'palette.results': 'Résultats',
+    'palette.empty': 'Aucun résultat',
+    'palette.resultCount': '{count, plural, one {# résultat} other {# résultats}}',
+    'palette.group.command': 'Commande',
+    'palette.group.view': 'Vue',
+    'palette.group.feed': 'Flux',
+    'palette.group.folder': 'Dossier',
+    'palette.group.settings': 'Paramètres',
+    'palette.group.theme': 'Thème',
+    'palette.current': 'actuel',
+    'palette.hint.move': 'se déplacer',
+    'palette.hint.run': 'exécuter',
+    'palette.hint.close': 'fermer',
 };

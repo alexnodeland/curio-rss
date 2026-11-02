@@ -13,7 +13,7 @@ use curio_core::events::{FoldedState, read_all};
 use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
 use curio_core::model::{
-    ArticleContent, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
+    ArticleContent, ArticleFlag, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
 };
 use curio_core::storage::{ListArticles, StorageError};
 use curio_core::{CoreHandle, CoreOptions, ImportSource};
@@ -1471,6 +1471,63 @@ fn mark_all_read_round_trips_through_mark_read_many() {
     assert_eq!(core.mark_read_many(&flipped, false).unwrap(), 1);
     assert!(!core.article_state(articles[1].id).unwrap().read);
     assert!(core.article_state(articles[0].id).unwrap().read);
+}
+
+/// A bulk flip through the facade lands every changed article's event in
+/// the JSONL log (one emit), so the fold sees the whole batch; the undo's
+/// negations fold it back out.
+#[test]
+fn set_flag_many_emits_each_change_and_folds_back_on_undo() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("b1", "One"),
+            manual_article("b2", "Two"),
+            manual_article("b3", "Three"),
+        ])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|article| article.id)
+        .collect();
+    assert!(core.set_archived(ids[0], true).unwrap());
+
+    let changed = core
+        .set_flag_many(&ids, ArticleFlag::Archived, true)
+        .unwrap();
+    assert_eq!(changed, ids[1..], "the archived one is unchanged");
+    assert!(
+        core.storage().pending_intents().unwrap().is_empty(),
+        "emitted"
+    );
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert_eq!(folded.archived.len(), 3);
+
+    assert_eq!(
+        core.set_flag_many(&changed, ArticleFlag::Archived, false)
+            .unwrap(),
+        changed
+    );
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert_eq!(folded.archived.len(), 1, "only the single flip remains");
+
+    // Read is DB-local: it flips but writes nothing to the log.
+    let logged = read_all(&profile.path().join(".curio/events"))
+        .unwrap()
+        .len();
+    assert_eq!(
+        core.set_flag_many(&ids, ArticleFlag::Read, true).unwrap(),
+        ids
+    );
+    assert_eq!(
+        read_all(&profile.path().join(".curio/events"))
+            .unwrap()
+            .len(),
+        logged
+    );
 }
 
 #[tokio::test]

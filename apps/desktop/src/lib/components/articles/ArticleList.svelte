@@ -41,7 +41,12 @@ import { commandErrorMessage } from '$lib/utils/errors';
 import ErrorState from '$components/common/ErrorState.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { untrack } from 'svelte';
-import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
+import ArticleRow, {
+    type SelectGesture,
+    articleOptionId,
+    buildArticleMenu,
+} from './ArticleRow.svelte';
+import BulkBar, { BULK_BAR_INSET } from './BulkBar.svelte';
 import ListEmpty from './ListEmpty.svelte';
 import VirtualList, { type ViewportReport } from './VirtualList.svelte';
 
@@ -72,9 +77,51 @@ const activeDescendantId = $derived(
         : articleOptionId(selectionStore.selectedArticleId),
 );
 
-function selectArticle(articleId: number): void {
-    selectionStore.selectedArticleId = articleId;
+/** A row click: plain selects the row, Shift a range, ⌘/Ctrl toggles it. */
+function selectArticle(articleId: number, gesture: SelectGesture): void {
+    if (gesture === 'range') {
+        selectionStore.selectRange(articleId);
+    } else if (gesture === 'toggle') {
+        selectionStore.toggleSelected(articleId);
+    } else {
+        selectionStore.selectedArticleId = articleId;
+    }
 }
+
+// Rows that leave the window (archived out of the view, a refetch) leave the
+// multi-selection too, so the bar never counts or acts on rows not listed.
+$effect(() => {
+    const items = list.items;
+    untrack(() => selectionStore.prune(items));
+});
+
+// A multi-selection belongs to the list it was made in: another view (or
+// leaving the list for search) drops it back to the cursor row.
+$effect(() => {
+    void list;
+    return () => untrack(() => selectionStore.clearMulti());
+});
+
+// These rows draw a multi-selection; the other list surfaces (search results,
+// the YouTube / Reddit home layouts) mark only the cursor, so Shift+J/K
+// extend a range only while this list is on screen.
+$effect(() => {
+    selectionStore.multiSelectable = true;
+    return () => {
+        selectionStore.multiSelectable = false;
+    };
+});
+
+/**
+ * The bulk count spoken in the persistent live region below: empty while one
+ * row is selected, so the first count ("2 selected") is a change a screen
+ * reader announces — a region inserted already filled is often skipped.
+ */
+const bulkAnnouncement = $derived(
+    selectionStore.multiActive
+        ? t('bulk.count', { count: selectionStore.selectedIds.length })
+        : '',
+);
 
 /**
  * Opens the context menu for the selected row when the keyboard menu key fires
@@ -297,6 +344,7 @@ function onViewport(report: ViewportReport): void {
 </script>
 
 <div class="article-list" bind:this={pane}>
+    <span class="sr-only" aria-live="polite" data-testid="bulk-announcer">{bulkAnnouncement}</span>
     {#if list.items.length > 0}
         <!-- Stale-while-revalidate: keep showing the loaded rows even if a
              refetch just errored; surface the failure as a non-destructive
@@ -324,6 +372,8 @@ function onViewport(report: ViewportReport): void {
                 selectedIndex={selectionStore.selectedIndex}
                 initialScrollTop={openingScrollTop()}
                 label={t('list.label')}
+                multiselectable
+                bottomInset={selectionStore.multiActive ? BULK_BAR_INSET : 0}
                 {activeDescendantId}
                 focusNonce={focusRequest}
                 onnearend={() => void list.loadMore()}
@@ -339,12 +389,16 @@ function onViewport(report: ViewportReport): void {
                         {rowHeight}
                         {compact}
                         setsize={list.items.length}
-                        selected={article.id === selectionStore.selectedArticleId}
+                        selected={selectionStore.isSelected(article.id)}
+                        cursor={article.id === selectionStore.selectedArticleId}
                         onselect={selectArticle}
                     />
                 {/snippet}
             </VirtualList>
         {/key}
+        {#if selectionStore.multiActive}
+            <BulkBar />
+        {/if}
     {:else if !list.loaded}
         <div class="list-skeleton" aria-hidden="true">
             {#each SKELETON_ROWS as index (index)}
@@ -379,6 +433,7 @@ function onViewport(report: ViewportReport): void {
 
 <style>
     .article-list {
+        position: relative;
         flex: 1 1 auto;
         display: flex;
         flex-direction: column;

@@ -563,6 +563,7 @@ export const de: Partial<Record<MessageKey, string>> = {
     'shortcut.toggleSidebar': 'Seitenleiste ein- / ausblenden',
     'shortcut.toggleFocusMode': 'Fokusmodus: nur der Artikel',
     'key.space': 'Leertaste',
+    'key.ctrl': 'Strg',
 
     'recovery.title.corrupt': 'Curio kann seine Datenbank nicht lesen',
     'recovery.title.tooNew': 'Diese Datenbank stammt von einem neueren Curio',
@@ -619,4 +620,47 @@ export const de: Partial<Record<MessageKey, string>> = {
     'recovery.recovered.title': 'Curio ist bereit',
     'recovery.recovered.body': 'Deine Bibliothek wurde geöffnet.',
     'recovery.recovered.setAside': 'Die vorherige Datenbank wurde nach {path} verschoben.',
+
+    'bulk.toolbar': 'Aktionen für die Auswahl',
+    'bulk.count': '{count, plural, one {# ausgewählt} other {# ausgewählt}}',
+    'bulk.clear': 'Auswahl aufheben',
+    'reader.multiSelected':
+        '{count, plural, one {# Artikel ausgewählt} other {# Artikel ausgewählt}}',
+    'reader.multiSelected.hint':
+        'Bearbeite sie über die Leiste unter der Liste, oder drücke Esc, um die Auswahl aufzuheben.',
+    'toast.bulk.unread':
+        '{count, plural, one {# als ungelesen markiert} other {# als ungelesen markiert}}',
+    'toast.bulk.starred':
+        '{count, plural, one {# Artikel zu Favoriten hinzugefügt} other {# Artikel zu Favoriten hinzugefügt}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {# Artikel aus Favoriten entfernt} other {# Artikel aus Favoriten entfernt}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {# zu „Später lesen“ hinzugefügt} other {# zu „Später lesen“ hinzugefügt}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {# aus „Später lesen“ entfernt} other {# aus „Später lesen“ entfernt}}',
+    'toast.bulk.archived':
+        '{count, plural, one {# Artikel archiviert} other {# Artikel archiviert}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {# Artikel aus dem Archiv geholt} other {# Artikel aus dem Archiv geholt}}',
+    'toast.bulk.undone':
+        '{count, plural, one {# Artikel wiederhergestellt} other {# Artikel wiederhergestellt}}',
+    'shortcut.extendDown': 'Auswahl nach unten erweitern',
+    'shortcut.extendUp': 'Auswahl nach oben erweitern',
+    'toast.bulk.noChange': 'Nichts zu ändern',
+    'shortcut.commandPalette': 'Befehlspalette',
+    'palette.title': 'Befehlspalette',
+    'palette.placeholder': 'Befehle, Feeds, Ordner, Einstellungen und Designs suchen…',
+    'palette.results': 'Treffer',
+    'palette.empty': 'Keine Treffer',
+    'palette.resultCount': '{count, plural, one {# Treffer} other {# Treffer}}',
+    'palette.group.command': 'Befehl',
+    'palette.group.view': 'Ansicht',
+    'palette.group.feed': 'Feed',
+    'palette.group.folder': 'Ordner',
+    'palette.group.settings': 'Einstellungen',
+    'palette.group.theme': 'Design',
+    'palette.current': 'aktuell',
+    'palette.hint.move': 'bewegen',
+    'palette.hint.run': 'ausführen',
+    'palette.hint.close': 'schließen',
 };

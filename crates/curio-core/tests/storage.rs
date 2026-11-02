@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use curio_core::model::{
-    ArticleContent, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchErrorKind, FetchRecord,
-    FetchStatus, NewArticle, NewFeed,
+    ArticleContent, ArticleFlag, ArticleId, ContentOrigin, FeedId, FeedStatus, FetchErrorKind,
+    FetchRecord, FetchStatus, NewArticle, NewFeed,
 };
 use curio_core::storage::{
     FETCH_LOG_KEEP, FeedSchedule, ListArticles, OpenError, Storage, StorageError,
@@ -1907,6 +1907,168 @@ fn source_urls_by_dedupe_key_reads_only_stored_keys_in_scope() {
         manual_scope.keys().collect::<Vec<_>>(),
         ["guid:other"],
         "keyed by the unscoped key"
+    );
+}
+
+/// Marks every staged intent emitted, so a test reads only what follows.
+fn drain_intents(storage: &Storage) {
+    let staged = storage.pending_intents().unwrap();
+    storage
+        .mark_intents_emitted(staged.iter().map(|p| p.intent_id).collect())
+        .unwrap();
+}
+
+/// The batch flip behind the desktop's bulk actions: each article that
+/// changes stages its single-flip event (tags included), unknown and
+/// repeated ids are skipped, read stays DB-local, and the returned ids are
+/// exactly what an undo flips back.
+#[test]
+fn set_flag_many_flips_each_once_and_stages_each_event() {
+    let (_dir, storage) = temp_storage();
+    let a = insert_one(&storage, "bulk-a", "A", "body");
+    let b = insert_one(&storage, "bulk-b", "B", "body");
+    let c = insert_one(&storage, "bulk-c", "C", "body");
+    storage.tag_article(a, "rust").unwrap();
+    storage.star_article(c).unwrap();
+    drain_intents(&storage);
+
+    let changed = storage
+        .set_flag_many(
+            &[a, ArticleId(9_999_999), b, a, c],
+            ArticleFlag::Starred,
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        changed,
+        [a, b],
+        "c was starred already; the unknown id and the repeat are skipped"
+    );
+    let pending = storage.pending_intents().unwrap();
+    assert_eq!(pending.len(), 2, "one event per changed article");
+    assert!(matches!(
+        &pending[0].envelope.event,
+        EventPayload::ArticleStarred { tags, .. } if tags == &["rust".to_owned()]
+    ));
+
+    // The undo: exactly the changed ids go back; c stays starred.
+    assert_eq!(
+        storage
+            .set_flag_many(&changed, ArticleFlag::Starred, false)
+            .unwrap(),
+        [a, b]
+    );
+    assert!(!storage.article_state(a).unwrap().starred);
+    assert!(storage.article_state(c).unwrap().starred);
+
+    for (flag, on, off) in [
+        (
+            ArticleFlag::ReadLater,
+            "article.read_later.added",
+            "article.read_later.removed",
+        ),
+        (
+            ArticleFlag::Archived,
+            "article.archived",
+            "article.unarchived",
+        ),
+    ] {
+        drain_intents(&storage);
+        assert_eq!(storage.set_flag_many(&[a, b], flag, true).unwrap(), [a, b]);
+        assert_eq!(storage.set_flag_many(&[b], flag, false).unwrap(), [b]);
+        let pending = storage.pending_intents().unwrap();
+        let types: Vec<&str> = pending
+            .iter()
+            .map(|p| p.envelope.event.event_type())
+            .collect();
+        assert_eq!(types, [on, on, off], "{flag:?}");
+    }
+    let state = storage.article_state(a).unwrap();
+    assert!(state.read_later && state.archived);
+
+    // Read is DB-local: the batch flips it but stages nothing.
+    drain_intents(&storage);
+    assert_eq!(
+        storage
+            .set_flag_many(&[a, b, c], ArticleFlag::Read, true)
+            .unwrap(),
+        [a, b, c]
+    );
+    assert!(storage.article_state(b).unwrap().read);
+    assert_eq!(storage.pending_intents().unwrap().len(), 0);
+    assert_eq!(
+        storage.set_flag_many(&[], ArticleFlag::Read, true).unwrap(),
+        [] as [ArticleId; 0]
+    );
+}
+
+/// Bulk-archiving 500 articles is ONE transaction: a refusal on the very
+/// last row rolls back the 499 before it (and their staged events), and the
+/// successful run commits all 500 with one event each.
+#[test]
+fn bulk_archiving_500_articles_is_one_transaction() {
+    let (dir, storage) = temp_storage();
+    storage
+        .upsert_articles(
+            (0..500)
+                .map(|i| new_article(&format!("bulk{i}"), &format!("Item {i}"), "body"))
+                .collect(),
+        )
+        .unwrap();
+    let conn = side_conn(&dir);
+    let ids: Vec<ArticleId> = conn
+        .prepare("SELECT id FROM articles ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0).map(ArticleId))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(ids.len(), 500);
+    // Were the batch committed per article, the 499 before this refusal
+    // would stick.
+    conn.execute_batch(&format!(
+        "CREATE TRIGGER refuse_last BEFORE INSERT ON article_state \
+         WHEN NEW.article_id = {} BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        ids[499].0
+    ))
+    .unwrap();
+    let version = data_version(&conn);
+
+    assert!(
+        storage
+            .set_flag_many(&ids, ArticleFlag::Archived, true)
+            .is_err()
+    );
+    assert_eq!(data_version(&conn), version, "nothing was committed");
+    assert!(
+        ids.iter()
+            .all(|id| !storage.article_state(*id).unwrap().archived),
+        "the whole batch rolled back"
+    );
+    assert!(
+        storage.pending_intents().unwrap().is_empty(),
+        "no event survives the rollback"
+    );
+
+    conn.execute_batch("DROP TRIGGER refuse_last").unwrap();
+    let changed = storage
+        .set_flag_many(&ids, ArticleFlag::Archived, true)
+        .unwrap();
+    assert_eq!(changed, ids);
+    let archived: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM article_state WHERE is_archived = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 500);
+    let pending = storage.pending_intents().unwrap();
+    assert_eq!(pending.len(), 500);
+    assert!(
+        pending
+            .iter()
+            .all(|p| p.envelope.event.event_type() == "article.archived")
     );
 }
 

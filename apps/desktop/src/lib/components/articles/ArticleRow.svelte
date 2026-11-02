@@ -11,6 +11,7 @@ import {
 import { feedsStore } from '$lib/state/feeds.svelte';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { isLinkless } from '$lib/utils/article';
+import { isApplePlatform } from '$lib/utils/platform';
 
 /**
  * The DOM id of the row for one article — the listbox points at it through
@@ -19,6 +20,28 @@ import { isLinkless } from '$lib/utils/article';
  */
 export function articleOptionId(articleId: number): string {
     return `article-option-${articleId}`;
+}
+
+/**
+ * How a row click selects: a plain click selects just that row, Shift
+ * extends a range from the anchor, ⌘ (Ctrl off macOS) toggles the row in or
+ * out of a multi-selection.
+ */
+export type SelectGesture = 'single' | 'range' | 'toggle';
+
+/**
+ * The selection gesture a click's modifiers spell. On macOS ⌃-click is the
+ * secondary click (the context menu), so there only ⌘ toggles — whether or
+ * not the engine also delivers that ⌃-click as a `click`.
+ */
+export function selectGesture(
+    event: MouseEvent,
+    apple: boolean = isApplePlatform(),
+): SelectGesture {
+    if (event.shiftKey) {
+        return 'range';
+    }
+    return event.metaKey || (event.ctrlKey && !apple) ? 'toggle' : 'single';
 }
 
 /**
@@ -106,6 +129,7 @@ let {
     compact,
     setsize,
     selected,
+    cursor = selected,
     onselect,
     highlight,
 }: {
@@ -114,8 +138,12 @@ let {
     rowHeight: number;
     compact: boolean;
     setsize: number;
+    /** Part of the selection (`aria-selected`, the selected background). */
     selected: boolean;
-    onselect: (articleId: number) => void;
+    /** The keyboard cursor's row (the accent spine) — the selected row, unless
+     *  several are selected. */
+    cursor?: boolean;
+    onselect: (articleId: number, gesture: SelectGesture) => void;
     /** Active search query — when set, its terms are `<mark>`-ed in title/snippet. */
     highlight?: string;
 } = $props();
@@ -164,6 +192,7 @@ const date = $derived(listDateLabel(article, dayClock.now));
     class="article-row"
     data-testid="article-row"
     class:selected
+    class:cursor
     class:compact
     class:unread={flags()?.read === false}
     style="height: {rowHeight}px"
@@ -172,7 +201,7 @@ const date = $derived(listDateLabel(article, dayClock.now));
     aria-posinset={index + 1}
     aria-setsize={setsize}
     tabindex="-1"
-    onclick={() => onselect(article.id)}
+    onclick={(event) => onselect(article.id, selectGesture(event))}
     use:contextMenu={{ items: () => buildArticleMenu(article, flags()), ariaLabel: article.title }}
 >
     <span class="row-dot" aria-hidden="true"></span>
@@ -215,6 +244,10 @@ const date = $derived(listDateLabel(article, dayClock.now));
         border-radius: var(--radius-lg);
         cursor: pointer;
         transition: background var(--dur-fast) var(--ease);
+        /* Rows are picked, not text: a Shift-click extends the selection
+           instead of dragging a text selection across rows. */
+        -webkit-user-select: none;
+        user-select: none;
     }
 
     /* Hairline between rows, inset so it doesn't touch the rounded edges. */
@@ -241,8 +274,8 @@ const date = $derived(listDateLabel(article, dayClock.now));
         background: var(--selected);
     }
 
-    /* Accent spine on the selected row. */
-    .article-row.selected::before {
+    /* Accent spine on the cursor's row. */
+    .article-row.cursor::before {
         content: '';
         position: absolute;
         left: 0;

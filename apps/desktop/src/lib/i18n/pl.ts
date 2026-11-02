@@ -560,6 +560,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'shortcut.toggleSidebar': 'Pokaż / ukryj pasek boczny',
     'shortcut.toggleFocusMode': 'Tryb skupienia: tylko artykuł',
     'key.space': 'Spacja',
+    'key.ctrl': 'Ctrl',
 
     'recovery.title.corrupt': 'Curio nie może odczytać swojej bazy danych',
     'recovery.title.tooNew': 'Ta baza danych pochodzi z nowszego Curio',
@@ -616,4 +617,49 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'recovery.recovered.title': 'Curio jest gotowe',
     'recovery.recovered.body': 'Twoja biblioteka została otwarta.',
     'recovery.recovered.setAside': 'Poprzednia baza danych została przeniesiona do {path}.',
+
+    'bulk.toolbar': 'Działania na zaznaczeniu',
+    'bulk.count':
+        '{count, plural, one {Zaznaczono #} few {Zaznaczono #} many {Zaznaczono #} other {Zaznaczono #}}',
+    'bulk.clear': 'Wyczyść zaznaczenie',
+    'reader.multiSelected':
+        '{count, plural, one {Zaznaczono # artykuł} few {Zaznaczono # artykuły} many {Zaznaczono # artykułów} other {Zaznaczono # artykułu}}',
+    'reader.multiSelected.hint':
+        'Użyj paska pod listą albo naciśnij Esc, aby wyczyścić zaznaczenie.',
+    'toast.bulk.unread':
+        '{count, plural, one {Oznaczono # jako nieprzeczytany} few {Oznaczono # jako nieprzeczytane} many {Oznaczono # jako nieprzeczytane} other {Oznaczono # jako nieprzeczytane}}',
+    'toast.bulk.starred':
+        '{count, plural, one {Oznaczono gwiazdką # artykuł} few {Oznaczono gwiazdką # artykuły} many {Oznaczono gwiazdką # artykułów} other {Oznaczono gwiazdką # artykułu}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {Usunięto gwiazdkę z # artykułu} few {Usunięto gwiazdkę z # artykułów} many {Usunięto gwiazdkę z # artykułów} other {Usunięto gwiazdkę z # artykułu}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {Dodano # do listy Do przeczytania} few {Dodano # do listy Do przeczytania} many {Dodano # do listy Do przeczytania} other {Dodano # do listy Do przeczytania}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {Usunięto # z listy Do przeczytania} few {Usunięto # z listy Do przeczytania} many {Usunięto # z listy Do przeczytania} other {Usunięto # z listy Do przeczytania}}',
+    'toast.bulk.archived':
+        '{count, plural, one {Zarchiwizowano # artykuł} few {Zarchiwizowano # artykuły} many {Zarchiwizowano # artykułów} other {Zarchiwizowano # artykułu}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {Przywrócono z archiwum # artykuł} few {Przywrócono z archiwum # artykuły} many {Przywrócono z archiwum # artykułów} other {Przywrócono z archiwum # artykułu}}',
+    'toast.bulk.undone':
+        '{count, plural, one {Przywrócono # artykuł} few {Przywrócono # artykuły} many {Przywrócono # artykułów} other {Przywrócono # artykułu}}',
+    'shortcut.extendDown': 'Rozszerz zaznaczenie w dół',
+    'shortcut.extendUp': 'Rozszerz zaznaczenie w górę',
+    'toast.bulk.noChange': 'Nic do zmiany',
+    'shortcut.commandPalette': 'Paleta poleceń',
+    'palette.title': 'Paleta poleceń',
+    'palette.placeholder': 'Szukaj poleceń, kanałów, folderów, ustawień i motywów…',
+    'palette.results': 'Wyniki',
+    'palette.empty': 'Brak wyników',
+    'palette.resultCount':
+        '{count, plural, one {# wynik} few {# wyniki} many {# wyników} other {# wyniku}}',
+    'palette.group.command': 'Polecenie',
+    'palette.group.view': 'Widok',
+    'palette.group.feed': 'Kanał',
+    'palette.group.folder': 'Folder',
+    'palette.group.settings': 'Ustawienia',
+    'palette.group.theme': 'Motyw',
+    'palette.current': 'bieżący',
+    'palette.hint.move': 'przejdź',
+    'palette.hint.run': 'uruchom',
+    'palette.hint.close': 'zamknij',
 };

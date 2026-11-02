@@ -3,9 +3,18 @@
  * keyboard focus. Navigation helpers walk the *backend-ordered* current list
  * (never a client re-sort) and report when the selection nears the end of
  * the loaded window so the shell can trigger `loadMore`.
+ *
+ * Multi-selection (Shift-click / Shift+J/K ranges, ⌘/Ctrl-click toggles)
+ * rides alongside: `selectedArticleId` stays the cursor (the row the
+ * keyboard sits on), and `selectedIds` is the set the bulk bar acts on. Any
+ * plain single selection — a click, j/k, a view switch — goes through the
+ * `selectedArticleId` setter, which collapses the set, so a stale
+ * multi-selection can never outlive the gesture that replaced it.
  */
 import type { ArticleSummaryDto } from '$lib/bindings';
+import { SvelteSet } from 'svelte/reactivity';
 import { articlesStore } from './articles.svelte';
+import { rangeBetween, stillListed } from './multi-select';
 import { searchStore } from './search.svelte';
 
 export type FocusZone = 'sidebar' | 'list';
@@ -47,8 +56,163 @@ export class SelectionStore {
     /** Selected feed; `null` = the all-feeds views. */
     selectedFeedId: number | null = $state(null);
 
-    /** Selected article row id, if any. */
-    selectedArticleId: number | null = $state(null);
+    /** The cursor row (see `selectedArticleId`). */
+    #cursor: number | null = $state(null);
+
+    /** The multi-selection; empty unless two or more rows are selected. */
+    readonly #multi = new SvelteSet<number>();
+
+    /** Where a Shift-extension starts (the last plainly selected/toggled row). */
+    #anchor: number | null = null;
+
+    /**
+     * Whether the list on screen draws a multi-selection — only the article
+     * rows do (`ArticleList` turns this on while mounted). Search results and
+     * the YouTube / Reddit home layouts mark just the cursor, so there
+     * Shift+J/K are plain j/k: a selection nobody can see must never be built
+     * for the bulk keys to act on.
+     */
+    multiSelectable: boolean = $state(false);
+
+    /**
+     * Selected article row id (the cursor), if any. Setting it is a plain
+     * single selection: it collapses any multi-selection and re-anchors.
+     */
+    get selectedArticleId(): number | null {
+        return this.#cursor;
+    }
+
+    set selectedArticleId(id: number | null) {
+        this.#cursor = id;
+        this.#anchor = id;
+        if (this.#multi.size > 0) {
+            this.#multi.clear();
+        }
+    }
+
+    /** Whether more than one row is selected (the bulk bar is showing). */
+    get multiActive(): boolean {
+        return this.#multi.size > 1;
+    }
+
+    /**
+     * The rows a bulk action applies to, in list order: the multi-selection,
+     * or just the cursor's row when only one is selected.
+     */
+    get selectedIds(): number[] {
+        if (this.#multi.size > 1) {
+            const multi = this.#multi;
+            return articlesStore.activeItems
+                .filter((item) => multi.has(item.id))
+                .map((item) => item.id);
+        }
+        return this.#cursor === null ? [] : [this.#cursor];
+    }
+
+    /** Whether row `id` is part of the selection (`aria-selected`). */
+    isSelected(id: number): boolean {
+        return this.#multi.size > 1 ? this.#multi.has(id) : id === this.#cursor;
+    }
+
+    /** Commits a multi-selection; one row (or none) collapses to the cursor. */
+    #setMulti(ids: readonly number[]): void {
+        this.#multi.clear();
+        for (const id of ids) {
+            this.#multi.add(id);
+        }
+        if (this.#multi.size < 2) {
+            this.#multi.clear();
+        }
+    }
+
+    /**
+     * Shift-click: selects the contiguous range from the anchor (else the
+     * cursor) to `id`, in list order, and moves the cursor there. The anchor
+     * stays put, so successive Shift-clicks pivot around it.
+     */
+    selectRange(id: number): void {
+        const range = rangeBetween(
+            articlesStore.activeItems,
+            this.#anchor ?? this.#cursor ?? id,
+            id,
+        );
+        if (range === null) {
+            return;
+        }
+        this.#anchor = range.anchor;
+        this.#cursor = id;
+        this.lastPresentIndex = range.index;
+        this.#setMulti(range.ids);
+    }
+
+    /**
+     * ⌘/Ctrl-click: adds `id` to the selection, or takes it out. The first
+     * toggle keeps the row already selected, so it builds a set of two. The
+     * cursor follows an added row; removing the cursor's row moves it to the
+     * most recently added row still selected.
+     */
+    toggleSelected(id: number): void {
+        // Only a cursor still listed seeds the set: one archived out of the
+        // view (`selectedIndex === -1`) must not ride along as a hidden member.
+        const single = this.#cursor === null || this.selectedIndex === -1 ? [] : [this.#cursor];
+        const current = this.#multi.size > 1 ? [...this.#multi] : single;
+        const next = current.includes(id)
+            ? current.filter((candidate) => candidate !== id)
+            : [...current, id];
+        if (next.includes(id)) {
+            this.#cursor = id;
+        } else if (this.#cursor === id) {
+            this.#cursor = next.at(-1) ?? null;
+        }
+        this.#anchor = this.#cursor;
+        this.#setMulti(next);
+    }
+
+    /**
+     * Shift+J / Shift+K: moves the cursor one row and selects the range from
+     * the anchor to it — growing or shrinking the selection like Shift+↓/↑ in
+     * a file list. With no row selected — or on a list that draws only the
+     * cursor ({@link multiSelectable}) — it is a plain j / k. Returns the
+     * load-more signal, like j.
+     */
+    extendSelection(direction: 'down' | 'up'): boolean {
+        const items = articlesStore.activeItems;
+        const index = this.selectedIndex;
+        if (index === -1 || !this.multiSelectable) {
+            if (direction === 'up') {
+                this.selectPreviousArticle();
+                return false;
+            }
+            return this.selectNextArticle();
+        }
+        if (this.#multi.size < 2) {
+            this.#anchor = this.#cursor;
+        }
+        const next =
+            direction === 'down' ? Math.min(index + 1, items.length - 1) : Math.max(index - 1, 0);
+        this.selectRange(items[next].id);
+        return direction === 'down' && items.length - next <= LOAD_MORE_MARGIN;
+    }
+
+    /** Drops the multi-selection, keeping the cursor's row selected (Esc). */
+    clearMulti(): void {
+        this.#multi.clear();
+        this.#anchor = this.#cursor;
+    }
+
+    /**
+     * Drops selected ids that have left the list (archived out of the view,
+     * a refetch). The list calls it whenever its window changes.
+     */
+    prune(present: readonly ArticleSummaryDto[]): void {
+        if (this.#multi.size === 0) {
+            return;
+        }
+        const kept = stillListed(this.#multi, present);
+        if (kept.length !== this.#multi.size) {
+            this.#setMulti(kept);
+        }
+    }
 
     /**
      * The last window index the selection sat at while present. When the
@@ -185,6 +349,9 @@ export class SelectionStore {
         this.selectedFeedId = null;
         this.selectedArticleId = null;
         this.lastPresentIndex = 0;
+        this.#multi.clear();
+        this.#anchor = null;
+        this.multiSelectable = false;
     }
 }
 

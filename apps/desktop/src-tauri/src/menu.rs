@@ -88,7 +88,14 @@ pub fn build_for(app: &AppHandle, locale: Locale) -> tauri::Result<Menu<Wry>> {
     let focus_mode = MenuItemBuilder::with_id("view.toggleFocusMode", text.focus_mode)
         .accelerator("CmdOrCtrl+Alt+F")
         .build(app)?;
+    // The same ⌘K the window's key handler matches (the frontend's open is
+    // idempotent, so the two seeing one press is harmless).
+    let command_palette = MenuItemBuilder::with_id("app.commandPalette", text.command_palette)
+        .accelerator("CmdOrCtrl+K")
+        .build(app)?;
     let view = SubmenuBuilder::new(app, text.view)
+        .item(&command_palette)
+        .separator()
         .item(&refresh)
         .separator()
         .item(&toggle_sidebar)

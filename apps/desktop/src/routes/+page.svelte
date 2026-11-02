@@ -13,6 +13,7 @@ import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
 import WelcomeView from '$components/layout/WelcomeView.svelte';
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
+import CommandPalette from '$components/modals/CommandPalette.svelte';
 import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
@@ -21,6 +22,7 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { t } from '$lib/i18n';
 import {
+    commandShortcut,
     createMatcher,
     eventKeyName,
     frameShortcut,
@@ -79,13 +81,17 @@ function handleModalKey(event: KeyboardEvent): boolean {
 }
 
 // Menu + modal Escape are handled earlier; here Escape steps back through the
-// shell so it is never a no-op — clear an active search, else deselect the open
-// article. Returns true when the event was an Escape (handled).
+// shell so it is never a no-op — drop a multi-selection back to its cursor row,
+// else clear an active search, else deselect the open article. Returns true
+// when the event was an Escape (handled).
 function handleEscapeStepback(event: KeyboardEvent): boolean {
     if (event.key !== 'Escape') {
         return false;
     }
-    if (searchStore.active) {
+    if (selectionStore.multiActive) {
+        event.preventDefault();
+        selectionStore.clearMulti();
+    } else if (searchStore.active) {
         event.preventDefault();
         searchStore.clear();
     } else if (selectionStore.selectedArticleId !== null) {
@@ -143,6 +149,15 @@ function onKeydown(event: KeyboardEvent): void {
     if (handleModalKey(event)) {
         return;
     }
+    // ⌘K (Ctrl+K off macOS) works from anywhere outside a dialog — the
+    // search field included, so it is matched before the typing guard.
+    const commandId = commandShortcut(event);
+    if (commandId !== null) {
+        event.preventDefault();
+        matcher.reset();
+        handleShortcut(commandId);
+        return;
+    }
     if (shouldIgnoreKeyEvent(event)) {
         return;
     }
@@ -195,6 +210,10 @@ function onKeydown(event: KeyboardEvent): void {
 
 {#if layoutStore.activeModal === 'help'}
     <HelpOverlay onclose={() => layoutStore.closeModal()} />
+{/if}
+
+{#if layoutStore.activeModal === 'palette'}
+    <CommandPalette onclose={() => layoutStore.closeModal()} />
 {/if}
 
 {#if layoutStore.activeModal === 'destinations'}

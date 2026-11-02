@@ -302,6 +302,10 @@ function dateLabel(current: ReaderHead): { text: string; firstSeen: boolean } {
 let lastOpenedId: number | null = null;
 $effect(() => {
     const articleId = selectionStore.selectedArticleId;
+    // A multi-selection shows no article, so it marks none read.
+    if (selectionStore.multiActive) {
+        return;
+    }
     if (articleId !== null && articleId !== lastOpenedId && articleQuery?.data != null) {
         lastOpenedId = articleId;
         void markReadOnOpen(articleId);
@@ -374,7 +378,18 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 {/snippet}
 
 <div class="reader">
-    {#if selectedId === null}
+    {#if selectionStore.multiActive}
+        <!-- Several rows selected: no one article is "open"; the bulk bar acts. -->
+        {@render dragStrip()}
+        <EmptyState
+            icon="rows"
+            title={t('reader.multiSelected', { count: selectionStore.selectedIds.length })}
+        >
+            {#snippet hint()}
+                {t('reader.multiSelected.hint')}
+            {/snippet}
+        </EmptyState>
+    {:else if selectedId === null}
         {@render dragStrip()}
         <EmptyState
             icon="sparkle"

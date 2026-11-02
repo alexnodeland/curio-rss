@@ -3,14 +3,15 @@
  * The `?` overlay: renders the shortcut registry verbatim — the table is
  * data, so this component can never drift from what the keys actually do.
  * A row shows its global sequence (chords joined by "then"), then any pane
- * keys (the listbox arrows / Enter, the reader's ← / Esc) as alternatives.
+ * keys (the listbox arrows / Enter, the reader's ← / Esc) as alternatives,
+ * and a command chord (⌘K / Ctrl+K) where the entry has one.
  * It rides the shared {@link Modal} shell (focus trap, restore, labelled
  * dialog); dismissal (Escape / `?`) is handled by the shell's keydown
  * handler, and the close button covers the pointer path.
  */
 import Modal from '$components/common/Modal.svelte';
 import { type MessageKey, t } from '$lib/i18n';
-import { keyLabel } from '$lib/keyboard/labels';
+import { commandKeyLabel, keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS, type ShortcutCategory } from '$lib/keyboard/registry';
 
 let { onclose }: { onclose: () => void } = $props();
@@ -49,6 +50,9 @@ function shortcutsIn(category: ShortcutCategory) {
                                 {/if}
                                 <kbd>{keyLabel(keyName)}</kbd>
                             {/each}
+                            {#if shortcut.commandKey !== undefined}
+                                <kbd>{commandKeyLabel(shortcut.commandKey)}</kbd>
+                            {/if}
                         </span>
                         <span class="description">{t(shortcut.description)}</span>
                     </li>

@@ -18,7 +18,8 @@ use std::path::Path;
 
 use curio_core::export::ExportDisposition;
 use curio_core::model::{
-    Article, ArticleState, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus,
+    Article, ArticleFlag, ArticleState, Feed, FeedId, FeedStatus, FetchErrorKind, FetchRecord,
+    FetchStatus,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
 use curio_core::storage::ListArticles;
@@ -457,6 +458,31 @@ impl From<ArticleState> for ArticleStateDto {
             starred: state.starred,
             read_later: state.read_later,
             archived: state.archived,
+        }
+    }
+}
+
+/// Mirror of [`ArticleFlag`] — which flag a bulk action writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ArticleFlagDto {
+    /// Read/unread.
+    Read,
+    /// Starred.
+    Starred,
+    /// In the read-later queue.
+    ReadLater,
+    /// Archived.
+    Archived,
+}
+
+impl From<ArticleFlagDto> for ArticleFlag {
+    fn from(flag: ArticleFlagDto) -> Self {
+        match flag {
+            ArticleFlagDto::Read => Self::Read,
+            ArticleFlagDto::Starred => Self::Starred,
+            ArticleFlagDto::ReadLater => Self::ReadLater,
+            ArticleFlagDto::Archived => Self::Archived,
         }
     }
 }

@@ -1,10 +1,8 @@
 //! Articles: batch upsert, lookup, keyset listing, unread counts, search,
 //! deletion and content replacement.
 
-use super::rows::{
-    RawArticle, article_by_id, list_articles_query, parse_ts, raw_article, scoped_dedupe_key,
-    search_articles_query,
-};
+use super::query::{list_articles_query, search_articles_query};
+use super::rows::{RawArticle, article_by_id, parse_ts, raw_article, scoped_dedupe_key};
 use super::{ARTICLE_COLS, ListArticles, SearchArticles, UpsertOutcome, begin_write};
 use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, NewArticle};
 use crate::storage::{Storage, StorageError};

@@ -27,6 +27,7 @@ pub mod notify;
 pub mod paths;
 pub mod refresh_scheduler;
 pub mod startup;
+pub mod window_chrome;
 
 use tauri::Manager as _;
 
@@ -131,6 +132,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::recovery::start_fresh_profile,
             commands::recovery::reveal_profile_folder,
             commands::recovery::quit_app,
+            // window chrome (macOS overlay title bar)
+            window_chrome::window_chrome,
         ])
         .events(tauri_specta::collect_events![
             events::FeedsChanged,
@@ -139,6 +142,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::RefreshFinished,
             events::ConnectivityChanged,
             events::MenuAction,
+            window_chrome::FullscreenChanged,
         ])
 }
 
@@ -167,11 +171,13 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .menu(menu::build)
         .on_menu_event(menu::on_event)
+        .on_window_event(window_chrome::on_window_event)
         .setup(move |app| {
             builder.mount_events(app);
             // Managed before the window exists: the frontend's first call
             // asks the gate whether to show the reader or the recovery screen.
             app.manage(startup::StartupGate::default());
+            app.manage(window_chrome::FullscreenTracker::default());
             // Before the profile is touched, so the window exists whatever
             // happens next (tauri itself would have built a `create: true`
             // window slightly earlier, ahead of its asset setup and this

@@ -126,6 +126,18 @@ h6 {
     --sidebar-width: 264px;
     --list-width: 384px;
     --header-height: 52px;
+    /* Extra leading room the leftmost pane header keeps clear of the window
+       controls. 0 with native decorations; see the overlay rule below. */
+    --titlebar-inset: 0px;
+}
+
+/* macOS overlay title bar (#148): the traffic lights sit inside the leftmost
+   pane header — 14px buttons on a 20px pitch from x = 16 (tauri.conf.json's
+   trafficLightPosition), so they end at 70px; the header's own 16px padding
+   plus this inset puts its content 12px past them. Set by the window-chrome
+   store, which drops it in fullscreen (macOS hides the lights there). */
+:root[data-titlebar="overlay"] {
+    --titlebar-inset: 66px;
 }
 
 /* Derived surface + elevation tokens — computed from each theme's own base

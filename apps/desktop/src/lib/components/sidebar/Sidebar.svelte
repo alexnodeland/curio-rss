@@ -28,6 +28,7 @@ import { folderPathsForTags } from '$lib/state/folder-ops';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { untrack } from 'svelte';
 import FeedItem from './FeedItem.svelte';
@@ -240,7 +241,9 @@ function newFolder(): void {
 </script>
 
 <nav class="sidebar" aria-label={t('sidebar.label')}>
-    <div class="sidebar-brand">
+    <!-- The macOS title bar (#148): a press on the header drags the window and
+         a double-click zooms it; its buttons and the badge stay controls. -->
+    <div class="sidebar-brand" data-tauri-drag-region={windowChromeStore.dragRegion}>
         <div class="brand" class:offline={connectivityStore.offline}>
             <span class="brand-mark" aria-hidden="true"><Icon name="sparkle" size={16} /></span>
             <span class="brand-name">Curio</span>
@@ -458,7 +461,10 @@ function newFolder(): void {
         justify-content: space-between;
         gap: var(--space-2);
         height: var(--header-height);
-        padding: 0 var(--space-2) 0 var(--space-4);
+        /* Clears the traffic lights under the macOS overlay title bar. The
+           container queries below measure the content box, so they already
+           count the inset. */
+        padding: 0 var(--space-2) 0 calc(var(--space-4) + var(--titlebar-inset));
         border-bottom: 1px solid var(--hairline);
         container: sidebar-brand / inline-size;
     }
@@ -511,6 +517,17 @@ function newFolder(): void {
     .brand.offline .brand-mark,
     .offline-label {
         display: none;
+    }
+
+    /* Too narrow for the name beside the mark and the toolbar — mark 26 +
+       gap 8 + name ~44 + gap 8 + toolbar 94 = 180px, plus slack for the
+       platform font (the narrowest sidebar, or a narrow one that also holds
+       the traffic lights): the mark carries the brand alone rather than the
+       name running under the buttons. */
+    @container sidebar-brand (max-width: 185.98px) {
+        .brand-name {
+            display: none;
+        }
     }
 
     /* Room for the word: the brand mark comes back and the tile becomes a

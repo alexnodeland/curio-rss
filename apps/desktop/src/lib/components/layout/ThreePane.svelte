@@ -87,8 +87,13 @@ function persistListWidth(width: number): void {
     }
 
     @media (max-width: 900px) {
+        /* Never so narrow that the header's brand mark and three buttons
+           (16 + 26 + 8 + 94 + 8 px) collide with the macOS traffic lights:
+           a no-op at 24vw ≥ 192px, unless the inset is on. min-width wins
+           over max-width. */
         .three-pane :global(.pane.sidebar) {
             max-width: 24vw;
+            min-width: calc(152px + var(--titlebar-inset));
         }
         .three-pane :global(.pane.list) {
             max-width: 30vw;

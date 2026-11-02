@@ -119,7 +119,7 @@ function onKeydown(event: KeyboardEvent): void {
         color: var(--fg-muted);
         font-family: var(--font-family);
         font-size: var(--text-xs);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .tag::before {

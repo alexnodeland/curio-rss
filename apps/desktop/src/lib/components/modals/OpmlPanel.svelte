@@ -124,7 +124,7 @@ async function runExport(): Promise<void> {
         color: var(--fg-muted);
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);

@@ -307,7 +307,7 @@ function openCustomMenu(theme: CustomTheme, event: MouseEvent): void {
 
     .custom-head h3 {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);

@@ -139,7 +139,7 @@ function onBackdropClick(event: MouseEvent): void {
 
     .overlay-header h2 {
         font-size: var(--text-lg);
-        font-weight: 640;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-snug);
     }
 

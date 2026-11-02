@@ -279,7 +279,7 @@ function label(action: RecoveryAction): string {
 
     .title {
         font-size: var(--text-xl);
-        font-weight: 620;
+        font-weight: var(--weight-semibold);
         letter-spacing: var(--tracking-tight);
         line-height: 1.25;
     }
@@ -317,7 +317,7 @@ function label(action: RecoveryAction): string {
         background: transparent;
         color: var(--fg);
         font-size: var(--text-md);
-        font-weight: 520;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);
@@ -412,7 +412,7 @@ function label(action: RecoveryAction): string {
     .link-btn {
         padding: var(--space-1) 0;
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-muted);
     }
 

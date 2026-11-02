@@ -191,7 +191,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     .title {
         font-family: var(--font-family);
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         line-height: 1.3;
         /* Reserve both clamp lines so a 1-line title occupies the same height as
            a 2-line one — otherwise the channel/date row rides up and the grid's
@@ -203,7 +203,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 
     .card.read .title {
         color: var(--fg-muted);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .sub {
@@ -228,7 +228,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     .channel {
         flex-shrink: 1000;
         min-width: 1.5em; /* never collapses to a bare dot */
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-muted);
     }
 

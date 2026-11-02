@@ -171,7 +171,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     }
 
     .sub {
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         color: #ff6a33;
     }
 
@@ -199,7 +199,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     .title {
         font-family: var(--font-family);
         font-size: var(--text-base);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         line-height: 1.35;
         color: var(--fg);
         letter-spacing: var(--tracking-snug);
@@ -207,7 +207,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 
     .card.read .title {
         color: var(--fg-muted);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .foot {
@@ -222,7 +222,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         gap: 5px;
         font-family: var(--font-family);
         font-size: var(--text-xs);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-subtle);
     }
 </style>

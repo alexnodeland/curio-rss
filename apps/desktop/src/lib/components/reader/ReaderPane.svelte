@@ -846,6 +846,9 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
            cut. A body already in cache mounts with it and rides this fade
            alone — stacking a second one would multiply the opacities. */
         animation: reader-fade-in var(--dur-fast) var(--ease);
+        /* The reading-surface tint (sepia/paper), when one is chosen — the
+           tokens live with the [data-reading-theme] rules in app.css. */
+        background: var(--reading-surface, transparent);
     }
 
     /* A body that lands over its skeleton, later in the same selection,
@@ -915,29 +918,6 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         hyphens: auto;
     }
 
-    /* Reading-surface tints, independent of the app theme: a warm paper ground
-       with dark ink so long reads stay comfortable on any theme. The tint sits
-       on the scroll surface; the ink tokens are forced directly (`--ink` is a
-       :root color-mix that inherits its computed value, so overriding `--fg`
-       alone would not repaint the prose) while links keep their accent. */
-    .reader-scroll[data-reading-theme='sepia'] {
-        background: #f1e5cf;
-        --ink: #43392b;
-        --ink-soft: #6b5b45;
-        --fg: #43392b;
-        --fg-muted: #5c4f3b;
-        --fg-subtle: #7a6a52;
-    }
-
-    .reader-scroll[data-reading-theme='paper'] {
-        background: #faf6ee;
-        --ink: #2b2b2b;
-        --ink-soft: #555555;
-        --fg: #2b2b2b;
-        --fg-muted: #4a4a4a;
-        --fg-subtle: #6b6b6b;
-    }
-
     .reader-article {
         margin: 0 auto;
         padding: var(--space-10) var(--space-8) var(--space-12);
@@ -965,7 +945,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         border-radius: var(--radius-sm);
         font-family: var(--font-family);
         font-size: 0.72rem;
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         color: hsl(var(--mono-hue) 65% 82%);
         background: hsl(var(--mono-hue) 45% 32% / 0.5);
         box-shadow: inset 0 0 0 1px hsl(var(--mono-hue) 55% 60% / 0.35);
@@ -974,7 +954,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     .feed-name {
         font-family: var(--font-family);
         font-size: var(--text-sm);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         letter-spacing: var(--tracking-wide);
         color: var(--fg-muted);
     }
@@ -982,7 +962,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     .reader-title {
         font-family: var(--font-family);
         font-size: var(--text-2xl);
-        font-weight: 680;
+        font-weight: var(--weight-bold);
         line-height: 1.16;
         letter-spacing: var(--tracking-tight);
         text-wrap: balance;

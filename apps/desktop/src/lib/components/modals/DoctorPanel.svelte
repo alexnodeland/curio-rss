@@ -192,7 +192,7 @@ async function diagnostics(): Promise<void> {
 
     h4 {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -224,7 +224,7 @@ async function diagnostics(): Promise<void> {
         color: var(--fg-muted);
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);

@@ -444,7 +444,7 @@ function onKeydown(event: KeyboardEvent): void {
     .tablist button[role='tab'][aria-selected='true'] {
         background: var(--selected);
         color: var(--accent);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
     }
 
     .tablist button[role='tab']:focus-visible {

@@ -489,7 +489,7 @@ function newFolder(): void {
 
     .brand-name {
         font-size: var(--text-lg);
-        font-weight: 660;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-tight);
         color: var(--fg);
     }
@@ -509,7 +509,7 @@ function newFolder(): void {
         background: color-mix(in srgb, var(--warning), transparent 86%);
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning), transparent 58%);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         white-space: nowrap;
         cursor: default;
     }
@@ -600,7 +600,7 @@ function newFolder(): void {
     .sidebar-heading {
         padding: 0 var(--space-3);
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -697,7 +697,7 @@ function newFolder(): void {
 
     .sidebar-empty-title {
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         color: var(--fg);
     }
 
@@ -722,7 +722,7 @@ function newFolder(): void {
         color: var(--fg-muted);
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         cursor: pointer;
         transition:
             background var(--dur-fast) var(--ease),
@@ -757,7 +757,7 @@ function newFolder(): void {
         color: var(--fg-muted);
         text-align: left;
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition: background var(--dur-fast) var(--ease);
     }
 
@@ -799,7 +799,7 @@ function newFolder(): void {
         background: var(--accent);
         color: var(--accent-fg);
         font-size: 0.7rem;
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.5;

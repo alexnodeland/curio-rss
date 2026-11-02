@@ -132,7 +132,7 @@ async function install(update: Update): Promise<void> {
         color: var(--fg-muted);
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         cursor: pointer;
         transition:
             background var(--dur-fast) var(--ease),

@@ -99,6 +99,16 @@ h6 {
     --tracking-wide: 0.02em;
     --tracking-caps: 0.07em;
 
+    /* Weight scale — the only font weights components may use
+       (scripts/check-frontend-bans.sh fails on a raw number). Variable system
+       faces honour the in-between steps; static faces round to 500/600/700. */
+    --weight-regular: 400; /* body text */
+    --weight-medium: 500; /* secondary emphasis: meta, chips, buttons */
+    --weight-emphasis: 560; /* labels, section titles, read row titles */
+    --weight-semibold: 600; /* unread titles, counts, strong labels */
+    --weight-heading: 650; /* pane and dialog headings */
+    --weight-bold: 700; /* display titles, prose <strong> */
+
     /* Spacing */
     --space-1: 4px;
     --space-2: 8px;
@@ -456,6 +466,32 @@ h6 {
     --surface-inset: color-mix(in srgb, var(--bg-tertiary), #000 5%);
 }
 
+/* Reading surfaces — the reader-body tints (Typography → Reading surface),
+   independent of the app theme: a warm paper ground with dark ink so long
+   reads stay comfortable on any theme. One source for the reader pane and the
+   typography preview: each puts `data-reading-theme` on its scroll surface
+   and paints `background: var(--reading-surface, …)`. The ink tokens are
+   forced directly (`--ink` is a :root color-mix that inherits its computed
+   value, so overriding `--fg` alone would not repaint the prose); links keep
+   the theme's accent. */
+[data-reading-theme="sepia"] {
+    --reading-surface: #f1e5cf;
+    --ink: #43392b;
+    --ink-soft: #6b5b45;
+    --fg: #43392b;
+    --fg-muted: #5c4f3b;
+    --fg-subtle: #7a6a52;
+}
+
+[data-reading-theme="paper"] {
+    --reading-surface: #faf6ee;
+    --ink: #2b2b2b;
+    --ink-soft: #555555;
+    --fg: #2b2b2b;
+    --fg-muted: #4a4a4a;
+    --fg-subtle: #6b6b6b;
+}
+
 /* Utility Classes */
 .flex {
     display: flex;
@@ -515,7 +551,7 @@ h6 {
     box-shadow: var(--shadow-lg);
     color: var(--fg);
     font-size: var(--text-sm);
-    font-weight: 550;
+    font-weight: var(--weight-emphasis);
     transform: translateY(-200%);
     transition: transform var(--dur-fast) var(--ease);
 }

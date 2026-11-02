@@ -62,7 +62,7 @@ function shortcutsIn(category: ShortcutCategory) {
 <style>
     .shortcut-group h3 {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);

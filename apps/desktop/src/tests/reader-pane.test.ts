@@ -504,14 +504,20 @@ describe('ReaderPane', () => {
                 105, 106, 108, 109,
             ]);
 
-            // Archived out of the view: the read-hold lets go of it, the backend
-            // stops returning it, so 106 shifts into slot 3 and the selection is
-            // no longer in the window.
+            // Archived out of the view: the read-hold lets go of it, and the
+            // archive's own flag event takes it out of the (archived-excluding)
+            // window in place, so 106 shifts into slot 3 and the selection is no
+            // longer in the window.
+            const listCalls = harness.callsFor('list_articles').length;
             await fireEvent.click(getByRole('button', { name: 'Archive' }));
             await flush();
             rows = ROWS.filter((row) => row.id !== 107);
-            await events.articlesChanged.emit({ feed_id: null, flags: null });
+            await events.articlesChanged.emit({
+                feed_id: null,
+                flags: { article_ids: [107], field: 'archived', value: true },
+            });
             await flush();
+            expect(harness.callsFor('list_articles')).toHaveLength(listCalls);
             expect(selectionStore.selectedIndex).toBe(-1);
             await settle();
 

@@ -5,12 +5,13 @@
  * verbatim, internal generic), view selection swaps the backend filter
  * set, and unwired registry ids are deliberate no-ops.
  */
-import type { ArticleStateDto, ListArticlesDto } from '$lib/bindings';
+import { events, type ArticleStateDto, type ListArticlesDto } from '$lib/bindings';
 import {
     activeView,
     goToNextUnread,
     handleShortcut,
     importFromFile,
+    markReadOnOpen,
     markViewRead,
     openInBrowser,
     pageReader,
@@ -19,12 +20,19 @@ import {
     selectFolder,
     selectView,
     toggleArchived,
+    toggleRead,
     toggleStar,
 } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
-import { type Query, ensureQuery, queryKeys, resetQueryCache } from '$lib/state/query-cache.svelte';
+import {
+    type Query,
+    ensureQuery,
+    queryKeys,
+    resetQueryCache,
+    wireInvalidation,
+} from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -162,6 +170,102 @@ describe('actions — toggles', () => {
         ]);
         // The failed first write must not roll the flag back over the second press.
         expect(state.data?.starred).toBe(false);
+    });
+
+    /**
+     * A flag write the test settles by hand: settling emits the flag event
+     * the Rust command does, then resolves the command.
+     */
+    interface HeldWrite {
+        readonly value: boolean;
+        readonly settle: () => Promise<void>;
+    }
+
+    function heldWrites(
+        field: 'starred' | 'read',
+        arg: 'starred' | 'read',
+    ): { writes: HeldWrite[]; respond: (args: Record<string, unknown>) => Promise<boolean> } {
+        const writes: HeldWrite[] = [];
+        return {
+            writes,
+            respond: (args) =>
+                new Promise<boolean>((resolve) => {
+                    const value = args[arg] as boolean;
+                    writes.push({
+                        value,
+                        settle: async () => {
+                            await events.articlesChanged.emit({
+                                feed_id: null,
+                                flags: { article_ids: [7], field, value },
+                            });
+                            resolve(true);
+                            await flushIpc();
+                        },
+                    });
+                }),
+        };
+    }
+
+    it("an earlier press's event never flashes the old value back over a pending press", async () => {
+        const held = heldWrites('starred', 'starred');
+        harness = installIpcHarness({ set_starred: held.respond });
+        const unwire = await wireInvalidation();
+        const state = await cachedState(false);
+        const seen: (boolean | undefined)[] = [];
+
+        const first = toggleStar(7);
+        const second = toggleStar(7);
+        seen.push(state.data?.starred);
+        await flushIpc();
+        await held.writes[0]?.settle(); // star committed; its event arrives
+        seen.push(state.data?.starred);
+        await held.writes[1]?.settle(); // unstar committed
+        seen.push(state.data?.starred);
+        await Promise.all([first, second]);
+
+        expect(held.writes.map((write) => write.value)).toEqual([true, false]);
+        expect(seen).toEqual([false, false, false]);
+
+        // Settled: the next change from anywhere shows as usual.
+        await events.articlesChanged.emit({
+            feed_id: null,
+            flags: { article_ids: [7], field: 'starred', value: true },
+        });
+        await flushIpc();
+        expect(state.data?.starred).toBe(true);
+        unwire();
+    });
+
+    it("m right after an open queues behind the open's write and flips the value it asked for", async () => {
+        const held = heldWrites('read', 'read');
+        harness = installIpcHarness({ mark_read: held.respond });
+        const unwire = await wireInvalidation();
+        const state = ensureQuery(queryKeys.articleState(7), () =>
+            Promise.resolve({ status: 'ok' as const, data: articleStateFixture({ read: false }) }),
+        );
+        await flushIpc();
+
+        const opened = markReadOnOpen(7);
+        expect(state.data?.read).toBe(true); // the dot clears with the open
+        const pressed = toggleRead(7);
+        expect(state.data?.read).toBe(false); // and `m` brings it back at once
+        await flushIpc();
+        // One write at a time: the `m` waits for the open's mark.
+        expect(held.writes.map((write) => write.value)).toEqual([true]);
+
+        await held.writes[0]?.settle();
+        expect(state.data?.read).toBe(false); // the open's event doesn't win
+        expect(held.writes.map((write) => write.value)).toEqual([true, false]);
+        await held.writes[1]?.settle();
+        await Promise.all([opened, pressed]);
+
+        expect(harness.callsFor('mark_read')).toEqual([
+            { articleId: 7, read: true },
+            { articleId: 7, read: false },
+        ]);
+        expect(harness.callsFor('get_article_state')).toHaveLength(0);
+        expect(state.data?.read).toBe(false);
+        unwire();
     });
 
     it('a user-tier failure surfaces verbatim as a toast and stops the flip', async () => {

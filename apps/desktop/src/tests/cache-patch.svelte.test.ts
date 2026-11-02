@@ -24,11 +24,16 @@ import {
     type Query,
     type QueryScope,
     applyArticlesChanged,
+    cachedArticleFlag,
     ensureQuery,
+    landCarried,
+    patchArticleFlag,
     peekQuery,
+    pinArticleFlag,
     queryCount,
     queryKeys,
     resetQueryCache,
+    unpinArticleFlag,
     wireInvalidation,
 } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
@@ -200,6 +205,67 @@ describe('query cache — patch in place (#135)', () => {
         expect(calls).toBe(2);
         expect(query.data?.read).toBe(true);
     });
+
+    it('a list fetch that started before a flip does not land its older flags over the patch', async () => {
+        const state = counted(() => articleStateFixture());
+        const stateQuery = ensureQuery<ArticleStateDto>(queryKeys.articleState(7), state.fetch);
+        await flushIpc();
+        let finish: () => void = () => undefined;
+        const list = ensureQuery<number[]>(
+            queryKeys.articleList('any'),
+            () =>
+                new Promise((resolve) => {
+                    finish = () => resolve({ status: 'ok', data: [7] });
+                }),
+            { feedId: null, flagFilter: {} },
+            (ids) =>
+                ids.map((id) => ({
+                    key: queryKeys.articleState(id),
+                    fetcher: state.fetch,
+                    data: articleStateFixture(), // read before the star committed
+                })),
+        );
+        await flushIpc(); // the list's read is in flight
+
+        applyArticlesChanged(flip('starred', [7], true));
+        finish();
+        await flushIpc();
+
+        expect(list.data).toEqual([7]);
+        expect(stateQuery.data?.starred).toBe(true);
+        expect(state.calls()).toBe(1);
+    });
+
+    it('a pinned flag keeps the pressed value over older events and reads until unpinned', async () => {
+        // The backend still holds the first press's value; a second press is pending.
+        const state = counted(() => articleStateFixture({ starred: true }));
+        const query = ensureQuery<ArticleStateDto>(queryKeys.articleState(7), state.fetch);
+        await flushIpc();
+        pinArticleFlag(7, 'starred', false);
+        expect(query.data?.starred).toBe(false);
+
+        // The first press's event, a read that predates the pending write, and
+        // a list landing its rows: none paints the old value back.
+        applyArticlesChanged(flip('starred', [7], true));
+        await flushIpc();
+        expect(query.data?.starred).toBe(false);
+        await query.refetch();
+        expect(query.data?.starred).toBe(false);
+        landCarried([
+            {
+                key: queryKeys.articleState(7),
+                fetcher: state.fetch,
+                data: articleStateFixture({ starred: true }),
+            },
+        ]);
+        expect(query.data?.starred).toBe(false);
+
+        // Once the writes settle, the cache follows events again.
+        unpinArticleFlag(7, 'starred');
+        applyArticlesChanged(flip('starred', [7], true));
+        await flushIpc();
+        expect(query.data?.starred).toBe(true);
+    });
 });
 
 describe('query cache — coalescing and idle entries (#135)', () => {
@@ -221,6 +287,59 @@ describe('query cache — coalescing and idle entries (#135)', () => {
 
         expect(list.calls()).toBe(2);
         expect(counts.calls()).toBe(2);
+    });
+
+    it('events in separate tasks while a refetch is in flight cost one follow-up, not one each', async () => {
+        const settles: (() => void)[] = [];
+        let calls = 0;
+        ensureQuery(queryKeys.unreadCounts, () => {
+            calls += 1;
+            return new Promise<CommandResult<unknown>>((resolve) => {
+                settles.push(() => resolve({ status: 'ok', data: unreadCountsFixture() }));
+            });
+        });
+        await flushIpc();
+        settles.shift()?.();
+        await flushIpc();
+        expect(calls).toBe(1);
+
+        // Three read flips, each delivered in its own task (as Tauri delivers
+        // events): the first starts a refetch, the rest arrive while it runs.
+        for (const id of [1, 2, 3]) {
+            applyArticlesChanged(flip('read', [id], true));
+            await flushIpc();
+        }
+        expect(calls).toBe(2);
+
+        settles.shift()?.();
+        await flushIpc();
+        expect(calls).toBe(3); // one more, after the running one landed
+        settles.shift()?.();
+        await flushIpc();
+        expect(calls).toBe(3);
+    });
+
+    it('a stale flag reads as uncached, and whenLoaded refetches it', async () => {
+        let starred = false;
+        const state = counted(() => articleStateFixture({ starred }));
+        const query = ensureQuery<ArticleStateDto>(queryKeys.articleState(7), state.fetch);
+        const shown = observe(() => query.data);
+        await flushIpc();
+        await unmount(shown);
+
+        // Changed by a write whose event names no flag (e.g. saving a URL that
+        // already exists sets read-later): the idle entry only goes stale.
+        starred = true;
+        applyArticlesChanged({ feed_id: null, flags: null });
+        await flushIpc();
+        expect(query.stale).toBe(true);
+        expect(cachedArticleFlag(7, 'starred')).toBeUndefined();
+        expect(patchArticleFlag(7, 'starred', false)).toBeNull();
+
+        await query.whenLoaded();
+        expect(state.calls()).toBe(2);
+        expect(query.data?.starred).toBe(true);
+        expect(cachedArticleFlag(7, 'starred')).toBe(true);
     });
 
     it('an entry nothing reads any more goes stale instead of refetching, and refetches once read again', async () => {
@@ -247,6 +366,38 @@ describe('query cache — coalescing and idle entries (#135)', () => {
         expect(body.calls()).toBe(3); // read again: one catch-up refetch
         expect(query.stale).toBe(false);
         await unmount(again);
+    });
+
+    it('an idle list covers none of its rows: a shown row it carries refetches on its own', async () => {
+        const detail = counted(() => articleStateFixture({ read: true }));
+        const list = ensureQuery<number[]>(
+            queryKeys.articleList('idle'),
+            () => Promise.resolve({ status: 'ok', data: [1] }),
+            { feedId: null },
+            (ids) =>
+                ids.map((id) => ({
+                    key: queryKeys.articleState(id),
+                    fetcher: detail.fetch,
+                    data: articleStateFixture(),
+                })),
+        );
+        const listShown = observe(() => list.data);
+        await flushIpc();
+        await unmount(listShown);
+        const row = ensureQuery<ArticleStateDto>(queryKeys.articleState(1), detail.fetch);
+        const rowShown = observe(() => row.data);
+        await flushIpc();
+        expect(detail.calls()).toBe(0); // landed by the list
+
+        applyArticlesChanged({ feed_id: null, flags: null });
+        await flushIpc();
+
+        // The idle list only went stale — its landing is not coming — so the
+        // row the reader shows was refetched rather than left to it.
+        expect(list.stale).toBe(true);
+        expect(detail.calls()).toBe(1);
+        expect(row.data?.read).toBe(true);
+        await unmount(rowShown);
     });
 
     it('a list view nothing shows any more goes stale too', async () => {
@@ -393,7 +544,11 @@ describe('acceptance — one toggleStar after a session (#135)', () => {
         return installIpcHarness({
             list_articles: (args) => {
                 const params = args.params as ListArticlesDto;
-                return rows.filter((row) => matches(params, row)).slice(0, params.limit);
+                // Each row carries its flags, as `list_articles` rows do.
+                return rows
+                    .filter((row) => matches(params, row))
+                    .slice(0, params.limit)
+                    .map((row) => ({ ...row, state: flags.get(row.id) ?? articleStateFixture() }));
             },
             get_article: (args) => articleFixture({ id: args.articleId as number }),
             get_article_state: (args) => flags.get(args.articleId as number),

@@ -14,13 +14,22 @@
  *   only the lists the flip can add rows to, and the unread counts when they
  *   move, go back to the backend.
  * - **Coalesced refetches.** Invalidations queue up and run once per entry
- *   in one microtask batch, however many events asked for it.
+ *   per microtask batch, and an entry whose fetch is still in flight is not
+ *   refetched again on top of it: it refetches once more after that fetch
+ *   lands. So a burst of events — each delivered in its own task, like a
+ *   folder's per-feed mark-all-read — costs an entry at most two fetches
+ *   (the one running and one after it), not one per event.
  * - **Observed vs idle.** An entry knows whether anything reactive reads it.
  *   Once every reader has gone (its row scrolled away, its view closed), an
  *   invalidation only marks it stale; it refetches when it is read again.
  *   The keyed families (`articles:`, `article:`, …) also cap how many idle
  *   entries they keep, evicting the least recently used — so the registry
  *   stays bounded however long the session runs.
+ *
+ * A flag the user just pressed is **pinned** (`pinArticleFlag`) until its
+ * write settles: the press shows at once, and nothing older — an earlier
+ * press's event, a fetch that started before the write — can paint the
+ * previous value back over it in the meantime.
  */
 import {
     events,
@@ -100,6 +109,10 @@ export class Query<T> {
     #everObserved = false;
     /** Invalidated while idle: refetch once it is read again. */
     #stale = false;
+    /** Invalidated while a fetch was in flight: refetch once that one lands. */
+    #again = false;
+    /** When its data was last written (`writeClock`): a fetch, a landing, a patch. */
+    #writtenAt = 0;
 
     /** Registers the calling reaction as a reader (see `createSubscriber`). */
     readonly #track = createSubscriber(() => {
@@ -139,12 +152,14 @@ export class Query<T> {
      */
     land(data: T): void {
         this.#generation += 1;
-        this.#data = data;
+        this.#writtenAt = nextWrite();
+        this.#data = withPins(this.key, data);
         this.#error = null;
         this.#loading = false;
         this.#loaded = true;
         this.#stale = false;
         this.#latest ??= Promise.resolve();
+        this.#followUp();
     }
 
     /**
@@ -244,6 +259,10 @@ export class Query<T> {
      * keeps awaiting the newest one rather than trusting the first to finish.
      */
     async whenLoaded(): Promise<void> {
+        if (this.#stale) {
+            // Invalidated while idle: what it holds is known to be outdated.
+            await this.refetch();
+        }
         while (!this.#loaded) {
             await this.start();
         }
@@ -251,7 +270,8 @@ export class Query<T> {
 
     /**
      * The invalidation step: refetch now, or — while idle — only mark the
-     * entry stale, so it refetches when something reads it again.
+     * entry stale, so it refetches when something reads it again. While a
+     * fetch is in flight, it refetches once more after that one lands.
      */
     invalidate(): void {
         if (this.idle) {
@@ -259,7 +279,21 @@ export class Query<T> {
             this.releaseDeferred();
             return;
         }
+        if (this.#loading) {
+            // A fetch is running; one more after it lands covers this
+            // invalidation and every other one that arrives meanwhile.
+            this.#again = true;
+            return;
+        }
         void this.refetch();
+    }
+
+    /** Runs the refetch an invalidation left for after the last landing. */
+    #followUp(): void {
+        if (this.#again) {
+            this.#again = false;
+            scheduleRefetch(this as Query<unknown>);
+        }
     }
 
     /**
@@ -273,7 +307,13 @@ export class Query<T> {
             return false;
         }
         this.#data = update(current);
+        this.#writtenAt = nextWrite();
         return true;
+    }
+
+    /** When its data was last written, on the cache's write clock (untracked). */
+    get writtenAt(): number {
+        return this.#writtenAt;
     }
 
     /** A fetch has not settled yet (untracked — for bookkeeping). */
@@ -284,6 +324,7 @@ export class Query<T> {
     async #run(): Promise<void> {
         this.#generation += 1;
         const generation = this.#generation;
+        const startedAt = nextWrite();
         this.#loading = true;
         let result: CommandResult<T>;
         try {
@@ -308,24 +349,28 @@ export class Query<T> {
         this.#loading = false;
         this.#loaded = true;
         if (result.status === 'ok') {
-            this.#data = result.data;
+            this.#data = withPins(this.key, result.data);
+            this.#writtenAt = nextWrite();
             this.#error = null;
         } else {
             this.#error = result.error;
         }
-        this.#settleCarried(result);
+        this.#settleCarried(result, startedAt);
+        this.#followUp();
     }
 
     /**
      * Lands what a landed result carries, then settles every deferred key
-     * it no longer carries (all of them when the fetch failed).
+     * it no longer carries (all of them when the fetch failed). An entry
+     * written since the fetch started (a flag flip patched in meanwhile) keeps
+     * its newer data.
      */
-    #settleCarried(result: CommandResult<T>): void {
+    #settleCarried(result: CommandResult<T>, startedAt: number): void {
         const deferred = this.#deferred;
         this.#deferred = new SvelteSet();
         const landed =
             result.status === 'ok' && this.#carries !== undefined
-                ? landCarried(this.#carries(result.data))
+                ? landCarried(this.#carries(result.data), startedAt)
                 : new SvelteSet<string>();
         for (const key of deferred) {
             if (!landed.has(key)) {
@@ -336,6 +381,18 @@ export class Query<T> {
 }
 
 const registry = new SvelteMap<string, Query<unknown>>();
+
+/**
+ * The cache's write clock: orders an entry's last write against the moment a
+ * carrier's fetch started, so a list fetch that began before a flag flip
+ * cannot land its older flags over the patch.
+ */
+let writeClock = 0;
+
+function nextWrite(): number {
+    writeClock += 1;
+    return writeClock;
+}
 
 /**
  * A keyed family whose idle entries are kept in least-recently-used order
@@ -456,25 +513,38 @@ export function ensureQuery<T>(
  * takes it (it is the newest read), and a missing one is created loaded with
  * it, unclaimed until someone reads it. This is how a list page that carries
  * each row's details fills those rows' detail entries, so rendering the page
- * costs no call per row. Returns the keys landed.
+ * costs no call per row. With `readAt` (when the carrier's fetch started on
+ * the write clock), an entry written after that keeps its newer data. Returns
+ * the keys landed (or kept newer).
  */
-export function landCarried(entries: readonly CarriedEntry[]): ReadonlySet<string> {
+export function landCarried(
+    entries: readonly CarriedEntry[],
+    readAt = Number.POSITIVE_INFINITY,
+): ReadonlySet<string> {
     const landed = new SvelteSet<string>();
     untrack(() => {
-        for (const { key, fetcher, data } of entries) {
-            let query = registry.get(key);
-            if (query === undefined) {
-                query = new Query(key, fetcher);
-                registry.set(key, query);
-            }
-            query.land(data);
-            if (!query.observed) {
-                touchIdle(query);
-            }
-            landed.add(key);
+        for (const entry of entries) {
+            landOne(entry, readAt);
+            landed.add(entry.key);
         }
     });
     return landed;
+}
+
+/** Lands one carried entry, unless it was written after `readAt` (it is newer). */
+function landOne({ key, fetcher, data }: CarriedEntry, readAt: number): void {
+    const existing = registry.get(key);
+    if (existing !== undefined && existing.writtenAt > readAt) {
+        return; // already newer than the carrier's read
+    }
+    const query = existing ?? new Query(key, fetcher);
+    if (existing === undefined) {
+        registry.set(key, query);
+    }
+    query.land(data);
+    if (!query.observed) {
+        touchIdle(query);
+    }
 }
 
 /**
@@ -538,35 +608,38 @@ export function dropQuery(key: string, only?: Query<unknown>): void {
 /** Drops every entry — test isolation. */
 export function resetQueryCache(): void {
     registry.clear();
-    pending = [];
+    pending.clear();
+    pins.clear();
     for (const family of families) {
         family.idle.clear();
     }
 }
 
 /**
- * Entries waiting for the next coalesced refetch batch, each once (a plain
- * array: bookkeeping, never rendered; the registry bounds its length).
+ * Entries waiting for the next coalesced refetch batch, each once, in the
+ * order queued (a plain set: bookkeeping, never rendered; the registry
+ * bounds its size).
  */
-let pending: Query<unknown>[] = [];
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping touched from inside reactions; reactive reads here would become their dependencies
+const pending = new Set<Query<unknown>>();
 
 /**
  * Queues one entry for the next batch. However many events invalidate it
  * before the batch runs, it refetches once.
  */
 function scheduleRefetch(query: Query<unknown>): void {
-    if (pending.includes(query)) {
+    if (pending.has(query)) {
         return;
     }
-    pending.push(query);
-    if (pending.length === 1) {
+    pending.add(query);
+    if (pending.size === 1) {
         queueMicrotask(flushRefetches);
     }
 }
 
 function flushRefetches(): void {
-    const batch = pending;
-    pending = [];
+    const batch = [...pending];
+    pending.clear();
     for (const query of batch) {
         // An entry evicted or dropped since it was queued has no reader left;
         // the rows it was left to refresh are settled without it.
@@ -615,10 +688,57 @@ function listCoversFeed(query: Query<unknown>, feedId: number | null): boolean {
 }
 
 /**
- * Writes one flag into an article's cached state, if it is cached. Returns an
- * undo that puts the previous value back — unless something newer (a later
- * flip, an event, a refetch) has rewritten the flag since — or `null` when
- * nothing was cached to patch.
+ * Flags the user pressed whose writes are still pending, by state-entry key:
+ * the value every landing and every committed event for that entry shows
+ * instead of its own until the pin is lifted (plain map: bookkeeping, never
+ * rendered).
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping read while landing data; never rendered, so it must not be a reactive dependency
+const pins = new Map<string, Partial<Record<FlagField, boolean>>>();
+
+/** `data` with the entry's pinned flags written over it (state entries only). */
+function withPins<T>(key: string, data: T): T {
+    const pinned = pins.get(key);
+    if (pinned === undefined || data === null || typeof data !== 'object') {
+        return data;
+    }
+    return { ...data, ...pinned };
+}
+
+/**
+ * Pins `field` of an article to the value the user just pressed and shows it
+ * (see `patchArticleFlag` for the returned undo). Until `unpinArticleFlag`,
+ * an older value arriving — an earlier write's event, a fetch that predates
+ * the press — leaves the shown flag alone.
+ */
+export function pinArticleFlag(
+    articleId: number,
+    field: FlagField,
+    value: boolean,
+): (() => void) | null {
+    const key = queryKeys.articleState(articleId);
+    pins.set(key, { ...pins.get(key), [field]: value });
+    return patchArticleFlag(articleId, field, value);
+}
+
+/** Lifts a pin once the flag's writes have settled. */
+export function unpinArticleFlag(articleId: number, field: FlagField): void {
+    const key = queryKeys.articleState(articleId);
+    const pinned = pins.get(key);
+    if (pinned === undefined) {
+        return;
+    }
+    delete pinned[field];
+    if (Object.keys(pinned).length === 0) {
+        pins.delete(key);
+    }
+}
+
+/**
+ * Writes one flag into an article's cached state, if it is cached (and not
+ * stale). Returns an undo that puts the previous value back — unless
+ * something newer (a later flip, an event, a refetch) has rewritten the flag
+ * since — or `null` when nothing was cached to patch.
  */
 export function patchArticleFlag(
     articleId: number,
@@ -638,17 +758,23 @@ export function patchArticleFlag(
     };
 }
 
-/** One flag of a cached state entry, untracked; `undefined` when not loaded. */
+/**
+ * One flag of a cached state entry, untracked; `undefined` when not loaded —
+ * or stale (invalidated while idle), whose value is known to be outdated.
+ */
 function flagOf(query: Query<ArticleStateDto> | undefined, field: FlagField): boolean | undefined {
+    if (query === undefined || query.stale) {
+        return undefined;
+    }
     // `data?.`: the read for an article purged meanwhile can come back empty.
-    return query === undefined ? undefined : untrack(() => query.data?.[field]);
+    return untrack(() => query.data?.[field]);
 }
 
 function setFlagOf(query: Query<ArticleStateDto>, field: FlagField, value: boolean): void {
     query.patch((state) => ({ ...state, [field]: value }));
 }
 
-/** The cached value of one article flag, or `undefined` when not loaded. */
+/** The cached value of one article flag, or `undefined` when not loaded or stale. */
 export function cachedArticleFlag(articleId: number, field: FlagField): boolean | undefined {
     return flagOf(peekQuery<ArticleStateDto>(queryKeys.articleState(articleId)), field);
 }
@@ -656,19 +782,22 @@ export function cachedArticleFlag(articleId: number, field: FlagField): boolean 
 /**
  * A committed flag flip, reconciled into a cached state entry: patched in
  * place, and refetched too when a fetch that may predate the write is still
- * in flight (or nothing has loaded to patch yet).
+ * in flight (or nothing has loaded to patch yet). A pinned flag keeps the
+ * pressed value: the event is an earlier write's, and the pending write's
+ * own event follows.
  */
 function reconcileState(articleId: number, change: FlagChange): void {
-    const query = peekQuery<ArticleStateDto>(queryKeys.articleState(articleId));
+    const key = queryKeys.articleState(articleId);
+    const query = peekQuery<ArticleStateDto>(key);
     if (query === undefined) {
         return;
     }
     const loaded = flagOf(query, change.field) !== undefined;
     if (loaded) {
-        setFlagOf(query, change.field, change.value);
+        setFlagOf(query, change.field, pins.get(key)?.[change.field] ?? change.value);
     }
     if (!loaded || query.inFlight) {
-        scheduleRefetch(query);
+        scheduleRefetch(query as Query<unknown>);
     }
 }
 

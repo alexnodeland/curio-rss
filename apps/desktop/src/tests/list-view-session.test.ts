@@ -17,7 +17,12 @@ import {
 } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
-import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
+import {
+    peekQuery,
+    queryKeys,
+    resetQueryCache,
+    wireInvalidation,
+} from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
@@ -46,9 +51,32 @@ function feedArticles(feedId: number): ArticleSummaryDto[] {
     });
 }
 
-/** A backend over both feeds that honours the feed, read, and keyset filters. */
+/**
+ * A backend over both feeds that honours the feed, read, and keyset filters.
+ * Its rows carry their read flag, and its read marks emit the flag-scoped
+ * `ArticlesChanged` the Rust commands do — so the cache patches the held
+ * unread window in place, exactly as in the app.
+ */
 function harnessFor(read: Set<number>): IpcHarness {
     const all = [...feedArticles(FEED_A), ...feedArticles(FEED_B)];
+    /** Sets `read` on `ids`; emits the flag event when any changed, as Rust does. */
+    const markRead = (ids: number[], value: boolean): number => {
+        const changed = ids.filter((id) => read.has(id) !== value);
+        for (const id of changed) {
+            if (value) {
+                read.add(id);
+            } else {
+                read.delete(id);
+            }
+        }
+        if (changed.length > 0) {
+            void events.articlesChanged.emit({
+                feed_id: null,
+                flags: { article_ids: ids, field: 'read', value },
+            });
+        }
+        return changed.length;
+    };
     return installIpcHarness({
         list_articles: (args) => {
             const params = args.params as ListArticlesDto;
@@ -56,31 +84,15 @@ function harnessFor(read: Set<number>): IpcHarness {
                 .filter((a) => params.feed_id === null || a.feed_id === params.feed_id)
                 .filter((a) => params.read !== false || !read.has(a.id))
                 .filter((a) => params.before === null || a.id < params.before)
-                .slice(0, params.limit);
+                .slice(0, params.limit)
+                .map((a) => ({ ...a, state: articleStateFixture({ read: read.has(a.id) }) }));
         },
         list_feeds: [],
         get_article_state: (args) =>
             articleStateFixture({ read: read.has(args.articleId as number) }),
         get_article: (args) => articleFixture({ id: args.articleId as number, feed_id: FEED_A }),
-        mark_read: (args) => {
-            if (args.read === true) {
-                read.add(args.articleId as number);
-            } else {
-                read.delete(args.articleId as number);
-            }
-            return true;
-        },
-        mark_read_many: (args) => {
-            const ids = args.articleIds as number[];
-            for (const id of ids) {
-                if (args.read === true) {
-                    read.add(id);
-                } else {
-                    read.delete(id);
-                }
-            }
-            return ids.length;
-        },
+        mark_read: (args) => markRead([args.articleId as number], args.read as boolean) > 0,
+        mark_read_many: (args) => markRead(args.articleIds as number[], args.read as boolean),
         set_archived: true,
         mark_all_read: [],
         refresh_all: [refreshOutcomeFixture()],
@@ -315,10 +327,10 @@ describe('list view sessions', () => {
         const row = container.querySelector('#article-option-1078') as HTMLElement;
         await fireEvent.click(row);
         await settle();
-        // The reader marked it read; the backend's unread window now drops it.
+        // The reader marked it read, and its flag event took the row out of
+        // the backend window in place (no refetch) — the hold keeps it shown.
         expect(read.has(1078)).toBe(true);
-        await events.articlesChanged.emit({ feed_id: null, flags: null });
-        await settle();
+        expect(harness.callsFor('list_articles')).toHaveLength(1);
 
         const list = articlesStore.current;
         expect(list.query.data?.some((a) => a.id === 1078)).toBe(false);
@@ -347,8 +359,8 @@ describe('list view sessions', () => {
 
         await scrollTo(container, ROW_HEIGHT * 3);
         expect(markedIds(harness)).toEqual([1080, 1079, 1078]);
-        await events.articlesChanged.emit({ feed_id: null, flags: null });
-        await settle();
+        // The batch's flag event dropped the three rows from the window in place.
+        expect(harness.callsFor('list_articles')).toHaveLength(1);
 
         // The backend window dropped the three read rows, but they are held
         // in place: the next row scrolled past is the fourth, not a row that
@@ -376,8 +388,7 @@ describe('list view sessions', () => {
         }
         const scrolled = Array.from({ length: 20 }, (_, index) => 1080 - index);
         expect(markedIds(harness)).toEqual(scrolled);
-        await events.articlesChanged.emit({ feed_id: null, flags: null });
-        await settle();
+        expect(articlesStore.current.query.data?.[0]?.id).toBe(1060);
         expect(articlesStore.current.items[20]?.id).toBe(1060);
 
         // An explicit refresh lets the twenty held rows go. The row the reader
@@ -501,7 +512,9 @@ describe('read-hold actions', () => {
 
     it('unarchiving leaves a held row held', async () => {
         await readInUnreadView([1079]);
+        // The backend has it archived, and its cached flags have caught up.
         harness?.respond('get_article_state', articleStateFixture({ read: true, archived: true }));
+        await peekQuery(queryKeys.articleState(1079))?.refetch();
         await toggleArchived(1079);
         expect(harness?.callsFor('set_archived').at(-1)?.archived).toBe(false);
         expect(shownIds()).toEqual([1080, 1079, 1078, 1077]);

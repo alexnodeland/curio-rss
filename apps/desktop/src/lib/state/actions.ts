@@ -41,7 +41,9 @@ import {
     cachedArticleFlag,
     ensureQuery,
     patchArticleFlag,
+    pinArticleFlag,
     queryKeys,
+    unpinArticleFlag,
 } from './query-cache.svelte';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
@@ -170,15 +172,26 @@ type ToggleField = FlagField;
  * concurrently and both write the same negation, so the second press is
  * silently dropped. Serializing per key (chained promise) makes the second
  * press's write run only after the first settles, and `toggleDesired` carries
- * the last value pressed for so the follow-up alternates without a read.
+ * the last value pressed for so the follow-up alternates without a read. While
+ * a pressed value is pending, the query cache holds it pinned
+ * (`pinArticleFlag`), so an earlier write's event cannot flash the previous
+ * value back.
  */
 const toggleChain = new Map<string, Promise<unknown>>();
 const toggleDesired = new Map<string, boolean>();
 
 type FlagWrite = (id: number, value: boolean) => Promise<CommandResult<boolean>>;
 
+/** The `read` flag's write. */
+const markRead: FlagWrite = (id, value) => commands.markRead(id, value);
+
 /** Runs `step` after every earlier step on the same flag has settled. */
-async function onFlagChain<T>(key: string, step: () => Promise<T>): Promise<T> {
+async function onFlagChain<T>(
+    articleId: number,
+    field: ToggleField,
+    step: () => Promise<T>,
+): Promise<T> {
+    const key = `${field}:${articleId}`;
     const previous = toggleChain.get(key) ?? Promise.resolve();
     const task = previous.then(step);
     toggleChain.set(key, task);
@@ -186,18 +199,25 @@ async function onFlagChain<T>(key: string, step: () => Promise<T>): Promise<T> {
     // Drain once this press is the tail of the chain, so the maps don't grow.
     if (toggleChain.get(key) === task) {
         toggleChain.delete(key);
-        toggleDesired.delete(key);
+        forgetPressed(articleId, field);
     }
     return outcome;
 }
 
 /**
  * Shows `value` in the cached flag now (optimistic) and remembers it as the
- * pressed value; returns the undo for a failed write (see `patchArticleFlag`).
+ * pressed value, pinned until the flag's writes settle; returns the undo for
+ * a failed write (see `patchArticleFlag`).
  */
 function showFlag(articleId: number, field: ToggleField, value: boolean): (() => void) | null {
     toggleDesired.set(`${field}:${articleId}`, value);
-    return patchArticleFlag(articleId, field, value);
+    return pinArticleFlag(articleId, field, value);
+}
+
+/** Drops the pressed value (and its pin): the cache is the truth again. */
+function forgetPressed(articleId: number, field: ToggleField): void {
+    toggleDesired.delete(`${field}:${articleId}`);
+    unpinArticleFlag(articleId, field);
 }
 
 /**
@@ -222,11 +242,11 @@ async function commitFlag(
         run: () => void setFlag(articleId, field, write, value),
     });
     if (ok === undefined) {
-        rollback?.();
         if (toggleDesired.get(key) === value) {
             // Forget the pressed value, so the next press starts from the cache.
-            toggleDesired.delete(key);
+            forgetPressed(articleId, field);
         }
+        rollback?.();
         return undefined;
     }
     return value;
@@ -240,7 +260,7 @@ function setFlag(
     value: boolean,
 ): Promise<boolean | undefined> {
     const rollback = showFlag(articleId, field, value);
-    return onFlagChain(`${field}:${articleId}`, () =>
+    return onFlagChain(articleId, field, () =>
         commitFlag(articleId, field, write, value, rollback),
     );
 }
@@ -273,7 +293,7 @@ function toggleFlag(
         return setFlag(articleId, field, write, !current);
     }
     const key = `${field}:${articleId}`;
-    return onFlagChain(key, async (): Promise<boolean | undefined> => {
+    return onFlagChain(articleId, field, async (): Promise<boolean | undefined> => {
         // Queued behind an earlier press: flip the value that one asked for.
         let current = toggleDesired.get(key);
         if (current === undefined) {
@@ -309,7 +329,7 @@ export async function toggleReadLater(articleId: number): Promise<void> {
  */
 export async function toggleRead(articleId: number): Promise<void> {
     articlesStore.holdRead(articleId);
-    await toggleFlag(articleId, 'read', (id, value) => commands.markRead(id, value));
+    await toggleFlag(articleId, 'read', markRead);
 }
 
 /**
@@ -449,20 +469,17 @@ function toastBulkDone(changed: readonly number[], flag: ArticleFlagDto, value: 
  * emits nothing when it already was). The `article.opened` contract event
  * is reserved for a real open-in-browser, so the log stays truthful under
  * j/k scanning.
+ *
+ * The mark is a press of the `read` flag like `m` is — the same chain, so an
+ * `m` right after the open queues behind its write instead of racing it, and
+ * flips the value the open asked for.
  */
 export async function markReadOnOpen(articleId: number): Promise<void> {
     // Held first: in an unread-only view the open must not drop the row (and
     // the selection with it) — it stays until the view changes.
     articlesStore.holdRead(articleId);
     // The unread dot clears with the open, not a round trip later.
-    const rollback = patchArticleFlag(articleId, 'read', true);
-    const marked = await run(() => commands.markRead(articleId, true), {
-        key: `read:${articleId}`,
-        run: () => void markReadOnOpen(articleId),
-    });
-    if (marked === undefined) {
-        rollback?.();
-    }
+    await setFlag(articleId, 'read', markRead, true);
 }
 
 /**

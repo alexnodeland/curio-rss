@@ -11,28 +11,34 @@
  * `src/window/scripts/drag.js`, `isDragRegion`): walk the event path from
  * the target up; a control without the attribute blocks, `false` blocks,
  * `deep` drags from anywhere below it, a bare/`true` value only from itself.
+ * A test pins the tauri version this copy was checked against, so a tauri
+ * upgrade has to re-verify it (and the macOS checklist's drag steps).
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import ListPane from '$components/layout/ListPane.svelte';
 import RecoveryScreen from '$components/layout/RecoveryScreen.svelte';
+import ThreePane from '$components/layout/ThreePane.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { events } from '$lib/bindings';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { connectivityStore } from '$lib/state/connectivity.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
-import { layoutStore } from '$lib/state/layout.svelte';
-import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import { PANE_LIMITS, SIDEBAR_HEADER_MIN, layoutStore } from '$lib/state/layout.svelte';
+import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { startupStore } from '$lib/state/startup.svelte';
 import {
     DRAG_REGION_ATTR,
+    TITLEBAR_INSET_PX,
     WindowChromeStore,
     windowChromeStore,
 } from '$lib/state/window-chrome.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
-import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { createRawSnippet, tick } from 'svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
     type Responder,
@@ -46,6 +52,12 @@ import {
     unreadCountsFixture,
 } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
+
+/** The tauri minor `startsDrag` restates (see the header). */
+const VERIFIED_TAURI = '2.12.';
+
+const MAC_USER_AGENT =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)';
 
 const CLICKABLE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LABEL', 'SUMMARY']);
 const INTERACTIVE_ROLES = new Set([
@@ -118,6 +130,7 @@ describe('window chrome', () => {
 
     afterEach(() => {
         cleanup();
+        vi.restoreAllMocks();
         for (const teardown of teardowns.splice(0)) teardown();
         resetQueryCache();
         articlesStore.reset();
@@ -210,6 +223,133 @@ describe('window chrome', () => {
             expect(unanswered.inset).toBe(false);
             expect(document.documentElement.dataset.titlebar).toBeUndefined();
         });
+
+        it('assumes the overlay in the macOS app when the query fails', async () => {
+            // tauri.conf.json overlays the macOS title bar whatever the store
+            // hears: without the inset the traffic lights would sit on the
+            // brand mark, and without drag regions nothing moves the window.
+            vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(MAC_USER_AGENT);
+            harness = installIpcHarness({
+                window_chrome: rejectWith(commandErrorFixture({ kind: 'internal' })),
+            });
+            const failed = new WindowChromeStore();
+            teardowns.push(await failed.wire());
+            expect(failed.inset).toBe(true);
+            expect(failed.dragRegion).toBe('deep');
+            expect(document.documentElement.dataset.titlebar).toBe('overlay');
+
+            harness.teardown();
+            harness = installIpcHarness({}); // the command throws
+            const unanswered = new WindowChromeStore();
+            teardowns.push(await unanswered.wire());
+            expect(unanswered.inset).toBe(true);
+        });
+
+        it('keeps native chrome in a plain browser on a Mac', async () => {
+            vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(MAC_USER_AGENT);
+            harness = installIpcHarness({});
+            harness.teardown(); // no runtime left to invoke
+            harness = null;
+            const store = new WindowChromeStore();
+            teardowns.push(await store.wire());
+            expect(store.inset).toBe(false);
+            expect(document.documentElement.dataset.titlebar).toBeUndefined();
+        });
+
+        it('mirrors the inset app.css sets, in px', () => {
+            const css = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+            const rule =
+                /:root\[data-titlebar="overlay"\]\s*\{\s*--titlebar-inset:\s*(\d+)px;/.exec(css);
+            expect(rule?.[1]).toBe(String(TITLEBAR_INSET_PX));
+            const store = new WindowChromeStore();
+            expect(store.insetPx).toBe(0);
+            store.overlay = true;
+            expect(store.insetPx).toBe(TITLEBAR_INSET_PX);
+            store.fullscreen = true;
+            expect(store.insetPx).toBe(0);
+        });
+
+        it('keeps a title bar’s words unselectable, outside its false subtrees', () => {
+            const css = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+            expect(css).toMatch(
+                /\[data-tauri-drag-region="deep"\]\s*\{[^}]*-webkit-user-select:\s*none;[^}]*\buser-select:\s*none;/,
+            );
+            expect(css).toMatch(
+                /\[data-tauri-drag-region="deep"\] \[data-tauri-drag-region="false"\]\s*\{[^}]*\buser-select:\s*text;/,
+            );
+        });
+
+        it('restates the drag rule of the tauri it was checked against', () => {
+            // Cargo.lock sits at the workspace root, two levels above the app.
+            const lock = readFileSync(resolve(process.cwd(), '../../Cargo.lock'), 'utf8');
+            const version = /\[\[package\]\]\nname = "tauri"\nversion = "([^"]+)"/.exec(lock)?.[1];
+            expect(
+                version?.startsWith(VERIFIED_TAURI),
+                `tauri ${version}: re-check startsDrag against its drag.js, then bump VERIFIED_TAURI`,
+            ).toBe(true);
+        });
+    });
+
+    describe('sidebar width under the overlay title bar', () => {
+        const pane = (name: string) =>
+            createRawSnippet(() => ({ render: () => `<div class="${name}-stub"></div>` }));
+
+        function renderFrame() {
+            return render(ThreePane, {
+                sidebar: pane('sidebar'),
+                list: pane('list'),
+                reader: pane('reader'),
+            });
+        }
+
+        const overlayMin = SIDEBAR_HEADER_MIN + TITLEBAR_INSET_PX;
+
+        it('never lets the sidebar narrow past what its header needs', async () => {
+            harness = installIpcHarness({ set_setting: null });
+            layoutStore.sidebarWidth = PANE_LIMITS.sidebar.min; // saved before the inset
+            emulateOverlay();
+            const { container, getByRole } = renderFrame();
+            const frame = query(container, '.three-pane');
+            const sidebar = query(container, '.pane.sidebar');
+            const handle = getByRole('separator', { name: 'Resize sidebar' });
+
+            expect(overlayMin).toBeGreaterThan(PANE_LIMITS.sidebar.min);
+            expect(handle.getAttribute('aria-valuemin')).toBe(String(overlayMin));
+            expect(handle.getAttribute('aria-valuenow')).toBe(String(overlayMin));
+            expect(sidebar.style.width).toBe(`${overlayMin}px`);
+            // The floor also outranks the narrow-window max-width caps.
+            expect(frame.style.getPropertyValue('--sidebar-floor')).toBe(`${overlayMin}px`);
+            // The stored width is left alone until the user resizes.
+            expect(layoutStore.sidebarWidth).toBe(PANE_LIMITS.sidebar.min);
+
+            layoutStore.sidebarWidth = 300;
+            await tick();
+            await fireEvent.keyDown(handle, { key: 'Home' });
+            expect(layoutStore.sidebarWidth).toBe(overlayMin);
+            await fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+            expect(layoutStore.sidebarWidth).toBe(overlayMin);
+        });
+
+        it('keeps the usual bounds with native chrome and in fullscreen', async () => {
+            harness = installIpcHarness({ set_setting: null });
+            layoutStore.sidebarWidth = PANE_LIMITS.sidebar.min;
+            emulateOverlay(true);
+            const { container, getByRole } = renderFrame();
+            const handle = getByRole('separator', { name: 'Resize sidebar' });
+            expect(handle.getAttribute('aria-valuemin')).toBe(String(PANE_LIMITS.sidebar.min));
+            expect(query(container, '.pane.sidebar').style.width).toBe(
+                `${PANE_LIMITS.sidebar.min}px`,
+            );
+            expect(query(container, '.three-pane').style.getPropertyValue('--sidebar-floor')).toBe(
+                `${SIDEBAR_HEADER_MIN}px`,
+            );
+
+            // Leaving fullscreen brings the traffic lights, and the floor, back.
+            windowChromeStore.fullscreen = false;
+            await tick();
+            expect(handle.getAttribute('aria-valuemin')).toBe(String(overlayMin));
+            expect(query(container, '.pane.sidebar').style.width).toBe(`${overlayMin}px`);
+        });
     });
 
     describe('pane headers under the overlay title bar', () => {
@@ -284,6 +424,26 @@ describe('window chrome', () => {
             }
             // No article content is ever a drag handle.
             expect(startsDrag(query(container, 'article'))).toBe(false);
+        });
+
+        it('the reader toolbar stays the top row under a refetch-failure banner', async () => {
+            harness = installIpcHarness(shellResponders());
+            const unwire = await wireInvalidation();
+            teardowns.push(unwire);
+            emulateOverlay();
+            selectionStore.selectedArticleId = 100;
+            const { container, getByRole } = render(ReaderPane);
+            await flushIpc();
+
+            harness.respond('get_article', rejectWith(commandErrorFixture({ kind: 'user' })));
+            await events.articlesChanged.emit({ feed_id: null });
+            await flushIpc();
+
+            const banner = getByRole('alert');
+            const reader = query(container, '.reader');
+            expect(reader.firstElementChild?.classList.contains('reader-toolbar')).toBe(true);
+            expect(query(container, '.reader-toolbar').nextElementSibling).toBe(banner);
+            expect(startsDrag(query(container, '.toolbar-spring'))).toBe(true);
         });
 
         it('the empty reader keeps a header-high drag strip', async () => {

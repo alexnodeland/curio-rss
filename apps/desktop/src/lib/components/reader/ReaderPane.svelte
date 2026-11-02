@@ -376,15 +376,10 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                 <p>{t('reader.missing')}</p>
             </div>
         {:else}
-            {#if current !== null && failure() !== null}
-                <!-- Stale-while-revalidate: a refetch failed but the article is
-                     still in hand — keep showing it under a non-destructive
-                     banner instead of blanking a populated reader (parity with
-                     the article list's refetch banner). -->
-                <p class="reader-banner" role="alert">{failureMessage()}</p>
-            {/if}
             <!-- Mounted for the whole selection — including while the body is
-                 still loading — so j/k never unmounts it or resets its state. -->
+                 still loading — so j/k never unmounts it or resets its state.
+                 Always the pane's top row: it is the title bar's drag region
+                 under the macOS overlay (#148), level with the other headers. -->
             <div
                 class="reader-toolbar"
                 role="toolbar"
@@ -519,6 +514,13 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     </button>
                 {/if}
             </div>
+            {#if current !== null && failure() !== null}
+                <!-- Stale-while-revalidate: a refetch failed but the article is
+                     still in hand — keep showing it under a non-destructive
+                     banner instead of blanking a populated reader (parity with
+                     the article list's refetch banner, also under its header). -->
+                <p class="reader-banner" role="alert">{failureMessage()}</p>
+            {/if}
             <!-- Key on the selection so switching articles remounts the
                  scroll body at the top instead of inheriting the previous scroll
                  offset; the body landing within one selection does not. -->

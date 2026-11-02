@@ -23,6 +23,31 @@ export const DRAG_REGION_ATTR = 'data-tauri-drag-region';
 /** `<html>` attribute value while the traffic lights take header room. */
 const OVERLAY = 'overlay';
 
+/**
+ * The `--titlebar-inset` the overlay rule in app.css sets (a test pins the
+ * two together): the leading header's extra room for the traffic lights.
+ * Layout code that sizes panes in script (the sidebar's resize floor) reads
+ * it from here.
+ */
+export const TITLEBAR_INSET_PX = 66;
+
+/**
+ * Whether this webview runs inside the macOS app, judged from the platform
+ * alone. Only the fallback reads it: `tauri.conf.json` gives the macOS window
+ * its overlay title bar whatever the store believes, so an unanswered query
+ * there must still assume the overlay — the traffic lights are on top of the
+ * header either way, and without drag regions nothing would move the window.
+ */
+function macosTauri(): boolean {
+    const internals = (globalThis as { __TAURI_INTERNALS__?: { invoke?: unknown } })
+        .__TAURI_INTERNALS__;
+    return (
+        typeof internals?.invoke === 'function' &&
+        typeof navigator !== 'undefined' &&
+        /\bMac OS X\b|\bMacintosh\b/.test(navigator.userAgent)
+    );
+}
+
 export class WindowChromeStore {
     /** The OS title bar is overlaid on the webview (macOS). */
     overlay: boolean = $state(false);
@@ -35,6 +60,11 @@ export class WindowChromeStore {
     /** The traffic lights are showing inside the leading header. */
     get inset(): boolean {
         return this.overlay && !this.fullscreen;
+    }
+
+    /** The leading header's extra room in px: {@link TITLEBAR_INSET_PX} or 0. */
+    get insetPx(): number {
+        return this.inset ? TITLEBAR_INSET_PX : 0;
     }
 
     /**
@@ -56,8 +86,11 @@ export class WindowChromeStore {
 
     /**
      * Subscribes to `FullscreenChanged`, then seeds from `window_chrome`.
-     * Never throws: without an answer the window keeps native chrome.
-     * Returns an unsubscribe for teardown.
+     * Never throws. Without an answer the chrome follows the platform: the
+     * macOS app was built with the overlay title bar (tauri.conf.json), so
+     * it keeps the inset and drag regions; anywhere else (Linux, Windows, a
+     * plain browser) the window has native chrome. Returns an unsubscribe
+     * for teardown.
      */
     async wire(): Promise<() => void> {
         let unlisten: () => void = () => {};
@@ -74,9 +107,13 @@ export class WindowChromeStore {
                 if (seededAt === this.#generation) {
                     this.fullscreen = result.data.fullscreen;
                 }
+            } else {
+                this.overlay = macosTauri();
             }
         } catch {
-            // No Tauri runtime answered (a plain browser): native chrome.
+            // Nothing answered: no Tauri runtime (a plain browser) or a
+            // failed subscription — the platform decides, as above.
+            this.overlay = macosTauri();
         }
         this.#apply();
         return unlisten;

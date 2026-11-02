@@ -38,10 +38,11 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { capturePosition, restoreScrollTop } from '$lib/state/list-position';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
-import EmptyState from '$components/common/EmptyState.svelte';
+import ErrorState from '$components/common/ErrorState.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { untrack } from 'svelte';
 import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
+import ListEmpty from './ListEmpty.svelte';
 import VirtualList, { type ViewportReport } from './VirtualList.svelte';
 
 /** How many placeholder rows the loading skeleton sketches. */
@@ -301,7 +302,15 @@ function onViewport(report: ViewportReport): void {
              refetch just errored; surface the failure as a non-destructive
              banner instead of blanking a populated list. -->
         {#if list.error !== null}
-            <p class="list-banner" role="alert">{listError}</p>
+            <div class="list-banner">
+                <p role="alert">{listError}</p>
+                <button
+                    class="banner-action"
+                    type="button"
+                    disabled={list.loading}
+                    onclick={() => void list.query.refetch()}>{t('toast.retry')}</button
+                >
+            </div>
         {/if}
         <!-- Keyed on the list: a different view is a fresh scroll container,
              seated at that view's remembered position. It takes DOM focus
@@ -356,10 +365,14 @@ function onViewport(report: ViewportReport): void {
         <span class="sr-only">{t('list.loading')}</span>
     {:else if list.error !== null}
         <!-- No rows to preserve: the first load itself failed. -->
-        <p class="list-status error" role="alert">{listError}</p>
+        <ErrorState
+            message={listError}
+            busy={list.loading}
+            onretry={() => void list.query.refetch()}
+        />
     {:else}
         <div class="empty-region" bind:this={emptyRegion} tabindex="-1">
-            <EmptyState icon="inbox" title={t('list.empty')} />
+            <ListEmpty />
         </div>
     {/if}
 </div>
@@ -373,25 +386,23 @@ function onViewport(report: ViewportReport): void {
         background: var(--bg);
     }
 
-    .list-status {
-        padding: var(--space-4);
-        font-size: 0.875rem;
-        color: var(--fg-muted);
-    }
-
-    .list-status.error {
-        color: var(--error-text);
-    }
-
     /* Non-destructive refetch-failure strip above the retained rows. */
     .list-banner {
         flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
         padding: var(--space-2) var(--space-4);
         margin: var(--space-2) var(--space-2) 0;
         border-radius: var(--radius-md);
         background: var(--error-bg);
         color: var(--error-text);
         font-size: var(--text-xs);
+    }
+
+    .list-banner p {
+        flex: 1 1 auto;
+        min-width: 0;
     }
 
     /* Focus holder for the empty list (see the emptyRegion effect). Fills the

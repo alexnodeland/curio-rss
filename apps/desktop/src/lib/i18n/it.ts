@@ -58,10 +58,13 @@ export const it: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Vai al contenuto',
     'shell.feeds.loading': 'Caricamento iscrizioni…',
     'shell.feeds.empty': 'Nessuna iscrizione',
-    'emptyState.hint':
-        'Iscriviti a un feed per iniziare a leggere, oppure importa le tue iscrizioni da un altro lettore.',
     'emptyState.addFeed': 'Aggiungi il tuo primo feed',
-    'emptyState.importOpml': 'Importa OPML…',
+    'welcome.title': 'Benvenuto in Curio',
+    'welcome.intro':
+        'Segui i siti, i canali e le newsletter che leggi. Curio li raccoglie in un unico elenco tranquillo e conserva ciò che conta nelle tue note, in semplice markdown.',
+    'welcome.import': 'Arrivi da un’altra app?',
+    'welcome.keys': 'Tre tasti da conoscere',
+    'welcome.keys.star': 'per aggiungere ai preferiti',
     'shell.feeds.count': '{count, plural, one {# feed} other {# feed}}',
     'shell.unread.count': '{count, plural, one {# non letto} other {# non letti}}',
     'view.all': 'Tutti gli articoli',
@@ -99,6 +102,30 @@ export const it: Partial<Record<MessageKey, string>> = {
     'list.label': 'Articoli',
     'list.loading': 'Caricamento articoli…',
     'list.empty': 'Nessun articolo qui',
+    'list.empty.all': 'Ancora nessun articolo',
+    'list.empty.all.hint': 'I nuovi articoli arrivano qui a ogni aggiornamento dei tuoi feed.',
+    'list.empty.unread': 'Sei in pari',
+    'list.empty.showRead': 'Mostra articoli letti',
+    'list.empty.starred': 'Nessun articolo nei preferiti',
+    'list.empty.starred.hint':
+        'Premi {key} su un articolo per aggiungerlo ai preferiti e ritrovarlo qui.',
+    'list.empty.readLater': 'Niente da leggere più tardi',
+    'list.empty.readLater.hint': 'Premi {key} su un articolo per salvarlo per dopo.',
+    'list.empty.archived': 'Niente in archivio',
+    'list.empty.archived.hint':
+        'Premi {key} su un articolo che hai finito: si sposta qui, fuori dalle altre viste.',
+    'list.empty.feed': 'Ancora nessun articolo in questo feed',
+    'list.empty.feed.hint': 'Curio lo controlla a ogni aggiornamento.',
+    'list.empty.refresh': 'Aggiorna ora',
+    'list.empty.feedError': 'Curio non è riuscito a scaricare questo feed',
+    'feedError.notAFeed':
+        'Quell’indirizzo restituisce una pagina web, non un feed. Controlla l’URL del feed.',
+    'feedError.parse': 'Il feed non è leggibile: non è RSS o Atom valido.',
+    'feedError.gone': 'Il sito ha rimosso questo feed (HTTP 410).',
+    'feedError.http':
+        'Il sito ha risposto con un errore. Controlla l’URL del feed o riprova più tardi.',
+    'feedError.generic':
+        'L’ultimo aggiornamento non è riuscito. Riprova o controlla lo stato del feed.',
     'list.view.home': 'Vista home',
     'list.view.rows': 'Vista elenco',
     'list.filter.unreadOnly': 'Mostra solo non letti',

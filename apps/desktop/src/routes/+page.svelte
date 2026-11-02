@@ -11,6 +11,7 @@ import Toasts from '$components/common/Toasts.svelte';
 import TooltipHost from '$components/common/TooltipHost.svelte';
 import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
+import WelcomeView from '$components/layout/WelcomeView.svelte';
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
 import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
@@ -26,12 +27,34 @@ import {
     shouldIgnoreKeyEvent,
 } from '$lib/keyboard/registry';
 import { handleShortcut } from '$lib/state/actions';
+import { articlesStore } from '$lib/state/articles.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { shouldWelcome } from '$lib/utils/empty-states';
+import { untrack } from 'svelte';
 
 const matcher = createMatcher();
+
+// The list the welcome gate watches, created in init/derived — never from the
+// template (state created inside a render reaction is excluded from its deps).
+untrack(() => feedsStore.prime());
+const allList = $derived(articlesStore.current);
+
+/** First run: no subscriptions, nothing saved — the welcome view takes over. */
+const welcoming = $derived(
+    shouldWelcome({
+        feedsLoaded: feedsStore.loaded,
+        feedsFailed: feedsStore.error !== null,
+        feedCount: feedsStore.feeds.length,
+        filters: articlesStore.filters,
+        listLoaded: allList.loaded,
+        listCount: allList.items.length,
+        searching: searchStore.active,
+    }),
+);
 
 // While a modal owns the screen, the whole app frame behind it is `inert`
 // — removed from the tab order and hidden from assistive tech — so the
@@ -134,8 +157,12 @@ function onKeydown(event: KeyboardEvent): void {
 
 <a class="skip-link" href="#main-content">{t('a11y.skipToContent')}</a>
 
+{#snippet welcomePane()}
+    <WelcomeView />
+{/snippet}
+
 <main id="main-content" class="app-main" tabindex="-1" inert={backgroundInert}>
-    <ThreePane>
+    <ThreePane welcome={welcoming ? welcomePane : undefined}>
         {#snippet sidebar()}
             <Sidebar />
         {/snippet}

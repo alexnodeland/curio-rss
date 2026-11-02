@@ -20,10 +20,12 @@ import { type CommandError, type DiscoveredFeedDto, commands } from '$lib/bindin
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { isUnreachable } from '$lib/utils/errors';
 import { openExternal } from '$lib/utils/external';
+import { untrack } from 'svelte';
 import {
     HN_PRESETS,
     KILL_THE_NEWSLETTER_URL,
@@ -33,8 +35,10 @@ import {
 
 let { onclose }: { onclose: () => void } = $props();
 
-let url = $state('');
-let tagsInput = $state('');
+// A welcome-view preset opens the modal pre-filled (read once, at open).
+const seed = untrack(() => layoutStore.addFeedSeed);
+let url = $state(seed?.url ?? '');
+let tagsInput = $state(seed?.tags ?? '');
 let candidates: DiscoveredFeedDto[] = $state([]);
 let selectedUrl: string | null = $state(null);
 let faviconSrc: string | null = $state(null);

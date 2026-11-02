@@ -48,6 +48,7 @@ import { typographyStore } from '$lib/state/typography.svelte';
 import { articleDate, isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
+import ErrorState from '$components/common/ErrorState.svelte';
 import Icon from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { dismissable } from '$lib/actions/dismissable';
@@ -225,6 +226,11 @@ function failureMessage(): string {
     return error === null ? '' : commandErrorMessage(error);
 }
 
+/** Re-runs the selected article's load (the error states' Retry). */
+function retryArticle(): void {
+    void articleQuery?.refetch();
+}
+
 /** The header source: the full article once loaded, else the list row. */
 function head(): ReaderHead | null {
     return article() ?? selectionStore.selectedArticle;
@@ -355,9 +361,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         {@const header = head()}
         {#if current === null && failure() !== null}
             <!-- No article to preserve: the load itself failed. -->
-            <div class="reader-status">
-                <p class="error" role="alert">{failureMessage()}</p>
-            </div>
+            <ErrorState message={failureMessage()} busy={articleQuery?.loading ?? false} onretry={retryArticle} />
         {:else if current === null && articleLoaded()}
             <div class="reader-status">
                 <p>{t('reader.missing')}</p>
@@ -368,7 +372,15 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                      still in hand — keep showing it under a non-destructive
                      banner instead of blanking a populated reader (parity with
                      the article list's refetch banner). -->
-                <p class="reader-banner" role="alert">{failureMessage()}</p>
+                <div class="reader-banner">
+                    <p role="alert">{failureMessage()}</p>
+                    <button
+                        class="banner-action"
+                        type="button"
+                        disabled={articleQuery?.loading ?? false}
+                        onclick={retryArticle}>{t('toast.retry')}</button
+                    >
+                </div>
             {/if}
             <!-- Mounted for the whole selection — including while the body is
                  still loading — so j/k never unmounts it or resets its state. -->
@@ -634,19 +646,23 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         font-size: 0.9375rem;
     }
 
-    .reader-status .error {
-        color: var(--error-text);
-    }
-
     /* Non-destructive refetch-failure strip above the retained article. */
     .reader-banner {
         flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
         padding: var(--space-2) var(--space-4);
         margin: var(--space-2) var(--space-3) 0;
         border-radius: var(--radius-md);
         background: var(--error-bg);
         color: var(--error-text);
         font-size: var(--text-xs);
+    }
+
+    .reader-banner p {
+        flex: 1 1 auto;
+        min-width: 0;
     }
 
     /* Empty-state hint: one unbreakable group per action. */

@@ -103,6 +103,11 @@ export class SearchStore {
         }, debounceMs);
     }
 
+    /** Re-runs the current query now (the error state's Retry). */
+    retry(): void {
+        void this.#run();
+    }
+
     async #run(): Promise<void> {
         const query = this.query.trim();
         if (query.length === 0) {

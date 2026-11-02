@@ -2,7 +2,8 @@
 /**
  * The reader's frame: sidebar | article list | reader, the first two
  * resizable with widths owned by `layoutStore` and persisted to the settings
- * table on resize end. The reader takes whatever remains.
+ * table on resize end. The reader takes whatever remains. A `welcome`
+ * snippet (first run) takes the list and reader's place as one pane.
  */
 import { t } from '$lib/i18n';
 import { SETTING_KEYS, settingsStore } from '$lib/state/settings.svelte';
@@ -14,10 +15,13 @@ let {
     sidebar,
     list,
     reader,
+    welcome,
 }: {
     sidebar: Snippet;
     list: Snippet;
     reader: Snippet;
+    /** When set, rendered across the list + reader area instead of them. */
+    welcome?: Snippet;
 } = $props();
 
 function persistSidebarWidth(width: number): void {
@@ -42,19 +46,25 @@ function persistListWidth(width: number): void {
             {@render sidebar()}
         </ResizablePane>
     {/if}
-    <ResizablePane
-        bind:width={layoutStore.listWidth}
-        min={PANE_LIMITS.list.min}
-        max={PANE_LIMITS.list.max}
-        label={t('pane.list.resize')}
-        variant="list"
-        onresizeend={persistListWidth}
-    >
-        {@render list()}
-    </ResizablePane>
-    <section class="reader-slot">
-        {@render reader()}
-    </section>
+    {#if welcome}
+        <section class="reader-slot">
+            {@render welcome()}
+        </section>
+    {:else}
+        <ResizablePane
+            bind:width={layoutStore.listWidth}
+            min={PANE_LIMITS.list.min}
+            max={PANE_LIMITS.list.max}
+            label={t('pane.list.resize')}
+            variant="list"
+            onresizeend={persistListWidth}
+        >
+            {@render list()}
+        </ResizablePane>
+        <section class="reader-slot">
+            {@render reader()}
+        </section>
+    {/if}
 </div>
 
 <style>

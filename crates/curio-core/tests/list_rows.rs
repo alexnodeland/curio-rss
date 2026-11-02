@@ -9,7 +9,8 @@
 use std::collections::BTreeMap;
 
 use curio_core::model::{
-    ArticleContent, ArticleId, ArticleState, FeedId, NewArticle, NewFeed, SNIPPET_MAX_CHARS,
+    ArticleContent, ArticleFlag, ArticleId, ArticleState, FeedId, NewArticle, NewFeed,
+    SNIPPET_MAX_CHARS,
 };
 use curio_core::storage::{ListArticles, Storage};
 use proptest::prelude::*;
@@ -496,14 +497,37 @@ fn unread_counts_follow_every_kind_of_write() {
 /// One write the property walk can make.
 #[derive(Debug, Clone)]
 enum Op {
-    Insert { feed: usize },
-    Read { article: usize, read: bool },
-    Archive { article: usize, archived: bool },
-    Star { article: usize },
-    Delete { article: usize },
-    RemoveFeed { feed: usize },
-    MarkAllRead { feed: Option<usize> },
-    MarkManyUnread { from: usize },
+    Insert {
+        feed: usize,
+    },
+    Read {
+        article: usize,
+        read: bool,
+    },
+    Archive {
+        article: usize,
+        archived: bool,
+    },
+    Star {
+        article: usize,
+    },
+    Delete {
+        article: usize,
+    },
+    RemoveFeed {
+        feed: usize,
+    },
+    MarkAllRead {
+        feed: Option<usize>,
+    },
+    MarkManyUnread {
+        from: usize,
+    },
+    FlagMany {
+        from: usize,
+        archive: bool,
+        value: bool,
+    },
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -518,6 +542,8 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (0usize..3).prop_map(|feed| Op::RemoveFeed { feed }),
         1 => proptest::option::of(0usize..3).prop_map(|feed| Op::MarkAllRead { feed }),
         1 => any::<usize>().prop_map(|from| Op::MarkManyUnread { from }),
+        2 => (any::<usize>(), any::<bool>(), any::<bool>())
+            .prop_map(|(from, archive, value)| Op::FlagMany { from, archive, value }),
     ]
 }
 
@@ -578,6 +604,11 @@ proptest! {
                 Op::MarkManyUnread { from } => {
                     let tail: Vec<ArticleId> = ids.iter().skip(from % 4).copied().collect();
                     storage.mark_read_many(&tail, false).unwrap();
+                }
+                Op::FlagMany { from, archive, value } => {
+                    let tail: Vec<ArticleId> = ids.iter().skip(from % 4).copied().collect();
+                    let flag = if archive { ArticleFlag::Archived } else { ArticleFlag::Read };
+                    storage.set_flag_many(&tail, flag, value).unwrap();
                 }
             }
             prop_assert_eq!(storage.unread_counts().unwrap(), scanned_unread(&conn));

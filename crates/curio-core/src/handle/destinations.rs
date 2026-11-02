@@ -20,10 +20,10 @@ use curio_types::{CurioId, Destination, DestinationName, Timestamp};
 
 use crate::content;
 use crate::export::{self, ExportDisposition, ExportInput};
-use crate::model::ArticleId;
-use crate::storage::{ListArticles, SettingsTx, Storage};
+use crate::model::{Article, ArticleId, Feed};
+use crate::storage::{SettingsTx, Storage};
 
-use super::{BulkSaveOutcome, CoreError, CoreHandle, SaveOutcome};
+use super::{CoreError, CoreHandle, SaveOutcome};
 
 impl CoreHandle {
     /// Registers (or re-roots) a named destination and persists the
@@ -234,23 +234,7 @@ impl CoreHandle {
             Some(feed_id) => self.storage.get_feed(feed_id)?,
             None => None,
         };
-        let tags = self.storage.article_tags(id)?;
-        let markdown = content::to_markdown(&article.content.html)?;
-
-        let input = ExportInput {
-            curio_id: article.curio_id,
-            title: article.title.clone(),
-            source: article.source_url.clone(),
-            feed: feed.as_ref().map(|f| f.url.clone()),
-            feed_title: feed.as_ref().and_then(|f| f.title.clone()),
-            author: article.author.clone(),
-            published: article.published_at,
-            saved: article.saved_at,
-            tags: tags.clone(),
-            lang: article.lang.clone(),
-            word_count: article.word_count,
-            markdown,
-        };
+        let input = self.export_input(&article, feed.as_ref())?;
         let dest = Destination {
             name: destination.clone(),
             root: root.clone(),
@@ -272,7 +256,7 @@ impl CoreHandle {
         let snapshot = article.snapshot(
             input.feed.clone(),
             input.feed_title.clone(),
-            tags,
+            input.tags.clone(),
             destination.clone(),
             staged.outcome().path.clone(),
             staged.outcome().checksum,
@@ -301,63 +285,35 @@ impl CoreHandle {
         })
     }
 
-    /// Exports every article matching `filter` to a named destination —
-    /// the export-everything path ("my library as markdown"). Each note
-    /// goes through the same per-article pipeline as
-    /// [`Self::save_to_destination`] (frontmatter, managed region,
-    /// manifest idempotency, `article.saved`/`article.updated` events), so
-    /// re-running a bulk export only rewrites what actually changed.
-    /// `filter.before`/`limit` are pagination internals and are ignored.
-    ///
-    /// # Errors
-    ///
-    /// [`CoreError::UnknownDestination`]; the first per-article
-    /// export/storage/emission error aborts the walk (already-written
-    /// notes stay — each save is atomic). That includes
-    /// [`crate::export::ExportError::NoteParse`] for a note the user
-    /// edited into something that no longer parses, even when the article
-    /// itself is unchanged.
-    pub fn save_all_to_destination(
+    /// What the exporter needs to write `article`'s note: the article
+    /// itself, its feed (`None` for a manual save) and its tags, with the
+    /// stored HTML converted to the managed region's markdown.
+    pub(super) fn export_input(
         &self,
-        filter: &ListArticles,
-        destination: &DestinationName,
-    ) -> Result<BulkSaveOutcome, CoreError> {
-        // Fail on an unknown destination before walking anything.
-        if !load_roots(&self.storage)?.contains_key(destination) {
-            return Err(CoreError::UnknownDestination {
-                name: destination.to_string(),
-            });
-        }
-        let mut page_filter = filter.clone();
-        page_filter.before = None;
-        page_filter.limit = 200;
-        let mut outcome = BulkSaveOutcome::default();
-        loop {
-            let page = self.storage.list_articles(page_filter.clone())?;
-            let page_len = page.len();
-            for article in page {
-                page_filter.before = Some(article.id);
-                match self
-                    .save_to_destination(article.id, destination)?
-                    .disposition
-                {
-                    ExportDisposition::Created => outcome.created += 1,
-                    ExportDisposition::Updated => outcome.updated += 1,
-                    ExportDisposition::Unchanged => outcome.unchanged += 1,
-                }
-            }
-            if page_len < page_filter.limit as usize {
-                break;
-            }
-        }
-        Ok(outcome)
+        article: &Article,
+        feed: Option<&Feed>,
+    ) -> Result<ExportInput, CoreError> {
+        Ok(ExportInput {
+            curio_id: article.curio_id,
+            title: article.title.clone(),
+            source: article.source_url.clone(),
+            feed: feed.map(|f| f.url.clone()),
+            feed_title: feed.and_then(|f| f.title.clone()),
+            author: article.author.clone(),
+            published: article.published_at,
+            saved: article.saved_at,
+            tags: self.storage.article_tags(article.id)?,
+            lang: article.lang.clone(),
+            word_count: article.word_count,
+            markdown: content::to_markdown(&article.content.html)?,
+        })
     }
 
     /// Records that `name`, registered at `root`, has completed an
     /// export. Best effort: the export itself already succeeded, and a
     /// failed persist only means the missing-destination check stays off
     /// for this destination until the next successful export records it.
-    fn mark_exported(&self, name: &DestinationName, root: PathBuf) {
+    pub(super) fn mark_exported(&self, name: &DestinationName, root: PathBuf) {
         let recorded = self.storage.edit_settings({
             let name = name.clone();
             move |settings| {
@@ -461,11 +417,13 @@ fn create_root(root: &Path) -> Result<(), CoreError> {
     })
 }
 
-fn load_roots(storage: &Storage) -> Result<BTreeMap<DestinationName, PathBuf>, CoreError> {
+pub(super) fn load_roots(
+    storage: &Storage,
+) -> Result<BTreeMap<DestinationName, PathBuf>, CoreError> {
     parse_roots(storage.get_setting(DESTINATIONS_KEY)?.as_deref())
 }
 
-fn load_exported(storage: &Storage) -> Result<BTreeSet<DestinationName>, CoreError> {
+pub(super) fn load_exported(storage: &Storage) -> Result<BTreeSet<DestinationName>, CoreError> {
     parse_names(storage.get_setting(EXPORTED_DESTINATIONS_KEY)?.as_deref())
 }
 

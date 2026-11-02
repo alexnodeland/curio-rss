@@ -39,6 +39,7 @@
 //! commit.)
 
 mod articles;
+mod bulk_export;
 mod destinations;
 mod feeds;
 mod hydrate;
@@ -54,6 +55,10 @@ mod state;
 mod sweep;
 mod work_queue;
 
+pub use bulk_export::{
+    BULK_SAVE_BATCH, BulkSaveCancel, BulkSaveFailure, BulkSaveOutcome, BulkSaveProgress,
+    MAX_BULK_SAVE_FAILURES,
+};
 pub use hydrate::DEFAULT_HYDRATE_CONCURRENCY;
 pub use maintenance::{MaintenanceOptions, MaintenanceReport};
 pub use reddit_auth::RedditAuthReason;
@@ -248,25 +253,6 @@ pub struct SavedUrl {
     /// `false` for an unreachable page (the link is saved bare) and for
     /// an existing article.
     pub hydrated: bool,
-}
-
-/// Outcome of a bulk note export: how many notes each disposition got.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct BulkSaveOutcome {
-    /// Notes written for the first time (`article.saved` each).
-    pub created: u64,
-    /// Existing notes whose managed region changed (`article.updated` each).
-    pub updated: u64,
-    /// Idempotency hits — already exported, byte-identical, no event.
-    pub unchanged: u64,
-}
-
-impl BulkSaveOutcome {
-    /// Articles the export walked in total.
-    #[must_use]
-    pub fn total(&self) -> u64 {
-        self.created + self.updated + self.unchanged
-    }
 }
 
 /// Outcome of an OPML import.

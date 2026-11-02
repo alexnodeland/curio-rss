@@ -10,7 +10,7 @@ mod common;
 use std::time::Duration;
 
 use curio_core::events::{FoldedState, read_all};
-use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
+use curio_core::export::{ExportBatch, ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
 use curio_core::model::{
     ArticleContent, ArticleFlag, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
@@ -970,6 +970,152 @@ fn a_crash_before_the_manifest_write_never_loses_article_saved() {
     assert_eq!(saved.disposition, ExportDisposition::Updated);
     let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
     assert_eq!(folded.articles[&curio_id].path, saved.path);
+}
+
+/// The crash-ordering guarantee above, for a bulk export's batch: several
+/// notes written and their intents staged in one transaction, then the
+/// process dies before the batch's single manifest write. Every event
+/// survives (startup replay), and the next bulk export re-converges the
+/// manifest onto the notes already on disk — as updates, never a second
+/// article.saved.
+#[test]
+fn a_crash_before_a_batch_manifest_write_never_loses_article_saved() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let dest_name: DestinationName = "vault".parse().unwrap();
+    let dest = Destination {
+        name: dest_name.clone(),
+        root: vault.path().to_path_buf(),
+    };
+
+    let curio_ids = {
+        let core = open_core(profile.path());
+        core.add_destination(dest_name.clone(), vault.path().to_path_buf())
+            .unwrap();
+        core.storage()
+            .upsert_articles(vec![
+                manual_article("k1", "One"),
+                manual_article("k2", "Two"),
+                manual_article("k3", "Three"),
+            ])
+            .unwrap();
+        let articles = core.list_articles(ListArticles::default()).unwrap();
+
+        // Simulate the crashing batch: notes written, intents staged — and
+        // the process dies before the manifest commit and the emit.
+        let mut batch = ExportBatch::begin(&dest).unwrap();
+        let mut events = Vec::new();
+        for article in &articles {
+            let input = ExportInput {
+                curio_id: article.curio_id,
+                title: article.title.clone(),
+                source: article.source_url.clone(),
+                feed: None,
+                feed_title: None,
+                author: None,
+                published: None,
+                saved: article.saved_at,
+                tags: vec![],
+                lang: None,
+                word_count: None,
+                markdown: "body".to_owned(),
+            };
+            let staged = batch.stage(&input).unwrap();
+            assert_eq!(staged.disposition, ExportDisposition::Created);
+            events.push(EventPayload::ArticleSaved(article.snapshot(
+                None,
+                None,
+                vec![],
+                dest_name.clone(),
+                staged.path,
+                staged.checksum,
+            )));
+        }
+        core.storage().record_article_exports(events).unwrap();
+        drop(batch); // the manifest write never happens
+        assert!(
+            !vault.path().join(".curio/manifest.json").exists(),
+            "nothing recorded before the commit"
+        );
+        articles.iter().map(|a| a.curio_id).collect::<Vec<_>>()
+    }; // dropping the handle = the crash
+
+    // Restart: the startup replay emits every staged article.saved.
+    let core = open_core(profile.path());
+    let saved = read_all(&profile.path().join(".curio/events"))
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(&e.event, EventPayload::ArticleSaved(_)))
+        .count();
+    assert_eq!(
+        saved,
+        curio_ids.len(),
+        "every saved event survives the crash"
+    );
+
+    // The next bulk export finds each article's own note on disk: an
+    // update, recorded in the manifest at the note's path.
+    let outcome = core
+        .save_all_to_destination(&ListArticles::default(), &dest_name)
+        .unwrap();
+    assert_eq!((outcome.created, outcome.updated), (0, 3));
+    let manifest = curio_core::export::load_manifest(vault.path()).unwrap();
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    for id in curio_ids {
+        assert_eq!(folded.articles[&id].path, manifest.notes[&id].path);
+    }
+}
+
+/// A crash one step earlier — notes written, no intent staged yet — loses
+/// nothing either: the next bulk export announces each note it finds as
+/// article.updated (the full snapshot, folding idempotently).
+#[test]
+fn a_crash_before_a_batch_stages_its_intents_still_announces_every_note() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let dest_name: DestinationName = "vault".parse().unwrap();
+    let core = open_core(profile.path());
+    core.add_destination(dest_name.clone(), vault.path().to_path_buf())
+        .unwrap();
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "One"),
+            manual_article("k2", "Two"),
+        ])
+        .unwrap();
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    let mut batch = ExportBatch::begin(&Destination {
+        name: dest_name.clone(),
+        root: vault.path().to_path_buf(),
+    })
+    .unwrap();
+    for article in &articles {
+        let input = ExportInput {
+            curio_id: article.curio_id,
+            title: article.title.clone(),
+            source: article.source_url.clone(),
+            feed: None,
+            feed_title: None,
+            author: None,
+            published: None,
+            saved: article.saved_at,
+            tags: vec![],
+            lang: None,
+            word_count: None,
+            markdown: "body".to_owned(),
+        };
+        batch.stage(&input).unwrap();
+    }
+    drop(batch);
+
+    let outcome = core
+        .save_all_to_destination(&ListArticles::default(), &dest_name)
+        .unwrap();
+    assert_eq!(outcome.updated, 2);
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    for article in &articles {
+        assert!(folded.articles.contains_key(&article.curio_id));
+    }
 }
 
 /// Concurrent registrations must all survive a reopen: the registry is
@@ -2850,13 +2996,13 @@ fn database_health_probes_go_through_the_facade() {
     assert_eq!(core.pending_intent_count().unwrap(), 0);
 }
 
-/// A hand-edited note that no longer parses stops a bulk export at that
-/// article (as the CLI guide documents), even when its content is
-/// unchanged: the export never claims a note it cannot account for is
-/// intact. Notes already written stay, and once the user repairs (here:
-/// deletes) the note, re-running the bulk export completes.
+/// A hand-edited note that no longer parses is skipped by a bulk export
+/// and listed in its summary, even when its content is unchanged: the
+/// export never claims a note it cannot account for is intact. The run
+/// carries on past it, and once the user repairs (here: deletes) the note,
+/// re-running the bulk export heals it.
 #[tokio::test]
-async fn bulk_export_stops_at_a_note_that_no_longer_parses() {
+async fn bulk_export_skips_and_lists_a_note_that_no_longer_parses() {
     let profile = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
     let core = open_core(profile.path());
@@ -2867,38 +3013,96 @@ async fn bulk_export_stops_at_a_note_that_no_longer_parses() {
         .upsert_articles(vec![
             manual_article("k1", "First note"),
             manual_article("k2", "Second note"),
+            manual_article("k3", "Third note"),
         ])
         .unwrap();
     let first = core
         .save_all_to_destination(&ListArticles::default(), &dest)
         .unwrap();
-    assert_eq!(first.created, 2);
+    assert_eq!(first.created, 3);
 
     let garbled = vault.path().join("curio/second-note.md");
     std::fs::write(&garbled, "markers and frontmatter gone\n").unwrap();
-    let err = core
+    let skipped = core
         .save_all_to_destination(&ListArticles::default(), &dest)
-        .unwrap_err();
+        .unwrap();
+    assert_eq!((skipped.unchanged, skipped.failed), (2, 1));
+    let [failure] = skipped.failures.as_slice() else {
+        panic!("one failure listed: {:?}", skipped.failures);
+    };
+    assert_eq!(failure.title, "Second note");
     assert!(
-        matches!(
-            err,
-            curio_core::CoreError::Export(curio_core::export::ExportError::NoteParse { .. })
-        ),
-        "{err:?}"
+        failure.error.contains("second-note.md"),
+        "{}",
+        failure.error
     );
     assert_eq!(
         std::fs::read_to_string(&garbled).unwrap(),
         "markers and frontmatter gone\n",
         "the unparseable note is never rewritten"
     );
-    assert!(vault.path().join("curio/first-note.md").is_file());
 
     std::fs::remove_file(&garbled).unwrap();
     let repaired = core
         .save_all_to_destination(&ListArticles::default(), &dest)
         .unwrap();
-    assert_eq!(repaired.total(), 2);
+    assert_eq!((repaired.total(), repaired.failed), (3, 0));
     assert!(garbled.is_file(), "the deleted note is healed");
+}
+
+/// A first bulk export does not stop at an article it cannot write (every
+/// candidate path is held by a file of the user's): the articles around it
+/// are exported, recorded and announced, and the summary names it.
+#[test]
+fn a_failing_article_does_not_abort_a_first_bulk_export() {
+    let profile = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let dest: DestinationName = "vault".parse().unwrap();
+    core.add_destination(dest.clone(), vault.path().to_path_buf())
+        .unwrap();
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("k1", "Before"),
+            manual_article("k2", "Blocked"),
+            manual_article("k3", "After"),
+        ])
+        .unwrap();
+    let blocked = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|a| a.title == "Blocked")
+        .unwrap();
+    let id = blocked.curio_id.to_string();
+    std::fs::create_dir_all(vault.path().join("curio")).unwrap();
+    for name in [
+        "blocked.md".to_owned(),
+        format!("blocked-{}.md", &id[..8]),
+        format!("blocked-{id}.md"),
+    ] {
+        std::fs::write(vault.path().join("curio").join(name), "my own file\n").unwrap();
+    }
+
+    let outcome = core
+        .save_all_to_destination(&ListArticles::default(), &dest)
+        .unwrap();
+    assert_eq!((outcome.created, outcome.failed), (2, 1));
+    assert_eq!(outcome.failures[0].curio_id, blocked.curio_id);
+    assert_eq!(outcome.failures[0].article_id, blocked.id);
+    let manifest = curio_core::export::load_manifest(vault.path()).unwrap();
+    assert_eq!(manifest.notes.len(), 2);
+    assert!(!manifest.notes.contains_key(&blocked.curio_id));
+    let saved: Vec<_> = read_all(&profile.path().join(".curio/events"))
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| match e.event {
+            EventPayload::ArticleSaved(s) => Some(s.title),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(saved.len(), 2);
+    assert!(!saved.contains(&"Blocked".to_owned()));
 }
 
 /// Makes the profile's events dir unwritable for every user (root

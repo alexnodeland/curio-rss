@@ -2,11 +2,13 @@
  * DEV-ONLY in-browser IPC mock. When `npm run dev` runs the app in a plain
  * browser (no Tauri webview), this installs `@tauri-apps/api/mocks` with a
  * stateful responder over the preview dataset so the whole UI renders and
- * reacts — the substrate for visual design review. Mutating handlers emit the
- * `FeedsChanged` / `ArticlesChanged` invalidations the real commands emit, so
- * the query cache refetches as it does in the app. Guarded by
- * `import.meta.env.DEV` + a no-real-Tauri check and dynamic-imported, so it is
- * absent from the production bundle and never runs inside the packaged app.
+ * reacts — the substrate for visual design review. The mutating handlers it
+ * implements emit the `FeedsChanged` / `ArticlesChanged` invalidations the
+ * real commands emit, so the query cache refetches as it does in the app
+ * (`delete_article`, `save_url` and the imports change nothing yet: #328).
+ * Guarded by `import.meta.env.DEV` + a no-real-Tauri check and
+ * dynamic-imported, so it is absent from the production bundle and never runs
+ * inside the packaged app.
  */
 import type {
     ArticleStateDto,
@@ -431,11 +433,14 @@ tokens:
                         f.site_url = (args.siteUrl as string | null) ?? null;
                         f.description = (args.description as string | null) ?? null;
                     });
+                // Core only fills the fields still empty (`COALESCE(title, ?)`
+                // …): an already-set value — a human edit — always wins.
                 case 'update_feed_metadata':
                     return editFeed(args.feedId, (f) => {
-                        f.title = (args.title as string | null) ?? null;
-                        f.site_url = (args.siteUrl as string | null) ?? null;
-                        f.description = (args.description as string | null) ?? null;
+                        f.title = f.title ?? (args.title as string | null) ?? null;
+                        f.site_url = f.site_url ?? (args.siteUrl as string | null) ?? null;
+                        f.description =
+                            f.description ?? (args.description as string | null) ?? null;
                     });
                 case 'set_feed_full_text':
                     return editFeed(args.feedId, (f) => {

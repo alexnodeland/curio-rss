@@ -191,18 +191,19 @@ describe('dev mock IPC', () => {
             ok(await commands.setFeedStatus(2, 'paused'));
             ok(await commands.setFeedMetadata(2, 'https://example.com', 'About'));
             ok(await commands.setFeedFullText(2, true));
-            ok(await commands.updateFeedMetadata(2, 'Retitled', null, null));
+            // Like core, update_feed_metadata never clobbers a set value.
+            ok(await commands.updateFeedMetadata(2, 'Retitled', 'https://other.example', null));
             await flushIpc();
 
             expect(recorded.feeds).toBe(6);
             expect(recorded.articles).toEqual([]);
             const feed = ok(await commands.listFeeds()).find((candidate) => candidate.id === 2);
             expect(feed).toMatchObject({
-                title: 'Retitled',
+                title: 'Renamed',
                 tags: ['Moved'],
                 status: 'paused',
-                site_url: null,
-                description: null,
+                site_url: 'https://example.com',
+                description: 'About',
                 fetch_full_text: true,
             });
 
@@ -210,6 +211,23 @@ describe('dev mock IPC', () => {
             expect(missing.status === 'error' && missing.error.code).toBe('NOT_FOUND');
             await flushIpc();
             expect(recorded.feeds).toBe(6);
+        });
+
+        it('update_feed_metadata fills only the empty fields', async () => {
+            const recorded = await installMock();
+
+            ok(await commands.setFeedTitle(2, null));
+            ok(await commands.setFeedMetadata(2, null, 'Kept'));
+            ok(await commands.updateFeedMetadata(2, 'Filled', 'https://filled.example', 'Lost'));
+            await flushIpc();
+
+            expect(recorded.feeds).toBe(3);
+            const feed = ok(await commands.listFeeds()).find((candidate) => candidate.id === 2);
+            expect(feed).toMatchObject({
+                title: 'Filled',
+                site_url: 'https://filled.example',
+                description: 'Kept',
+            });
         });
 
         it('reorder_feeds lists the feeds in the new order', async () => {

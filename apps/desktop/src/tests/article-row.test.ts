@@ -10,7 +10,7 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
     articleStateFixture,
@@ -30,13 +30,13 @@ function harness(): IpcHarness {
     });
 }
 
-async function renderRow(article: ArticleSummaryDto): Promise<HTMLElement> {
+async function renderRow(article: ArticleSummaryDto, compact = false): Promise<HTMLElement> {
     const { container } = render(ArticleRow, {
         props: {
             article,
             index: 0,
             rowHeight: 72,
-            compact: false,
+            compact,
             setsize: 1,
             selected: false,
             onselect: () => {},
@@ -112,5 +112,66 @@ describe('ArticleRow — link-less and date-less feed entries', () => {
         expect(meta?.querySelector('[data-first-seen]')).toBeNull();
         expect(meta?.textContent).toContain('July 1');
         expect(meta?.textContent).not.toContain('First seen');
+    });
+});
+
+describe('ArticleRow — date and title polish', () => {
+    let installed: IpcHarness | null = null;
+
+    afterEach(() => {
+        vi.useRealTimers();
+        cleanup();
+        resetQueryCache();
+        resetUiStores();
+        installed?.teardown();
+        installed = null;
+    });
+
+    /** Pins only `Date` — the IPC harness's timers stay real. */
+    function pinNow(now: Date): void {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(now);
+    }
+
+    it('a row published today shows its time of day, not the date', async () => {
+        pinNow(new Date(2026, 9, 31, 18, 30));
+        installed = harness();
+        const row = await renderRow(
+            articleSummaryFixture({ published_at: new Date(2026, 9, 31, 9, 5).toISOString() }),
+        );
+        const meta = row.querySelector('.row-meta')?.textContent ?? '';
+        expect(meta).toMatch(/9:05\sAM/);
+        expect(meta).not.toContain('October');
+    });
+
+    it('a row from yesterday says so', async () => {
+        pinNow(new Date(2026, 9, 31, 8, 0));
+        installed = harness();
+        const row = await renderRow(
+            articleSummaryFixture({ published_at: new Date(2026, 9, 30, 22, 0).toISOString() }),
+        );
+        expect(row.querySelector('.row-meta')?.textContent).toContain('yesterday');
+    });
+
+    it('a date-less entry first seen today reads "First seen <time>"', async () => {
+        pinNow(new Date(2026, 9, 31, 18, 30));
+        installed = harness();
+        const row = await renderRow(
+            articleSummaryFixture({
+                published_at: null,
+                saved_at: new Date(2026, 9, 31, 14, 0).toISOString(),
+            }),
+        );
+        const date = row.querySelector('.row-meta [data-first-seen]');
+        expect(date?.textContent).toMatch(/^First seen 2:00\sPM$/);
+    });
+
+    it('a comfortable row lets the title wrap; a compact row keeps it to one line', async () => {
+        installed = harness();
+        const comfortable = await renderRow(articleSummaryFixture({ id: 1 }));
+        expect(comfortable.querySelector('.row-title')?.classList.contains('truncate')).toBe(false);
+        cleanup();
+        const compact = await renderRow(articleSummaryFixture({ id: 2 }), true);
+        expect(compact.querySelector('.row-title')?.classList.contains('truncate')).toBe(true);
     });
 });

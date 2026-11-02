@@ -1,4 +1,4 @@
-import ArticleList from '$components/articles/ArticleList.svelte';
+import ArticleList, { ROW_HEIGHT } from '$components/articles/ArticleList.svelte';
 /**
  * The middle pane over mockIPC: virtualized rendering of the loaded window,
  * keyset `before`-cursor infinite scroll on near-end, per-row state from
@@ -87,7 +87,7 @@ describe('ArticleList', () => {
         expect(articlesStore.current.items).toHaveLength(50);
 
         const listbox = getByRole('listbox');
-        listbox.scrollTop = 50 * 84 - 600; // the bottom of the loaded window
+        listbox.scrollTop = 50 * ROW_HEIGHT - 600; // the bottom of the loaded window
         await fireEvent.scroll(listbox);
         await flushIpc();
 
@@ -98,7 +98,7 @@ describe('ArticleList', () => {
         expect(articlesStore.current.exhausted).toBe(true);
 
         // Exhausted: further scrolling asks the backend for nothing more.
-        listbox.scrollTop = 70 * 84;
+        listbox.scrollTop = 70 * ROW_HEIGHT;
         await fireEvent.scroll(listbox);
         await flushIpc();
         expect(harness.callsFor('list_articles')).toHaveLength(2);
@@ -120,9 +120,13 @@ describe('ArticleList', () => {
         const rows = [...container.querySelectorAll('.article-row')];
         expect(rows).toHaveLength(2);
         expect(rows[0]?.classList.contains('unread')).toBe(true);
-        expect(rows[0]?.textContent).toContain('★');
+        // The star is the shared Icon glyph (as in the reader toolbar), not a
+        // text character, and is announced through its sr-only label.
+        expect(rows[0]?.querySelector('.row-star svg')).not.toBeNull();
+        expect(rows[0]?.textContent).not.toContain('★');
+        expect(rows[0]?.textContent).toContain('Starred');
         expect(rows[1]?.classList.contains('unread')).toBe(false);
-        expect(rows[1]?.textContent).not.toContain('★');
+        expect(rows[1]?.querySelector('.row-star')).toBeNull();
     });
 
     it('row state flips when the Rust-emitted invalidation event lands', async () => {

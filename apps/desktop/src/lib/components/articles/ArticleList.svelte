@@ -7,7 +7,7 @@ import { type ReadingDensity, prefsStore } from '$lib/state/prefs.svelte';
  * source and cannot drift.
  */
 export const ROW_HEIGHTS: Record<ReadingDensity, number> = {
-    comfortable: 84,
+    comfortable: 104,
     compact: 56,
 };
 

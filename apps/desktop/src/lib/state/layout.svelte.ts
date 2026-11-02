@@ -146,22 +146,43 @@ export class LayoutStore {
      * Puts the sidebar on screen whatever hid it — focus mode (left), a
      * stored collapse (cleared) or a narrow window (peeked open) — so a
      * caller about to focus it never aims at a hidden pane.
+     *
+     * Every visibility change lands synchronously, before the first await:
+     * a caller focuses the sidebar right after calling this, and the pane
+     * effects that flush in between must already see it on screen. The
+     * settings writes follow.
      */
     async revealSidebar(): Promise<void> {
         if (this.sidebarVisible) {
             return;
         }
         this.paneMotion = true;
+        const writes: Promise<unknown>[] = [];
         if (this.focusMode) {
             this.focusMode = false;
-            await settingsStore.set(SETTING_KEYS.focusMode, 'false');
+            writes.push(settingsStore.set(SETTING_KEYS.focusMode, 'false'));
         }
         if (this.narrow) {
             this.sidebarPeek = true;
         } else if (this.sidebarCollapsed) {
             this.sidebarCollapsed = false;
-            await settingsStore.set(SETTING_KEYS.sidebarCollapsed, 'false');
+            writes.push(settingsStore.set(SETTING_KEYS.sidebarCollapsed, 'false'));
         }
+        await Promise.all(writes);
+    }
+
+    /**
+     * Brings the article list back if focus mode hid it, so a caller about to
+     * focus something in it (the search box) never aims at an inert pane. The
+     * list is on screen as soon as this returns; the settings write follows.
+     */
+    async revealList(): Promise<void> {
+        if (this.listVisible) {
+            return;
+        }
+        this.paneMotion = true;
+        this.focusMode = false;
+        await settingsStore.set(SETTING_KEYS.focusMode, 'false');
     }
 
     /** Enters or leaves focus mode (the reader alone), persisted. */

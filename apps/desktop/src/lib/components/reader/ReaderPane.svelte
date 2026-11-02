@@ -356,10 +356,25 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     {/if}
 {/snippet}
 
+<!-- Focus mode can be the launch layout, and with no article open the
+     toolbar's toggle is absent: the empty reader carries a pointer way back
+     to the list. The hint above it already names the key, so it carries no
+     tooltip repeating its own label. -->
+{#snippet exitFocusAction()}
+    <button type="button" class="exit-focus" onclick={() => void layoutStore.toggleFocusMode()}>
+        <Icon name="focus-exit" size={16} />
+        {focusModeLabel}
+    </button>
+{/snippet}
+
 <div class="reader">
     {#if selectedId === null}
         {@render dragStrip()}
-        <EmptyState icon="sparkle" title={t('reader.empty')}>
+        <EmptyState
+            icon="sparkle"
+            title={t('reader.empty')}
+            action={layoutStore.focusMode ? exitFocusAction : undefined}
+        >
             {#snippet hint()}
                 {#each hintParts as part, index (part.label)}
                     {#if index > 0}
@@ -717,6 +732,30 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
     .hint-alt {
         font-size: var(--text-xs);
+    }
+
+    /* A quiet secondary button: the hint above names the key, this is the
+       pointer route. */
+    .exit-focus {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--hairline-strong);
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .exit-focus:hover {
+        background: var(--hover);
+        color: var(--fg);
     }
 
     .reader-toolbar {

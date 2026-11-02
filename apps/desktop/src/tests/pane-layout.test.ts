@@ -303,6 +303,91 @@ describe('pane layout — focus mode', () => {
         const hint = getByText(t('reader.hint.exitFocus'));
         expect(hint.querySelector('kbd')?.textContent).toBe('f');
     });
+
+    it('the empty reader offers a button out of focus mode (a launch into it)', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container, getByRole, queryByRole } = await mountShell();
+        const exitName = t('reader.action.exitFocusMode');
+        expect(queryByRole('button', { name: exitName })).toBeNull();
+
+        await fireEvent.keyDown(window, { key: 'f' });
+        await fireEvent.click(getByRole('button', { name: exitName }));
+        await flushIpc();
+
+        expect(layoutStore.focusMode).toBe(false);
+        expect(isHidden(slot(container, 'list'))).toBe(false);
+        expect(queryByRole('button', { name: exitName })).toBeNull();
+    });
+
+    it('g f from focus mode reaches a collapsed sidebar’s tree', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container, getByRole } = await mountShell();
+        await fireEvent.keyDown(window, { key: '\\' });
+        await fireEvent.keyDown(window, { key: 'f' });
+        await flushIpc();
+        expect(isHidden(slot(container, 'sidebar'))).toBe(true);
+
+        await fireEvent.keyDown(window, { key: 'g' });
+        await fireEvent.keyDown(window, { key: 'f' });
+        await flushIpc();
+
+        expect(isHidden(slot(container, 'sidebar'))).toBe(false);
+        expect(isHidden(slot(container, 'list'))).toBe(false);
+        expect(selectionStore.focus).toBe('sidebar');
+        expect(document.activeElement).toBe(getByRole('tree'));
+        expect(harness.callsFor('set_setting')).toEqual(
+            expect.arrayContaining([
+                { key: 'ui.panes.focus-mode', value: 'false' },
+                { key: 'ui.panes.sidebar-collapsed', value: 'false' },
+            ]),
+        );
+    });
+
+    it('g f from focus mode in a narrow window peeks the sidebar and focuses its tree', async () => {
+        harness = installIpcHarness(shellResponders());
+        vi.stubGlobal('matchMedia', (media: string) => ({
+            media,
+            matches: true,
+            addEventListener: () => {},
+            removeEventListener: () => {},
+        }));
+        try {
+            const { container, getByRole } = await mountShell();
+            expect(isHidden(slot(container, 'sidebar'))).toBe(true);
+            await fireEvent.keyDown(window, { key: 'f' });
+            await flushIpc();
+
+            await fireEvent.keyDown(window, { key: 'g' });
+            await fireEvent.keyDown(window, { key: 'f' });
+            await flushIpc();
+
+            expect(isHidden(slot(container, 'sidebar'))).toBe(false);
+            expect(layoutStore.sidebarPeek).toBe(true);
+            expect(selectionStore.focus).toBe('sidebar');
+            expect(document.activeElement).toBe(getByRole('tree'));
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('/ leaves focus mode so the search box can take the keyboard', async () => {
+        harness = installIpcHarness(shellResponders());
+        const { container, getByRole } = await mountShell();
+        await fireEvent.keyDown(window, { key: 'f' });
+        await flushIpc();
+        expect(isHidden(slot(container, 'list'))).toBe(true);
+
+        await fireEvent.keyDown(window, { key: '/' });
+        await flushIpc();
+
+        expect(layoutStore.focusMode).toBe(false);
+        expect(isHidden(slot(container, 'list'))).toBe(false);
+        expect(document.activeElement).toBe(getByRole('searchbox'));
+        expect(harness.callsFor('set_setting')).toContainEqual({
+            key: 'ui.panes.focus-mode',
+            value: 'false',
+        });
+    });
 });
 
 describe('evacuateHiddenPanes', () => {

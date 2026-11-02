@@ -290,6 +290,40 @@ describe('layout store — sidebar collapse and focus mode', () => {
         expect(harness.callsFor('set_setting')).toEqual([]);
     });
 
+    it('revealSidebar shows the sidebar before its settings writes settle', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new LayoutStore();
+        ui.sidebarCollapsed = true;
+        ui.focusMode = true;
+
+        const pending = ui.revealSidebar();
+        // A caller focuses the tree right after the call, before any await.
+        expect(ui.sidebarVisible).toBe(true);
+        await pending;
+
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.panes.focus-mode', value: 'false' },
+            { key: 'ui.panes.sidebar-collapsed', value: 'false' },
+        ]);
+    });
+
+    it('revealList leaves focus mode at once, persisted, and is a no-op otherwise', async () => {
+        harness = installIpcHarness({ set_setting: null });
+        const ui = new LayoutStore();
+        await ui.revealList();
+        expect(ui.paneMotion).toBe(false);
+        expect(harness.callsFor('set_setting')).toEqual([]);
+
+        ui.focusMode = true;
+        const pending = ui.revealList();
+        expect(ui.listVisible).toBe(true);
+        expect(ui.paneMotion).toBe(true);
+        await pending;
+        expect(harness.callsFor('set_setting')).toEqual([
+            { key: 'ui.panes.focus-mode', value: 'false' },
+        ]);
+    });
+
     it('only a layout change after launch turns pane motion on', async () => {
         const table = settingsTable();
         harness = table.harness;

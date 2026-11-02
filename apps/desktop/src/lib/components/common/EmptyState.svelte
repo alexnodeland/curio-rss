@@ -12,11 +12,14 @@ let {
     icon,
     title,
     hint,
+    action,
 }: {
     icon: IconName;
     title: string;
     /** Optional secondary line (e.g. keyboard hints). */
     hint?: Snippet;
+    /** Optional on-screen way out of the state (a button), below the hint. */
+    action?: Snippet;
 } = $props();
 </script>
 
@@ -27,6 +30,9 @@ let {
     <p class="empty-title">{title}</p>
     {#if hint}
         <p class="empty-hint">{@render hint()}</p>
+    {/if}
+    {#if action}
+        <div class="empty-action">{@render action()}</div>
     {/if}
 </div>
 
@@ -63,6 +69,11 @@ let {
     .empty-hint {
         font-size: var(--text-sm);
         color: var(--fg-subtle);
+    }
+
+    .empty-action {
+        display: flex;
+        justify-content: center;
     }
 
     .empty-hint :global(kbd) {

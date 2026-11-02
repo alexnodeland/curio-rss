@@ -1016,6 +1016,9 @@ export function handleShortcut(id: ShortcutId): void {
             layoutStore.openModal('settings');
             break;
         case 'search.focus':
+            // The search box sits in the list pane, which focus mode hides
+            // (inert): leave it first, or `/` would focus nothing.
+            void layoutStore.revealList();
             focusSearch();
             break;
         case 'view.all':

@@ -183,6 +183,11 @@ allowance carries a vector in `xss-corpus.html`):
   `language-*` class on `pre`/`code` (the exported fence language). When a
   whole-page feed item is extracted, direction set only on the winning container
   survives as a `<div dir lang>` wrapper.
+- **Code in exported markdown** — code text is the one thing export writes
+  unescaped, so it always lands where a renderer reads it as code: every `<pre>`
+  becomes a fence longer than any backtick run in it (an inline span where a fence
+  cannot stand on its own lines), every other `<code>` a single-line span. Escaped
+  `&lt;script&gt;` inside code therefore never becomes a live tag in the note (#245).
 - **Embeds** — iframes from known media/content hosts (YouTube, Vimeo, Spotify,
   SoundCloud, CodePen, Bluesky) or with an embed-shaped URL (`/embed`, `/player`, …,
   e.g. Mastodon) become a plain "Embedded media/content (host) ↗" link; invisible

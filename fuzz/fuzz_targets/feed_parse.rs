@@ -1,12 +1,10 @@
 //! Feed bytes → `parse_feed` → every entry through the ingest content
 //! pipeline and the export converter: the full path a hostile feed takes.
-//! Any panic or abort, or stored content failing the inertness audit, is a
-//! finding.
+//! Any panic or abort, or stored content or exported markdown failing the
+//! inertness audit, is a finding.
 
 #![no_main]
 
-// The markdown half of the audit is not run here yet (#245).
-#[allow(dead_code)]
 #[path = "../../crates/curio-core/tests/common/inert.rs"]
 mod inert;
 
@@ -30,6 +28,10 @@ fuzz_target!(|data: &[u8]| {
         if let Some(image) = first_image(&processed.html) {
             assert!(image.starts_with("http://") || image.starts_with("https://"));
         }
-        let _ = to_markdown(&processed.html);
+        if let Ok(markdown) = to_markdown(&processed.html)
+            && let Err(violation) = inert::audit_markdown(&markdown)
+        {
+            panic!("a feed entry exported live markdown: {violation}");
+        }
     }
 });

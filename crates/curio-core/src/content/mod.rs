@@ -29,6 +29,7 @@
 //! Markdown conversion is a DOM walk (htmd); the sketch's regex
 //! converter and render-time sanitization are banned.
 
+mod code;
 mod embeds;
 mod extract;
 mod footnotes;

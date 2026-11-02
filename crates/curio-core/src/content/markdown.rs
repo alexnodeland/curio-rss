@@ -32,7 +32,8 @@
 //! markup must never reach it. Before the walk, every element nested
 //! deeper than [`MAX_DEPTH`] is unwrapped (an iterative pass): its text and
 //! childless elements (`img`, `br`) stay, in document order, and only the
-//! surplus wrappers go (#244).
+//! surplus wrappers go (#244) — except what the skip list names, which goes
+//! whole, exactly as an uncapped walk would drop it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -50,6 +51,13 @@ use super::{ContentError, INLINE_ELEMENTS, code, footnotes};
 /// threads get 2 MB). `walk_fits_a_1mb_stack_at_the_cap` pins that.
 const MAX_DEPTH: usize = 128;
 
+/// Elements dropped with their whole subtree — by htmd's walk above the
+/// cap and by [`flatten_subtree`] below it, so the cap never exports text
+/// an uncapped walk would not.
+const SKIP_TAGS: &[&str] = &[
+    "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg", "canvas",
+];
+
 /// Converts an HTML fragment to `CommonMark`.
 ///
 /// # Errors
@@ -57,20 +65,25 @@ const MAX_DEPTH: usize = 128;
 /// [`ContentError::Markdown`] if the DOM walk fails to serialize
 /// (practically unreachable for parseable HTML).
 pub fn to_markdown(html: &str) -> Result<String, ContentError> {
-    let builder = HtmlToMarkdown::builder().skip_tags(vec![
-        "script", "style", "iframe", "object", "embed", "form", "nav", "noscript", "svg", "canvas",
-    ]);
-    let converter = code::register(footnotes::register(builder, html)).build();
+    let converter = converter(html);
     let tree = converter.html_to_tree(html)?;
     cap_depth(&tree, MAX_DEPTH);
     Ok(converter.tree_to_markdown(&tree).trim().to_owned())
 }
 
+/// The converter for `html`: the skip list plus the footnote and code
+/// handlers.
+fn converter(html: &str) -> HtmlToMarkdown {
+    let builder = HtmlToMarkdown::builder().skip_tags(SKIP_TAGS.to_vec());
+    code::register(footnotes::register(builder, html)).build()
+}
+
 /// Bounds the element nesting under `root` to `max_depth` (plus one level
-/// of childless elements): each element at `max_depth` keeps its subtree's
-/// text and childless elements as direct children, in document order, and
-/// loses every element between. Iterative throughout, so it holds for any
-/// depth the parser builds.
+/// of childless elements, and the item or cell a list or table holds them
+/// in): each element at `max_depth` keeps its subtree's text and childless
+/// elements as direct children, in document order, and loses every element
+/// between. Iterative throughout, so it holds for any depth the parser
+/// builds.
 fn cap_depth(root: &Rc<Node>, max_depth: usize) {
     let mut stack = vec![(Rc::clone(root), 0_usize)];
     while let Some((node, depth)) = stack.pop() {
@@ -88,10 +101,30 @@ fn cap_depth(root: &Rc<Node>, max_depth: usize) {
 
 /// Replaces `node`'s children with the leaves of its subtree (text,
 /// comments, childless elements), unwrapping every element that has
-/// children. A space stands in for each unwrapped block (non-inline)
-/// element, so the words of two flattened blocks never run together — the
-/// same boundary rule as [`super::plain_text`].
+/// children and dropping every [`SKIP_TAGS`] element whole. A space stands
+/// in for each unwrapped or dropped block (non-inline) element, so a block
+/// boundary never joins two words — the same rule as [`super::plain_text`].
+/// When `node` is inline, one stands at either end of the run too: there
+/// it is all that separates the run from `node`'s siblings (a block `node`
+/// is a boundary itself, and a space there would linger in the markdown).
+///
+/// A list (`ol`, `ul`) keeps the run as its one item and a `table` as its
+/// one cell, the shapes htmd renders a run in: it joins an `ol`'s children
+/// bare, one at a time (losing every space between the run's pieces), and
+/// gives a `table` without cells no block boundary.
 fn flatten_subtree(node: &Rc<Node>) {
+    let (inline, item) = match &node.data {
+        NodeData::Element { name, .. } => (
+            INLINE_ELEMENTS.contains(&&*name.local),
+            match &*name.local {
+                "ol" | "ul" => element_like(node, "li"),
+                "table" => element_like(node, "td"),
+                _ => None,
+            },
+        ),
+        _ => (false, None),
+    };
+    let holder = item.as_ref().unwrap_or(node);
     let children = std::mem::take(&mut *node.children.borrow_mut());
     // One iterator per element being unwrapped, plus whether it was a block.
     let mut levels = vec![(children.into_iter(), false)];
@@ -105,21 +138,52 @@ fn flatten_subtree(node: &Rc<Node>) {
             continue;
         };
         if let NodeData::Element { name, .. } = &child.data {
+            let block = !INLINE_ELEMENTS.contains(&&*name.local);
+            if SKIP_TAGS.contains(&&*name.local) {
+                pending_space |= block;
+                continue;
+            }
             let grandchildren = std::mem::take(&mut *child.children.borrow_mut());
             if !grandchildren.is_empty() {
-                let block = !INLINE_ELEMENTS.contains(&&*name.local);
                 pending_space |= block;
                 levels.push((grandchildren.into_iter(), block));
                 continue;
             }
         }
-        if std::mem::take(&mut pending_space) && !flat.is_empty() {
-            flat.push(space(node));
+        if std::mem::take(&mut pending_space) && (inline || !flat.is_empty()) {
+            flat.push(space(holder));
         }
-        child.parent.set(Some(Rc::downgrade(node)));
+        child.parent.set(Some(Rc::downgrade(holder)));
         flat.push(child);
     }
-    *node.children.borrow_mut() = flat;
+    if pending_space && inline {
+        flat.push(space(holder));
+    }
+    match item {
+        Some(item) if !flat.is_empty() => {
+            *item.children.borrow_mut() = flat;
+            item.parent.set(Some(Rc::downgrade(node)));
+            node.children.borrow_mut().push(item);
+        }
+        Some(_) => {}
+        None => *node.children.borrow_mut() = flat,
+    }
+}
+
+/// An empty `tag` element in `element`'s namespace (`None` if `element`
+/// is not one).
+fn element_like(element: &Rc<Node>, tag: &str) -> Option<Rc<Node>> {
+    let NodeData::Element { name, .. } = &element.data else {
+        return None;
+    };
+    let mut name = name.clone();
+    name.local = tag.into();
+    Some(Node::new(NodeData::Element {
+        name,
+        attrs: RefCell::default(),
+        template_contents: RefCell::default(),
+        mathml_annotation_xml_integration_point: false,
+    }))
 }
 
 /// A single-space text node, child of `parent`.
@@ -473,12 +537,14 @@ mod tests {
             .unwrap()
     }
 
-    /// `to_markdown`'s conversion with the cap at `max_depth` instead.
-    fn convert_capped(html: &str, max_depth: usize) -> String {
-        let converter = HtmlToMarkdown::new();
+    /// `to_markdown` with the cap at `max_depth` instead (`None`: no cap).
+    fn convert_capped(html: &str, max_depth: Option<usize>) -> String {
+        let converter = converter(html);
         let tree = converter.html_to_tree(html).unwrap();
-        cap_depth(&tree, max_depth);
-        converter.tree_to_markdown(&tree)
+        if let Some(max_depth) = max_depth {
+            cap_depth(&tree, max_depth);
+        }
+        converter.tree_to_markdown(&tree).trim().to_owned()
     }
 
     /// The deepest element nesting under `root` (`root` itself is 0).
@@ -555,13 +621,46 @@ mod tests {
         assert_eq!(max_depth_of(&tree), 11);
     }
 
+    /// A list whose `li`s sit `wrappers + 4` deep (`html` 1, `body` 2, the
+    /// wrapping divs, then `ul` and `li`), inside a footnoted document.
+    fn list_under(wrappers: usize) -> String {
+        format!(
+            "<p>x<a href=\"#user-content-fn1\">1</a></p>{}<ul><li>a</li><li>b</li></ul>{}\
+             <ol><li id=\"user-content-fn1\">n</li></ol>",
+            "<div>".repeat(wrappers),
+            "</div>".repeat(wrappers),
+        )
+    }
+
     #[test]
-    fn shallow_markup_is_left_alone() {
-        let html = "<div><blockquote><p>a <b>b</b></p><ul><li>c</li></ul></blockquote></div>";
-        assert_eq!(
-            convert_capped(html, MAX_DEPTH),
-            HtmlToMarkdown::new().convert(html).unwrap()
-        );
+    fn markup_up_to_the_cap_exports_as_if_uncapped() {
+        // The `li`s at MAX_DEPTH keep their structure, so the export is
+        // exactly the uncapped walk's.
+        let html = list_under(MAX_DEPTH - 4);
+        let md = to_markdown(&html).unwrap();
+        assert_eq!(md, convert_capped(&html, None));
+        assert!(md.contains("a\n*   b"), "{md}");
+        assert!(md.contains("x[^1]") && md.contains("[^1]: n"), "{md}");
+        // One level deeper the `li`s are past the cap and unwrap.
+        let md = to_markdown(&list_under(MAX_DEPTH - 3)).unwrap();
+        assert!(md.contains("a b"), "{md}");
+    }
+
+    #[test]
+    fn skipped_elements_stay_skipped_below_the_cap() {
+        // `nav` survives sanitization; the uncapped walk drops it whole, and
+        // so must the flattening when the cap lands on the div around it.
+        let html = "<div><nav><p>menu</p></nav>body<svg><text>shape</text></svg></div>";
+        assert_eq!(convert_capped(html, None), "body");
+        assert_eq!(convert_capped(html, Some(3)), "body");
+    }
+
+    #[test]
+    fn an_inline_element_at_the_cap_keeps_its_outer_word_boundaries() {
+        // `html` 1, `body` 2, the div 3, the `em` 4: the blockquote inside
+        // the `em` is a boundary on both sides, even once unwrapped.
+        let html = "<div>alpha<em><blockquote>beta</blockquote></em>gamma</div>";
+        assert_eq!(convert_capped(html, Some(4)), "alpha *beta* gamma");
     }
 
     #[test]
@@ -571,7 +670,7 @@ mod tests {
             "<div><div><p>one</p><p>two <b>bo</b>ld</p></div>\
              <ul><li>three</li><li>four<br>five</li></ul>\
              <img src=\"https://e.com/i.png\" alt=\"pic\"><!-- note --></div>",
-            3,
+            Some(3),
         );
         // Blocks are word boundaries; inline elements are not; childless
         // elements (`br`, `img`) survive the unwrapping.
@@ -579,6 +678,28 @@ mod tests {
             md,
             "one two bold three four  \nfive ![pic](https://e.com/i.png)"
         );
+    }
+
+    #[test]
+    fn a_list_at_the_cap_keeps_its_run_as_one_item() {
+        // htmd joins an `ol`'s children without a separator, so a bare run
+        // straight in it would lose every space between its pieces.
+        let html = "<ol><li>one</li><li>two <b>bo</b>ld<div>three</div></li></ol>";
+        assert_eq!(convert_capped(html, Some(3)), "1.  one two bold three");
+        let html = "<ul><li>one</li><li>two</li></ul>";
+        assert_eq!(convert_capped(html, Some(3)), "*   one two");
+        // A list whose run is all skipped content keeps no empty item.
+        assert_eq!(
+            convert_capped("<p>a</p><ol><li><nav>menu</nav></li></ol>", Some(3)),
+            "a"
+        );
+    }
+
+    #[test]
+    fn a_table_at_the_cap_keeps_its_run_as_one_cell() {
+        // A table of bare text would run into what follows it.
+        let html = "<div><table><tr><td>one<div>two</div></td></tr></table>three</div>";
+        assert_eq!(convert_capped(html, Some(4)), "one two\n\nthree");
     }
 
     #[test]

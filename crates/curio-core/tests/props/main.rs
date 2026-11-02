@@ -7,7 +7,7 @@
 //! | `sanitize` | `content::sanitize` | output passes the inertness audit; idempotent |
 //! | `extract` | `content::extract_main_content` | stays inert; never invents text |
 //! | `plain_text` | `content::plain_text` | escaped text round-trips whitespace-normalized |
-//! | `markdown` | `content::process` → `content::to_markdown` | always converts; exported markdown is inert |
+//! | `markdown` | `content::process` → `content::to_markdown` | always converts; exported markdown is inert; any nesting depth exports, text intact |
 //! | `opml` | `feeds::import_opml` / `export_opml` | never panics; export → import is lossless |
 //! | `import_csv` | `import::parse` | never panics; generated Pocket exports round-trip |
 //! | `url_screen` | `fetch::screen_url`, `fetch::policy::is_public_address` | only http(s) with a host and no userinfo passes; every IPv4-embedding IPv6 form is judged like its IPv4 |

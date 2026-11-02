@@ -3,9 +3,10 @@
 //! Each `fixtures/db/vX.Y.Z.db` was produced by that release tag's own
 //! storage code (generator: `fixtures/db/generate.rs`), so these tests
 //! prove that today's build opens what users actually have on disk:
-//! the pre-migration backup is written, every row survives, the FTS index
-//! still matches its content table, and the intents the old build staged
-//! (but never emitted) still decode and replay into the event log.
+//! the pre-migration backup is written (when there is anything to
+//! migrate), every row survives, the FTS index still matches its content
+//! table, and the intents the old build staged (but never emitted) still
+//! decode and replay into the event log.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -83,16 +84,29 @@ fn assert_upgrades(version: &str, written_at_schema: i64) {
         "{version}: upgraded to the current schema"
     );
 
-    // The backup holds the release's database exactly as it was.
+    // The backup holds the release's database exactly as it was. A
+    // release already at today's schema has nothing to migrate, so it is
+    // opened in place with no backup — until the next migration lands,
+    // when the same fixture becomes an upgrade case and the backup check
+    // applies to it too.
+    assert!(
+        written_at_schema <= Storage::schema_version(),
+        "{version}: fixture schema {written_at_schema} is newer than this build's"
+    );
+    let migrated = written_at_schema < Storage::schema_version();
     let backup = dir
         .path()
         .join(format!("curio.db.pre-v{}.bak", Storage::schema_version()));
-    assert_eq!(
-        user_version(&backup),
-        written_at_schema,
-        "{version}: backup"
-    );
-    assert_eq!(raw_counts(&backup), EXPECTED, "{version}: backup contents");
+    if migrated {
+        assert_eq!(
+            user_version(&backup),
+            written_at_schema,
+            "{version}: backup"
+        );
+        assert_eq!(raw_counts(&backup), EXPECTED, "{version}: backup contents");
+    } else {
+        assert!(!backup.exists(), "{version}: no backup without a migration");
+    }
 
     // Integrity: page-level and the FTS external-content mapping.
     storage.integrity_check().unwrap();
@@ -140,7 +154,11 @@ fn assert_upgrades(version: &str, written_at_schema: i64) {
                 .ends_with(".bak")
         })
         .count();
-    assert_eq!(backups, 1, "{version}: exactly one backup");
+    assert_eq!(
+        backups,
+        usize::from(migrated),
+        "{version}: one backup per migration, none on re-open"
+    );
 }
 
 /// The whole engine boots on the release's profile and replays the
@@ -186,4 +204,13 @@ fn upgrades_a_v0_3_0_database() {
 fn upgrades_a_v0_4_0_database() {
     assert_upgrades("v0.4.0", 6);
     assert_engine_replays("v0.4.0");
+}
+
+/// v0.6.0 (v0.5.0 was never released) shipped schema 10, today's: it opens
+/// in place with no backup, and becomes an upgrade case with the next
+/// migration.
+#[test]
+fn opens_a_v0_6_0_database() {
+    assert_upgrades("v0.6.0", 10);
+    assert_engine_replays("v0.6.0");
 }

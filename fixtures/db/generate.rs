@@ -12,16 +12,20 @@
 //! CURIO_FIXTURE_OUT=$PWD/vX.Y.Z.db cargo test -p curio-core --test mkfixture -- --ignored
 //! ```
 //!
-//! The data set is identical across tags (the storage API it uses has been
-//! stable since v0.1.0), so the upgrade test in
+//! The data set is identical across tags, so the upgrade test in
 //! `crates/curio-core/tests/migration_fixtures.rs` asserts one set of
 //! expected counts against every fixture. Keep [`EXPECTED`] there in sync
 //! with what this writes.
+//!
+//! The storage API it uses was stable from v0.1.0 to v0.4.0; v0.6.0 added
+//! `FetchRecord::error_kind` (migration 0009). For a tag before v0.6.0,
+//! delete the `error_kind` line (and its `FetchErrorKind` import) in the
+//! scratch copy.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use curio_core::model::{
-    ArticleContent, FeedStatus, FetchRecord, FetchStatus, NewArticle, NewFeed,
+    ArticleContent, FeedStatus, FetchErrorKind, FetchRecord, FetchStatus, NewArticle, NewFeed,
 };
 use curio_core::storage::{ListArticles, Storage};
 use curio_types::Timestamp;
@@ -107,6 +111,8 @@ fn write_fixture_db() {
                     status,
                     http_status: http,
                     error: (status == FetchStatus::Error).then(|| "upstream 503".to_owned()),
+                    // v0.6.0+ only (see the module docs).
+                    error_kind: (status == FetchStatus::Error).then_some(FetchErrorKind::Http),
                     articles_new,
                     duration_ms: Some(42),
                 })

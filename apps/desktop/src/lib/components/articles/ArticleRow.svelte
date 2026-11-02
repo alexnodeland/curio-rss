@@ -94,6 +94,7 @@ import ArticleThumb from '$components/common/ArticleThumb.svelte';
 import Icon from '$components/common/Icon.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
 import { t } from '$lib/i18n';
+import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { listDateLabel } from '$lib/utils/article';
 import { highlightSegments } from '$lib/utils/highlight';
@@ -137,8 +138,9 @@ function feedTitle(): string | null {
     return feed.title ?? feed.url;
 }
 
-/** The row's date — publication, or a labelled first-seen stand-in. */
-const date = $derived(listDateLabel(article));
+/** The row's date — publication, or a labelled first-seen stand-in — scaled
+ *  to its age against the day clock, so it moves on when the day turns. */
+const date = $derived(listDateLabel(article, dayClock.now));
 
 </script>
 

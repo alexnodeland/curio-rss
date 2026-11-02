@@ -6,10 +6,12 @@
  */
 import ArticleRow, { buildArticleMenu } from '$components/articles/ArticleRow.svelte';
 import type { ArticleSummaryDto } from '$lib/bindings';
+import { DAY_CHECK_INTERVAL_MS } from '$lib/state/clock';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { resetQueryCache } from '$lib/state/query-cache.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     type IpcHarness,
@@ -97,7 +99,7 @@ describe('ArticleRow — link-less and date-less feed entries', () => {
             articleSummaryFixture({ published_at: null, saved_at: '2026-07-02T12:00:00.000Z' }),
         );
         const date = row.querySelector('.row-meta [data-first-seen]');
-        expect(date?.textContent).toMatch(/^First seen July 2/);
+        expect(date?.textContent).toMatch(/^First seen: July 2/);
     });
 
     it('a dated entry shows its publication date, unmarked', async () => {
@@ -153,7 +155,7 @@ describe('ArticleRow — date and title polish', () => {
         expect(row.querySelector('.row-meta')?.textContent).toContain('yesterday');
     });
 
-    it('a date-less entry first seen today reads "First seen <time>"', async () => {
+    it('a date-less entry first seen today reads "First seen: <time>"', async () => {
         pinNow(new Date(2026, 9, 31, 18, 30));
         installed = harness();
         const row = await renderRow(
@@ -163,7 +165,37 @@ describe('ArticleRow — date and title polish', () => {
             }),
         );
         const date = row.querySelector('.row-meta [data-first-seen]');
-        expect(date?.textContent).toMatch(/^First seen 2:00\sPM$/);
+        expect(date?.textContent).toMatch(/^First seen: 2:00\sPM$/);
+    });
+
+    it('a row that stays mounted across midnight moves on to "yesterday"', async () => {
+        // Date and the day clock's interval are faked; the IPC harness's
+        // timeouts stay real.
+        vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+        vi.setSystemTime(new Date(2026, 9, 31, 23, 59, 30));
+        installed = harness();
+        const row = await renderRow(
+            articleSummaryFixture({ published_at: new Date(2026, 9, 31, 21, 5).toISOString() }),
+        );
+        const meta = (): string => row.querySelector('.row-meta')?.textContent ?? '';
+        expect(meta()).toMatch(/9:05\sPM/);
+        expect(vi.getTimerCount()).toBe(1);
+
+        // A tick inside the same day changes nothing.
+        vi.advanceTimersByTime(DAY_CHECK_INTERVAL_MS / 4);
+        await tick();
+        expect(meta()).toMatch(/9:05\sPM/);
+
+        // The first check after midnight re-labels the mounted row.
+        vi.advanceTimersByTime(DAY_CHECK_INTERVAL_MS);
+        await tick();
+        expect(meta()).toContain('yesterday');
+        expect(meta()).not.toMatch(/9:05\sPM/);
+
+        // Unmounting the last reader stops the clock.
+        cleanup();
+        await Promise.resolve();
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('a comfortable row lets the title wrap; a compact row keeps it to one line', async () => {

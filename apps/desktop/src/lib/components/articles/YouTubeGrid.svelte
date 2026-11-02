@@ -14,6 +14,7 @@ import Icon from '$components/common/Icon.svelte';
 import VideoPoster from '$components/common/VideoPoster.svelte';
 import { youTubeVideoId } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
@@ -59,7 +60,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     {:else}
         <div class="grid" role="listbox" aria-label={t('list.label')}>
             {#each list.items as article (article.id)}
-                {@const date = listDateLabel(article)}
+                {@const date = listDateLabel(article, dayClock.now)}
                 <button
                     class="card"
                     class:selected={article.id === selectionStore.selectedArticleId}

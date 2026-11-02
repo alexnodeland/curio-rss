@@ -593,7 +593,7 @@ describe('ReaderPane — link-less and date-less feed entries', () => {
         expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
         expect(container.querySelector('.body-skeleton')).not.toBeNull();
         const date = container.querySelector('.reader-meta [data-first-seen]');
-        expect(date?.textContent).toMatch(/^First seen .*2026/);
+        expect(date?.textContent).toMatch(/^First seen: .*2026/);
         // Assistive tech gets the hint the pointer tooltip shows.
         expect(date?.querySelector('.sr-only')?.textContent).toContain(
             'The feed gave no publication date',
@@ -621,7 +621,7 @@ describe('ReaderPane — link-less and date-less feed entries', () => {
         await flushIpc();
 
         const date = container.querySelector('.reader-meta [data-first-seen]');
-        expect(date?.textContent).toMatch(/^First seen .*2026/);
+        expect(date?.textContent).toMatch(/^First seen: .*2026/);
     });
 
     it('a dated entry shows its publication date, unmarked', async () => {

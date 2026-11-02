@@ -97,7 +97,7 @@ describe('listDateLabel', () => {
         });
         const label = listDateLabel(article);
         expect(label?.firstSeen).toBe(true);
-        expect(label?.text).toMatch(/^First seen July 2/);
+        expect(label?.text).toMatch(/^First seen: July 2/);
     });
 
     it('is null for an unparseable timestamp, so no date renders', () => {

@@ -124,7 +124,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'reader.action.focusMode': '专注模式',
     'reader.action.exitFocusMode': '退出专注模式',
     'reader.meta.words': '{count, plural, other {# 字}}',
-    'article.date.firstSeen': '首次发现于 {date}',
+    'article.date.firstSeen': '首次发现：{date}',
     'article.date.firstSeenHint': '该订阅源未提供发布日期',
     'reddit.postedBy': '由 u/{author} 发布',
     'reader.youtube.play': '播放 {title}',

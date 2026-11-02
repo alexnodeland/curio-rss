@@ -75,8 +75,8 @@ describe.each([
         const container = await renderLayout(layout);
         const marked = container.querySelectorAll('[data-first-seen]');
         expect(marked).toHaveLength(1);
-        expect(marked[0]?.textContent).toMatch(/^First seen July 2/);
-        expect(cardText(container, 'Date-less post')).toContain('First seen July 2');
+        expect(marked[0]?.textContent).toMatch(/^First seen: July 2/);
+        expect(cardText(container, 'Date-less post')).toContain('First seen: July 2');
     });
 
     it('shows a dated entry’s publication date, unmarked', async () => {

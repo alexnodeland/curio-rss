@@ -24,7 +24,7 @@ import {
     type FeedDto,
     commands,
 } from '$lib/bindings';
-import { type MessageKey, formatIntlDateTime, t } from '$lib/i18n';
+import { type MessageKey, formatIntlDateTime, formatIntlNumber, t } from '$lib/i18n';
 import { advertisedKeys, keyLabel, shortcutKbd } from '$lib/keyboard/labels';
 import { type ShortcutId, eventKeyName, paneShortcut } from '$lib/keyboard/registry';
 import {
@@ -35,6 +35,7 @@ import {
     openInBrowser,
     promoteSelected,
     registerReaderBody,
+    shareLink,
     toggleArchived,
     toggleRead,
     toggleReadLater,
@@ -45,6 +46,7 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
+import { SPEECH_RATES, readAloudStore } from '$lib/state/read-aloud.svelte';
 import { readingSession } from '$lib/state/reading-session';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
@@ -52,6 +54,8 @@ import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { PERMILLE_END, permilleAt, readMinutes, resumable, resumeScroll } from '$lib/utils/reading';
 import { articleDate, isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
+import { canShareLinks } from '$lib/utils/share';
+import { type SpokenSentence, collectSentences, speechLang } from '$lib/utils/speech';
 import EmptyState from '$components/common/EmptyState.svelte';
 import ErrorState from '$components/common/ErrorState.svelte';
 import Icon from '$components/common/Icon.svelte';
@@ -476,6 +480,87 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     event.preventDefault();
     void openInBrowser(current.id, current.source_url);
 }
+
+// ─── share sheet and read aloud (#153) ───────────────────────────────────────
+
+/** Whether the webview has an OS share sheet (WKWebView, WebView2). */
+const canShare = canShareLinks();
+
+/** Whether the article on screen is being read aloud (playing or paused). */
+const readingAloud = $derived(readAloudStore.isReading(selectedId));
+
+const readAloudLabel = $derived(
+    readingAloud ? t('reader.action.stopReadAloud') : t('reader.action.readAloud'),
+);
+
+/** The body's markup — a string, so a refetch that changes nothing is no change. */
+const bodyHtml = $derived(articleQuery?.data?.content_html ?? null);
+
+// A read belongs to one rendered body: it ends as the selection moves on, or
+// as the body re-renders (a full-article load), which leaves its sentence
+// ranges pointing at nodes that are gone.
+$effect(() => {
+    const articleId = selectedId;
+    void bodyHtml;
+    return () => {
+        if (readAloudStore.articleId === articleId) {
+            readAloudStore.stop();
+        }
+    };
+});
+
+onDestroy(() => readAloudStore.stop());
+
+/**
+ * Starts reading the article on screen aloud — its title, then the sanitized
+ * body as rendered — or stops the read in progress.
+ */
+function toggleReadAloud(): void {
+    if (readingAloud) {
+        readAloudStore.stop();
+        return;
+    }
+    const body = scrollBody;
+    const current = article();
+    const articleId = selectedId;
+    if (body === null || current === null || articleId === null) {
+        return;
+    }
+    const roots = [...body.querySelectorAll('.reader-title, .reader-body .sanitized-content')];
+    const lang = speechLang(current.lang);
+    readAloudStore.start(articleId, collectSentences(roots, lang), {
+        lang,
+        onSentence: followSentence,
+    });
+}
+
+/**
+ * Keeps the spoken sentence on screen (a third of the way down when it has
+ * to move), and counts listening as reading for the dwell's idle cap.
+ */
+function followSentence(sentence: SpokenSentence): void {
+    readingSession.touch();
+    const body = scrollBody;
+    if (body === null || typeof sentence.range.getBoundingClientRect !== 'function') {
+        return;
+    }
+    const rect = sentence.range.getBoundingClientRect();
+    const view = body.getBoundingClientRect();
+    if (rect.top >= view.top && rect.bottom <= view.bottom) {
+        return;
+    }
+    // The body's own scroll-behavior glides this, or jumps under reduced motion.
+    body.scrollTo({ top: body.scrollTop + rect.top - view.top - view.height / 3 });
+}
+
+/** A speed as the menu shows it: "1.25×", in the active locale's digits. */
+function rateLabel(rate: number): string {
+    return `${formatIntlNumber(rate)}×`;
+}
+
+function onRateChange(event: Event & { currentTarget: HTMLSelectElement }): void {
+    readAloudStore.setRate(Number(event.currentTarget.value));
+}
 </script>
 
 <svelte:window
@@ -486,7 +571,10 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     onpointerdown={onReaderInput}
     onpointermove={onReaderInput}
     onwheel={onReaderInput}
-    onpagehide={() => readingSession.end()}
+    onpagehide={() => {
+        readingSession.end();
+        readAloudStore.stop();
+    }}
 />
 <svelte:document onvisibilitychange={onVisibilityChange} />
 
@@ -681,6 +769,19 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                         </div>
                     {/if}
                 </div>
+                {#if readAloudStore.supported}
+                    <button
+                        class="tool"
+                        class:on={readingAloud}
+                        aria-pressed={readingAloud}
+                        disabled={current === null}
+                        aria-label={readAloudLabel}
+                        use:tooltip={readAloudLabel}
+                        onclick={toggleReadAloud}
+                    >
+                        <Icon name="speaker" />
+                    </button>
+                {/if}
                 <!-- A link-less entry has no page of its own: no load-full or
                      open-in-browser. Unknown until the row is in hand, so the
                      buttons stay (disabled) while the header is loading. -->
@@ -721,6 +822,21 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     >
                         <Icon name="link" />
                     </button>
+                    {#if canShare}
+                        <button
+                            class="tool"
+                            disabled={header === null}
+                            aria-label={t('reader.action.share')}
+                            use:tooltip={t('reader.action.share')}
+                            onclick={() => {
+                                if (header !== null) {
+                                    void shareLink(header.source_url, header.title);
+                                }
+                            }}
+                        >
+                            <Icon name="share" />
+                        </button>
+                    {/if}
                 {/if}
                 {#if barPermille() !== null}
                     <!-- How far through the article: decorative (the scroll
@@ -733,6 +849,48 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     </span>
                 {/if}
             </div>
+            {#if readingAloud}
+                <!-- The read's controls, while one is in progress: play/pause,
+                     where it is, the speed, and stop. The spoken sentence is
+                     highlighted in the body below. -->
+                <div class="read-aloud-bar" role="toolbar" aria-label={t('reader.action.readAloud')}>
+                    <button
+                        class="bar-tool"
+                        aria-label={readAloudStore.status === 'playing'
+                            ? t('reader.readAloud.pause')
+                            : t('reader.readAloud.resume')}
+                        use:tooltip={readAloudStore.status === 'playing'
+                            ? t('reader.readAloud.pause')
+                            : t('reader.readAloud.resume')}
+                        onclick={() => readAloudStore.toggle()}
+                    >
+                        <Icon name={readAloudStore.status === 'playing' ? 'pause' : 'play'} size={16} />
+                    </button>
+                    <span class="read-aloud-position">
+                        {t('reader.readAloud.position', {
+                            current: readAloudStore.index + 1,
+                            total: readAloudStore.total,
+                        })}
+                    </span>
+                    <span class="toolbar-spring"></span>
+                    <label class="read-aloud-speed">
+                        <span>{t('reader.readAloud.speed')}</span>
+                        <select value={String(readAloudStore.rate)} onchange={onRateChange}>
+                            {#each SPEECH_RATES as rate (rate)}
+                                <option value={String(rate)}>{rateLabel(rate)}</option>
+                            {/each}
+                        </select>
+                    </label>
+                    <button
+                        class="bar-tool"
+                        aria-label={t('reader.action.stopReadAloud')}
+                        use:tooltip={t('reader.action.stopReadAloud')}
+                        onclick={() => readAloudStore.stop()}
+                    >
+                        <Icon name="stop" size={16} />
+                    </button>
+                </div>
+            {/if}
             {#if current !== null && failure() !== null}
                 <!-- Stale-while-revalidate: a refetch failed but the article is
                      still in hand — keep showing it under a non-destructive
@@ -1045,6 +1203,79 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
        the accent blue the other toggles use. */
     .tool.star.on {
         color: var(--warning-text);
+    }
+
+    /* The read-aloud controls: a quiet strip under the toolbar while a read
+       is in progress. */
+    .read-aloud-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-4);
+        border-bottom: 1px solid var(--hairline);
+        background: color-mix(in srgb, var(--surface-app), var(--surface-chrome) 25%);
+        font-size: var(--text-sm);
+        color: var(--fg-muted);
+    }
+
+    /* As wide as a toolbar button, so the bar's ends line up under the
+       toolbar's; shorter, so the strip stays slim. */
+    .bar-tool {
+        display: inline-grid;
+        place-items: center;
+        width: 34px;
+        height: 28px;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid transparent;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .bar-tool:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .read-aloud-position {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .read-aloud-speed {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        white-space: nowrap;
+    }
+
+    .read-aloud-speed select {
+        padding: 2px calc(var(--space-3) + 1em) 2px var(--space-2);
+        border-radius: var(--radius-md);
+        background-color: var(--surface-inset);
+        color: var(--fg);
+        border: 1px solid var(--hairline);
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* The sentence being read: the search-match tint, over the text itself
+       (a CSS Custom Highlight — the markup is untouched). Where the engine
+       has no highlight registry, its paragraph carries the tint instead. */
+    :global(::highlight(curio-read-aloud)) {
+        background-color: color-mix(in srgb, var(--accent), transparent 72%);
+        color: inherit;
+    }
+
+    .reader-body :global([data-speaking]) {
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--accent), transparent 85%);
+        box-shadow: 0 0 0 var(--space-1) color-mix(in srgb, var(--accent), transparent 85%);
     }
 
     .typography-anchor {

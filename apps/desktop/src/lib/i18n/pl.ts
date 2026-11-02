@@ -162,6 +162,13 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.action.focusMode': 'Tryb skupienia',
     'reader.action.exitFocusMode': 'Wyjdź z trybu skupienia',
     'reader.action.copyLink': 'Kopiuj link',
+    'reader.action.share': 'Udostępnij…',
+    'reader.action.readAloud': 'Czytaj na głos',
+    'reader.action.stopReadAloud': 'Zatrzymaj czytanie na głos',
+    'reader.readAloud.pause': 'Wstrzymaj',
+    'reader.readAloud.resume': 'Wznów',
+    'reader.readAloud.speed': 'Tempo',
+    'reader.readAloud.position': 'Zdanie {current} z {total}',
     'reader.meta.words':
         '{count, plural, one {# słowo} few {# słowa} many {# słów} other {# słowa}}',
     'reader.meta.minutes':
@@ -249,6 +256,9 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'toast.promote.saved': 'Zapisano w {name}',
     'toast.linkCopied': 'Skopiowano link',
     'toast.linkCopyFailed': 'Nie udało się skopiować linku',
+    'toast.shareFailed': 'Nie udało się otworzyć menu udostępniania',
+    'toast.readAloudFailed': 'Nie udało się przeczytać artykułu na głos',
+    'toast.readAloudEmpty': 'Ten artykuł nie zawiera tekstu do przeczytania na głos',
     'toast.promote.unchanged': 'Już aktualne w {name}',
     'toast.markAllRead':
         '{count, plural, one {Oznaczono # jako przeczytany} few {Oznaczono # jako przeczytane} many {Oznaczono # jako przeczytane} other {Oznaczono # jako przeczytane}}',

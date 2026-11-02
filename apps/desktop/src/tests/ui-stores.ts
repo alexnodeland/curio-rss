@@ -1,6 +1,6 @@
 /**
  * Test isolation for the UI chrome stores (theme, typography, layout, toasts,
- * prefs): calls every singleton's `reset()` in one go, for component suites
+ * prefs, read aloud): calls every singleton's `reset()` in one go, for component suites
  * that touch several of them.
  *
  * Each `reset()` restores only the fields it lists (carried over unchanged
@@ -11,6 +11,7 @@
  */
 import { layoutStore } from '$lib/state/layout.svelte';
 import { prefsStore } from '$lib/state/prefs.svelte';
+import { readAloudStore } from '$lib/state/read-aloud.svelte';
 import { themeStore } from '$lib/state/theme.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
@@ -21,4 +22,5 @@ export function resetUiStores(): void {
     prefsStore.reset();
     themeStore.reset();
     typographyStore.reset();
+    readAloudStore.reset();
 }

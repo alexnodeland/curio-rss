@@ -268,4 +268,29 @@ describe('ArticleRow — reading aids (#153)', () => {
         );
         expect(linkless.some((item) => item.id === 'copyLink')).toBe(false);
     });
+
+    it('the context menu offers Share only where the webview has a share sheet', async () => {
+        installed = withState({});
+        const article = articleSummaryFixture({ feed_id: 1, title: 'Shared' });
+        await renderRow(article); // loads the feeds the link-less check reads
+        expect(buildArticleMenu(article, undefined).some((item) => item.id === 'share')).toBe(
+            false,
+        );
+
+        const share = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'share', { value: share, configurable: true });
+        try {
+            const item = buildArticleMenu(article, undefined).find((entry) => entry.id === 'share');
+            expect(item?.labelKey).toBe('reader.action.share');
+            item?.onSelect?.();
+            expect(share).toHaveBeenCalledWith({ url: article.source_url, title: 'Shared' });
+            const linkless = buildArticleMenu(
+                articleSummaryFixture({ feed_id: 1, source_url: FEED_URL }),
+                undefined,
+            );
+            expect(linkless.some((entry) => entry.id === 'share')).toBe(false);
+        } finally {
+            Reflect.deleteProperty(navigator, 'share');
+        }
+    });
 });

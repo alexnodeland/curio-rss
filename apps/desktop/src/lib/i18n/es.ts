@@ -160,6 +160,13 @@ export const es: Partial<Record<MessageKey, string>> = {
     'reader.action.focusMode': 'Modo concentración',
     'reader.action.exitFocusMode': 'Salir del modo concentración',
     'reader.action.copyLink': 'Copiar enlace',
+    'reader.action.share': 'Compartir…',
+    'reader.action.readAloud': 'Leer en voz alta',
+    'reader.action.stopReadAloud': 'Dejar de leer en voz alta',
+    'reader.readAloud.pause': 'Pausa',
+    'reader.readAloud.resume': 'Reanudar',
+    'reader.readAloud.speed': 'Velocidad',
+    'reader.readAloud.position': 'Frase {current} de {total}',
     'reader.meta.words': '{count, plural, one {# palabra} other {# palabras}}',
     'reader.meta.minutes':
         '{count, plural, one {# minuto de lectura} other {# minutos de lectura}}',
@@ -244,6 +251,9 @@ export const es: Partial<Record<MessageKey, string>> = {
     'toast.promote.saved': 'Guardado en {name}',
     'toast.linkCopied': 'Enlace copiado',
     'toast.linkCopyFailed': 'No se pudo copiar el enlace',
+    'toast.shareFailed': 'No se pudo abrir el menú de compartir',
+    'toast.readAloudFailed': 'No se pudo leer el artículo en voz alta',
+    'toast.readAloudEmpty': 'Este artículo no tiene texto para leer en voz alta',
     'toast.promote.unchanged': 'Ya está actualizado en {name}',
     'toast.markAllRead':
         '{count, plural, one {# marcado como leído} other {# marcados como leídos}}',

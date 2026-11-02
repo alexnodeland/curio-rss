@@ -107,6 +107,86 @@ impl Default for ListArticles {
     }
 }
 
+impl ListArticles {
+    /// The filter dimensions of this listing (everything but the cursor).
+    fn filter(&self) -> ArticleFilter {
+        ArticleFilter {
+            feed_id: self.feed_id,
+            read: self.read,
+            starred: self.starred,
+            read_later: self.read_later,
+            archived: self.archived,
+            tag: self.tag.clone(),
+            feed_tag: self.feed_tag.clone(),
+        }
+    }
+}
+
+/// The article filter dimensions shared by listing and search — the same
+/// semantics as the matching [`ListArticles`] fields. `Default` is no
+/// filter at all (every article, archived included).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArticleFilter {
+    /// Restrict to one feed.
+    pub feed_id: Option<FeedId>,
+    /// Keep only (un)read articles.
+    pub read: Option<bool>,
+    /// Keep only (un)starred articles.
+    pub starred: Option<bool>,
+    /// Keep only articles (not) in the read-later queue.
+    pub read_later: Option<bool>,
+    /// Keep only (un)archived articles.
+    pub archived: Option<bool>,
+    /// Keep only articles carrying this tag.
+    pub tag: Option<String>,
+    /// Keep only articles whose feed sits in this folder (see
+    /// [`ListArticles::feed_tag`]).
+    pub feed_tag: Option<String>,
+}
+
+/// Full-text search parameters: a query in Curio's small search syntax,
+/// scoped by the same filters as a listing.
+///
+/// The query syntax (compiled to an escaped FTS5 expression — user input
+/// never reaches `MATCH` raw, so no input is a syntax error):
+///
+/// - `word` — matches the word; the **last** bare word also matches as a
+///   prefix (`prog` finds `programming`), so search-as-you-type hits while
+///   a word is still being typed. A trailing `*` asks for a prefix on any
+///   word (`sql* rust`).
+/// - `"two words"` — an exact phrase; an unterminated quote runs to the end.
+/// - `-word` / `-"a phrase"` — excludes articles containing it. A query of
+///   exclusions alone matches nothing (FTS has no "everything" to subtract
+///   from).
+/// - `a OR b` — either (upper-case `OR` only; `or` is a plain word). `OR`
+///   binds tighter than the implicit AND: `rust OR go tutorial` is
+///   `(rust OR go) AND tutorial`.
+///
+/// Every other FTS5 operator (`AND`, `NOT`, `NEAR`, `^`, `title:` …) is
+/// matched literally. Results rank by BM25 with a title hit weighted above
+/// a body hit; ties fall back to the newest row first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchArticles {
+    /// The user's query text.
+    pub query: String,
+    /// The scope the search runs in.
+    pub filter: ArticleFilter,
+    /// Maximum number of hits.
+    pub limit: u32,
+}
+
+impl SearchArticles {
+    /// An unscoped search for `query` (every article, archived included).
+    #[must_use]
+    pub fn new(query: impl Into<String>, limit: u32) -> Self {
+        Self {
+            query: query.into(),
+            filter: ArticleFilter::default(),
+            limit,
+        }
+    }
+}
+
 /// The scheduling state a settled fetch leaves on its feed, written in the
 /// same transaction as the attempt's `fetch_log` row (see
 /// [`Storage::settle_fetch`](super::Storage::settle_fetch)).

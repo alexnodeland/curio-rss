@@ -12,7 +12,7 @@ use crate::fetch::{FetchKind, FetchRequest};
 use crate::model::{
     Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, NewArticle,
 };
-use crate::storage::ListArticles;
+use crate::storage::{ListArticles, SearchArticles};
 
 use super::refresh::is_feed_own_url;
 use super::sweep::{RefreshCancel, until_cancelled};
@@ -475,13 +475,24 @@ impl CoreHandle {
         }
     }
 
-    /// Full-text search (escaped FTS5 — user input is never raw MATCH).
+    /// Unscoped full-text search (escaped FTS5 — user input is never raw
+    /// MATCH); shorthand for [`search`](Self::search) with no filter.
     ///
     /// # Errors
     ///
     /// Storage errors.
     pub fn search_articles(&self, query: &str, limit: u32) -> Result<Vec<Article>, CoreError> {
         Ok(self.storage.search_articles(query, limit)?)
+    }
+
+    /// Full-text search scoped by a filter, title hits ranked first (see
+    /// [`SearchArticles`] for the query syntax).
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn search(&self, params: SearchArticles) -> Result<Vec<Article>, CoreError> {
+        Ok(self.storage.search(params)?)
     }
 
     /// How many articles are stored in total.

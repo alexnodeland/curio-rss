@@ -29,7 +29,10 @@ pub use netfs::{
 };
 pub use open::OpenError;
 pub(crate) use repo::SettingsTx;
-pub use repo::{FETCH_LOG_KEEP, FeedSchedule, ListArticles, PendingIntent, UpsertOutcome};
+pub use repo::{
+    ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, PendingIntent, SearchArticles,
+    UpsertOutcome,
+};
 pub(crate) use writer::panic_message;
 
 use pool::ReadPool;

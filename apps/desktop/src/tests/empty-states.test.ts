@@ -164,6 +164,7 @@ describe('shouldWelcome', () => {
         feedCount: 0,
         filters: ALL_ARTICLES,
         listLoaded: true,
+        listFailed: false,
         listCount: 0,
         searching: false,
     };
@@ -177,6 +178,7 @@ describe('shouldWelcome', () => {
         ['feeds failed to load', { feedsFailed: true }],
         ['a subscription exists', { feedCount: 1 }],
         ['the list is still loading', { listLoaded: false }],
+        ['the list failed to load', { listFailed: true }],
         ['imported saves exist', { listCount: 3 }],
         ['a search is active', { searching: true }],
         ['another view is open', { filters: { ...ALL_ARTICLES, starred: true } }],

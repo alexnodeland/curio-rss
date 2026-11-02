@@ -230,6 +230,9 @@ export class LayoutStore {
     }
 
     openModal(modal: ModalKind): void {
+        // A preset's pre-fill belongs to the opening that carried it: switching
+        // straight to another modal (or reopening Add Feed by hand) starts clean.
+        this.addFeedSeed = null;
         this.activeModal = modal;
     }
 
@@ -241,6 +244,7 @@ export class LayoutStore {
 
     /** Opens the edit-feed modal bound to one feed, optionally scrolled to a section. */
     openEditFeed(feedId: number, section: EditFeedSection = 'details'): void {
+        this.addFeedSeed = null;
         this.editFeedId = feedId;
         this.editFeedSection = section;
         this.activeModal = 'edit-feed';

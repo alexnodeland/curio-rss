@@ -19,6 +19,22 @@ describe('layout store — chrome', () => {
         expect(ui.activeModal).toBeNull();
     });
 
+    it("a preset's add-feed pre-fill does not outlive a switch to another modal", () => {
+        const ui = new LayoutStore();
+        ui.openAddFeed({ url: 'https://hnrss.org/frontpage', tags: 'Community/Hacker News' });
+        expect(ui.addFeedSeed).not.toBeNull();
+        // Switched straight to settings (a toast action, a menu shortcut)…
+        ui.openModal('settings');
+        expect(ui.addFeedSeed).toBeNull();
+        // …and Add Feed reopened by hand starts clean.
+        ui.openModal('add-feed');
+        expect(ui.addFeedSeed).toBeNull();
+
+        ui.openAddFeed({ url: 'r/', tags: '' });
+        ui.openEditFeed(7, 'health');
+        expect(ui.addFeedSeed).toBeNull();
+    });
+
     it('sidebar toggles', async () => {
         const harness = installIpcHarness({ set_setting: null });
         const ui = new LayoutStore();

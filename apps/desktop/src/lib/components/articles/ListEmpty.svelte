@@ -36,13 +36,17 @@ const hintParts = $derived(empty.hint === null ? null : splitAtKey(empty.hint));
 const hintKey = $derived(empty.hintKey === null ? undefined : shortcutKbd(empty.hintKey));
 
 function run(action: ListEmptyAction): void {
-    const current = feed;
+    // The view's own feed id, not the looked-up feed: a feed that is not in
+    // the list yet (still loading) still refreshes from its empty state.
+    const feedId = articlesStore.filters.feedId;
     if (action === 'showRead') {
         articlesStore.toggleUnreadOnly();
+    } else if (feedId === null) {
+        return;
     } else if (action === 'feedHealth') {
-        if (current !== null) layoutStore.openEditFeed(current.id, 'health');
-    } else if (current !== null) {
-        refreshFeed(current.id);
+        layoutStore.openEditFeed(feedId, 'health');
+    } else {
+        refreshFeed(feedId);
     }
 }
 

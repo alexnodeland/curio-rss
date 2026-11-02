@@ -56,8 +56,9 @@ function state(
 
 /**
  * Whether a feed's last fetch failed in a way worth explaining. `busy` is not
- * a failure — another Curio process was refreshing it — and a paused or dead
- * feed already says so in the sidebar.
+ * a failure — another Curio process was refreshing it. The feed's status
+ * does not gate it: a paused or dead feed with a recorded failure explains
+ * that failure here too.
  */
 export function feedHasError(feed: FeedDto): boolean {
     return feed.last_error !== null && feed.last_error_kind !== 'busy';
@@ -186,6 +187,7 @@ export interface WelcomeInput {
     readonly feedCount: number;
     readonly filters: ArticleFilters;
     readonly listLoaded: boolean;
+    readonly listFailed: boolean;
     readonly listCount: number;
     readonly searching: boolean;
 }
@@ -194,8 +196,10 @@ export interface WelcomeInput {
  * Whether the welcome view replaces the list and reader: no subscriptions,
  * the plain All view, and that view settled empty. Waiting for the list (not
  * just the feeds) keeps a library of imported saves — articles with no feed
- * — on screen instead of hiding it behind onboarding; any other view (Starred,
- * Archived, unread-only, a search) keeps its own zero-state.
+ * — on screen instead of hiding it behind onboarding; a list that failed to
+ * load is not an empty one (its error state and Retry stay up, since the
+ * library behind it may well hold saves); any other view (Starred, Archived,
+ * unread-only, a search) keeps its own zero-state.
  */
 export function shouldWelcome(input: WelcomeInput): boolean {
     return (
@@ -205,6 +209,7 @@ export function shouldWelcome(input: WelcomeInput): boolean {
         !input.searching &&
         filterKey(input.filters) === filterKey(ALL_ARTICLES) &&
         input.listLoaded &&
+        !input.listFailed &&
         input.listCount === 0
     );
 }

@@ -234,4 +234,22 @@ describe('view-specific empty states', () => {
         expect(layoutStore.editFeedId).toBe(4);
         expect(layoutStore.editFeedSection).toBe('health');
     });
+
+    it("an empty feed's Refresh now works before the feed list has it", async () => {
+        harness = installIpcHarness({
+            list_articles: [],
+            // The selected feed is not in the list (still loading, or hidden
+            // during an unsubscribe's undo window).
+            list_feeds: [],
+            refresh_feed: { feed_id: 6, status: 'ok', articles_new: 0, error: null },
+        });
+        selectionStore.selectFeed(6);
+        const { getByText, getByRole } = render(ArticleList);
+        await flushIpc();
+
+        expect(getByText('No articles in this feed yet')).toBeTruthy();
+        await fireEvent.click(getByRole('button', { name: 'Refresh now' }));
+        await flushIpc();
+        expect(harness.callsFor('refresh_feed')).toEqual([{ feedId: 6 }]);
+    });
 });

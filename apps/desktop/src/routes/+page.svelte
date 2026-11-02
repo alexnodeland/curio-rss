@@ -52,6 +52,7 @@ const welcoming = $derived(
         feedCount: feedsStore.feeds.length,
         filters: articlesStore.filters,
         listLoaded: allList.loaded,
+        listFailed: allList.error !== null,
         listCount: allList.items.length,
         searching: searchStore.active,
     }),

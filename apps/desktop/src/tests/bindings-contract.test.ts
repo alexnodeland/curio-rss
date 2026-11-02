@@ -181,6 +181,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     startFreshProfile: { args: [], response: recoveryOutcomeFixture() },
     revealProfileFolder: { args: [], response: null },
     quitApp: { args: [], response: null },
+    windowChrome: { args: [], response: { overlay_title_bar: true, fullscreen: false } },
 };
 
 /** The wire name every wrapper must invoke: strict snake_case of its own. */

@@ -30,6 +30,7 @@
 //! converter and render-time sanitization are banned.
 
 mod code;
+mod depth;
 mod embeds;
 mod extract;
 mod footnotes;

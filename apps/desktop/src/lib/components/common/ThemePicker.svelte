@@ -11,7 +11,7 @@
  */
 import { commands } from '$lib/bindings';
 import { tooltip } from '$lib/actions/tooltip';
-import { t } from '$lib/i18n';
+import { displayName, formatIntlNumber, t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { type MenuItem, menuStore } from '$lib/state/menu.svelte';
 import {
@@ -29,10 +29,11 @@ import {
 } from '$lib/utils/theme-format';
 import { readComputedTokens } from '$lib/utils/theme-dom';
 
-const OPTIONS: readonly { id: ThemePreference; name: string }[] = [
+// Derived so a language switch relabels the swatches in place.
+const options: readonly { id: ThemePreference; name: string }[] = $derived([
     { id: 'system', name: t('theme.system') },
-    ...THEMES.map((theme) => ({ id: theme.id, name: theme.name })),
-];
+    ...THEMES.map((theme) => ({ id: theme.id, name: displayName(theme.name) })),
+]);
 
 function pick(id: ThemePreference): void {
     void themeStore.setThemePreference(id);
@@ -53,7 +54,7 @@ function activeThemeExport(): CustomTheme {
     const builtin = THEMES.find((theme) => theme.id === resolved);
     return {
         id: resolved,
-        name: builtin?.name ?? resolved,
+        name: builtin === undefined ? resolved : displayName(builtin.name),
         isDark: builtin?.isDark ?? true,
         tokens,
     };
@@ -130,7 +131,10 @@ async function importTheme(): Promise<void> {
         const failures = contrastFailures(theme);
         if (failures.length > 0) {
             const pairs = failures
-                .map((failure) => `--${failure.fg}/--${failure.bg} ${failure.ratio.toFixed(2)}`)
+                .map(
+                    (failure) =>
+                        `--${failure.fg}/--${failure.bg} ${formatIntlNumber(failure.ratio, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                )
                 .join(', ');
             toastStore.showToast(t('theme.contrastWarning', { pairs }), 'warning', 8000);
         }
@@ -155,7 +159,7 @@ function openCustomMenu(theme: CustomTheme, event: MouseEvent): void {
 </script>
 
 <div class="theme-grid" role="group" aria-label={t('settings.theme')}>
-    {#each OPTIONS as option (option.id)}
+    {#each options as option (option.id)}
         {@const active = themeStore.themePreference === option.id}
         <button
             class="swatch"

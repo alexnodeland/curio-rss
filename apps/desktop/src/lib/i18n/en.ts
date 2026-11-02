@@ -172,6 +172,13 @@ export const en = {
 
     'typography.title': 'Typography',
     'typography.font': 'Font',
+    'typography.font.sans': 'Sans',
+    'typography.font.serif': 'Serif',
+    'typography.font.mono': 'Mono',
+    'typography.font.humanist': 'Humanist',
+    'typography.font.grotesque': 'Grotesque',
+    'typography.font.readable': 'Readable',
+    'typography.pixels': '{value}px',
     'typography.size': 'Size',
     'typography.lineHeight': 'Line height',
     'typography.measure': 'Width',
@@ -375,6 +382,8 @@ export const en = {
     'settings.about.schema': 'Database schema v{version}',
 
     'theme.system': 'System',
+    'theme.name.light': 'Light',
+    'theme.name.dark': 'Dark',
     'theme.select': 'Use the {name} theme',
     'theme.active': 'Active theme: {name}',
     'theme.import': 'Import theme…',

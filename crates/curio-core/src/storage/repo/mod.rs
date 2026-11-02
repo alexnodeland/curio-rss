@@ -12,8 +12,9 @@
 //! `articles`, `state`, `tags`, `fetch_log`, `settings` and `intents`,
 //! plus `maintenance` (retention, housekeeping, index upkeep).
 //! `rows` holds the helpers they share (tag normalization, dedupe-key
-//! scoping, the FTS query builder, the raw-row parsers) and `listing` the
-//! list/search query compilers and the list-row parser. This
+//! scoping, the raw-row parsers), `listing` the list/search query
+//! compilers and the list-row parser, and `query` the search syntax's
+//! compiler into an escaped FTS5 expression. This
 //! file holds the public parameter/outcome types, the column lists and
 //! [`begin_write`], the one way a mutation opens its transaction.
 
@@ -23,6 +24,7 @@ mod fetch_log;
 mod intents;
 mod listing;
 mod maintenance;
+mod query;
 mod rows;
 mod settings;
 mod state;
@@ -108,6 +110,102 @@ impl Default for ListArticles {
             archived: None,
             tag: None,
             feed_tag: None,
+        }
+    }
+}
+
+impl ListArticles {
+    /// The filter dimensions of this listing (everything but the cursor).
+    fn filter(&self) -> ArticleFilter {
+        ArticleFilter {
+            feed_id: self.feed_id,
+            read: self.read,
+            starred: self.starred,
+            read_later: self.read_later,
+            archived: self.archived,
+            tag: self.tag.clone(),
+            feed_tag: self.feed_tag.clone(),
+        }
+    }
+}
+
+/// The article filter dimensions shared by listing and search — the same
+/// semantics as the matching [`ListArticles`] fields. `Default` is no
+/// filter at all (every article, archived included).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArticleFilter {
+    /// Restrict to one feed.
+    pub feed_id: Option<FeedId>,
+    /// Keep only (un)read articles.
+    pub read: Option<bool>,
+    /// Keep only (un)starred articles.
+    pub starred: Option<bool>,
+    /// Keep only articles (not) in the read-later queue.
+    pub read_later: Option<bool>,
+    /// Keep only (un)archived articles.
+    pub archived: Option<bool>,
+    /// Keep only articles carrying this tag.
+    pub tag: Option<String>,
+    /// Keep only articles whose feed sits in this folder (see
+    /// [`ListArticles::feed_tag`]).
+    pub feed_tag: Option<String>,
+}
+
+impl ArticleFilter {
+    /// The state-flag dimensions as `(article_state column, wanted value)`.
+    fn state_flags(&self) -> [(&'static str, Option<bool>); 4] {
+        [
+            ("is_read", self.read),
+            ("is_starred", self.starred),
+            ("is_read_later", self.read_later),
+            ("is_archived", self.archived),
+        ]
+    }
+}
+
+/// Full-text search parameters: a query in Curio's small search syntax,
+/// scoped by the same filters as a listing.
+///
+/// The query syntax (compiled to an escaped FTS5 expression — user input
+/// never reaches `MATCH` raw, so no input is a syntax error):
+///
+/// - `word` — matches the word; the **last** bare word also matches as a
+///   prefix (`prog` finds `programming`), so search-as-you-type hits while
+///   a word is still being typed — unless the token it would widen is a
+///   single letter or digit (`a`, or the `c` that `c++` and `C#` index
+///   as), which would match a large share of the library. A trailing `*`
+///   asks for a prefix on any word (`sql* rust`).
+/// - `"two words"` — an exact phrase. An unterminated quote runs to the
+///   end, and its last word matches as a prefix the same way (`"write ahe`
+///   finds `write ahead`); a closed phrase matches whole words only.
+/// - `-word` / `-"a phrase"` — excludes articles containing it. A query of
+///   exclusions alone matches nothing (FTS has no "everything" to subtract
+///   from).
+/// - `a OR b` — either (upper-case `OR` only; `or` is a plain word). `OR`
+///   binds tighter than the implicit AND: `rust OR go tutorial` is
+///   `(rust OR go) AND tutorial`.
+///
+/// Every other FTS5 operator (`AND`, `NOT`, `NEAR`, `^`, `title:` …) is
+/// matched literally. Results rank by BM25 with a title hit weighted above
+/// a body hit; ties fall back to the newest row first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchArticles {
+    /// The user's query text.
+    pub query: String,
+    /// The scope the search runs in.
+    pub filter: ArticleFilter,
+    /// Maximum number of hits.
+    pub limit: u32,
+}
+
+impl SearchArticles {
+    /// An unscoped search for `query` (every article, archived included).
+    #[must_use]
+    pub fn new(query: impl Into<String>, limit: u32) -> Self {
+        Self {
+            query: query.into(),
+            filter: ArticleFilter::default(),
+            limit,
         }
     }
 }

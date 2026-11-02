@@ -12,7 +12,7 @@ use curio_core::model::{
     ArticleContent, ArticleFlag, ArticleId, ArticleState, FeedId, NewArticle, NewFeed,
     SNIPPET_MAX_CHARS,
 };
-use curio_core::storage::{ListArticles, Storage};
+use curio_core::storage::{ListArticles, SearchArticles, Storage};
 use proptest::prelude::*;
 
 fn temp_storage() -> (tempfile::TempDir, Storage) {
@@ -404,7 +404,9 @@ fn search_rows_carry_state_and_tags_in_rank_order() {
     storage.archive_article(ids[1]).unwrap();
     storage.tag_article(ids[1], "rust").unwrap();
 
-    let rows = storage.search_article_rows("borrowck", 10).unwrap();
+    let rows = storage
+        .search_article_rows(SearchArticles::new("borrowck", 10))
+        .unwrap();
     let full = storage.search_articles("borrowck", 10).unwrap();
     let row_ids: Vec<ArticleId> = rows.iter().map(|r| r.id).collect();
     let full_ids: Vec<ArticleId> = full.iter().map(|a| a.id).collect();
@@ -414,8 +416,18 @@ fn search_rows_carry_state_and_tags_in_rank_order() {
     assert!(two.state.archived);
     assert_eq!(two.tags, ["rust"]);
     assert_eq!(two.snippet.as_deref(), Some("borrowck once"));
-    assert_eq!(storage.search_article_rows("   ", 10).unwrap(), []);
-    assert_eq!(storage.search_article_rows("\"NEAR(", 10).unwrap(), []);
+    assert_eq!(
+        storage
+            .search_article_rows(SearchArticles::new("   ", 10))
+            .unwrap(),
+        []
+    );
+    assert_eq!(
+        storage
+            .search_article_rows(SearchArticles::new("\"NEAR(", 10))
+            .unwrap(),
+        []
+    );
 }
 
 // --------------------------------------------------------- unread counters

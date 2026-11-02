@@ -43,7 +43,7 @@ future head.
 | `curio list [--unread\|--starred\|--tag …]` | List articles (keyset-paginated) |
 | `curio show <id>` | Render an article as markdown in the terminal |
 | `curio star` / `later` / `archive` / `tag` / `untag` `<id>` | Flip state — each is a `curio.events.v1` event |
-| `curio search <query>` | Full-text search (FTS5) |
+| `curio search <query> [--unread\|--starred\|--tag …]` | Full-text search (FTS5), title hits first; takes the `list` filters |
 | `curio dest add <name> <path>` | Register a save destination |
 | `curio save <id> --dest <name>` | Export a note per `curio.frontmatter.v1` |
 | `curio import <file> --from <service>` | Import subscriptions + saved articles from a third-party export (idempotent) |
@@ -382,9 +382,27 @@ unreachable — usually a Reddit outage; nothing to fix, try again later).
 ```sh
 curio list [--unread] [--starred] [--read-later] [--tag rust] [--feed example.com] [--limit 20]
 curio search "sqlite wal" [--limit 20]    # real FTS5, hostile input escaped
+curio search 'rust -async' --feed example.com --unread
 curio show 3e9f10aa                       # article as markdown; marks it read
 curio open 3e9f10aa                       # emits article.opened, launches $BROWSER
 ```
+
+`search` ranks by relevance, a title hit above a body hit, and takes the
+same filters as `list` (applied in the query, so `--limit` counts matches
+inside the filter). The query is a few words with a small syntax on top —
+never raw FTS5, so no input is a syntax error:
+
+| Query | Matches |
+|---|---|
+| `sqlite wal` | both words, anywhere; the **last** word also as a prefix (`wal` → `walrus`), so a half-typed word already hits — unless it is a single letter or digit (also `c++` or `C#`, which search as the letter `c`) |
+| `sql* wal` | `*` makes any word a prefix |
+| `"write ahead log"` | the exact phrase |
+| `"write ahe` | an unterminated phrase runs to the end, its last word as a prefix (`ahe` → `ahead`) |
+| `rust -async` | `rust`, but not articles mentioning `async` (also `-"a phrase"`) |
+| `rust OR go tutorial` | (`rust` or `go`) and `tutorial` — upper-case `OR` only |
+
+A query of exclusions alone matches nothing. Other FTS5 operators (`AND`,
+`NOT`, `NEAR`, `title:` …) are searched for as plain words.
 
 Article handles are **any unique fragment of the `curio_id`** — listings
 show the 8-character tail, which is the typable handle. (UUIDv7 ids share

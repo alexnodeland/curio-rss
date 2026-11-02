@@ -173,6 +173,16 @@ async fn the_full_happy_path_produces_contract_valid_artifacts() {
     assert_eq!(shown["read"], true);
     assert!(shown["markdown"].as_str().unwrap().contains("**content**"));
 
+    // Search takes the list filters, applied core-side: the only hit is
+    // read now, so an unread-only search comes back empty.
+    let unread_hits = stdout_json(
+        &curio(profile.path())
+            .args(["search", "content", "--unread", "--json"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(unread_hits.as_array().unwrap().len(), 0);
+
     // Tag, then export to the named destination.
     curio(profile.path())
         .args(["tag", short, "rust"])

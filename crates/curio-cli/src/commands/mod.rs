@@ -73,6 +73,6 @@ fn dispatch(app: &mut App, command: Command) -> anyhow::Result<ExitCode> {
         Command::Maintenance { purge_orphans } => maintenance::run(app, purge_orphans),
         Command::Retention(args) => maintenance::retention(app, &args),
         Command::Db(command) => maintenance::db(app, &command),
-        Command::Search { query, limit } => articles::search(app, &query, limit),
+        Command::Search { query, filters } => articles::search(app, &query, &filters),
     }
 }

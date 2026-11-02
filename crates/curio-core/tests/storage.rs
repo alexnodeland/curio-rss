@@ -13,7 +13,8 @@ use curio_core::model::{
     FetchRecord, FetchStatus, NewArticle, NewFeed,
 };
 use curio_core::storage::{
-    FETCH_LOG_KEEP, FeedSchedule, ListArticles, OpenError, Storage, StorageError,
+    ArticleFilter, FETCH_LOG_KEEP, FeedSchedule, ListArticles, OpenError, SearchArticles, Storage,
+    StorageError,
 };
 use curio_types::{EventPayload, Timestamp};
 
@@ -1007,6 +1008,59 @@ fn feed_tag_filter_scopes_articles_to_the_folder_subtree() {
     assert_eq!(titles("Tec"), [] as [std::string::String; 0]);
 }
 
+#[test]
+fn feed_tag_filter_takes_wildcards_and_case_literally() {
+    let (_dir, storage) = temp_storage();
+    let feed = |url: &str, tag: &str| {
+        storage
+            .add_feed(NewFeed {
+                url: url.to_owned(),
+                title: None,
+                tags: vec![tag.to_owned()],
+            })
+            .unwrap()
+            .0
+    };
+    let underscore = feed("https://u.example/f", "a_b/inner");
+    let lookalike = feed("https://x.example/f", "axb/inner");
+    let percent = feed("https://p.example/f", "100%/x");
+    let upper = feed("https://c.example/f", "Tech/Databases");
+    let article = |key: &str, feed_id| {
+        let mut a = new_article(key, key, "body");
+        a.feed_id = Some(feed_id);
+        a
+    };
+    storage
+        .upsert_articles(vec![
+            article("underscore", underscore.id),
+            article("lookalike", lookalike.id),
+            article("percent", percent.id),
+            article("upper", upper.id),
+        ])
+        .unwrap();
+    let titles = |feed_tag: &str| {
+        let mut t = storage
+            .list_articles(ListArticles {
+                feed_tag: Some(feed_tag.to_owned()),
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .map(|a| a.title)
+            .collect::<Vec<_>>();
+        t.sort();
+        t
+    };
+
+    // `_` and `%` are characters, not LIKE wildcards.
+    assert_eq!(titles("a_b"), vec!["underscore".to_owned()]);
+    assert_eq!(titles("100%"), vec!["percent".to_owned()]);
+    assert_eq!(titles("1"), [] as [String; 0]);
+    // The subtree branch is case-sensitive, like the exact branch.
+    assert_eq!(titles("tech"), [] as [String; 0]);
+    assert_eq!(titles("Tech"), vec!["upper".to_owned()]);
+}
+
 // ------------------------------------------------------- state and events
 
 #[test]
@@ -1613,6 +1667,241 @@ fn hostile_search_input_never_reaches_raw_match() {
         assert!(result.is_ok(), "query {query:?} errored: {result:?}");
     }
     assert_eq!(storage.search_articles("   ", 10).unwrap(), vec![]);
+}
+
+/// Titles of a search's hits, in rank order.
+fn search_titles(storage: &Storage, params: SearchArticles) -> Vec<String> {
+    storage
+        .search(params)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.title)
+        .collect()
+}
+
+fn sorted(mut titles: Vec<String>) -> Vec<String> {
+    titles.sort();
+    titles
+}
+
+#[test]
+fn search_matches_the_last_word_as_a_prefix() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "k1", "Programming in Rust", "body text");
+    insert_one(&storage, "k2", "Gardening", "programs for growing");
+    // Search-as-you-type: an incomplete last word already hits.
+    assert_eq!(
+        sorted(search_titles(&storage, SearchArticles::new("prog", 10))),
+        ["Gardening", "Programming in Rust"]
+    );
+    // An explicit `*` prefixes a word that is not last.
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("gard* programs", 10)),
+        ["Gardening"]
+    );
+    // A word before the last one is still a whole word.
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("gard programs", 10)),
+        [] as [String; 0]
+    );
+}
+
+#[test]
+fn search_never_widens_a_one_letter_token_into_a_prefix() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "k1", "Modern C++", "templates and c++ concepts");
+    insert_one(&storage, "k2", "Cooking", "a recipe for curry");
+    // `c++` and `C#` index as the token `c`: the last word is two
+    // characters, but its token is one letter, so it stays a whole word.
+    for query in ["c++", "C#"] {
+        assert_eq!(
+            search_titles(&storage, SearchArticles::new(query, 10)),
+            ["Modern C++"],
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn search_widens_the_last_word_of_an_unterminated_phrase() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "k1", "Logs", "the write ahead log");
+    insert_one(&storage, "k2", "Other", "write a letter ahead of time");
+    // Typing a phrase: its last word is still being typed.
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("\"write ahe", 10)),
+        ["Logs"]
+    );
+    // Once closed, the phrase is finished and matches whole words only.
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("\"write ahe\"", 10)),
+        [] as [String; 0]
+    );
+}
+
+#[test]
+fn search_keeps_a_quoted_phrase_together() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "k1", "Adjacent", "the quick brown fox");
+    insert_one(&storage, "k2", "Apart", "brown dogs are quick");
+    assert_eq!(
+        sorted(search_titles(
+            &storage,
+            SearchArticles::new("quick brown", 10)
+        )),
+        ["Adjacent", "Apart"],
+        "bare words match anywhere"
+    );
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("\"quick brown\"", 10)),
+        ["Adjacent"],
+        "a phrase needs the words adjacent and in order"
+    );
+}
+
+#[test]
+fn search_excludes_minus_terms_and_honours_or() {
+    let (_dir, storage) = temp_storage();
+    insert_one(&storage, "k1", "Rust async", "tokio runtime");
+    insert_one(&storage, "k2", "Rust sync", "threads");
+    insert_one(&storage, "k3", "Go", "goroutines and threads");
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("rust -tokio", 10)),
+        ["Rust sync"]
+    );
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("rust -\"tokio runtime\"", 10)),
+        ["Rust sync"]
+    );
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("-tokio", 10)),
+        [] as [String; 0],
+        "exclusions alone match nothing"
+    );
+    assert_eq!(
+        sorted(search_titles(
+            &storage,
+            SearchArticles::new("rust OR goroutines threads", 10)
+        )),
+        ["Go", "Rust sync"],
+        "(rust OR goroutines) AND threads"
+    );
+}
+
+#[test]
+fn search_ranks_a_title_hit_above_a_body_hit() {
+    let (_dir, storage) = temp_storage();
+    // Inserted first (lower id) and with the term repeated in a short
+    // body, so neither recency nor plain BM25 would put the title hit
+    // first — only the title weight does.
+    insert_one(&storage, "body", "Unrelated", "sqlite sqlite notes");
+    insert_one(
+        &storage,
+        "title",
+        "SQLite internals",
+        "a long body about storage engines, pages, b-trees and journaling",
+    );
+    assert_eq!(
+        search_titles(&storage, SearchArticles::new("sqlite", 10)),
+        ["SQLite internals", "Unrelated"]
+    );
+}
+
+#[test]
+fn search_applies_the_list_filters() {
+    let (_dir, storage) = temp_storage();
+    let folder = |url: &str, tag: &str| {
+        storage
+            .add_feed(NewFeed {
+                url: url.to_owned(),
+                title: None,
+                tags: vec![tag.to_owned()],
+            })
+            .unwrap()
+            .0
+    };
+    let tech = folder("https://tech.example/f", "Tech");
+    let cook = folder("https://cook.example/f", "Cooking");
+    let article = |key: &str, feed_id| {
+        let mut a = new_article(key, key, "shared keyword");
+        a.feed_id = Some(feed_id);
+        a
+    };
+    storage
+        .upsert_articles(vec![
+            article("tech-read", tech.id),
+            article("tech-starred", tech.id),
+            article("cook-archived", cook.id),
+        ])
+        .unwrap();
+    let id = |key: &str, feed: FeedId| id_by_key(&storage, &format!("f{}:{key}", feed.0));
+    storage.mark_read(id("tech-read", tech.id), true).unwrap();
+    storage.star_article(id("tech-starred", tech.id)).unwrap();
+    storage
+        .archive_article(id("cook-archived", cook.id))
+        .unwrap();
+    let scoped = |filter: ArticleFilter| {
+        sorted(search_titles(
+            &storage,
+            SearchArticles {
+                query: "keyword".to_owned(),
+                filter,
+                limit: 10,
+            },
+        ))
+    };
+
+    assert_eq!(
+        scoped(ArticleFilter::default()).len(),
+        3,
+        "unscoped search covers everything, archived included"
+    );
+    assert_eq!(
+        scoped(ArticleFilter {
+            feed_id: Some(tech.id),
+            ..ArticleFilter::default()
+        }),
+        ["tech-read", "tech-starred"]
+    );
+    assert_eq!(
+        scoped(ArticleFilter {
+            feed_id: Some(tech.id),
+            read: Some(false),
+            ..ArticleFilter::default()
+        }),
+        ["tech-starred"]
+    );
+    assert_eq!(
+        scoped(ArticleFilter {
+            starred: Some(true),
+            ..ArticleFilter::default()
+        }),
+        ["tech-starred"]
+    );
+    assert_eq!(
+        scoped(ArticleFilter {
+            archived: Some(false),
+            ..ArticleFilter::default()
+        }),
+        ["tech-read", "tech-starred"]
+    );
+    assert_eq!(
+        scoped(ArticleFilter {
+            feed_tag: Some("Cooking".to_owned()),
+            ..ArticleFilter::default()
+        }),
+        ["cook-archived"]
+    );
+    storage
+        .tag_article(id("tech-read", tech.id), "later")
+        .unwrap();
+    assert_eq!(
+        scoped(ArticleFilter {
+            tag: Some("later".to_owned()),
+            ..ArticleFilter::default()
+        }),
+        ["tech-read"]
+    );
 }
 
 /// The sketch's corruption bug: FTS5 external-content keyed to the

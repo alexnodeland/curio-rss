@@ -2,14 +2,11 @@
 //! deletion and content replacement.
 
 use super::listing::{
-    Projection, RawListed, UNREAD_COUNTS, article_cols_prefixed, list_articles_query, raw_listed,
-    search_listed_query,
+    Projection, RawListed, UNREAD_COUNTS, list_articles_query, raw_listed, search_articles_query,
 };
 use super::maintenance::is_tombstoned;
-use super::rows::{
-    RawArticle, article_by_id, fts_match_expr, parse_ts, raw_article, scoped_dedupe_key,
-};
-use super::{ARTICLE_COLS, ListArticles, UpsertOutcome, begin_write};
+use super::rows::{RawArticle, article_by_id, parse_ts, raw_article, scoped_dedupe_key};
+use super::{ARTICLE_COLS, ListArticles, SearchArticles, UpsertOutcome, begin_write};
 use crate::model::{
     Article, ArticleContent, ArticleId, ContentOrigin, FeedId, ListedArticle, NewArticle,
 };
@@ -364,49 +361,62 @@ impl Storage {
         })
     }
 
-    /// Full-text search over title + extracted content. User input is
-    /// compiled into an escaped FTS5 phrase query — never raw `MATCH`
-    /// (unbalanced quotes must not surface as database errors).
+    /// Full-text search over title + extracted content — the unscoped
+    /// shorthand for [`search`](Self::search) (every article, archived
+    /// included).
     ///
     /// # Errors
     ///
     /// Database or stored-value corruption errors.
     pub fn search_articles(&self, query: &str, limit: u32) -> Result<Vec<Article>, StorageError> {
-        let Some(expr) = fts_match_expr(query) else {
-            return Ok(Vec::new());
-        };
+        self.search(SearchArticles::new(query, limit))
+    }
+
+    /// Full-text search over title + extracted content, scoped by the
+    /// [`ArticleFilter`](super::ArticleFilter) and ranked title-first (see
+    /// [`SearchArticles`] for the query syntax). User input is compiled
+    /// into an escaped FTS5 expression — never raw `MATCH` (unbalanced
+    /// quotes or stray operators must not surface as database errors).
+    ///
+    /// # Errors
+    ///
+    /// Database or stored-value corruption errors.
+    pub fn search(&self, params: SearchArticles) -> Result<Vec<Article>, StorageError> {
         self.read(move |conn| {
-            let cols = article_cols_prefixed("a");
-            let mut stmt = conn.prepare_cached(&format!(
-                "SELECT {cols} FROM articles_fts \
-                 JOIN articles a ON a.id = articles_fts.rowid \
-                 WHERE articles_fts MATCH ?1 ORDER BY rank LIMIT ?2"
-            ))?;
+            let Some((sql, binds)) = search_articles_query(&params, Projection::Full) else {
+                return Ok(Vec::new());
+            };
+            let mut stmt = conn.prepare_cached(&sql)?;
             let raws = stmt
-                .query_map((expr, limit), raw_article)?
+                .query_map(
+                    rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                    raw_article,
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             raws.into_iter().map(RawArticle::into_article).collect()
         })
     }
 
-    /// [`Self::search_articles`] as list rows (see
-    /// [`Self::list_article_rows`]), best match first.
+    /// [`Self::search`] as list rows (see [`Self::list_article_rows`]):
+    /// the same query syntax, scope and ranking, best match first.
     ///
     /// # Errors
     ///
     /// Database or stored-value corruption errors.
     pub fn search_article_rows(
         &self,
-        query: &str,
-        limit: u32,
+        params: SearchArticles,
     ) -> Result<Vec<ListedArticle>, StorageError> {
-        let Some(expr) = fts_match_expr(query) else {
-            return Ok(Vec::new());
-        };
         self.read(move |conn| {
-            let mut stmt = conn.prepare_cached(&search_listed_query())?;
+            let Some((sql, binds)) = search_articles_query(&params, Projection::Listed) else {
+                return Ok(Vec::new());
+            };
+            let mut stmt = conn.prepare_cached(&sql)?;
             let raws = stmt
-                .query_map((expr, limit), raw_listed)?
+                .query_map(
+                    rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                    raw_listed,
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             raws.into_iter().map(RawListed::into_listed).collect()
         })

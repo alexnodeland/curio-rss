@@ -47,4 +47,20 @@ describe('highlightSegments', () => {
             { text: 'runtime', mark: true },
         ]);
     });
+
+    it('marks nothing of an excluded word or phrase', () => {
+        expect(highlightSegments('or tokio runtime', 'or -tokio -"or runtime"')).toEqual([
+            { text: 'or', mark: true },
+            { text: ' tokio runtime', mark: false },
+        ]);
+    });
+
+    it('marks the words of a quoted phrase', () => {
+        expect(highlightSegments('write ahead log', '"write ahead')).toEqual([
+            { text: 'write', mark: true },
+            { text: ' ', mark: false },
+            { text: 'ahead', mark: true },
+            { text: ' log', mark: false },
+        ]);
+    });
 });

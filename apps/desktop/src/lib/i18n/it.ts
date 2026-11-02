@@ -217,6 +217,9 @@ export const it: Partial<Record<MessageKey, string>> = {
     'search.loading': 'Ricerca in corso…',
     'search.empty': 'Nessun risultato',
     'search.results': '{count, plural, one {# risultato} other {# risultati}}',
+    'search.resultsCapped': '{count, plural, one {#+ risultato} other {#+ risultati}}',
+    'search.scope.label': 'Cerca in',
+    'search.scope.everywhere': 'Ovunque',
     'destinations.title': 'Destinazioni',
     'destinations.open': 'Destinazioni',
     'destinations.empty':

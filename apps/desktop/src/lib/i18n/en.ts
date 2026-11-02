@@ -219,6 +219,9 @@ export const en = {
     'search.loading': 'Searching…',
     'search.empty': 'No matches',
     'search.results': '{count, plural, one {# result} other {# results}}',
+    'search.resultsCapped': '{count, plural, one {#+ result} other {#+ results}}',
+    'search.scope.label': 'Search in',
+    'search.scope.everywhere': 'Everywhere',
 
     'destinations.title': 'Destinations',
     'destinations.open': 'Destinations',

@@ -1,9 +1,11 @@
-//! The article list and search queries: the [`ListArticles`] compiler
-//! (both projections — whole articles and list rows), the full-text
-//! search over list rows, the unread-count read, and the list-row parser.
+//! The article list and search queries: the [`ListArticles`] and
+//! [`SearchArticles`] compilers (both projections — whole articles and
+//! list rows) over one shared [`ArticleFilter`] clause builder, the
+//! unread-count read, and the list-row parser.
 
+use super::query::fts_match_expr;
 use super::rows::{parse_curio_id, parse_opt_ts, parse_ts};
-use super::{ARTICLE_COLS, ListArticles};
+use super::{ARTICLE_COLS, ArticleFilter, ListArticles, SearchArticles};
 use crate::model::{ArticleId, ArticleState, FeedId, ListedArticle, SNIPPET_SOURCE_CHARS, snippet};
 use crate::storage::StorageError;
 use rusqlite::Row;
@@ -46,6 +48,57 @@ fn listed_cols() -> String {
     )
 }
 
+/// Appends the [`ArticleFilter`] clauses (static fragments, every value a
+/// bind) over the `a` (articles) and `s` (`article_state`) aliases; the
+/// caller provides the state join whenever a state flag is filtered. A
+/// missing state row defaults every flag to 0 via `COALESCE`. `driving`
+/// names the state column the query already pages through (a membership
+/// index), which is not re-tested.
+fn push_filter_clauses(
+    filter: &ArticleFilter,
+    driving: Option<&str>,
+    clauses: &mut Vec<String>,
+    binds: &mut Vec<Box<dyn ToSql>>,
+) {
+    if let Some(feed) = filter.feed_id {
+        clauses.push("a.feed_id = ?".to_owned());
+        binds.push(Box::new(feed.0));
+    }
+    for (column, want) in filter.state_flags() {
+        if driving == Some(column) {
+            continue;
+        }
+        if let Some(want) = want {
+            clauses.push(format!("COALESCE(s.{column}, 0) = ?"));
+            binds.push(Box::new(want));
+        }
+    }
+    if let Some(tag) = &filter.tag {
+        clauses.push(
+            "EXISTS (SELECT 1 FROM article_tags at JOIN tags t ON t.id = at.tag_id \
+             WHERE at.article_id = a.id AND t.name = ?)"
+                .to_owned(),
+        );
+        binds.push(Box::new(tag.trim().to_owned()));
+    }
+    if let Some(feed_tag) = &filter.feed_tag {
+        // Folder scope: the feed carries a path tag equal to `feed_tag` or
+        // nested beneath it (`Tech` → `Tech`, `Tech/Databases`, …). The
+        // subtree test is an exact, case-sensitive prefix compare — never
+        // `LIKE`, whose `%`/`_` wildcards would let folder `a_b` match
+        // `axb/…` and whose ASCII case folding the `=` branch lacks.
+        let feed_tag = feed_tag.trim().to_owned();
+        clauses.push(
+            "a.feed_id IN (SELECT f.id FROM feeds f, json_each(f.tags) je \
+             WHERE je.value = ? OR substr(je.value, 1, length(?) + 1) = ? || '/')"
+                .to_owned(),
+        );
+        binds.push(Box::new(feed_tag.clone()));
+        binds.push(Box::new(feed_tag.clone()));
+        binds.push(Box::new(feed_tag));
+    }
+}
+
 /// Compiles [`ListArticles`] into SQL + positional binds. Static clause
 /// fragments only — no user input ever lands in the SQL string (the tag
 /// value is a bind). A missing state row defaults every flag to 0 via
@@ -66,12 +119,8 @@ pub(super) fn list_articles_query(
     params: &ListArticles,
     projection: Projection,
 ) -> (String, Vec<Box<dyn ToSql>>) {
-    let state_filters = [
-        ("is_read", params.read),
-        ("is_starred", params.starred),
-        ("is_read_later", params.read_later),
-        ("is_archived", params.archived),
-    ];
+    let filter = params.filter();
+    let state_filters = filter.state_flags();
     let membership = MEMBERSHIP_INDEXES.iter().find(|(column, _)| {
         state_filters
             .iter()
@@ -104,39 +153,12 @@ pub(super) fn list_articles_query(
         // WHERE visibly implies the index's own `= 1`.
         clauses.push(format!("s.{column} = 1"));
     }
-    if let Some(feed) = params.feed_id {
-        clauses.push("a.feed_id = ?".to_owned());
-        binds.push(Box::new(feed.0));
-    }
-    for (column, want) in state_filters {
-        if membership.is_some_and(|(driving, _)| *driving == column) {
-            continue;
-        }
-        if let Some(want) = want {
-            clauses.push(format!("COALESCE(s.{column}, 0) = ?"));
-            binds.push(Box::new(want));
-        }
-    }
-    if let Some(tag) = &params.tag {
-        clauses.push(
-            "EXISTS (SELECT 1 FROM article_tags at JOIN tags t ON t.id = at.tag_id \
-             WHERE at.article_id = a.id AND t.name = ?)"
-                .to_owned(),
-        );
-        binds.push(Box::new(tag.trim().to_owned()));
-    }
-    if let Some(feed_tag) = &params.feed_tag {
-        // Folder scope: the feed carries a path tag equal to `feed_tag` or
-        // nested beneath it (`Tech` → `Tech`, `Tech/Databases`, …).
-        let feed_tag = feed_tag.trim().to_owned();
-        clauses.push(
-            "a.feed_id IN (SELECT f.id FROM feeds f, json_each(f.tags) je \
-             WHERE je.value = ? OR je.value LIKE ? || '/%')"
-                .to_owned(),
-        );
-        binds.push(Box::new(feed_tag.clone()));
-        binds.push(Box::new(feed_tag));
-    }
+    push_filter_clauses(
+        &filter,
+        membership.map(|(column, _)| *column),
+        &mut clauses,
+        &mut binds,
+    );
     sql.push_str(" WHERE ");
     sql.push_str(&clauses.join(" AND "));
     sql.push_str(" ORDER BY ");
@@ -151,16 +173,46 @@ pub(super) fn list_articles_query(
 /// articles.
 pub(super) const UNREAD_COUNTS: &str = "SELECT feed_key, unread FROM feed_unread WHERE unread > 0";
 
-/// The full-text search over [`Projection::Listed`] rows, best match
-/// first; the binds are the compiled `MATCH` expression and the limit.
-pub(super) fn search_listed_query() -> String {
-    format!(
-        "SELECT {} FROM articles_fts \
-         JOIN articles a ON a.id = articles_fts.rowid \
-         LEFT JOIN article_state s ON s.article_id = a.id \
-         WHERE articles_fts MATCH ?1 ORDER BY rank LIMIT ?2",
-        listed_cols()
-    )
+/// BM25 column weights for `articles_fts(title, content_text)`: a title
+/// hit outranks a body hit.
+const SEARCH_RANK: &str = "bm25(articles_fts, 10.0, 1.0)";
+
+/// Compiles [`SearchArticles`] into SQL + positional binds: the escaped
+/// FTS expression (see `query`) is the first bind, then the
+/// [`ArticleFilter`] clauses exactly as [`list_articles_query`] applies
+/// them, ordered by the title-weighted BM25 rank with `id DESC` breaking
+/// ties. The `article_state` join appears only when the projection or a
+/// state filter needs it. `None` when the query has nothing to match.
+pub(super) fn search_articles_query(
+    params: &SearchArticles,
+    projection: Projection,
+) -> Option<(String, Vec<Box<dyn ToSql>>)> {
+    let expr = fts_match_expr(&params.query)?;
+    let cols = match projection {
+        Projection::Full => article_cols_prefixed("a"),
+        Projection::Listed => listed_cols(),
+    };
+    let needs_state = projection == Projection::Listed
+        || params
+            .filter
+            .state_flags()
+            .iter()
+            .any(|(_, want)| want.is_some());
+    let join = if needs_state {
+        " LEFT JOIN article_state s ON s.article_id = a.id"
+    } else {
+        ""
+    };
+    let mut clauses = vec!["articles_fts MATCH ?".to_owned()];
+    let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(expr)];
+    push_filter_clauses(&params.filter, None, &mut clauses, &mut binds);
+    let sql = format!(
+        "SELECT {cols} FROM articles_fts JOIN articles a ON a.id = articles_fts.rowid{join} \
+         WHERE {} ORDER BY {SEARCH_RANK}, a.id DESC LIMIT ?",
+        clauses.join(" AND ")
+    );
+    binds.push(Box::new(params.limit));
+    Some((sql, binds))
 }
 
 pub(super) fn article_cols_prefixed(alias: &str) -> String {
@@ -257,6 +309,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::model::FeedId;
     use rusqlite::Connection;
 
     #[test]
@@ -468,9 +521,47 @@ mod tests {
         );
         assert!(sql.contains("json_group_array(t.name)"));
         assert_eq!(binds.len(), 2, "before + limit");
-        let search = search_listed_query();
+        let (search, _) =
+            search_articles_query(&SearchArticles::new("rust", 5), Projection::Listed).unwrap();
         assert!(!search.contains("content_html"), "{search}");
         assert!(search.contains("LEFT JOIN article_state s ON s.article_id = a.id"));
+    }
+
+    #[test]
+    fn search_query_ranks_title_first_and_reuses_the_list_filters() {
+        let (sql, binds) = search_articles_query(
+            &SearchArticles {
+                query: "rust".to_owned(),
+                filter: ArticleFilter {
+                    feed_id: Some(FeedId(3)),
+                    read: Some(false),
+                    feed_tag: Some("Tech".to_owned()),
+                    ..ArticleFilter::default()
+                },
+                limit: 20,
+            },
+            Projection::Full,
+        )
+        .unwrap();
+        assert!(sql.contains("articles_fts MATCH ?"));
+        assert!(sql.contains("a.feed_id = ?"));
+        assert!(sql.contains("LEFT JOIN article_state s"));
+        assert!(sql.contains("COALESCE(s.is_read, 0) = ?"));
+        assert!(!sql.contains("INDEXED BY"), "the FTS match drives a search");
+        assert!(
+            sql.ends_with("ORDER BY bm25(articles_fts, 10.0, 1.0), a.id DESC LIMIT ?"),
+            "{sql}"
+        );
+        assert_eq!(binds.len(), 7, "match + feed + read + feed_tag ×3 + limit");
+    }
+
+    #[test]
+    fn unscoped_full_search_query_stays_join_free() {
+        let (sql, binds) =
+            search_articles_query(&SearchArticles::new("rust", 5), Projection::Full).unwrap();
+        assert!(!sql.contains("article_state"), "{sql}");
+        assert_eq!(binds.len(), 2, "match + limit");
+        assert!(search_articles_query(&SearchArticles::new(" - ", 5), Projection::Full).is_none());
     }
 
     #[test]
@@ -502,17 +593,18 @@ mod tests {
         );
         assert!(sql.contains("json_each(f.tags)"));
         assert!(
-            sql.contains("je.value = ? OR je.value LIKE ? || '/%'"),
+            sql.contains("je.value = ? OR substr(je.value, 1, length(?) + 1) = ? || '/'"),
             "matches the folder itself and its subtree: {sql}"
         );
+        assert!(!sql.contains("LIKE"), "no wildcard matching: {sql}");
         assert!(
             !sql.contains("article_state"),
             "feed_tag alone needs no state join"
         );
         assert_eq!(
             binds.len(),
-            4,
-            "before + feed_tag (exact + subtree) + limit"
+            5,
+            "before + feed_tag (exact + subtree ×2) + limit"
         );
     }
 }

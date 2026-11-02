@@ -1,12 +1,22 @@
 /**
- * Full-text search state. The query drives `search_articles` (FTS5,
- * phrase-escaped core-side — hostile input cannot break the MATCH grammar);
- * results are a flat, backend-ordered list the middle pane renders in place
- * of the filter list while a search is active. Debounced so a fast typist
- * fires one query, not one per keystroke, and generation-guarded so a slow
- * response never overwrites a newer one.
+ * Full-text search state. The query drives `search_articles` (Curio's search
+ * syntax, compiled to escaped FTS5 core-side — hostile input cannot break the
+ * MATCH grammar); results are a flat, backend-ranked list the middle pane
+ * renders in place of the filter list while a search is active. Debounced so
+ * a fast typist fires one query, not one per keystroke, and
+ * generation-guarded so a slow response never overwrites a newer one.
+ *
+ * A search runs in the current view by default — the feed, folder, tag or
+ * built-in view the list shows (see `scope`) — and `setEverywhere(true)`
+ * widens it to the whole library, archived included.
  */
-import { type ArticleSummaryDto, type CommandError, commands } from '$lib/bindings';
+import {
+    type ArticleSummaryDto,
+    type CommandError,
+    type SearchArticlesDto,
+    commands,
+} from '$lib/bindings';
+import type { ArticleFilters } from './articles.svelte';
 import type { CommandResult } from './query-cache.svelte';
 import { landRowDetails } from './row-details';
 
@@ -15,6 +25,36 @@ export const SEARCH_LIMIT = 100;
 
 /** Idle time after the last keystroke before the query fires. */
 export const SEARCH_DEBOUNCE_MS = 200;
+
+/** No filter at all: the whole library, archived articles included. */
+export const EVERYWHERE: ArticleFilters = {
+    feedId: null,
+    read: null,
+    starred: null,
+    readLater: null,
+    archived: null,
+    tag: null,
+    feedTag: null,
+};
+
+/** The `search_articles` request for `query` within `scope`. */
+export function searchParams(
+    query: string,
+    scope: ArticleFilters,
+    limit: number = SEARCH_LIMIT,
+): SearchArticlesDto {
+    return {
+        query,
+        limit,
+        feed_id: scope.feedId,
+        read: scope.read,
+        starred: scope.starred,
+        read_later: scope.readLater,
+        archived: scope.archived,
+        tag: scope.tag,
+        feed_tag: scope.feedTag,
+    };
+}
 
 function internalError(thrown: unknown): CommandResult<never> {
     return {
@@ -53,12 +93,24 @@ export class SearchStore {
     /** Bumped to ask the search input to take focus (the `/` shortcut). */
     focusNonce: number = $state(0);
 
+    /** The search ignores the current view and covers the whole library. */
+    everywhere: boolean = $state(false);
+
     #timer: ReturnType<typeof setTimeout> | null = null;
     #generation = 0;
+    #view: () => ArticleFilters = () => EVERYWHERE;
 
     /** True while a non-empty query scopes the list to search results. */
     get active(): boolean {
         return this.query.trim().length > 0;
+    }
+
+    /**
+     * The result window hit {@link SEARCH_LIMIT}: more articles may match
+     * than are shown, so a count of the window is a lower bound.
+     */
+    get capped(): boolean {
+        return this.results.length >= SEARCH_LIMIT;
     }
 
     /**
@@ -68,6 +120,35 @@ export class SearchStore {
      */
     get settled(): boolean {
         return !this.loading && !this.pending;
+    }
+
+    /**
+     * The filters a search runs in: the current view's (feed, folder, tag,
+     * starred/read-later/archived) — minus its unread-only toggle, which the
+     * header hides while searching — or none at all when `everywhere`.
+     */
+    get scope(): ArticleFilters {
+        return this.everywhere ? EVERYWHERE : { ...this.#view(), read: null };
+    }
+
+    /**
+     * Wires the "current view" a search is scoped to (the article list's
+     * filters — `articles.svelte.ts` binds it, so this module needs no
+     * runtime import of that one).
+     */
+    scopeTo(view: () => ArticleFilters): void {
+        this.#view = view;
+    }
+
+    /** Widens the search to the whole library (or back to the view) and re-runs it. */
+    setEverywhere(everywhere: boolean): void {
+        if (everywhere === this.everywhere) {
+            return;
+        }
+        this.everywhere = everywhere;
+        if (this.active) {
+            this.setQuery(this.query, 0);
+        }
     }
 
     /** Asks the mounted search input to focus (drives the `/` shortcut). */
@@ -120,7 +201,7 @@ export class SearchStore {
         this.loading = true;
         let result: CommandResult<ArticleSummaryDto[]>;
         try {
-            result = await commands.searchArticles(query, SEARCH_LIMIT);
+            result = await commands.searchArticles(searchParams(query, this.scope));
         } catch (thrown) {
             result = internalError(thrown);
         }
@@ -137,7 +218,10 @@ export class SearchStore {
         }
     }
 
-    /** Clears the query and results (Escape in the search box, feed switch). */
+    /**
+     * Clears the query and results (Escape in the search box, feed switch).
+     * The next search starts scoped to the view again.
+     */
     clear(): void {
         if (this.#timer !== null) {
             clearTimeout(this.#timer);
@@ -149,6 +233,7 @@ export class SearchStore {
         this.error = null;
         this.loading = false;
         this.pending = false;
+        this.everywhere = false;
     }
 
     /** Test isolation. */

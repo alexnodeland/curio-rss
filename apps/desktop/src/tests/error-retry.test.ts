@@ -161,10 +161,8 @@ describe('Retry on error states', () => {
         await fireEvent.click(getByRole('button', { name: 'Retry' }));
         await flushIpc();
 
-        expect(harness.callsFor('search_articles').map((call) => call.query)).toEqual([
-            'rust',
-            'rust',
-        ]);
+        const calls = harness.callsFor('search_articles') as { params: { query: string } }[];
+        expect(calls.map((call) => call.params.query)).toEqual(['rust', 'rust']);
         expect(await findByText('Found again')).toBeTruthy();
     });
 });

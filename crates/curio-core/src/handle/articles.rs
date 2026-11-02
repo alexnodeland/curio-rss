@@ -13,7 +13,7 @@ use crate::model::{
     Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, ListedArticle,
     NewArticle,
 };
-use crate::storage::ListArticles;
+use crate::storage::{ListArticles, SearchArticles};
 
 use super::refresh::is_feed_own_url;
 use super::sweep::{RefreshCancel, until_cancelled};
@@ -490,7 +490,8 @@ impl CoreHandle {
         }
     }
 
-    /// Full-text search (escaped FTS5 — user input is never raw MATCH).
+    /// Unscoped full-text search (escaped FTS5 — user input is never raw
+    /// MATCH); shorthand for [`search`](Self::search) with no filter.
     ///
     /// # Errors
     ///
@@ -499,18 +500,27 @@ impl CoreHandle {
         Ok(self.storage.search_articles(query, limit)?)
     }
 
-    /// [`Self::search_articles`] as list rows (see
-    /// [`Self::list_article_rows`]), best match first.
+    /// Full-text search scoped by a filter, title hits ranked first (see
+    /// [`SearchArticles`] for the query syntax).
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn search(&self, params: SearchArticles) -> Result<Vec<Article>, CoreError> {
+        Ok(self.storage.search(params)?)
+    }
+
+    /// [`Self::search`] as list rows (see [`Self::list_article_rows`]),
+    /// best match first.
     ///
     /// # Errors
     ///
     /// Storage errors.
     pub fn search_article_rows(
         &self,
-        query: &str,
-        limit: u32,
+        params: SearchArticles,
     ) -> Result<Vec<ListedArticle>, CoreError> {
-        Ok(self.storage.search_article_rows(query, limit)?)
+        Ok(self.storage.search_article_rows(params)?)
     }
 
     /// How many articles are stored in total.

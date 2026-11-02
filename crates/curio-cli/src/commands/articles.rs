@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Context as _;
-use curio_core::storage::ListArticles;
+use curio_core::storage::{ArticleFilter, ListArticles, SearchArticles};
 use serde::Serialize;
 
 use crate::app::App;
@@ -55,11 +55,30 @@ fn matches_filters(view: &ArticleView, args: &ListArgs) -> bool {
         && args.tag.as_ref().is_none_or(|tag| view.tags.contains(tag))
 }
 
-pub(crate) fn search(app: &App, query: &str, limit: u32) -> anyhow::Result<ExitCode> {
+/// Searches within the `list` filters — applied in SQL by the core (a
+/// post-filter here would starve the hit limit).
+pub(crate) fn search(app: &App, query: &str, args: &ListArgs) -> anyhow::Result<ExitCode> {
+    let feed = args
+        .feed
+        .as_deref()
+        .map(|reference| resolve::feed_by_ref(&app.core, reference))
+        .transpose()?;
     let feeds = feed_map(&app.core)?;
+    let params = SearchArticles {
+        query: query.to_owned(),
+        filter: ArticleFilter {
+            feed_id: feed.map(|f| f.id),
+            read: args.unread.then_some(false),
+            starred: args.starred.then_some(true),
+            read_later: args.read_later.then_some(true),
+            tag: args.tag.clone(),
+            ..ArticleFilter::default()
+        },
+        limit: args.limit,
+    };
     let views = app
         .core
-        .search_articles(query, limit)?
+        .search(params)?
         .iter()
         .map(|article| ArticleView::build(&app.core, article, &feeds))
         .collect::<anyhow::Result<Vec<_>>>()?;

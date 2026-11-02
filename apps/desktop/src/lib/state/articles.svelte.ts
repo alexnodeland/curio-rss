@@ -439,3 +439,6 @@ export class ArticlesStore {
 
 /** The app-wide singleton. */
 export const articlesStore = new ArticlesStore();
+
+// A search runs in whatever view the list currently shows.
+searchStore.scopeTo(() => articlesStore.filters);

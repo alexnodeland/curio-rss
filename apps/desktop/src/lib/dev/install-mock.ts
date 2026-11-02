@@ -172,6 +172,22 @@ tokens:
 `;
 
     const byId = (id: number) => articles.find((a) => a.summary.id === id);
+    /** The `list_articles` / `search_articles` filter dimensions. */
+    const filtered = (p: Record<string, unknown>) => {
+        const folder = p.feed_tag as string | null | undefined;
+        const inFolder = (feedId: number | null) =>
+            feeds
+                .find((f) => f.id === feedId)
+                ?.tags.some((tag) => tag === folder || tag.startsWith(`${folder}/`)) ?? false;
+        return articles
+            .filter((a) => (p.feed_id == null ? true : a.summary.feed_id === p.feed_id))
+            .filter((a) => (p.read == null ? true : a.state.read === p.read))
+            .filter((a) => (p.starred == null ? true : a.state.starred === p.starred))
+            .filter((a) => (p.read_later == null ? true : a.state.read_later === p.read_later))
+            .filter((a) => (p.archived == null ? true : a.state.archived === p.archived))
+            .filter((a) => (p.tag == null ? true : a.tags.includes(p.tag as string)))
+            .filter((a) => (folder == null ? true : inFolder(a.summary.feed_id)));
+    };
     // A list row as the engine returns it: the summary with the article's
     // current flags and tags joined in.
     const row = (a: (typeof articles)[number]): ArticleSummaryDto => ({
@@ -378,27 +394,25 @@ tokens:
                 }
                 case 'list_articles': {
                     const p = (args.params ?? {}) as Record<string, unknown>;
-                    let rows = articles
-                        .filter((a) => (p.feed_id == null ? true : a.summary.feed_id === p.feed_id))
-                        .filter((a) => (p.read == null ? true : a.state.read === p.read))
-                        .filter((a) => (p.starred == null ? true : a.state.starred === p.starred))
-                        .filter((a) =>
-                            p.read_later == null ? true : a.state.read_later === p.read_later,
-                        )
-                        .filter((a) =>
-                            p.archived == null ? true : a.state.archived === p.archived,
-                        )
-                        .filter((a) => (p.tag == null ? true : a.tags.includes(p.tag as string)))
-                        .sort((x, y) => y.summary.id - x.summary.id);
+                    let rows = filtered(p).sort((x, y) => y.summary.id - x.summary.id);
                     if (p.before != null)
                         rows = rows.filter((a) => a.summary.id < (p.before as number));
                     return rows.slice(0, (p.limit as number) ?? 50).map(row);
                 }
                 case 'search_articles': {
-                    const q = String(args.query ?? '').toLowerCase();
-                    return articles
-                        .filter((a) => a.summary.title.toLowerCase().includes(q))
-                        .slice(0, (args.limit as number) ?? 20)
+                    // Same filters as the list; a naive title-substring match
+                    // stands in for FTS (each word, operators dropped).
+                    const p = (args.params ?? {}) as Record<string, unknown>;
+                    const words = String(p.query ?? '')
+                        .toLowerCase()
+                        .split(/\s+/)
+                        .filter((word) => word !== '' && word !== 'or' && !word.startsWith('-'))
+                        .map((word) => word.replace(/["*]/g, ''));
+                    return filtered(p)
+                        .filter((a) =>
+                            words.every((word) => a.summary.title.toLowerCase().includes(word)),
+                        )
+                        .slice(0, (p.limit as number) ?? 20)
                         .map(row);
                 }
                 case 'get_article':

@@ -220,6 +220,10 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'search.empty': 'Brak wyników',
     'search.results':
         '{count, plural, one {# wynik} few {# wyniki} many {# wyników} other {# wyniku}}',
+    'search.resultsCapped':
+        '{count, plural, one {#+ wynik} few {#+ wyniki} many {#+ wyników} other {#+ wyniku}}',
+    'search.scope.label': 'Szukaj w',
+    'search.scope.everywhere': 'Wszędzie',
     'destinations.title': 'Miejsca docelowe',
     'destinations.open': 'Miejsca docelowe',
     'destinations.empty':

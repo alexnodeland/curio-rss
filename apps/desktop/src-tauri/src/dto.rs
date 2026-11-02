@@ -22,7 +22,7 @@ use curio_core::model::{
     FetchStatus, ListedArticle,
 };
 use curio_core::paths::{LeftReason, LegacyProfile};
-use curio_core::storage::ListArticles;
+use curio_core::storage::{ArticleFilter, ListArticles, SearchArticles};
 use curio_core::{
     ImportKind, ImportOutcome, ImportSource, OpmlImportOutcome, RefreshOutcome, RejectReason,
     Rejected, SaveOutcome,
@@ -514,6 +514,51 @@ impl From<ListArticlesDto> for ListArticles {
             archived: params.archived,
             tag: params.tag,
             feed_tag: params.feed_tag,
+        }
+    }
+}
+
+/// Mirror of [`SearchArticles`]: a query in Curio's search syntax (the
+/// last word matches as a prefix; `"phrase"`, `word*`, `-excluded`,
+/// `a OR b`), scoped by the [`ListArticlesDto`] filters (all `None` =
+/// everywhere, archived included). Ranking is backend-owned: best match
+/// first, a title hit above a body hit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SearchArticlesDto {
+    /// The user's query text.
+    pub query: String,
+    /// Maximum number of hits.
+    pub limit: u32,
+    /// Restrict to one feed.
+    pub feed_id: Option<i64>,
+    /// Keep only (un)read articles.
+    pub read: Option<bool>,
+    /// Keep only (un)starred articles.
+    pub starred: Option<bool>,
+    /// Keep only articles (not) in the read-later queue.
+    pub read_later: Option<bool>,
+    /// Keep only (un)archived articles.
+    pub archived: Option<bool>,
+    /// Keep only articles carrying this tag.
+    pub tag: Option<String>,
+    /// Keep only articles whose feed is in this folder (or beneath it).
+    pub feed_tag: Option<String>,
+}
+
+impl From<SearchArticlesDto> for SearchArticles {
+    fn from(params: SearchArticlesDto) -> Self {
+        Self {
+            query: params.query,
+            filter: ArticleFilter {
+                feed_id: params.feed_id.map(FeedId),
+                read: params.read,
+                starred: params.starred,
+                read_later: params.read_later,
+                archived: params.archived,
+                tag: params.tag,
+                feed_tag: params.feed_tag,
+            },
+            limit: params.limit,
         }
     }
 }
@@ -1079,5 +1124,36 @@ mod tests {
         assert_eq!(params.read, Some(false));
         assert_eq!(params.tag.as_deref(), Some("rust"));
         assert_eq!(params.feed_tag.as_deref(), Some("Tech/Databases"));
+    }
+
+    #[test]
+    fn search_params_carry_every_filter_into_the_core() {
+        let params = SearchArticles::from(SearchArticlesDto {
+            query: "rust -async".into(),
+            limit: 40,
+            feed_id: Some(7),
+            read: Some(false),
+            starred: Some(true),
+            read_later: Some(false),
+            archived: Some(false),
+            tag: Some("later".into()),
+            feed_tag: Some("Tech".into()),
+        });
+        assert_eq!(
+            params,
+            SearchArticles {
+                query: "rust -async".into(),
+                filter: ArticleFilter {
+                    feed_id: Some(FeedId(7)),
+                    read: Some(false),
+                    starred: Some(true),
+                    read_later: Some(false),
+                    archived: Some(false),
+                    tag: Some("later".into()),
+                    feed_tag: Some("Tech".into()),
+                },
+                limit: 40,
+            }
+        );
     }
 }

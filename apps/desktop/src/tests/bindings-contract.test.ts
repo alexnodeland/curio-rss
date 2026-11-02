@@ -100,7 +100,22 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
     getUnreadCounts: { args: [], response: unreadCountsFixture() },
     countArticles: { args: [], response: 42 },
     deleteArticle: { args: [100], response: null },
-    searchArticles: { args: ['rust', 20], response: [articleSummaryFixture()] },
+    searchArticles: {
+        args: [
+            {
+                query: 'rust',
+                limit: 20,
+                feed_id: 3,
+                read: null,
+                starred: null,
+                read_later: null,
+                archived: false,
+                tag: null,
+                feed_tag: null,
+            },
+        ],
+        response: [articleSummaryFixture()],
+    },
     markRead: { args: [100, true], response: true },
     markAllRead: { args: [1], response: [7, 8, 9] },
     markReadMany: { args: [[7, 8, 9], false], response: 3 },

@@ -220,6 +220,9 @@ export const de: Partial<Record<MessageKey, string>> = {
     'search.loading': 'Wird gesucht…',
     'search.empty': 'Keine Treffer',
     'search.results': '{count, plural, one {# Treffer} other {# Treffer}}',
+    'search.resultsCapped': '{count, plural, one {#+ Treffer} other {#+ Treffer}}',
+    'search.scope.label': 'Suchen in',
+    'search.scope.everywhere': 'Überall',
     'destinations.title': 'Ziele',
     'destinations.open': 'Ziele',
     'destinations.empty':

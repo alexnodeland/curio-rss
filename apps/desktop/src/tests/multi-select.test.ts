@@ -7,12 +7,13 @@
  * with an Undo that flips back exactly the ids that changed.
  */
 import ArticleList from '$components/articles/ArticleList.svelte';
+import { selectGesture } from '$components/articles/ArticleRow.svelte';
 import ReaderPane from '$components/reader/ReaderPane.svelte';
 import type { ArticleSummaryDto } from '$lib/bindings';
 import { handleShortcut } from '$lib/state/actions';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { rangeBetween, stillListed } from '$lib/state/multi-select';
-import { resetQueryCache } from '$lib/state/query-cache.svelte';
+import { applyArticlesChanged, resetQueryCache } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
@@ -42,7 +43,15 @@ function install(flags = flagBackend()): IpcHarness {
     return installIpcHarness({
         list_articles: rows(),
         list_feeds: [],
-        get_article_state: articleStateFixture(),
+        get_article_state: (args) => {
+            const id = args.articleId as number;
+            return articleStateFixture({
+                read: flags.read.has(id),
+                starred: flags.starred.has(id),
+                read_later: flags.read_later.has(id),
+                archived: flags.archived.has(id),
+            });
+        },
         get_article: (args) => articleFixture({ id: args.articleId as number }),
         mark_read: true,
         list_tags: [],
@@ -308,5 +317,132 @@ describe('multi-select', () => {
         await flushIpc();
         expect(reader.container.textContent).not.toContain('articles selected');
         expect(harness.callsFor('mark_read')).toEqual([{ articleId: 304, read: true }]);
+    });
+
+    it('Shift+J/K are plain j/k once the article rows are off screen (search, home layouts)', async () => {
+        harness = install();
+        const view = render(ArticleList);
+        await flushIpc();
+        await fireEvent.click(row(view.container, 305));
+        expect(selectionStore.multiSelectable).toBe(true);
+
+        // Search results / the YouTube grid replace the rows: they mark only
+        // the cursor, so no hidden range may be built behind them.
+        view.unmount();
+        expect(selectionStore.multiSelectable).toBe(false);
+        handleShortcut('nav.extendDown');
+        handleShortcut('nav.extendDown');
+        expect(selectionStore.multiActive).toBe(false);
+        expect(selectionStore.selectedIds).toEqual([303]);
+        handleShortcut('nav.extendUp');
+        expect(selectionStore.selectedIds).toEqual([304]);
+    });
+
+    it('⌘-click after the open row left the view selects just the clicked row', async () => {
+        harness = install();
+        const { container } = render(ArticleList);
+        await flushIpc();
+        await fireEvent.click(row(container, 305));
+
+        // `e` archived 305 out of the inbox: the cursor stays on its id, unlisted.
+        harness.respond(
+            'list_articles',
+            rows().filter((item) => item.id !== 305),
+        );
+        applyArticlesChanged({ feed_id: null });
+        await flushIpc();
+        expect(selectionStore.selectedIndex).toBe(-1);
+
+        await fireEvent.click(row(container, 303), { metaKey: true });
+        expect(selectionStore.multiActive).toBe(false);
+        expect(selectionStore.selectedArticleId).toBe(303);
+        expect(selectionStore.selectedIds).toEqual([303]);
+        expect(container.querySelector('[data-testid="bulk-bar"]')).toBeNull();
+    });
+
+    it('the bulk count lives in a persistent live region, empty until two rows are selected', async () => {
+        harness = install();
+        const { container } = render(ArticleList);
+        await flushIpc();
+        const announcer = container.querySelector('[data-testid="bulk-announcer"]');
+        expect(announcer?.getAttribute('aria-live')).toBe('polite');
+        expect(announcer?.textContent).toBe('');
+
+        await fireEvent.click(row(container, 306));
+        await fireEvent.click(row(container, 305), { shiftKey: true });
+        // The same node (mounted before the bar) now carries the first count.
+        expect(container.querySelector('[data-testid="bulk-announcer"]')).toBe(announcer);
+        expect(announcer?.textContent).toBe('2 selected');
+        expect(container.querySelector('[data-testid="bulk-bar"] [aria-live]')).toBeNull();
+
+        selectionStore.clearMulti();
+        await flushIpc();
+        expect(announcer?.textContent).toBe('');
+    });
+
+    it('star / read later toggle off when every selected row already has the flag', async () => {
+        const flags = flagBackend();
+        flags.starred = new Set([306, 305]);
+        flags.read_later = new Set([306]);
+        harness = install(flags);
+        const { container } = render(ArticleList);
+        await flushIpc();
+
+        await fireEvent.click(row(container, 306));
+        await fireEvent.click(row(container, 305), { shiftKey: true });
+        await flushIpc();
+        expect(bulkButton(container, 'star').getAttribute('aria-label')).toBe('Unstar');
+        // Only one of the two is queued: the bar adds, not removes.
+        expect(bulkButton(container, 'readLater').getAttribute('aria-label')).toBe('Read later');
+
+        handleShortcut('article.toggleStar');
+        await flushIpc();
+        expect(harness.callsFor('set_flag_many')).toEqual([
+            { articleIds: [306, 305], flag: 'starred', value: false },
+        ]);
+        expect(toastStore.toasts.map((toast) => toast.message)).toContain('Unstarred 2 articles');
+    });
+
+    it('m over an all-read selection marks it unread; a no-op is not reported as a success', async () => {
+        const flags = flagBackend();
+        flags.read = new Set([306, 305]);
+        harness = install(flags);
+        const { container } = render(ArticleList);
+        await flushIpc();
+        await fireEvent.click(row(container, 306));
+        await fireEvent.click(row(container, 305), { shiftKey: true });
+        await flushIpc();
+
+        // The bar's explicit Mark read changes nothing: an info note, no Undo.
+        await fireEvent.click(bulkButton(container, 'read'));
+        await flushIpc();
+        const noop = toastStore.toasts.at(-1);
+        expect(noop?.message).toBe('Nothing to change');
+        expect(noop?.tone).toBe('info');
+        expect(noop?.action).toBeUndefined();
+
+        handleShortcut('article.toggleRead');
+        await flushIpc();
+        expect(harness.callsFor('set_flag_many').at(-1)).toEqual({
+            articleIds: [306, 305],
+            flag: 'read',
+            value: false,
+        });
+    });
+});
+
+describe('selectGesture', () => {
+    const click = (init: MouseEventInit) => new MouseEvent('click', init);
+
+    it('Shift is a range and ⌘ a toggle everywhere', () => {
+        expect(selectGesture(click({ shiftKey: true }), true)).toBe('range');
+        expect(selectGesture(click({ metaKey: true }), true)).toBe('toggle');
+        expect(selectGesture(click({ metaKey: true }), false)).toBe('toggle');
+        expect(selectGesture(click({}), false)).toBe('single');
+    });
+
+    it('Ctrl toggles off macOS only — there ⌃-click is the context-menu click', () => {
+        expect(selectGesture(click({ ctrlKey: true }), false)).toBe('toggle');
+        expect(selectGesture(click({ ctrlKey: true }), true)).toBe('single');
     });
 });

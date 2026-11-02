@@ -6,8 +6,10 @@
  * prefix (`'Shift+Space'`) — a shifted printable key is already its own
  * character, so `Shift+R` is just `'R'` and `?` is `'?'` (a letter's case
  * is read from Shift, so Caps Lock never turns `r` into `R`). Ctrl/alt/meta
- * chords are deliberately absent from the v1 map (they belong to the native
- * menu). Two-key g-chords (`g` then `a`) ride a pending state with a timeout.
+ * chords mostly belong to the native menu; the one exception is a
+ * {@link ShortcutDef.commandKey} (⌘K on macOS, Ctrl+K elsewhere), which the
+ * shell matches ahead of the typing guard so it works from a text field too.
+ * Two-key g-chords (`g` then `a`) ride a pending state with a timeout.
  *
  * Global keys go through the shell's window matcher. Pane keys
  * ({@link ShortcutDef.paneKeys}) are the ARIA-pattern keys — the listbox's
@@ -18,6 +20,7 @@
  * actions) — the registry knows nothing about what a shortcut does.
  */
 import type { MessageKey } from '$lib/i18n';
+import { hasCommandModifier, isApplePlatform } from '$lib/utils/platform';
 
 /** Stable action ids — the currency between the registry and the shell. */
 export type ShortcutId =
@@ -49,6 +52,7 @@ export type ShortcutId =
     | 'view.toggleFocusMode'
     | 'app.addFeed'
     | 'app.settings'
+    | 'app.commandPalette'
     | 'help.toggle';
 
 export type ShortcutCategory = 'navigation' | 'actions' | 'views' | 'app';
@@ -72,6 +76,13 @@ export interface ShortcutDef {
      * reach the global matcher.
      */
     readonly paneKeys?: { readonly scope: PaneScope; readonly keys: readonly string[] };
+    /**
+     * A letter pressed with the platform's command modifier (⌘ on macOS, Ctrl
+     * elsewhere) — `'k'` is ⌘K. Resolved by {@link commandShortcut} from
+     * anywhere, a text field included; the native menu carries the same
+     * accelerator.
+     */
+    readonly commandKey?: string;
     /** i18n key for the help overlay's description column. */
     readonly description: MessageKey;
     /** Help-overlay grouping. */
@@ -209,6 +220,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     },
     { id: 'app.addFeed', keys: ['a'], description: 'shortcut.addFeed', category: 'app' },
     { id: 'app.settings', keys: [','], description: 'shortcut.settings', category: 'app' },
+    {
+        id: 'app.commandPalette',
+        keys: [],
+        commandKey: 'k',
+        description: 'shortcut.commandPalette',
+        category: 'app',
+    },
     { id: 'help.toggle', keys: ['?'], description: 'shortcut.help', category: 'app' },
 ] as const;
 
@@ -339,6 +357,25 @@ const PANE_KEYS: Record<PaneScope, ReadonlyMap<string, ShortcutId>> = {
  */
 export function paneShortcut(scope: PaneScope, key: string): ShortcutId | null {
     return PANE_KEYS[scope].get(key) ?? null;
+}
+
+/**
+ * Resolves a command-modifier chord (⌘K on macOS, Ctrl+K elsewhere — see
+ * {@link ShortcutDef.commandKey}) to its action, or `null`. Any other
+ * modifier held alongside (Shift, Option/Alt, or the other of ⌘/Ctrl) makes
+ * it a different chord, which stays the platform's.
+ */
+export function commandShortcut(
+    event: KeyboardEvent,
+    apple: boolean = isApplePlatform(),
+): ShortcutId | null {
+    // Exactly the command modifier: ⌘ and Ctrl both held is neither chord.
+    const both = event.metaKey && event.ctrlKey;
+    if (!hasCommandModifier(event, apple) || both || event.altKey || event.shiftKey) {
+        return null;
+    }
+    const key = event.key.toLowerCase();
+    return SHORTCUTS.find((shortcut) => shortcut.commandKey === key)?.id ?? null;
 }
 
 /**

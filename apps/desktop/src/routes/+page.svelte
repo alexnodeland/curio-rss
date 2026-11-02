@@ -13,6 +13,7 @@ import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
 import WelcomeView from '$components/layout/WelcomeView.svelte';
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
+import CommandPalette from '$components/modals/CommandPalette.svelte';
 import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
@@ -21,6 +22,7 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { t } from '$lib/i18n';
 import {
+    commandShortcut,
     createMatcher,
     eventKeyName,
     frameShortcut,
@@ -147,6 +149,15 @@ function onKeydown(event: KeyboardEvent): void {
     if (handleModalKey(event)) {
         return;
     }
+    // ⌘K (Ctrl+K off macOS) works from anywhere outside a dialog — the
+    // search field included, so it is matched before the typing guard.
+    const commandId = commandShortcut(event);
+    if (commandId !== null) {
+        event.preventDefault();
+        matcher.reset();
+        handleShortcut(commandId);
+        return;
+    }
     if (shouldIgnoreKeyEvent(event)) {
         return;
     }
@@ -199,6 +210,10 @@ function onKeydown(event: KeyboardEvent): void {
 
 {#if layoutStore.activeModal === 'help'}
     <HelpOverlay onclose={() => layoutStore.closeModal()} />
+{/if}
+
+{#if layoutStore.activeModal === 'palette'}
+    <CommandPalette onclose={() => layoutStore.closeModal()} />
 {/if}
 
 {#if layoutStore.activeModal === 'destinations'}

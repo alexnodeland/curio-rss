@@ -162,6 +162,7 @@ pub struct MenuStrings {
     pub refresh_all: &'static str,
     pub toggle_sidebar: &'static str,
     pub focus_mode: &'static str,
+    pub command_palette: &'static str,
     pub go: &'static str,
     pub all_articles: &'static str,
     pub starred: &'static str,
@@ -206,6 +207,7 @@ static EN: Strings = Strings {
         refresh_all: "Refresh All",
         toggle_sidebar: "Toggle Sidebar",
         focus_mode: "Focus Mode",
+        command_palette: "Command Palette…",
         go: "Go",
         all_articles: "All Articles",
         starred: "Starred",
@@ -255,6 +257,7 @@ static ES: Strings = Strings {
         refresh_all: "Actualizar todo",
         toggle_sidebar: "Mostrar/ocultar barra lateral",
         focus_mode: "Modo concentración",
+        command_palette: "Paleta de comandos…",
         go: "Ir",
         all_articles: "Todos los artículos",
         starred: "Destacados",
@@ -304,6 +307,7 @@ static FR: Strings = Strings {
         refresh_all: "Tout actualiser",
         toggle_sidebar: "Afficher/masquer la barre latérale",
         focus_mode: "Mode concentration",
+        command_palette: "Palette de commandes…",
         go: "Aller",
         all_articles: "Tous les articles",
         starred: "Favoris",
@@ -349,6 +353,7 @@ static DE: Strings = Strings {
         refresh_all: "Alle aktualisieren",
         toggle_sidebar: "Seitenleiste ein-/ausblenden",
         focus_mode: "Fokusmodus",
+        command_palette: "Befehlspalette…",
         go: "Gehe zu",
         all_articles: "Alle Artikel",
         starred: "Favoriten",
@@ -398,6 +403,7 @@ static IT: Strings = Strings {
         refresh_all: "Aggiorna tutto",
         toggle_sidebar: "Mostra/nascondi barra laterale",
         focus_mode: "Modalità concentrazione",
+        command_palette: "Palette dei comandi…",
         go: "Vai",
         all_articles: "Tutti gli articoli",
         starred: "Preferiti",
@@ -447,6 +453,7 @@ static PL: Strings = Strings {
         refresh_all: "Odśwież wszystko",
         toggle_sidebar: "Pokaż/ukryj pasek boczny",
         focus_mode: "Tryb skupienia",
+        command_palette: "Paleta poleceń…",
         go: "Idź",
         all_articles: "Wszystkie artykuły",
         starred: "Oznaczone gwiazdką",
@@ -492,6 +499,7 @@ static ZH_HANS: Strings = Strings {
         refresh_all: "全部刷新",
         toggle_sidebar: "显示/隐藏侧边栏",
         focus_mode: "专注模式",
+        command_palette: "命令面板…",
         go: "前往",
         all_articles: "所有文章",
         starred: "星标",
@@ -537,6 +545,7 @@ static YUE: Strings = Strings {
         refresh_all: "全部更新",
         toggle_sidebar: "顯示／隱藏側邊欄",
         focus_mode: "專注模式",
+        command_palette: "指令面板…",
         go: "前往",
         all_articles: "全部文章",
         starred: "已加星標",
@@ -555,7 +564,7 @@ mod tests {
     use super::*;
 
     /// Every label of one locale, for whole-table checks.
-    fn labels(menu: &MenuStrings) -> [&'static str; 29] {
+    fn labels(menu: &MenuStrings) -> [&'static str; 30] {
         [
             menu.about,
             menu.settings,
@@ -576,6 +585,7 @@ mod tests {
             menu.refresh_all,
             menu.toggle_sidebar,
             menu.focus_mode,
+            menu.command_palette,
             menu.go,
             menu.all_articles,
             menu.starred,

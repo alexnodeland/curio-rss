@@ -66,6 +66,15 @@ export class SelectionStore {
     #anchor: number | null = null;
 
     /**
+     * Whether the list on screen draws a multi-selection — only the article
+     * rows do (`ArticleList` turns this on while mounted). Search results and
+     * the YouTube / Reddit home layouts mark just the cursor, so there
+     * Shift+J/K are plain j/k: a selection nobody can see must never be built
+     * for the bulk keys to act on.
+     */
+    multiSelectable: boolean = $state(false);
+
+    /**
      * Selected article row id (the cursor), if any. Setting it is a plain
      * single selection: it collapses any multi-selection and re-anchors.
      */
@@ -143,7 +152,9 @@ export class SelectionStore {
      * most recently added row still selected.
      */
     toggleSelected(id: number): void {
-        const single = this.#cursor === null ? [] : [this.#cursor];
+        // Only a cursor still listed seeds the set: one archived out of the
+        // view (`selectedIndex === -1`) must not ride along as a hidden member.
+        const single = this.#cursor === null || this.selectedIndex === -1 ? [] : [this.#cursor];
         const current = this.#multi.size > 1 ? [...this.#multi] : single;
         const next = current.includes(id)
             ? current.filter((candidate) => candidate !== id)
@@ -160,13 +171,14 @@ export class SelectionStore {
     /**
      * Shift+J / Shift+K: moves the cursor one row and selects the range from
      * the anchor to it — growing or shrinking the selection like Shift+↓/↑ in
-     * a file list. With no row selected it is a plain j / k. Returns the
+     * a file list. With no row selected — or on a list that draws only the
+     * cursor ({@link multiSelectable}) — it is a plain j / k. Returns the
      * load-more signal, like j.
      */
     extendSelection(direction: 'down' | 'up'): boolean {
         const items = articlesStore.activeItems;
         const index = this.selectedIndex;
-        if (index === -1) {
+        if (index === -1 || !this.multiSelectable) {
             if (direction === 'up') {
                 this.selectPreviousArticle();
                 return false;
@@ -339,6 +351,7 @@ export class SelectionStore {
         this.lastPresentIndex = 0;
         this.#multi.clear();
         this.#anchor = null;
+        this.multiSelectable = false;
     }
 }
 

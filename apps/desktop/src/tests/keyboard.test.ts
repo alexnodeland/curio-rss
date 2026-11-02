@@ -3,11 +3,12 @@
  * matcher state machine handles singles, Shift-cased keys, g-chords with a
  * timeout, and typing contexts.
  */
-import { shortcutKbd } from '$lib/keyboard/labels';
+import { commandKeyLabel, shortcutKbd } from '$lib/keyboard/labels';
 import {
     CHORD_TIMEOUT_MS,
     SHORTCUTS,
     type ShortcutId,
+    commandShortcut,
     createMatcher,
     eventKeyName,
     frameShortcut,
@@ -48,9 +49,47 @@ describe('shortcut table', () => {
             'view.toggleFocusMode': ['f'],
             'app.addFeed': ['a'],
             'app.settings': [','],
+            'app.commandPalette': [],
             'help.toggle': ['?'],
         };
         expect(Object.fromEntries(byId)).toEqual(expected);
+    });
+
+    it('binds ⌘K (Ctrl+K off macOS) to the command palette, and nothing else to a command chord', () => {
+        const chords = SHORTCUTS.filter((shortcut) => shortcut.commandKey !== undefined);
+        expect(chords.map((shortcut) => [shortcut.id, shortcut.commandKey])).toEqual([
+            ['app.commandPalette', 'k'],
+        ]);
+        const press = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+        // macOS: ⌘K, also with Caps Lock on; ⌃K is the platform's (emacs line kill).
+        expect(commandShortcut(press({ key: 'k', metaKey: true }), true)).toBe(
+            'app.commandPalette',
+        );
+        expect(commandShortcut(press({ key: 'K', metaKey: true }), true)).toBe(
+            'app.commandPalette',
+        );
+        expect(commandShortcut(press({ key: 'k', ctrlKey: true }), true)).toBeNull();
+        // Elsewhere: Ctrl+K; the Windows/Super key is not the command modifier.
+        expect(commandShortcut(press({ key: 'k', ctrlKey: true }), false)).toBe(
+            'app.commandPalette',
+        );
+        expect(commandShortcut(press({ key: 'k', metaKey: true }), false)).toBeNull();
+        // Another modifier alongside is a different chord; a bare k is just k.
+        expect(
+            commandShortcut(press({ key: 'k', metaKey: true, shiftKey: true }), true),
+        ).toBeNull();
+        expect(commandShortcut(press({ key: 'k', metaKey: true, altKey: true }), true)).toBeNull();
+        expect(commandShortcut(press({ key: 'k', metaKey: true, ctrlKey: true }), true)).toBeNull();
+        expect(commandShortcut(press({ key: 'j', metaKey: true }), true)).toBeNull();
+        expect(commandShortcut(press({ key: 'k' }), true)).toBeNull();
+    });
+
+    it('prints a command chord as the platform spells it', () => {
+        expect(commandKeyLabel('k', true)).toBe('⌘K');
+        expect(commandKeyLabel('k', false)).toBe('Ctrl+K');
+        // jsdom is no Mac: the tooltip suffix reads Ctrl+K there.
+        expect(shortcutKbd('app.commandPalette')).toBe('Ctrl+K');
+        expect(shortcutKbd('view.all')).toBe('g a');
     });
 
     it('binds the ARIA pane keys: listbox arrows / Enter, reader ← / Esc', () => {
@@ -80,12 +119,13 @@ describe('shortcut table', () => {
         expect(paneShortcut('list', 'j')).toBeNull();
     });
 
-    it('every action is reachable: a global sequence, pane keys, or both', () => {
+    it('every action is reachable: a global sequence, pane keys, a command chord, or several', () => {
         for (const shortcut of SHORTCUTS) {
             const global = shortcut.keys.length;
             const pane = shortcut.paneKeys?.keys.length ?? 0;
+            const chord = shortcut.commandKey === undefined ? 0 : 1;
             expect(global <= 2, shortcut.id).toBe(true);
-            expect(global + pane > 0, shortcut.id).toBe(true);
+            expect(global + pane + chord > 0, shortcut.id).toBe(true);
         }
     });
 

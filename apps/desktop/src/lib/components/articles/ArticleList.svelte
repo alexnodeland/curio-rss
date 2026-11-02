@@ -102,6 +102,27 @@ $effect(() => {
     return () => untrack(() => selectionStore.clearMulti());
 });
 
+// These rows draw a multi-selection; the other list surfaces (search results,
+// the YouTube / Reddit home layouts) mark only the cursor, so Shift+J/K
+// extend a range only while this list is on screen.
+$effect(() => {
+    selectionStore.multiSelectable = true;
+    return () => {
+        selectionStore.multiSelectable = false;
+    };
+});
+
+/**
+ * The bulk count spoken in the persistent live region below: empty while one
+ * row is selected, so the first count ("2 selected") is a change a screen
+ * reader announces — a region inserted already filled is often skipped.
+ */
+const bulkAnnouncement = $derived(
+    selectionStore.multiActive
+        ? t('bulk.count', { count: selectionStore.selectedIds.length })
+        : '',
+);
+
 /**
  * Opens the context menu for the selected row when the keyboard menu key fires
  * on the listbox (rows are `tabindex="-1"`, so their own menu-key never fires).
@@ -323,6 +344,7 @@ function onViewport(report: ViewportReport): void {
 </script>
 
 <div class="article-list" bind:this={pane}>
+    <span class="sr-only" aria-live="polite" data-testid="bulk-announcer">{bulkAnnouncement}</span>
     {#if list.items.length > 0}
         <!-- Stale-while-revalidate: keep showing the loaded rows even if a
              refetch just errored; surface the failure as a non-destructive

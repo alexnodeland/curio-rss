@@ -12,10 +12,11 @@ export const BULK_BAR_INSET = 64;
  * The bulk bar: floats over the bottom of the article list while two or more
  * rows are selected, and runs one batch command per action over the whole
  * selection (`setFlagForSelection` — one IPC call, one transaction, with an
- * Undo toast). Star, read-later and archive take the flag off inside their
- * own view (everything listed there has it) and put it on elsewhere — the
- * same direction `s`/`l`/`e` take over a multi-selection, so each tooltip's
- * key does exactly what its button does.
+ * Undo toast). Star, read-later and archive toggle over the whole set: they
+ * take the flag off when every selected row already has it (always so inside
+ * that flag's own view) and put it on otherwise — the same direction
+ * `s`/`l`/`e` take over a multi-selection (`bulkValue`), so each tooltip's key
+ * does exactly what its button does. Read and unread are separate buttons.
  */
 import type { ArticleFlagDto } from '$lib/bindings';
 import Icon, { type IconName } from '$components/common/Icon.svelte';
@@ -89,11 +90,13 @@ const count = $derived(selectionStore.selectedIds.length);
 
 <div class="bulk-bar" role="toolbar" aria-label={t('bulk.toolbar')} data-testid="bulk-bar">
     <!-- The visible count is just the number (the bar must fit the narrowest
-         list column); the live region speaks the full, pluralized phrase. -->
+         list column). The full, pluralized phrase is spoken by the list's
+         persistent live region (it outlives this bar, so the first count is
+         announced too) and is the bar's own visually hidden text. -->
     <span class="bulk-count" aria-hidden="true" use:tooltip={t('bulk.count', { count })}
         >{count}</span
     >
-    <span class="sr-only" aria-live="polite">{t('bulk.count', { count })}</span>
+    <span class="sr-only">{t('bulk.count', { count })}</span>
     {#each buttons as button (button.id)}
         <button
             class="bulk-tool"

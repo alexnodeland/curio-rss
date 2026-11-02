@@ -6,6 +6,7 @@
  * mounted panels fire on open. Roving-focus assertions follow menu.test.ts.
  */
 import SettingsModal from '$components/modals/SettingsModal.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -125,5 +126,20 @@ describe('SettingsModal — tablist', () => {
         const panelEls = panels();
         expect(panelEls[0].hasAttribute('hidden')).toBe(false);
         expect(panelEls.slice(1).every((panel) => panel.hasAttribute('hidden'))).toBe(true);
+    });
+
+    it('opens on the tab a caller asked for (the command palette)', async () => {
+        harness = installIpcHarness(mountResponders());
+        layoutStore.openSettings('appearance');
+        render(SettingsModal, { props: { onclose: vi.fn() } });
+        await flushIpc();
+
+        const selected = tabs().find((tab) => tab.getAttribute('aria-selected') === 'true');
+        expect(selected?.textContent?.trim()).toBe('Appearance');
+        expect(document.getElementById('settings-panel-appearance')?.hasAttribute('hidden')).toBe(
+            false,
+        );
+        layoutStore.closeModal();
+        expect(layoutStore.settingsSection).toBeNull();
     });
 });

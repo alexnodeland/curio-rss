@@ -11,6 +11,7 @@ import {
 import { feedsStore } from '$lib/state/feeds.svelte';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { isLinkless } from '$lib/utils/article';
+import { isApplePlatform } from '$lib/utils/platform';
 
 /**
  * The DOM id of the row for one article — the listbox points at it through
@@ -28,12 +29,19 @@ export function articleOptionId(articleId: number): string {
  */
 export type SelectGesture = 'single' | 'range' | 'toggle';
 
-/** The selection gesture a click's modifiers spell. */
-export function selectGesture(event: MouseEvent): SelectGesture {
+/**
+ * The selection gesture a click's modifiers spell. On macOS ⌃-click is the
+ * secondary click (the context menu), so there only ⌘ toggles — whether or
+ * not the engine also delivers that ⌃-click as a `click`.
+ */
+export function selectGesture(
+    event: MouseEvent,
+    apple: boolean = isApplePlatform(),
+): SelectGesture {
     if (event.shiftKey) {
         return 'range';
     }
-    return event.metaKey || event.ctrlKey ? 'toggle' : 'single';
+    return event.metaKey || (event.ctrlKey && !apple) ? 'toggle' : 'single';
 }
 
 /**

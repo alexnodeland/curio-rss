@@ -460,6 +460,15 @@ describe('native menu — View items', () => {
         );
     });
 
+    it('carries the command palette on ⌘K (Ctrl+K), the chord the registry binds', () => {
+        expect(ids).toContain('app.commandPalette');
+        expect(menuSource).toMatch(
+            /with_id\("app\.commandPalette"[^;]*\.accelerator\("CmdOrCtrl\+K"\)/,
+        );
+        const palette = SHORTCUTS.find((shortcut) => shortcut.id === 'app.commandPalette');
+        expect(palette?.commandKey).toBe('k');
+    });
+
     it('emits only registered shortcut ids (or the two menu-only links)', () => {
         const known = new Set<string>([
             ...SHORTCUTS.map((shortcut) => shortcut.id),

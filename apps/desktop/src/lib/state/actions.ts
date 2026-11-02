@@ -33,7 +33,7 @@ import { type FeedFolder, subtreeFeedIds } from './feed-tree';
 import { feedsStore } from './feeds.svelte';
 import { feedInFolder } from './folder-ops';
 import { layoutStore } from './layout.svelte';
-import type { CommandResult } from './query-cache.svelte';
+import { type CommandResult, ensureQuery, queryKeys } from './query-cache.svelte';
 import { searchStore } from './search.svelte';
 import { selectionStore } from './selection.svelte';
 import { type ToastOptions, toastStore } from './toasts.svelte';
@@ -280,24 +280,46 @@ const BULK_DONE: Record<ArticleFlagDto, readonly [MessageKey, MessageKey]> = {
     archived: ['toast.bulk.archived', 'toast.bulk.unarchived'],
 };
 
-/**
- * The direction the current view gives a bulk flag: inside its own view
- * (Starred, Read later, Archived) the bar takes the flag off — everything
- * listed there already has it — and everywhere else it puts it on. Read has
- * both directions as separate buttons, so it is always "on" here.
- */
-export function bulkValue(flag: ArticleFlagDto): boolean {
+/** Whether the current view lists only rows carrying `flag` (Starred, Read later, Archived). */
+function inFlagView(flag: ArticleFlagDto): boolean {
     const filters = articlesStore.filters;
     switch (flag) {
         case 'starred':
-            return filters.starred !== true;
+            return filters.starred === true;
         case 'read_later':
-            return filters.readLater !== true;
+            return filters.readLater === true;
         case 'archived':
-            return filters.archived !== true;
+            return filters.archived === true;
         default:
-            return true;
+            return false;
     }
+}
+
+/**
+ * The direction a bulk flip of `flag` takes over `articleIds` (default: the
+ * current selection) — a toggle over the whole set, like a single press of
+ * `s`/`l`/`m`/`e`: it takes the flag off when every row already carries it
+ * (always so inside the flag's own view: Starred, Read later, Archived), and
+ * puts it on otherwise. Flags come from the rows' cached state queries; a row
+ * whose state hasn't loaded counts as not carrying it, so the set is never
+ * cleared on a guess.
+ */
+export function bulkValue(
+    flag: ArticleFlagDto,
+    articleIds: readonly number[] = selectionStore.selectedIds,
+): boolean {
+    if (inFlagView(flag)) {
+        return false;
+    }
+    const allCarry =
+        articleIds.length > 0 &&
+        articleIds.every(
+            (articleId) =>
+                ensureQuery(queryKeys.articleState(articleId), () =>
+                    commands.getArticleState(articleId),
+                ).data?.[flag] === true,
+        );
+    return !allCarry;
 }
 
 /** Puts a bulk flip back: exactly the ids it changed take the old value. */
@@ -307,6 +329,7 @@ async function undoBulk(
     value: boolean,
 ): Promise<void> {
     const restored = await run(() => commands.setFlagMany([...articleIds], flag, !value), {
+        key: `bulkUndo:${flag}`,
         run: () => void undoBulk(articleIds, flag, value),
     });
     if (restored !== undefined) {
@@ -346,11 +369,20 @@ export async function setFlagForSelection(
             articlesStore.releaseHeld(articleId);
         }
     }
-    const message = t(BULK_DONE[flag][value ? 0 : 1], { count: changed.length });
+    toastBulkDone(changed, flag, value);
+}
+
+/**
+ * The bulk flip's outcome toast: how many changed, with an Undo that flips
+ * exactly those back — or, when every row already had that value, a plain
+ * note that nothing happened (never "Starred 0 articles" as a success).
+ */
+function toastBulkDone(changed: readonly number[], flag: ArticleFlagDto, value: boolean): void {
     if (changed.length === 0) {
-        toastStore.showToast(message, 'success');
+        toastStore.showToast(t('toast.bulk.noChange'), 'info');
         return;
     }
+    const message = t(BULK_DONE[flag][value ? 0 : 1], { count: changed.length });
     toastStore.showToast(message, 'success', {
         action: { label: t('toast.undo'), run: () => undoBulk(changed, flag, value) },
     });
@@ -1019,8 +1051,9 @@ function openSelected(): void {
 
 /**
  * Runs a single-article toggle on the selected row — or, over a
- * multi-selection, the bulk bar's action for the same flag (one batch call),
- * so `s`/`l`/`m`/`e` always do what the bar's button does.
+ * multi-selection, the same toggle over the whole set in one batch call
+ * ({@link bulkValue} picks the direction), so `s`/`l`/`e` always do what the
+ * bar's button does and `m` marks the set read, or unread once all of it is.
  */
 function withSelected(action: (articleId: number) => Promise<void>, flag: ArticleFlagDto): void {
     if (selectionStore.multiActive) {
@@ -1044,6 +1077,18 @@ function focusReader(): void {
     }
     if (selectionStore.selectedArticleId !== null) {
         selectionStore.focusReader();
+    }
+}
+
+/**
+ * ⌘K (Ctrl+K off macOS, and the View menu's item): opens the command
+ * palette. Opening is idempotent, never a toggle — the webview's key handler
+ * and the native menu accelerator may both see the same press — and it never
+ * replaces another open dialog (a half-typed feed URL must not vanish).
+ */
+function openCommandPalette(): void {
+    if (layoutStore.activeModal === null) {
+        layoutStore.openModal('palette');
     }
 }
 
@@ -1157,6 +1202,9 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'view.toggleFocusMode':
             void layoutStore.toggleFocusMode();
+            break;
+        case 'app.commandPalette':
+            openCommandPalette();
             break;
         case 'help.toggle':
             toggleHelp();

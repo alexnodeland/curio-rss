@@ -6,9 +6,35 @@
  * width, a sidebar peeked open in a narrow window and the modal are
  * session-only.
  */
+import type { MessageKey } from '$lib/i18n';
 import { SETTING_KEYS, settingsStore } from './settings.svelte';
 
-export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'edit-feed';
+export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'edit-feed' | 'palette';
+
+/** The settings modal's tabs, in rail order. */
+export const SETTINGS_SECTIONS = [
+    'general',
+    'appearance',
+    'reading',
+    'media',
+    'notifications',
+    'data',
+    'advanced',
+] as const;
+
+/** One settings tab (see {@link SETTINGS_SECTIONS}). */
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+/** Each settings tab's label (the modal's rail, the command palette). */
+export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSection, MessageKey>> = {
+    general: 'settings.section.general',
+    appearance: 'settings.section.appearance',
+    reading: 'settings.section.reading',
+    media: 'settings.section.mediaPrivacy',
+    notifications: 'settings.section.notifications',
+    data: 'settings.section.data',
+    advanced: 'settings.section.advanced',
+};
 
 /** Which section the edit-feed modal opens focused on. */
 export type EditFeedSection = 'details' | 'health';
@@ -90,6 +116,12 @@ export class LayoutStore {
 
     /** The add-feed modal's pre-fill while it is open from a preset; else `null`. */
     addFeedSeed: AddFeedSeed | null = $state(null);
+
+    /**
+     * The tab the settings modal opens on, when a caller asked for one (the
+     * command palette's settings entries); `null` reopens the last tab.
+     */
+    settingsSection: SettingsSection | null = $state(null);
 
     /**
      * Adopts persisted pane layout at startup (after `settingsStore.load()`).
@@ -250,11 +282,18 @@ export class LayoutStore {
         this.activeModal = 'edit-feed';
     }
 
+    /** Opens the settings modal, on `section`'s tab when one is given. */
+    openSettings(section: SettingsSection | null = null): void {
+        this.settingsSection = section;
+        this.activeModal = 'settings';
+    }
+
     closeModal(): void {
         this.activeModal = null;
         this.addFeedSeed = null;
         this.editFeedId = null;
         this.editFeedSection = 'details';
+        this.settingsSection = null;
     }
 
     /** Test isolation. */
@@ -263,6 +302,7 @@ export class LayoutStore {
         this.addFeedSeed = null;
         this.editFeedId = null;
         this.editFeedSection = 'details';
+        this.settingsSection = null;
         this.sidebarCollapsed = false;
         this.focusMode = false;
         this.narrow = false;

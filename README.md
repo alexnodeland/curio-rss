@@ -129,6 +129,16 @@ command-key chords).
 | <kbd>Space</kbd> / <kbd>⇧ Space</kbd> | Page the article down / up — <kbd>Space</kbd> at the end opens the next unread | | <kbd>A</kbd> | Mark all read in the current view |
 | <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
 | <kbd>&#92;</kbd> | Show / hide the sidebar | | <kbd>f</kbd> | Focus mode — the article alone |
+| <kbd>⌘K</kbd> (<kbd>Ctrl+K</kbd>) | Command palette | | | |
+
+<kbd>⌘K</kbd> (<kbd>Ctrl+K</kbd> on Linux and Windows, and **View → Command
+Palette…**) opens the **command palette**: type a few letters of anything —
+a command, a view, a feed, a folder, a settings tab or a theme — and
+<kbd>↑</kbd>/<kbd>↓</kbd> then <kbd>Enter</kbd> runs it. The match is fuzzy
+(`gts` finds *Go to starred*), each command shows the key that runs it
+directly, and a leading group word narrows the list (`theme nord`,
+`folder tech`). It works from the search box too; <kbd>Esc</kbd> closes it and
+puts focus back where it was.
 
 The article list is a standard listbox: <kbd>↑</kbd>/<kbd>↓</kbd> move like
 <kbd>j</kbd>/<kbd>k</kbd>, <kbd>Home</kbd>/<kbd>End</kbd>/<kbd>Page Up</kbd>/<kbd>Page Down</kbd>
@@ -152,8 +162,10 @@ Select several articles at once with <kbd>⇧</kbd>-click (a range),
 grow the range. A bar at the bottom of the list then marks the whole selection
 read or unread, stars it, queues it for later or archives it — in one step,
 with Undo — and <kbd>s</kbd>/<kbd>l</kbd>/<kbd>m</kbd>/<kbd>e</kbd> do the
-same as its buttons. Inside Starred, Read later or Archived the bar takes that
-flag off instead. <kbd>Esc</kbd> goes back to a single article.
+same as its buttons. Like a single press, each one toggles: when every selected
+article already has the flag (always so inside Starred, Read later or
+Archived) it takes the flag off instead. <kbd>Esc</kbd> goes back to a single
+article.
 
 A feed entry published without a link of its own has no page to open, so
 <kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it
@@ -164,7 +176,7 @@ any other kind of site link from a feed either. An entry the feed gave no
 date is dated by the day Curio first saw it, labelled **First seen**.
 
 macOS command chords (also in the menu bar):
-<kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·
+<kbd>⌘K</kbd> Command palette · <kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·
 <kbd>⌘1</kbd>–<kbd>⌘4</kbd> All / Starred / Read-later / Archived.
 
 ## Importers

@@ -153,35 +153,59 @@ impl Storage {
         id: ArticleId,
         now: Timestamp,
     ) -> Result<bool, StorageError> {
-        let recorded = self.read(move |conn| {
-            Ok(conn
-                .prepare_cached("SELECT 1 FROM article_exports WHERE article_id = ?1")?
-                .query_row([id.0], |_| Ok(()))
-                .optional()?
-                .is_some())
+        Ok(self.mark_articles_exported(&[id], now)?.is_empty())
+    }
+
+    /// [`Self::mark_article_exported`] for a bulk export's batch: records
+    /// every article of `ids` in one transaction (none at all when each is
+    /// recorded already — then it is one read), and returns the ones that
+    /// do not exist (any more), for which the export must write no note.
+    ///
+    /// # Errors
+    ///
+    /// Database errors; nothing is recorded on error.
+    pub fn mark_articles_exported(
+        &self,
+        ids: &[ArticleId],
+        now: Timestamp,
+    ) -> Result<BTreeSet<ArticleId>, StorageError> {
+        let ids = ids.to_vec();
+        let unrecorded = self.read(move |conn| {
+            let mut recorded =
+                conn.prepare_cached("SELECT 1 FROM article_exports WHERE article_id = ?1")?;
+            let mut unrecorded = Vec::new();
+            for id in ids {
+                if recorded.query_row([id.0], |_| Ok(())).optional()?.is_none() {
+                    unrecorded.push(id);
+                }
+            }
+            Ok(unrecorded)
         })?;
-        if recorded {
-            return Ok(true);
+        if unrecorded.is_empty() {
+            return Ok(BTreeSet::new());
         }
         self.write(move |conn| {
             let tx = begin_write(conn)?;
-            let inserted = tx
-                .prepare_cached(
+            let mut gone = BTreeSet::new();
+            {
+                let mut insert = tx.prepare_cached(
                     "INSERT INTO article_exports (article_id, recorded_at) \
                      SELECT id, ?2 FROM articles WHERE id = ?1 \
                      ON CONFLICT (article_id) DO NOTHING",
-                )?
-                .execute((id.0, now.to_string()))?;
-            // No row inserted: the article is gone, or another export
-            // recorded it a moment ago.
-            let exists = inserted > 0
-                || tx
-                    .prepare_cached("SELECT 1 FROM articles WHERE id = ?1")?
-                    .query_row([id.0], |_| Ok(()))
-                    .optional()?
-                    .is_some();
+                )?;
+                let mut exists = tx.prepare_cached("SELECT 1 FROM articles WHERE id = ?1")?;
+                let now = now.to_string();
+                for id in unrecorded {
+                    // No row inserted: the article is gone, or another
+                    // export recorded it a moment ago.
+                    let inserted = insert.execute((id.0, &now))? > 0;
+                    if !inserted && exists.query_row([id.0], |_| Ok(())).optional()?.is_none() {
+                        gone.insert(id);
+                    }
+                }
+            }
             tx.commit()?;
-            Ok(exists)
+            Ok(gone)
         })
     }
 

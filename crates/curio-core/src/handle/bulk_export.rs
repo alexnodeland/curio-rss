@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use curio_types::{CurioId, Destination, DestinationName, EventPayload};
+use curio_types::{CurioId, Destination, DestinationName, EventPayload, Timestamp};
 
 use crate::export::{self, ExportBatch, ExportDisposition, StageError};
 use crate::model::{Article, ArticleId, Feed, FeedId};
@@ -256,12 +256,27 @@ impl CoreHandle {
         outcome: &mut BulkSaveOutcome,
     ) -> Result<(), CoreError> {
         let mut batch = ExportBatch::begin(dest)?;
+        // The page is recorded as exported BEFORE any of its notes is
+        // written, so retention never reaps one (see
+        // `save_to_destination`): a maintenance pass running alongside
+        // either sees the records, or already deleted an article — and
+        // then no note is written for it. An article whose export then
+        // fails, or that a cancel leaves unwalked, only stays protected:
+        // the safe side.
+        let ids: Vec<ArticleId> = page.iter().map(|article| article.id).collect();
+        let gone = self
+            .storage
+            .mark_articles_exported(&ids, Timestamp::now())?;
         let mut events = Vec::new();
         let mut tally = Tally::default();
         for article in page {
             if cancel.is_cancelled() {
                 outcome.cancelled = true;
                 break;
+            }
+            // Deleted since the page was read: nothing left to export.
+            if gone.contains(&article.id) {
+                continue;
             }
             let feed = match article.feed_id {
                 Some(feed_id) => match feeds.get(&feed_id) {
@@ -517,6 +532,21 @@ mod tests {
             (rest.created, rest.unchanged, rest.cancelled),
             (10, u64::from(BULK_SAVE_BATCH), false)
         );
+    }
+
+    /// Every bulk-exported article is recorded as an export, so retention
+    /// never reaps it — like a single save.
+    #[test]
+    fn bulk_exported_articles_are_recorded_as_exports() {
+        let (profile, _vault, core) = vault_core(3);
+        let outcome = core
+            .save_all_to_destination(&ListArticles::default(), &vault_name())
+            .unwrap();
+        assert_eq!(outcome.created, 3);
+        let recorded: i64 = raw_db(&profile)
+            .query_row("SELECT COUNT(*) FROM article_exports", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(recorded, 3);
     }
 
     #[test]

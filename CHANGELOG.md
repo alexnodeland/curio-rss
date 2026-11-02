@@ -7,7 +7,9 @@ All notable changes to the Curio app. The format follows
 (The versioned Curio↔notes **contract** schemas have their own changelog at
 [`schemas/CHANGELOG.md`](schemas/CHANGELOG.md).)
 
-## [0.5.0] — 2026-11-01
+## [0.6.0] — 2026-11-02
+
+0.5.0 was prepared but never published; its changes ship in this release.
 
 The data-safety release: a sweep through everything that could lose, revert,
 or corrupt your reading — notes, full text, events, and the library itself.
@@ -16,8 +18,41 @@ recover instead of crashing, and the CLI and the app now share one profile
 safely. It also patches the RUSTSEC advisories in the HTML sanitizer and the
 TLS stack, and hardens the release pipeline.
 
+It is also the refresh-and-polish release: refreshes run in parallel within
+bounds and can be stopped, a failing feed backs off politely and pauses
+itself instead of hammering its host, every page and feed is decoded in its
+own character encoding, errors are typed and speak your language, and the
+list and reader behave the way a keyboard and a screen reader expect.
+
 ### Added
 
+- **Parallel, cancellable refresh** — a sweep fetches several feeds at
+  once (with a fair share per host) and can be stopped; full-text
+  hydration runs as its own bounded background queue. The refresh pill
+  shows the running count and a **Stop** button.
+- **Polite per-feed scheduling** — a failing feed backs off exponentially
+  (15 minutes doubling to 24 hours, with jitter), a `Retry-After` from the
+  server is honoured (also for a manual refresh), and a feed's own refresh
+  hints (`<ttl>`, `sy:updatePeriod`, `Cache-Control: max-age`) space its
+  sweeps. Sweeps fetch only due feeds; 10 failures in a row over at least 3
+  days auto-pause a feed, and a feed is marked dead only after a second
+  `410 Gone`. The edit-feed Health section shows the next attempt and why a
+  feed was paused; `curio feed pause` / `curio feed resume` and
+  `curio feed list --json` expose the same schedule.
+- **Offline badge** — the sidebar says when you are offline; scheduled
+  refreshes stay quiet until the network is back.
+- **Undo** for mark-all-read, folder mark-read and unsubscribe; failures
+  show a sticky toast with **Retry** (paused on hover and focus), announced
+  through permanent live regions.
+- **Subscribe presets** — GitHub releases and newsletters, and every
+  subscribe in the app is validated by core's feed discovery
+  (docs explain newsletters as feeds).
+- **Reading shortcuts** — Space / Shift+Space page the reader (Space at
+  the end opens the next unread), `e` archives, `A` marks the current view
+  read; the `?` overlay, empty-state hint and tooltips are built from one
+  shortcut registry.
+- **Image lightbox** — reader images load lazily, keep their dimensions and
+  open in an accessible, modal zoom view.
 - **Startup recovery screen** — if your library can't be opened (a corrupt
   or too-new database, a busy profile, a failed upgrade), the app now opens
   to a plain-words recovery screen instead of quitting silently. It offers
@@ -70,6 +105,33 @@ TLS stack, and hardens the release pipeline.
   keychain item; existing credentials are copied over on first use.
 - Internal: the storage, handle, export, and desktop UI stores were split
   into smaller modules with no behaviour change.
+- **Errors say what went wrong, in your language** — fetch failures name
+  their cause once (refused, reset, TLS certificate, connect vs read
+  timeout, rate limited, a web page instead of a feed — with the feeds it
+  offers), storage failures are told apart (duplicate feed, disk full,
+  read-only profile, corrupt database), and export and Reddit sign-in
+  refusals are typed. Toasts, refresh notifications and the native menu are
+  localised in all eight languages; internal errors are logged once with the
+  command that hit them. `curio fetch --json` reports an `error_kind`.
+- **Pooled connections** — the fetch client reuses connections, dials every
+  screened address of a host instead of only the first, and bounds DNS
+  lookups.
+- **The unread view keeps rows you just read** until you leave it, each view
+  remembers its scroll position, and mark-on-scroll only marks rows you
+  actually saw.
+- **Standard listbox keys** — ↑/↓ move like j/k, Enter/→ focus the reader,
+  ←/Esc return to the list without deselecting; the reader is reachable by
+  keyboard alone.
+- **A steady reader** — the toolbar and header stay mounted while you move
+  with j/k, and neighbouring articles are prefetched.
+- **Release automation** — merging a version bump tags it and starts the
+  release pipeline on the tag; the draft still waits for the maintainer's
+  signing approval and publish.
+- Internal: frontmatter YAML moved off the unmaintained `serde_yaml` /
+  `unsafe-libyaml` onto `saphyr-parser`, byte-for-byte identical output; a
+  1,100-input nasty-feed corpus, property suites over every ingest entry
+  point, and nightly fuzz targets for feed parsing, OPML, content and URL
+  screening.
 
 ### Fixed
 
@@ -114,6 +176,24 @@ TLS stack, and hardens the release pipeline.
   reused across links no longer collapses distinct items, future dates are
   clamped, relative lead images resolve, and a link-less entry is never
   "full-texted" against its feed's URL.
+- **Character encodings** — feeds and pages are decoded by their declared
+  charset (a UTF-8 document still wins over a stale legacy label), gzip,
+  brotli and deflate responses are accepted, and a response's Content-Type
+  is checked (non-HTML clips are saved link-only).
+- **Background refresh survives sleep/wake** — the schedule runs on the wall
+  clock and is remembered across relaunches, so a laptop waking up
+  refreshes on time; offline, scheduled sweeps are skipped instead of
+  filling feed health with errors and raising "N feeds failed".
+- **The System theme follows the OS live** when macOS switches between light
+  and dark.
+- **Reader layout** — wide tables scroll inside the article, inline code
+  wraps, footnote links scroll within the reader, and a failed image folds
+  its whole figure away. Author `data-*` attributes are dropped from
+  rendered articles.
+- **Link-less and undated entries** — an entry without a link no longer
+  offers "Open in browser" (which opened the feed's XML), and an entry
+  without a date shows the day Curio first saw it.
+- Tooltips stay fully on screen next to the window edge.
 
 ### Security
 
@@ -335,7 +415,7 @@ First public release — a complete, local-first desktop reader.
   are built nightly and available as artifacts, but are not yet a shipped
   channel.
 
-[0.5.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.5.0
+[0.6.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.6.0
 [0.4.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.4.0
 [0.3.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alexnodeland/curio-rss/releases/tag/v0.2.0

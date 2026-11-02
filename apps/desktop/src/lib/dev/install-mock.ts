@@ -50,7 +50,7 @@ function devStartupFailure(): StartupFailureDto | null {
         message: DEV_STARTUP_MESSAGES[requested],
         profile_dir: hasProfile ? DEV_PROFILE : null,
         backup: hasBackup ? `${DEV_PROFILE}/curio.db.pre-v7.bak` : null,
-        app_version: '0.5.0',
+        app_version: '0.6.0',
     };
 }
 
@@ -445,7 +445,7 @@ tokens:
                     return new URLSearchParams(window.location.search).get('offline') !== '1';
                 case 'get_app_info':
                     return {
-                        version: '0.5.0',
+                        version: '0.6.0',
                         profile_dir: '~/Library/Application Support/io.github.alexnodeland.curio',
                         db_schema_version: 5,
                         schema_supported: true,

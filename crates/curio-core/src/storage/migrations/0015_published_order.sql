@@ -3,7 +3,7 @@
 -- time Curio first saved it.
 --
 -- The index key is that date expression, spelled exactly as the list
--- query spells it (storage/repo/listing.rs, DATED) — SQLite serves an
+-- query spells it (storage/repo/listing/mod.rs, DATED) — SQLite serves an
 -- ORDER BY from an expression index only when the expressions match.
 -- Every index entry ends in the rowid, so the key is (date, id): the
 -- list's tie-break comes free, and a page is one walk down the index,

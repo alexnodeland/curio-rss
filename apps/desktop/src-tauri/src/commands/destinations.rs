@@ -134,7 +134,19 @@ fn promote_all_impl(
     filter: ListArticlesDto,
 ) -> Result<BulkSaveOutcomeDto, CommandError> {
     let name: DestinationName = destination.parse()?;
-    Ok(core.save_all_to_destination(&filter.into(), &name)?.into())
+    let outcome = core.save_all_to_destination(&filter.into(), &name)?;
+    // The webview names the skipped articles, never the engine's message:
+    // that goes to the log, for a bug report.
+    for failure in &outcome.failures {
+        tracing::warn!(curio_id = %failure.curio_id, error = %failure.error, "export all skipped an article");
+    }
+    if outcome.failed > outcome.failures.len() as u64 {
+        tracing::warn!(
+            unlisted = outcome.failed - outcome.failures.len() as u64,
+            "export all skipped more articles than it lists"
+        );
+    }
+    Ok(outcome.into())
 }
 
 #[cfg(test)]

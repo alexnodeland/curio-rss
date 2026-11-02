@@ -414,6 +414,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                  under the macOS overlay (#148), level with the other headers. -->
             <div
                 class="reader-toolbar"
+                class:leading={!layoutStore.listVisible}
                 role="toolbar"
                 aria-label={t('reader.toolbar')}
                 data-tauri-drag-region={windowChromeStore.dragRegion}
@@ -767,6 +768,14 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         padding: 0 var(--space-4);
         border-bottom: 1px solid var(--hairline);
         background: color-mix(in srgb, var(--surface-app), var(--surface-chrome) 45%);
+    }
+
+    /* In focus mode the toolbar is the leftmost header: under the macOS
+       overlay title bar it keeps the traffic lights clear of its first
+       button (the focus-mode toggle), like the list header does with the
+       sidebar off screen. */
+    :global(:root[data-titlebar='overlay']) .reader-toolbar.leading {
+        padding-left: calc(var(--space-4) + var(--titlebar-inset));
     }
 
     .toolbar-spring {

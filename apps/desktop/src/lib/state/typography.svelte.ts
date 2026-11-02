@@ -3,6 +3,7 @@
  * weight, alignment, hyphenation, and the reading-surface tint. Every value is
  * persisted to the settings table and clamped into {@link TYPOGRAPHY_LIMITS}.
  */
+import type { DisplayName } from '$lib/i18n';
 import { SETTING_KEYS, settingsStore } from './settings.svelte';
 
 /** Reader body font — an id mapped to a concrete CSS font stack. */
@@ -18,7 +19,8 @@ export type ReaderFontId =
 
 export interface ReaderFontInfo {
     readonly id: ReaderFontId;
-    readonly name: string;
+    /** Generic styles are descriptive (translated); named typefaces are proper nouns. */
+    readonly name: DisplayName;
     /** The CSS `font-family` value applied to the reader body. */
     readonly stack: string;
 }
@@ -30,36 +32,36 @@ export interface ReaderFontInfo {
  * the reader Typography popover both render each option in its own face.
  */
 export const READER_FONTS: readonly ReaderFontInfo[] = [
-    { id: 'sans', name: 'Sans', stack: 'var(--font-family)' },
+    { id: 'sans', name: { key: 'typography.font.sans' }, stack: 'var(--font-family)' },
     {
         id: 'serif',
-        name: 'Serif',
+        name: { key: 'typography.font.serif' },
         stack: 'Iowan Old Style, "Palatino Linotype", Palatino, Georgia, Cambria, "Times New Roman", serif',
     },
-    { id: 'mono', name: 'Mono', stack: 'var(--font-mono)' },
+    { id: 'mono', name: { key: 'typography.font.mono' }, stack: 'var(--font-mono)' },
     {
         id: 'humanist',
-        name: 'Humanist',
+        name: { key: 'typography.font.humanist' },
         stack: 'Seravek, "Gill Sans Nova", "Gill Sans", Calibri, "Segoe UI", sans-serif',
     },
     {
         id: 'grotesque',
-        name: 'Grotesque',
+        name: { key: 'typography.font.grotesque' },
         stack: '"Helvetica Neue", Helvetica, "Arial Nova", Arial, sans-serif',
     },
     {
         id: 'georgia',
-        name: 'Georgia',
+        name: { proper: 'Georgia' },
         stack: 'Georgia, Cambria, "Times New Roman", Times, serif',
     },
     {
         id: 'charter',
-        name: 'Charter',
+        name: { proper: 'Charter' },
         stack: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif',
     },
     {
         id: 'readable',
-        name: 'Readable',
+        name: { key: 'typography.font.readable' },
         stack: '"Comic Sans MS", "Comic Neue", "Trebuchet MS", "Segoe UI", sans-serif',
     },
 ] as const;

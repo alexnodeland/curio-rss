@@ -6,7 +6,7 @@
  * typographyStore is the single source of truth, clamped on write.
  */
 import { rangeFill } from '$lib/actions/range-fill';
-import { t } from '$lib/i18n';
+import { displayName, formatIntlNumber, t } from '$lib/i18n';
 import {
     READER_FONTS,
     TYPOGRAPHY_LIMITS,
@@ -15,6 +15,19 @@ import {
     isReaderTheme,
     typographyStore,
 } from '$lib/state/typography.svelte';
+
+/** A CSS pixel length, as the locale writes a number and its unit. */
+function px(value: number): string {
+    return t('typography.pixels', { value: formatIntlNumber(value) });
+}
+
+/** A fixed-precision value in the locale's decimal format (German `1,6`). */
+function decimal(value: number, digits: number): string {
+    return formatIntlNumber(value, {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+    });
+}
 
 function onFont(event: Event & { currentTarget: HTMLSelectElement }): void {
     const value = event.currentTarget.value;
@@ -82,7 +95,7 @@ function reset(): void {
         <span class="row-label">{t('typography.font')}</span>
         <select value={typographyStore.fontFamily} onchange={onFont}>
             {#each READER_FONTS as font (font.id)}
-                <option value={font.id} style="font-family: {font.stack}">{font.name}</option>
+                <option value={font.id} style="font-family: {font.stack}">{displayName(font.name)}</option>
             {/each}
         </select>
     </label>
@@ -98,7 +111,7 @@ function reset(): void {
             oninput={onSize}
             use:rangeFill={typographyStore.fontSize}
         />
-        <span class="row-value">{typographyStore.fontSize}px</span>
+        <span class="row-value">{px(typographyStore.fontSize)}</span>
     </label>
 
     <label class="row">
@@ -112,7 +125,7 @@ function reset(): void {
             oninput={onLineHeight}
             use:rangeFill={typographyStore.lineHeight}
         />
-        <span class="row-value">{typographyStore.lineHeight.toFixed(1)}</span>
+        <span class="row-value">{decimal(typographyStore.lineHeight, 1)}</span>
     </label>
 
     <label class="row">
@@ -126,7 +139,7 @@ function reset(): void {
             oninput={onMeasure}
             use:rangeFill={typographyStore.measure}
         />
-        <span class="row-value">{typographyStore.measure}px</span>
+        <span class="row-value">{px(typographyStore.measure)}</span>
     </label>
 
     <label class="row">
@@ -140,7 +153,7 @@ function reset(): void {
             oninput={onSpacing}
             use:rangeFill={typographyStore.paragraphSpacing}
         />
-        <span class="row-value">{typographyStore.paragraphSpacing.toFixed(1)}</span>
+        <span class="row-value">{decimal(typographyStore.paragraphSpacing, 1)}</span>
     </label>
 
     <label class="row">
@@ -162,7 +175,7 @@ function reset(): void {
             oninput={onWeight}
             use:rangeFill={typographyStore.fontWeight}
         />
-        <span class="row-value">{typographyStore.fontWeight}</span>
+        <span class="row-value">{formatIntlNumber(typographyStore.fontWeight)}</span>
     </label>
 
     <label class="row">
@@ -176,7 +189,7 @@ function reset(): void {
             oninput={onLetterSpacing}
             use:rangeFill={typographyStore.letterSpacing}
         />
-        <span class="row-value">{typographyStore.letterSpacing.toFixed(3)}</span>
+        <span class="row-value">{decimal(typographyStore.letterSpacing, 3)}</span>
     </label>
 
     <label class="row">

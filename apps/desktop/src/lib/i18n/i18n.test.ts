@@ -1,11 +1,14 @@
 /**
- * i18n routing: typed lookup, interpolation, and the Intl date helpers.
+ * i18n routing: typed lookup, interpolation, display names, and the Intl
+ * date/number helpers.
  */
 import {
     LIST_DATE_RELATIVE_DAYS,
+    displayName,
     formatIntlDate,
     formatIntlDateTime,
     formatIntlListDate,
+    formatIntlNumber,
     localeStore,
     t,
 } from '$lib/i18n';
@@ -112,5 +115,41 @@ describe('formatIntlListDate — a list date scaled to its age', () => {
 
     it('returns an empty string for an unparseable date', () => {
         expect(formatIntlListDate(new Date('not-a-date'), now)).toBe('');
+    });
+});
+
+describe('formatIntlNumber', () => {
+    afterEach(() => {
+        localeStore.reset();
+    });
+
+    it('writes decimals in the active locale', () => {
+        const oneDigit = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
+        expect(formatIntlNumber(1.6, oneDigit)).toBe('1.6');
+        localeStore.active = 'de';
+        expect(formatIntlNumber(1.6, oneDigit)).toBe('1,6');
+        localeStore.active = 'fr';
+        expect(formatIntlNumber(0.025, { minimumFractionDigits: 3 })).toBe('0,025');
+    });
+
+    it('pads to the requested precision', () => {
+        expect(formatIntlNumber(1, { minimumFractionDigits: 1 })).toBe('1.0');
+    });
+});
+
+describe('displayName', () => {
+    afterEach(() => {
+        localeStore.reset();
+    });
+
+    it('translates a keyed name in the active locale', () => {
+        expect(displayName({ key: 'theme.name.dark' })).toBe('Dark');
+        localeStore.active = 'de';
+        expect(displayName({ key: 'theme.name.dark' })).toBe('Dunkel');
+    });
+
+    it('shows a proper noun verbatim in every locale', () => {
+        localeStore.active = 'zh-Hans';
+        expect(displayName({ proper: 'Nord' })).toBe('Nord');
     });
 });

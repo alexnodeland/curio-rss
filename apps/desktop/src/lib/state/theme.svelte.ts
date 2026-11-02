@@ -6,6 +6,7 @@
  * Under `system` the store listens to the OS appearance query, so a light/dark
  * flip (macOS Auto appearance) repaints live instead of at the next launch.
  */
+import type { DisplayName } from '$lib/i18n';
 import { type CustomTheme, buildThemeRule, validateStoredTheme } from '$lib/utils/theme-format';
 import { SETTING_KEYS, settingsStore } from './settings.svelte';
 
@@ -28,21 +29,22 @@ export type ThemePreference = ThemeId | CustomThemeId | 'system';
 
 export interface ThemeInfo {
     readonly id: ThemeId;
-    readonly name: string;
+    /** Light/Dark are descriptive (translated); the named palettes are proper nouns. */
+    readonly name: DisplayName;
     readonly isDark: boolean;
 }
 
 /** The 9 themes shipped in app.css — ids match the `[data-theme]` blocks. */
 export const THEMES: readonly ThemeInfo[] = [
-    { id: 'light', name: 'Light', isDark: false },
-    { id: 'dark', name: 'Dark', isDark: true },
-    { id: 'nord', name: 'Nord', isDark: true },
-    { id: 'catppuccin', name: 'Catppuccin Mocha', isDark: true },
-    { id: 'dracula', name: 'Dracula', isDark: true },
-    { id: 'gruvbox', name: 'Gruvbox Dark', isDark: true },
-    { id: 'tokyo-night', name: 'Tokyo Night', isDark: true },
-    { id: 'solarized-dark', name: 'Solarized Dark', isDark: true },
-    { id: 'solarized-light', name: 'Solarized Light', isDark: false },
+    { id: 'light', name: { key: 'theme.name.light' }, isDark: false },
+    { id: 'dark', name: { key: 'theme.name.dark' }, isDark: true },
+    { id: 'nord', name: { proper: 'Nord' }, isDark: true },
+    { id: 'catppuccin', name: { proper: 'Catppuccin Mocha' }, isDark: true },
+    { id: 'dracula', name: { proper: 'Dracula' }, isDark: true },
+    { id: 'gruvbox', name: { proper: 'Gruvbox Dark' }, isDark: true },
+    { id: 'tokyo-night', name: { proper: 'Tokyo Night' }, isDark: true },
+    { id: 'solarized-dark', name: { proper: 'Solarized Dark' }, isDark: true },
+    { id: 'solarized-light', name: { proper: 'Solarized Light' }, isDark: false },
 ] as const;
 
 /** The localStorage mirror key — must match the app.html preload script. */

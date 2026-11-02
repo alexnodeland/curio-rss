@@ -97,6 +97,10 @@ export async function installDevMock(): Promise<void> {
         ['ui.theme', 'dark'],
         ['ui.theme.mode', 'dark'],
     ]);
+    // `?sidebar=collapsed` previews the shell with the sidebar collapsed.
+    if (new URLSearchParams(window.location.search).get('sidebar') === 'collapsed') {
+        settings.set('ui.panes.sidebar-collapsed', 'true');
+    }
 
     // A canned custom theme the dev mock "reads" on import, so the theme
     // import flow can be exercised in the plain-browser visual loop.
@@ -443,6 +447,16 @@ tokens:
                 // `?offline=1` previews the sidebar's "Offline" badge.
                 case 'connectivity_online':
                     return new URLSearchParams(window.location.search).get('offline') !== '1';
+                // `?titlebar=overlay` previews the macOS overlay title bar's
+                // header inset (the browser draws no traffic lights);
+                // `&fullscreen=1` its fullscreen state, where the inset is off.
+                case 'window_chrome': {
+                    const query = new URLSearchParams(window.location.search);
+                    return {
+                        overlay_title_bar: query.get('titlebar') === 'overlay',
+                        fullscreen: query.get('fullscreen') === '1',
+                    };
+                }
                 case 'get_app_info':
                     return {
                         version: '0.5.0',

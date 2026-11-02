@@ -14,6 +14,7 @@ import { startupStore } from '$lib/state/startup.svelte';
 import { themeStore } from '$lib/state/theme.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { announceLegacyProfiles } from '$lib/utils/legacy-profiles';
 import { runStartupUpdateCheck } from '$lib/utils/updates';
 import type { Snippet } from 'svelte';
@@ -31,9 +32,21 @@ onMount(() => {
     let unmounted = false;
 
     void (async () => {
+        // The window chrome (macOS overlay title bar, #148) needs no core, so
+        // it is known before either screen renders: the header inset and
+        // drag regions are in place on the first paint.
+        const [failed, unlistenChrome] = await Promise.all([
+            startupStore.check(),
+            windowChromeStore.wire(),
+        ]);
+        if (unmounted) {
+            unlistenChrome();
+            return;
+        }
+        teardowns.push(unlistenChrome);
         // The profile may not have opened: then there are no settings to
         // load, and the recovery screen speaks the system language.
-        if (await startupStore.check()) {
+        if (failed) {
             localeStore.initFromSystem();
             phase = 'recovery';
             return;

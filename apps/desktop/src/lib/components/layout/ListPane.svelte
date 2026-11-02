@@ -18,6 +18,7 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 
 // The home layout only applies when a single YouTube/Reddit-typed feed is
 // selected (not "All articles" — a mixed corpus has no one home page).
@@ -34,8 +35,15 @@ const homeOn = $derived(homeType !== null && layoutStore.isHomeLayout(homeType))
 </script>
 
 <div class="list-pane">
-    <div class="list-header">
-        <div class="search-slot">
+    <!-- Part of the macOS title bar (#148): it drags the window, and with the
+         sidebar collapsed it is the leftmost header, so it clears the traffic
+         lights. The search field's frame is not a drag handle. -->
+    <div
+        class="list-header"
+        class:leading={layoutStore.sidebarCollapsed}
+        data-tauri-drag-region={windowChromeStore.dragRegion}
+    >
+        <div class="search-slot" data-tauri-drag-region={windowChromeStore.dragRegion && 'false'}>
             <SearchBar />
         </div>
         {#if !searchStore.active}
@@ -96,6 +104,12 @@ const homeOn = $derived(homeType !== null && layoutStore.isHomeLayout(homeType))
         height: var(--header-height);
         padding: 0 var(--space-3);
         border-bottom: 1px solid var(--hairline);
+    }
+
+    /* The leftmost header (sidebar collapsed) keeps the traffic lights clear,
+       on the sidebar header's 16px leading edge. */
+    :global(:root[data-titlebar='overlay']) .list-header.leading {
+        padding-left: calc(var(--space-4) + var(--titlebar-inset));
     }
 
     .search-slot {

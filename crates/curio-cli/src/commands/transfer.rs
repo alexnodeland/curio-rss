@@ -118,16 +118,19 @@ fn save_bulk(app: &App, request: SaveRequest, name: &DestinationName) -> anyhow:
     let mut progress = std::io::stderr()
         .is_terminal()
         .then(|| ProgressLine::new(std::io::stderr()));
-    let outcome =
+    let result =
         app.core
             .save_all_to_destination_with(&filter, name, &BulkSaveCancel::new(), |step| {
                 if let Some(line) = progress.as_mut() {
                     line.update(step);
                 }
-            })?;
+            });
+    // Cleared before anything else is printed — the summary, or the error
+    // of a run that ended early.
     if let Some(line) = progress.as_mut() {
         line.finish();
     }
+    let outcome = result?;
     if app.json {
         emit_json(&BulkSaveView {
             destination: name.to_string(),
@@ -171,7 +174,7 @@ fn warn_failed(failures: &[BulkSaveFailure], failed: u64) {
     }
     let unlisted = failed.saturating_sub(failures.len() as u64);
     if unlisted > 0 {
-        eprintln!("…and {unlisted} more (see the log with RUST_LOG=warn)");
+        eprintln!("…and {unlisted} more (each is logged with RUST_LOG=curio_core=debug)");
     }
 }
 

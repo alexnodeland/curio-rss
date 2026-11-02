@@ -350,6 +350,19 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Reddit API 憑證已經儲存到鑰匙串',
     'settings.redditApi.removed': 'Reddit API 憑證已經移除',
     'settings.redditApi.create': '去 reddit.com/prefs/apps 開個免費應用',
+    'settings.retention.title': '文章保留',
+    'settings.retention.hint':
+        '你未設上限之前，Curio 會保留晒所有文章。已加星、稍後閱讀、有標籤同已匯出嘅文章永遠唔會刪。',
+    'settings.retention.maxAge': '刪除幾耐之前嘅文章',
+    'settings.retention.maxAge.off': '永不',
+    'settings.retention.days': '{count, plural, other {# 日}}',
+    'settings.retention.maxPerFeed': '每個訂閱源保留',
+    'settings.retention.maxPerFeed.off': '所有文章',
+    'settings.retention.newest': '{count, plural, other {最新 # 篇}}',
+    'settings.retention.keepUnread': '保留未讀文章',
+    'settings.retention.keepUnread.hint': '未讀文章幾舊都唔會刪。',
+    'settings.retention.schedule':
+        '上限喺開啟後唔耐同每日一次生效。想即刻生效，就去「進階」撳「執行維護」。',
     'settings.allowRemoteFavicon.hint':
         '當網站冇聲明圖示嗰陣，改用 Google 嘅圖示服務。預設關閉——咁樣會俾 Google 知你預覽咗邊啲網站（見 PRIVACY.md）。',
     'settings.section.appearance': '外觀',
@@ -429,6 +442,20 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': '資料庫：{path}',
     'doctor.check.integrity': '完整性檢查',
     'doctor.check.fts': '搜尋索引檢查',
+    'doctor.rebuildFts': '重建搜尋索引',
+    'doctor.rebuiltFts': '搜尋索引已重建',
+    'doctor.maintenance': '執行維護',
+    'doctor.maintenance.done':
+        '維護完成：移除咗 {articles, plural, other {# 篇文章}}、{tags, plural, other {# 個冇用嘅標籤}}同 {logs, plural, other {# 個舊記錄檔}}',
+    'doctor.maintenance.reapSkipped':
+        '冇刪到任何文章：讀唔到某個目的地嘅筆記（{reason}）。重新連接之後再執行維護。',
+    'doctor.maintenance.partial': '有部分資料庫保養跳過咗，下次會再做。',
+    'doctor.purgeOrphans': '刪除已移除訂閱源嘅文章…',
+    'doctor.purgeOrphans.confirm':
+        '要刪除你取消咗訂閱嘅訂閱源嘅文章？已加星、稍後閱讀、有標籤同已匯出嘅會保留。',
+    'doctor.purgeOrphans.delete': '刪除',
+    'doctor.purgeOrphans.cancel': '取消',
+    'doctor.purged': '{count, plural, other {已刪除已移除訂閱源嘅 # 篇文章}}',
 
     'legacy.title': '舊版本嘅資料庫',
     'legacy.notice.moved': '已經將舊版本 Curio 嘅資料庫搬去 {path}，命令列都會開呢度。',

@@ -16,11 +16,12 @@ import {
     dbStatsFixture,
     flushIpc,
     installIpcHarness,
+    retentionPolicyFixture,
 } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
 
 function mountResponders(): Record<string, Responder> {
-    // The panels that prime on open: Data (destinations), Advanced
+    // The panels that prime on open: Data (destinations, retention), Advanced
     // (doctor), and Media & Privacy (the Reddit API status).
     return {
         list_destinations: [],
@@ -29,6 +30,7 @@ function mountResponders(): Record<string, Responder> {
         get_setting: null,
         set_setting: null,
         get_reddit_api_status: { configured: false, client_id: null },
+        retention_policy: retentionPolicyFixture(),
     };
 }
 

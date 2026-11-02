@@ -375,6 +375,21 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Identifiants de l’API Reddit enregistrés dans le trousseau',
     'settings.redditApi.removed': 'Identifiants de l’API Reddit supprimés',
     'settings.redditApi.create': 'Créer une app gratuite sur reddit.com/prefs/apps',
+    'settings.retention.title': 'Conservation des articles',
+    'settings.retention.hint':
+        'Curio garde chaque article tant que vous ne fixez pas de limite. Les articles favoris, à lire plus tard, étiquetés et exportés ne sont jamais supprimés.',
+    'settings.retention.maxAge': 'Supprimer les articles de plus de',
+    'settings.retention.maxAge.off': 'Jamais',
+    'settings.retention.days': '{count, plural, one {# jour} other {# jours}}',
+    'settings.retention.maxPerFeed': 'Garder par flux',
+    'settings.retention.maxPerFeed.off': 'Tous les articles',
+    'settings.retention.newest':
+        '{count, plural, one {Le # plus récent} other {Les # plus récents}}',
+    'settings.retention.keepUnread': 'Garder les articles non lus',
+    'settings.retention.keepUnread.hint':
+        'Les articles non lus ne sont jamais supprimés, quel que soit leur âge.',
+    'settings.retention.schedule':
+        'Les limites s’appliquent peu après le lancement puis une fois par jour. Pour les appliquer maintenant, utilisez Lancer la maintenance dans Avancé.',
     'settings.allowRemoteFavicon.hint':
         'Lorsqu’un site ne déclare aucun favicon, utiliser le service de favicons de Google. Désactivé par défaut : cela indique à Google quels sites vous prévisualisez (voir PRIVACY.md).',
     'settings.section.appearance': 'Apparence',
@@ -458,6 +473,22 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Base de données : {path}',
     'doctor.check.integrity': 'Vérification de l’intégrité',
     'doctor.check.fts': 'Vérification de l’index de recherche',
+    'doctor.rebuildFts': 'Reconstruire l’index de recherche',
+    'doctor.rebuiltFts': 'Index de recherche reconstruit',
+    'doctor.maintenance': 'Lancer la maintenance',
+    'doctor.maintenance.done':
+        'Maintenance terminée : {articles, plural, one {# article supprimé} other {# articles supprimés}}, {tags, plural, one {# étiquette inutilisée} other {# étiquettes inutilisées}} et {logs, plural, one {# ancien fichier journal} other {# anciens fichiers journaux}} retirés',
+    'doctor.maintenance.reapSkipped':
+        'Aucun article supprimé : les notes d’une destination sont illisibles ({reason}). Reconnectez-la et relancez la maintenance.',
+    'doctor.maintenance.partial':
+        'Une partie de l’entretien de la base a été sautée ; elle sera refaite la prochaine fois.',
+    'doctor.purgeOrphans': 'Supprimer les articles des flux retirés…',
+    'doctor.purgeOrphans.confirm':
+        'Supprimer les articles des flux dont vous vous êtes désabonné ? Les favoris, à lire plus tard, étiquetés et exportés sont conservés.',
+    'doctor.purgeOrphans.delete': 'Supprimer',
+    'doctor.purgeOrphans.cancel': 'Annuler',
+    'doctor.purged':
+        '{count, plural, one {# article de flux retirés supprimé} other {# articles de flux retirés supprimés}}',
 
     'legacy.title': 'Bibliothèques des versions précédentes',
     'legacy.notice.moved':

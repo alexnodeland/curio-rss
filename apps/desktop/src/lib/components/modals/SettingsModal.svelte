@@ -6,7 +6,7 @@
  * screen readers; keyboard dismissal (Escape) stays the shell's. The active
  * tab is remembered for the session (a module-scope value, not persisted).
  * All six panels render at once and inactive ones carry `hidden`, so the
- * panels that prime commands on mount (destinations, doctor) keep firing on
+ * panels that prime commands on mount (destinations, retention, doctor) keep firing on
  * open exactly as before the tabs.
  */
 import Modal from '$components/common/Modal.svelte';
@@ -15,6 +15,7 @@ import DestinationsManager from '$components/modals/DestinationsManager.svelte';
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import OpmlPanel from '$components/modals/OpmlPanel.svelte';
 import RedditApiPanel from '$components/modals/RedditApiPanel.svelte';
+import RetentionPanel from '$components/modals/RetentionPanel.svelte';
 import UpdatesPanel from '$components/modals/UpdatesPanel.svelte';
 import ReaderPreview from '$components/reader/ReaderPreview.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
@@ -391,6 +392,7 @@ function onKeydown(event: KeyboardEvent): void {
             >
                 <DestinationsManager />
                 <OpmlPanel />
+                <RetentionPanel />
             </div>
 
             <div

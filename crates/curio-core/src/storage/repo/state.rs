@@ -1,9 +1,10 @@
-//! Per-article state flags (read, starred, read-later, archived) and the
-//! snapshot events (`opened`, `saved`, `updated`) they narrate.
+//! Per-article state flags (read, starred, read-later, archived), the
+//! reading position, and the snapshot events (`opened`, `saved`, `updated`)
+//! they narrate.
 
 use super::begin_write;
 use super::rows::{article_tags_tx, insert_intent, require_article, set_flag};
-use crate::model::{ArticleFlag, ArticleId, ArticleState, FeedId};
+use crate::model::{ArticleFlag, ArticleId, ArticleState, FeedId, ReadProgress};
 use crate::storage::{Storage, StorageError};
 use curio_types::{ArticleSnapshot, CurioId, EventEnvelope, EventPayload, Timestamp};
 use rusqlite::OptionalExtension as _;
@@ -16,21 +17,64 @@ impl Storage {
     /// Database errors.
     pub fn article_state(&self, id: ArticleId) -> Result<ArticleState, StorageError> {
         self.read(move |conn| {
-            let state = conn
+            let row = conn
                 .prepare_cached(
-                    "SELECT is_read, is_starred, is_read_later, is_archived \
+                    "SELECT is_read, is_starred, is_read_later, is_archived, read_permille \
                      FROM article_state WHERE article_id = ?1",
                 )?
                 .query_row([id.0], |row| {
-                    Ok(ArticleState {
-                        read: row.get(0)?,
-                        starred: row.get(1)?,
-                        read_later: row.get(2)?,
-                        archived: row.get(3)?,
-                    })
+                    Ok((
+                        ArticleState {
+                            read: row.get(0)?,
+                            starred: row.get(1)?,
+                            read_later: row.get(2)?,
+                            archived: row.get(3)?,
+                            progress: ReadProgress::START,
+                        },
+                        row.get::<_, u16>(4)?,
+                    ))
                 })
                 .optional()?;
-            Ok(state.unwrap_or_default())
+            let Some((mut state, permille)) = row else {
+                return Ok(ArticleState::default());
+            };
+            state.progress = decode_progress(permille)?;
+            Ok(state)
+        })
+    }
+
+    /// Records how far through the body the reader is. DB-local, like
+    /// [`Self::mark_read`] — `curio.events.v1` defines no progress event.
+    /// Idempotent: `false` when the stored position is already `progress`.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] if the article does not exist.
+    pub fn set_read_progress(
+        &self,
+        id: ArticleId,
+        progress: ReadProgress,
+    ) -> Result<bool, StorageError> {
+        self.write(move |conn| {
+            let tx = begin_write(conn)?;
+            require_article(&tx, id.0)?;
+            // No state row yet reads as the top, like every other flag.
+            let current: u16 = tx
+                .prepare_cached("SELECT read_permille FROM article_state WHERE article_id = ?1")?
+                .query_row([id.0], |row| row.get(0))
+                .optional()?
+                .unwrap_or(0);
+            if current == progress.permille() {
+                return Ok(false);
+            }
+            tx.prepare_cached(
+                "INSERT INTO article_state (article_id, read_permille, updated_at) \
+                 VALUES (?1, ?2, ?3) ON CONFLICT(article_id) DO UPDATE SET \
+                 read_permille = excluded.read_permille, updated_at = excluded.updated_at",
+            )?
+            .execute((id.0, progress.permille(), Timestamp::now().to_string()))?;
+            tx.commit()?;
+            Ok(true)
         })
     }
 
@@ -350,4 +394,13 @@ fn flag_column(flag: ArticleFlag) -> &'static str {
         ArticleFlag::ReadLater => "is_read_later",
         ArticleFlag::Archived => "is_archived",
     }
+}
+
+/// The stored thousandths as a [`ReadProgress`] — the column's CHECK keeps
+/// it in range, so a miss means the file was edited outside Curio.
+fn decode_progress(permille: u16) -> Result<ReadProgress, StorageError> {
+    ReadProgress::from_permille(permille).ok_or_else(|| StorageError::Corrupt {
+        column: "article_state.read_permille",
+        message: format!("{permille} is outside 0..=1000"),
+    })
 }

@@ -851,6 +851,26 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "    ```\n<script>alert(1)</script>",
         // A fence closes only on the same marker.
         "~~~\nx\n```\n~~~\n<script>alert(1)</script>",
+        // #245: backticks straddling a blank line pair nothing — the
+        // paragraph ends between them.
+        "`<script>alert(1)</script>\n\nA`",
+        // An indented line cannot interrupt a paragraph: it continues it.
+        "text\n    <script>alert(1)</script>",
+        // A list marker inside "a span" starts a list item instead.
+        "`x\n- <img src=x onerror=alert(1)>`",
+        // A quoted line is prose unless a fence opened inside the quote.
+        "> <script>alert(1)</script>",
+        // GFM splits a table row on `|` before pairing backticks, so this
+        // span is live to every renderer with tables on.
+        "| a |\n| - |\n| `x|<script>alert(1)</script>` |",
+        // Destinations the `](` scan never sees: a reference definition
+        // and an autolink.
+        "[x][1]\n\n[1]: javascript:alert(1)",
+        "<javascript:alert(1)>",
+        // A link's text is prose; and with no link at all, a `](<` opens
+        // no destination.
+        "[<script>alert(1)</script>](https://x.example/)",
+        "foo](<script>alert(1)</script>",
     ] {
         assert!(
             inert::audit_markdown(live).is_err(),
@@ -867,6 +887,14 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "``a`<script>alert(1)</script>`",
         "   ```\n<script>alert(1)</script>\n```",
         "~~~~\n<script>alert(1)</script>\n~~~\n~~~~",
+        // Code inside containers (#245): a fence in a block quote or a
+        // list item, and a top-level indented code block.
+        "> ```\n> <script>alert(1)</script>\n> ```",
+        "*   step\n\n    ```\n    <img src=x onerror=alert(1)>\n    ```",
+        "para\n\n    <script>alert(1)</script>",
+        // An angle-bracketed destination is a destination, not a tag (the
+        // full-page form of `c0-control-urls.html`).
+        "[a](<https://x.example/ data:text/html,x>)",
     ] {
         assert!(
             inert::audit_markdown(inert_text).is_ok(),

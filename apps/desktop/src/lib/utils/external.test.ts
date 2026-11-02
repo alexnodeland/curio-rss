@@ -34,6 +34,8 @@ describe('isWebUrl', () => {
         expect(isWebUrl('https://example.com/a')).toBe(true);
         expect(isWebUrl('http://example.com')).toBe(true);
         expect(isWebUrl('  HTTPS://EXAMPLE.COM  ')).toBe(true);
+        expect(isWebUrl('https://example.com:8443/path/user@x?q=a@b#c@d')).toBe(true);
+        expect(isWebUrl('https://[::1]:8080/v6')).toBe(true);
     });
 
     it('rejects every other source, the opener-only schemes included', () => {
@@ -49,6 +51,11 @@ describe('isWebUrl', () => {
             '//example.com',
             '/relative/path',
             '',
+            'https://user:pw@example.com/secret',
+            'http://user@example.com/',
+            'http://',
+            'https://?q=1',
+            'http://:80/port-only',
         ]) {
             expect(isWebUrl(url), url).toBe(false);
         }

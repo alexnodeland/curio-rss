@@ -59,10 +59,13 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Przejdź do treści',
     'shell.feeds.loading': 'Ładowanie subskrypcji…',
     'shell.feeds.empty': 'Brak subskrypcji',
-    'emptyState.hint':
-        'Zasubskrybuj kanał, aby zacząć czytać, lub przenieś subskrypcje z innego czytnika.',
     'emptyState.addFeed': 'Dodaj pierwszy kanał',
-    'emptyState.importOpml': 'Importuj OPML…',
+    'welcome.title': 'Witaj w Curio',
+    'welcome.intro':
+        'Obserwuj strony, kanały i newslettery, które czytasz. Curio zbiera je w jedną spokojną listę i zachowuje to, co ważne, w Twoich notatkach jako zwykły markdown.',
+    'welcome.import': 'Przenosisz się z innej aplikacji?',
+    'welcome.keys': 'Trzy klawisze na start',
+    'welcome.keys.star': 'aby oznaczyć gwiazdką',
     'shell.feeds.count':
         '{count, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanału}}',
     'shell.unread.count':
@@ -102,6 +105,29 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'list.label': 'Artykuły',
     'list.loading': 'Ładowanie artykułów…',
     'list.empty': 'Brak artykułów',
+    'list.empty.all': 'Nie ma jeszcze artykułów',
+    'list.empty.all.hint': 'Nowe artykuły pojawią się tutaj, gdy kanały się odświeżą.',
+    'list.empty.unread': 'Wszystko przeczytane',
+    'list.empty.showRead': 'Pokaż przeczytane artykuły',
+    'list.empty.starred': 'Brak artykułów z gwiazdką',
+    'list.empty.starred.hint':
+        'Naciśnij {key} na artykule, aby oznaczyć go gwiazdką i mieć go tutaj.',
+    'list.empty.readLater': 'Nic nie odłożono na później',
+    'list.empty.readLater.hint': 'Naciśnij {key} na artykule, aby odłożyć go na później.',
+    'list.empty.archived': 'Archiwum jest puste',
+    'list.empty.archived.hint':
+        'Naciśnij {key} na skończonym artykule: trafi tutaj i zniknie z pozostałych widoków.',
+    'list.empty.feed': 'Ten kanał nie ma jeszcze artykułów',
+    'list.empty.feed.hint': 'Curio sprawdza go przy każdym odświeżeniu.',
+    'list.empty.refresh': 'Odśwież teraz',
+    'list.empty.feedError': 'Curio nie może pobrać tego kanału',
+    'feedError.notAFeed':
+        'Ten adres zwraca stronę internetową, a nie kanał. Sprawdź adres URL kanału.',
+    'feedError.parse': 'Nie można odczytać kanału: to nie jest poprawny RSS ani Atom.',
+    'feedError.gone': 'Witryna usunęła ten kanał (HTTP 410).',
+    'feedError.http': 'Witryna odpowiedziała błędem. Sprawdź adres URL kanału lub spróbuj później.',
+    'feedError.generic':
+        'Ostatnie odświeżenie się nie powiodło. Spróbuj ponownie lub sprawdź stan kanału.',
     'list.view.home': 'Widok główny',
     'list.view.rows': 'Widok listy',
     'list.filter.unreadOnly': 'Pokaż tylko nieprzeczytane',

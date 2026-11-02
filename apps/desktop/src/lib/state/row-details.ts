@@ -1,18 +1,31 @@
 /**
  * List rows carry each article's flags and tags (`ArticleSummaryDto.state` /
- * `.tags`), so a page that lands seeds the per-article detail entries the
+ * `.tags`), so a page that lands lands the per-article detail entries the
  * rows, the reader and the prefetcher read: a page renders from its one
  * `list_articles` (or `search_articles`) call, with no `get_article_state` /
- * `get_article_tags` call per row. Entries that already exist are left to
- * their own invalidation.
+ * `get_article_tags` call per row — and an `ArticlesChanged` that refetches
+ * the list refreshes its rows' entries through that one call too.
  */
 import { type ArticleSummaryDto, commands } from '$lib/bindings';
-import { queryKeys, seedQuery } from './query-cache.svelte';
+import { type CarriedEntry, landCarried, queryKeys } from './query-cache.svelte';
 
-export function seedRowDetails(rows: readonly ArticleSummaryDto[]): void {
-    for (const row of rows) {
-        const id = row.id;
-        seedQuery(queryKeys.articleState(id), () => commands.getArticleState(id), row.state);
-        seedQuery(queryKeys.articleTags(id), () => commands.getArticleTags(id), row.tags);
-    }
+/** The detail entries a page of list rows carries whole. */
+export function rowDetails(rows: readonly ArticleSummaryDto[]): CarriedEntry[] {
+    return rows.flatMap(({ id, state, tags }) => [
+        {
+            key: queryKeys.articleState(id),
+            fetcher: () => commands.getArticleState(id),
+            data: state,
+        },
+        {
+            key: queryKeys.articleTags(id),
+            fetcher: () => commands.getArticleTags(id),
+            data: tags,
+        },
+    ]);
+}
+
+/** Lands a page of rows' details (a `loadMore` page, a search result). */
+export function landRowDetails(rows: readonly ArticleSummaryDto[]): void {
+    landCarried(rowDetails(rows));
 }

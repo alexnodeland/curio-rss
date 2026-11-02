@@ -8,7 +8,7 @@
  */
 import { events, type ArticlesChanged, type CommandError } from '$lib/bindings';
 import { untrack } from 'svelte';
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 /** The result shape every generated command wrapper resolves to. */
 export type CommandResult<T> = { status: 'ok'; data: T } | { status: 'error'; error: CommandError };
@@ -18,6 +18,20 @@ export interface QueryScope {
     /** The feed a list query is restricted to; `null` = across feeds. */
     feedId?: number | null;
 }
+
+/**
+ * A detail entry a query's data carries whole — e.g. a list row's
+ * `article-state:` flags — so the carrier lands it instead of a fetch.
+ * `fetcher` is what the entry uses on its own when no carrier covers it.
+ */
+export interface CarriedEntry {
+    readonly key: string;
+    readonly fetcher: () => Promise<CommandResult<unknown>>;
+    readonly data: unknown;
+}
+
+/** What a query's data carries for other entries (see [`CarriedEntry`]). */
+export type Carries<T> = (data: T) => readonly CarriedEntry[];
 
 /**
  * One cached query: reactive data/error/loading plus a refetch. Stale data
@@ -34,38 +48,75 @@ export class Query<T> {
     /** True once any fetch has settled (distinguishes empty from unloaded). */
     loaded: boolean = $state(false);
 
+    /**
+     * Whether anything has asked for this entry through [`ensureQuery`]. An
+     * entry a carrier landed that nobody has read yet is unclaimed: when an
+     * invalidation finds it uncovered, it is dropped rather than refetched
+     * (a later reader recreates and fetches it), so landing a page's rows
+     * never adds per-row refetches for rows nothing renders.
+     */
+    claimed = false;
+
     #fetcher: () => Promise<CommandResult<T>>;
-    #onData: ((data: T) => void) | undefined;
+    #carries: Carries<T> | undefined;
     #generation = 0;
     /** The newest refetch's promise (the one whose result will land). */
     #latest: Promise<void> | null = null;
+    /**
+     * Carried keys an invalidation left for this query's next landing to
+     * refresh (see [`Query.defer`]).
+     */
+    #deferred = new SvelteSet<string>();
 
     /**
-     * `onData` runs whenever a fetch's data lands — the newest fetch only, so
-     * a superseded result never reaches it.
+     * `carries` names the detail entries this query's data holds whole:
+     * each fetch that lands (the newest only, so never a superseded result)
+     * lands them too, and an invalidation that refetches this query leaves
+     * them to it rather than refetching each one.
      */
     constructor(
         key: string,
         fetcher: () => Promise<CommandResult<T>>,
         scope: QueryScope = {},
-        onData?: (data: T) => void,
+        carries?: Carries<T>,
     ) {
         this.key = key;
         this.scope = scope;
         this.#fetcher = fetcher;
-        this.#onData = onData;
+        this.#carries = carries;
     }
 
     /**
      * Lands `data` as if a fetch had returned it, without one: the entry is
-     * loaded, and `start`/`whenLoaded` do not fetch. Later invalidation
-     * refetches it with its own fetcher like any other entry.
+     * loaded, and `start`/`whenLoaded` do not fetch. A fetch still in flight
+     * is superseded — `data` is at least as new as anything it started from.
+     * Later invalidation refetches it with its own fetcher like any other
+     * entry.
      */
-    seed(data: T): void {
+    land(data: T): void {
+        this.#generation += 1;
         this.data = data;
         this.error = null;
+        this.loading = false;
         this.loaded = true;
         this.#latest ??= Promise.resolve();
+    }
+
+    /**
+     * The keys this query's current data carries, recorded as left to its
+     * next landing: that landing lands each one it still carries and
+     * settles the rest (refetched when claimed, dropped when not) — and a
+     * failed refetch settles them all, so none is left stale.
+     */
+    defer(): string[] {
+        if (this.#carries === undefined || this.data === undefined) {
+            return [];
+        }
+        const keys = this.#carries(this.data).map((entry) => entry.key);
+        for (const key of keys) {
+            this.#deferred.add(key);
+        }
+        return keys;
     }
 
     /** Runs the fetcher; a newer concurrent refetch wins (last-write-wins). */
@@ -124,9 +175,27 @@ export class Query<T> {
         if (result.status === 'ok') {
             this.data = result.data;
             this.error = null;
-            this.#onData?.(result.data);
         } else {
             this.error = result.error;
+        }
+        this.#settleCarried(result);
+    }
+
+    /**
+     * Lands what a landed result carries, then settles every deferred key
+     * it no longer carries (all of them when the fetch failed).
+     */
+    #settleCarried(result: CommandResult<T>): void {
+        const deferred = this.#deferred;
+        this.#deferred = new SvelteSet();
+        const landed =
+            result.status === 'ok' && this.#carries !== undefined
+                ? landCarried(this.#carries(result.data))
+                : new SvelteSet<string>();
+        for (const key of deferred) {
+            if (!landed.has(key)) {
+                settleUncovered(key);
+            }
         }
     }
 }
@@ -144,14 +213,16 @@ export function ensureQuery<T>(
     key: string,
     fetcher: () => Promise<CommandResult<T>>,
     scope: QueryScope = {},
-    onData?: (data: T) => void,
+    carries?: Carries<T>,
 ): Query<T> {
     const existing = registry.get(key);
     if (existing !== undefined) {
+        existing.claimed = true;
         return existing as Query<T>;
     }
     return untrack(() => {
-        const created = new Query(key, fetcher, scope, onData);
+        const created = new Query(key, fetcher, scope, carries);
+        created.claimed = true;
         registry.set(key, created as Query<unknown>);
         // Deferred a microtask so a fetcher may close over state its owner
         // finishes constructing after `ensureQuery` returns. `start`, not
@@ -163,20 +234,43 @@ export function ensureQuery<T>(
 }
 
 /**
- * Creates the entry under `key` already loaded with `data` — no fetch — when
- * none exists; an existing entry is left alone (its own invalidation keeps it
- * current). This is how a list page that carries each row's details fills
- * those rows' detail entries, so rendering the page costs no call per row.
+ * Lands each entry's `data` under its key without a fetch: an existing entry
+ * takes it (it is the newest read), and a missing one is created loaded with
+ * it, unclaimed until someone reads it. This is how a list page that carries
+ * each row's details fills those rows' detail entries, so rendering the page
+ * costs no call per row. Returns the keys landed.
  */
-export function seedQuery<T>(key: string, fetcher: () => Promise<CommandResult<T>>, data: T): void {
-    if (registry.has(key)) {
+export function landCarried(entries: readonly CarriedEntry[]): ReadonlySet<string> {
+    const landed = new SvelteSet<string>();
+    untrack(() => {
+        for (const { key, fetcher, data } of entries) {
+            let query = registry.get(key);
+            if (query === undefined) {
+                query = new Query(key, fetcher);
+                registry.set(key, query);
+            }
+            query.land(data);
+            landed.add(key);
+        }
+    });
+    return landed;
+}
+
+/**
+ * Brings one detail entry current without a carrier: refetched when
+ * something reads it, dropped when nothing has (nobody is shown stale data,
+ * and the next reader fetches it fresh).
+ */
+function settleUncovered(key: string): void {
+    const query = registry.get(key);
+    if (query === undefined) {
         return;
     }
-    untrack(() => {
-        const created = new Query(key, fetcher);
-        created.seed(data);
-        registry.set(key, created as Query<unknown>);
-    });
+    if (query.claimed) {
+        void query.refetch();
+    } else {
+        registry.delete(key);
+    }
 }
 
 /** Whether an entry exists under `key` (read untracked by callers that only
@@ -231,26 +325,41 @@ export const queryKeys = {
     articleTags: (id: number) => `article-tags:${id}`,
 } as const;
 
+/**
+ * Whether an event touches a list query: a feed-scoped event touches that
+ * feed's lists and every unscoped list; an unscoped event touches all of
+ * them.
+ */
+function listTouched(query: Query<unknown>, payload: ArticlesChanged): boolean {
+    return (
+        payload.feed_id === null ||
+        query.scope.feedId === payload.feed_id ||
+        query.scope.feedId === null
+    );
+}
+
 /** Applies one [`ArticlesChanged`] payload to the cache. */
 export function applyArticlesChanged(payload: ArticlesChanged): void {
     invalidatePrefix(queryKeys.unreadCounts);
     invalidatePrefix(queryKeys.tags);
     // Detail queries (article:/article-state:/article-tags:) share the
-    // 'article' prefix with 'articles:' lists — handled by scope below.
-    invalidateWhere((query) => {
-        if (!query.key.startsWith('article')) {
-            return false;
+    // 'article' prefix with 'articles:' lists.
+    const all = [...registry.values()];
+    const isList = (query: Query<unknown>) => query.key.startsWith(queryKeys.articleList(''));
+    const lists = all.filter((query) => isList(query) && listTouched(query, payload));
+    const details = all.filter((query) => query.key.startsWith('article') && !isList(query));
+    // A detail entry a refetching list carries (its rows' state and tags) is
+    // left to that list: its landing refreshes the entry with no call of its
+    // own. Every other detail entry is settled now.
+    const covered = new SvelteSet(lists.flatMap((list) => list.defer()));
+    for (const detail of details) {
+        if (!covered.has(detail.key)) {
+            settleUncovered(detail.key);
         }
-        if (!query.key.startsWith(queryKeys.articleList(''))) {
-            return true; // detail namespaces: always refresh, they are cheap
-        }
-        // List queries: a feed-scoped event touches that feed's lists and
-        // every unscoped list; an unscoped event touches all of them.
-        if (payload.feed_id === null) {
-            return true;
-        }
-        return query.scope.feedId === payload.feed_id || query.scope.feedId === null;
-    });
+    }
+    for (const list of lists) {
+        void list.refetch();
+    }
 }
 
 /** Applies a `FeedsChanged` signal to the cache. */

@@ -154,6 +154,12 @@ fixtures *ARGS:
 bench-cold-start:
     cargo bench -p curio-fixtures --bench cold_start
 
+# List read-path bench on the 100k fixture: the default view's first page,
+# the Starred page and the unread counts (budget: p95 < 10ms each; the
+# p50/p95 pass prints to stderr before criterion runs).
+bench-list:
+    cargo bench -p curio-fixtures --bench list_queries
+
 # The nightly `bench` job's run, locally: bencher output from a stateless
 # criterion (fresh CRITERION_HOME, --discard-baseline), written to
 # bench-output.txt (gitignored), then the parse check the job runs before

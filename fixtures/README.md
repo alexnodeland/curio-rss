@@ -34,7 +34,10 @@ Current layout:
   generator is deterministic: the same seed yields a **byte-identical**
   `curio.db` (hash-asserted by the crate's own tests), written through the
   real migrated schema. It powers the criterion cold-start bench
-  (`just bench-cold-start`) and can seed a profile for manual QA.
+  (`just bench-cold-start`), the list read-path bench on a 100k-article
+  profile (`just bench-list`: first page, Starred page and unread counts,
+  printing p50 / p95 against the 10 ms budget) and can seed a profile for
+  manual QA.
   `just bench-cold-start-ci` runs the bench the way the nightly `bench` job
   does — bencher output from a criterion that keeps no baseline of its own
   (the job's `github-action-benchmark` step owns the trailing baseline and

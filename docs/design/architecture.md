@@ -222,6 +222,14 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
+- The list read paths stay off the article bodies (#136). A list or search page reads
+  **list rows** (`ListedArticle`: the summary columns, a preview built from a bounded
+  `substr` of the text, the state flags and the tags) — one read renders a page, never
+  a state query per row. The sparse membership views (Starred, Read later, Archived)
+  page newest-first through partial indexes on `article_state`, and per-feed unread
+  counts live in a `feed_unread` table that triggers on `articles`, `article_state`
+  and `feeds` keep equal to the scan they replace, so a badge refresh reads one row per
+  feed. `just bench-list` measures all three on the 100k fixture (budget: p95 < 10 ms).
 - Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
   (`feed | manual | full_text | enriched`) records where the stored body came from; a
   refresh upsert replaces only `feed`/`manual` bodies (hydrated or enriched text is never

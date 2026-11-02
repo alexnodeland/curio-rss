@@ -24,6 +24,8 @@ export type ShortcutId =
     | 'nav.nextArticle'
     | 'nav.previousArticle'
     | 'nav.nextUnread'
+    | 'nav.extendDown'
+    | 'nav.extendUp'
     | 'nav.focusReader'
     | 'nav.focusList'
     | 'reader.pageDown'
@@ -90,6 +92,20 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         keys: ['k'],
         paneKeys: { scope: 'list', keys: ['ArrowUp'] },
         description: 'shortcut.previousArticle',
+        category: 'navigation',
+    },
+    {
+        id: 'nav.extendDown',
+        keys: ['J'],
+        paneKeys: { scope: 'list', keys: ['Shift+ArrowDown'] },
+        description: 'shortcut.extendDown',
+        category: 'navigation',
+    },
+    {
+        id: 'nav.extendUp',
+        keys: ['K'],
+        paneKeys: { scope: 'list', keys: ['Shift+ArrowUp'] },
+        description: 'shortcut.extendUp',
         category: 'navigation',
     },
     {

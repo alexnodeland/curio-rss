@@ -44,6 +44,7 @@ let {
     fallbackViewportHeight = 600,
     initialScrollTop = 0,
     label,
+    multiselectable = false,
     activeDescendantId,
     focusNonce = 0,
     onnearend,
@@ -63,6 +64,9 @@ let {
     /** The offset this instance opens at (read once, at mount). */
     initialScrollTop?: number;
     label: string;
+    /** Whether several options can be selected at once (`aria-multiselectable`);
+     *  the owner then sets each row's `aria-selected` from its selection. */
+    multiselectable?: boolean;
     /** The `id` of the active option — mirrored into `aria-activedescendant`
      *  so a screen reader tracks selection while focus stays on the listbox. */
     activeDescendantId?: string;
@@ -291,6 +295,7 @@ $effect(() => {
     class:keyboard-mode={keyboardMode}
     role="listbox"
     aria-label={label}
+    aria-multiselectable={multiselectable || undefined}
     aria-activedescendant={effectiveActiveDescendant}
     tabindex="0"
     bind:this={viewport}

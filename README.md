@@ -146,6 +146,15 @@ need a hidden pane: <kbd>g</kbd> <kbd>f</kbd> brings the feed tree back,
 away on its own so the list and the article keep their room; <kbd>&#92;</kbd>
 peeks it back open until the window is resized.
 
+Select several articles at once with <kbd>⇧</kbd>-click (a range),
+<kbd>⌘</kbd>-click (<kbd>Ctrl</kbd>-click off macOS) to add or remove one, or
+<kbd>⇧ J</kbd>/<kbd>⇧ K</kbd> (<kbd>⇧ ↓</kbd>/<kbd>⇧ ↑</kbd> in the list) to
+grow the range. A bar at the bottom of the list then marks the whole selection
+read or unread, stars it, queues it for later or archives it — in one step,
+with Undo — and <kbd>s</kbd>/<kbd>l</kbd>/<kbd>m</kbd>/<kbd>e</kbd> do the
+same as its buttons. Inside Starred, Read later or Archived the bar takes that
+flag off instead. <kbd>Esc</kbd> goes back to a single article.
+
 A feed entry published without a link of its own has no page to open, so
 <kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it
 and its title is plain text. The same goes for an entry whose link is not a

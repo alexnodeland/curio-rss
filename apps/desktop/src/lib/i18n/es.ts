@@ -614,4 +614,30 @@ export const es: Partial<Record<MessageKey, string>> = {
     'recovery.recovered.title': 'Curio está listo',
     'recovery.recovered.body': 'Tu biblioteca se abrió.',
     'recovery.recovered.setAside': 'La base de datos anterior se movió a {path}.',
+
+    'bulk.toolbar': 'Acciones de la selección',
+    'bulk.count': '{count, plural, one {# seleccionado} other {# seleccionados}}',
+    'bulk.clear': 'Borrar la selección',
+    'reader.multiSelected':
+        '{count, plural, one {# artículo seleccionado} other {# artículos seleccionados}}',
+    'reader.multiSelected.hint':
+        'Actúa sobre ellos desde la barra bajo la lista, o pulsa Esc para borrar la selección.',
+    'toast.bulk.unread':
+        '{count, plural, one {# marcado como no leído} other {# marcados como no leídos}}',
+    'toast.bulk.starred':
+        '{count, plural, one {# artículo destacado} other {# artículos destacados}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {# artículo sin destacar} other {# artículos sin destacar}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {# añadido a leer más tarde} other {# añadidos a leer más tarde}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {# quitado de leer más tarde} other {# quitados de leer más tarde}}',
+    'toast.bulk.archived':
+        '{count, plural, one {# artículo archivado} other {# artículos archivados}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {# artículo desarchivado} other {# artículos desarchivados}}',
+    'toast.bulk.undone':
+        '{count, plural, one {# artículo restaurado} other {# artículos restaurados}}',
+    'shortcut.extendDown': 'Ampliar la selección hacia abajo',
+    'shortcut.extendUp': 'Ampliar la selección hacia arriba',
 };

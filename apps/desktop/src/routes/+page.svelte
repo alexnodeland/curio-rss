@@ -79,13 +79,17 @@ function handleModalKey(event: KeyboardEvent): boolean {
 }
 
 // Menu + modal Escape are handled earlier; here Escape steps back through the
-// shell so it is never a no-op — clear an active search, else deselect the open
-// article. Returns true when the event was an Escape (handled).
+// shell so it is never a no-op — drop a multi-selection back to its cursor row,
+// else clear an active search, else deselect the open article. Returns true
+// when the event was an Escape (handled).
 function handleEscapeStepback(event: KeyboardEvent): boolean {
     if (event.key !== 'Escape') {
         return false;
     }
-    if (searchStore.active) {
+    if (selectionStore.multiActive) {
+        event.preventDefault();
+        selectionStore.clearMulti();
+    } else if (searchStore.active) {
         event.preventDefault();
         searchStore.clear();
     } else if (selectionStore.selectedArticleId !== null) {

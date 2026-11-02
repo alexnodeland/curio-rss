@@ -614,4 +614,30 @@ export const it: Partial<Record<MessageKey, string>> = {
     'recovery.recovered.title': 'Curio è pronto',
     'recovery.recovered.body': 'La tua libreria si è aperta.',
     'recovery.recovered.setAside': 'Il database precedente è stato spostato in {path}.',
+
+    'bulk.toolbar': 'Azioni sulla selezione',
+    'bulk.count': '{count, plural, one {# selezionato} other {# selezionati}}',
+    'bulk.clear': 'Annulla la selezione',
+    'reader.multiSelected':
+        '{count, plural, one {# articolo selezionato} other {# articoli selezionati}}',
+    'reader.multiSelected.hint':
+        'Agisci su di essi dalla barra sotto l’elenco, o premi Esc per annullare la selezione.',
+    'toast.bulk.unread':
+        '{count, plural, one {# segnato come non letto} other {# segnati come non letti}}',
+    'toast.bulk.starred':
+        '{count, plural, one {# articolo aggiunto ai preferiti} other {# articoli aggiunti ai preferiti}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {# articolo tolto dai preferiti} other {# articoli tolti dai preferiti}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {# aggiunto a Leggi dopo} other {# aggiunti a Leggi dopo}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {# rimosso da Leggi dopo} other {# rimossi da Leggi dopo}}',
+    'toast.bulk.archived':
+        '{count, plural, one {# articolo archiviato} other {# articoli archiviati}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {# articolo tolto dall’archivio} other {# articoli tolti dall’archivio}}',
+    'toast.bulk.undone':
+        '{count, plural, one {# articolo ripristinato} other {# articoli ripristinati}}',
+    'shortcut.extendDown': 'Estendi la selezione verso il basso',
+    'shortcut.extendUp': 'Estendi la selezione verso l’alto',
 };

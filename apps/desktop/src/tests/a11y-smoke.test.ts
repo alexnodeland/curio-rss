@@ -155,4 +155,41 @@ describe('accessibility smoke', () => {
         expect(document.activeElement).toBe(listbox);
         await audit('back in the list');
     });
+
+    it('a keyboard multi-selection and its bulk bar pass axe; Esc collapses it', async () => {
+        harness = installIpcHarness({
+            list_feeds: [feedFixture({ id: 1, title: 'Alpha' })],
+            get_unread_counts: unreadCountsFixture({ total: 4, by_feed: [[1, 4]] }),
+            list_articles: [404, 403, 402, 401].map((id) =>
+                articleSummaryFixture({ id, feed_id: 1, title: `Article ${id}` }),
+            ),
+            get_article: (args) => articleFixture({ id: args.articleId as number }),
+            get_article_state: articleStateFixture(),
+            mark_read: true,
+            list_tags: [],
+        });
+        const { container } = render(Page);
+        await flushIpc();
+        const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+        expect(listbox.getAttribute('aria-multiselectable')).toBe('true');
+
+        await fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+        await fireEvent.keyDown(document.body, { key: 'J', shiftKey: true });
+        await fireEvent.keyDown(document.body, { key: 'J', shiftKey: true });
+        await flushIpc();
+        await tick();
+        const selected = [...container.querySelectorAll('[role="option"]')].map((option) =>
+            option.getAttribute('aria-selected'),
+        );
+        expect(selected).toEqual(['true', 'true', 'true', 'false']);
+        expect(container.querySelector('[role="toolbar"][data-testid="bulk-bar"]')).not.toBeNull();
+        const violations = await auditViolations(container);
+        expect(violations, violations.join('\n')).toEqual([]);
+
+        await fireEvent.keyDown(document.body, { key: 'Escape' });
+        await tick();
+        expect(selectionStore.multiActive).toBe(false);
+        expect(selectionStore.selectedArticleId).toBe(402);
+        expect(container.querySelector('[data-testid="bulk-bar"]')).toBeNull();
+    });
 });

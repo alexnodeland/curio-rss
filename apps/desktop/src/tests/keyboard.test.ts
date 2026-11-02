@@ -22,6 +22,8 @@ describe('shortcut table', () => {
         const expected: Record<ShortcutId, readonly string[]> = {
             'nav.nextArticle': ['j'],
             'nav.previousArticle': ['k'],
+            'nav.extendDown': ['J'],
+            'nav.extendUp': ['K'],
             'nav.nextUnread': ['n'],
             'nav.focusReader': [],
             'nav.focusList': [],
@@ -61,6 +63,8 @@ describe('shortcut table', () => {
         expect(pane).toEqual({
             'nav.nextArticle': { scope: 'list', keys: ['ArrowDown'] },
             'nav.previousArticle': { scope: 'list', keys: ['ArrowUp'] },
+            'nav.extendDown': { scope: 'list', keys: ['Shift+ArrowDown'] },
+            'nav.extendUp': { scope: 'list', keys: ['Shift+ArrowUp'] },
             'nav.focusReader': { scope: 'list', keys: ['Enter', 'ArrowRight'] },
             'nav.focusList': { scope: 'reader', keys: ['ArrowLeft', 'Escape'] },
         });

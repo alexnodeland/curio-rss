@@ -8,13 +8,14 @@
  */
 import {
     events,
+    type ArticleFlagDto,
     type ArticleSummaryDto,
     type CommandError,
     type ErrorCode,
     type ImportSourceDto,
     commands,
 } from '$lib/bindings';
-import { t } from '$lib/i18n';
+import { type MessageKey, t } from '$lib/i18n';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
@@ -267,6 +268,92 @@ export async function toggleArchived(articleId: number): Promise<void> {
     if (archived === true) {
         articlesStore.releaseHeld(articleId);
     }
+}
+
+// ─── bulk actions over a multi-selection ────────────────────────────────────
+
+/** The "done" toast per flag: `[set, cleared]`. */
+const BULK_DONE: Record<ArticleFlagDto, readonly [MessageKey, MessageKey]> = {
+    read: ['toast.markAllRead', 'toast.bulk.unread'],
+    starred: ['toast.bulk.starred', 'toast.bulk.unstarred'],
+    read_later: ['toast.bulk.readLater', 'toast.bulk.readLaterRemoved'],
+    archived: ['toast.bulk.archived', 'toast.bulk.unarchived'],
+};
+
+/**
+ * The direction the current view gives a bulk flag: inside its own view
+ * (Starred, Read later, Archived) the bar takes the flag off — everything
+ * listed there already has it — and everywhere else it puts it on. Read has
+ * both directions as separate buttons, so it is always "on" here.
+ */
+export function bulkValue(flag: ArticleFlagDto): boolean {
+    const filters = articlesStore.filters;
+    switch (flag) {
+        case 'starred':
+            return filters.starred !== true;
+        case 'read_later':
+            return filters.readLater !== true;
+        case 'archived':
+            return filters.archived !== true;
+        default:
+            return true;
+    }
+}
+
+/** Puts a bulk flip back: exactly the ids it changed take the old value. */
+async function undoBulk(
+    articleIds: readonly number[],
+    flag: ArticleFlagDto,
+    value: boolean,
+): Promise<void> {
+    const restored = await run(() => commands.setFlagMany([...articleIds], flag, !value), {
+        run: () => void undoBulk(articleIds, flag, value),
+    });
+    if (restored !== undefined) {
+        toastStore.showToast(t('toast.bulk.undone', { count: restored.length }), 'info');
+    }
+}
+
+/**
+ * Sets `flag` to `value` on every selected row (default: the current
+ * selection) in ONE `set_flag_many` call — one IPC round trip, one
+ * transaction — and toasts how many changed, with an Undo that flips back
+ * exactly those. Rows marked read are held for the view session (as a
+ * single mark is), and archived ones let go of their hold.
+ */
+export async function setFlagForSelection(
+    flag: ArticleFlagDto,
+    value: boolean,
+    articleIds: readonly number[] = selectionStore.selectedIds,
+): Promise<void> {
+    if (articleIds.length === 0) {
+        return;
+    }
+    if (flag === 'read') {
+        for (const articleId of articleIds) {
+            articlesStore.holdRead(articleId);
+        }
+    }
+    const changed = await run(() => commands.setFlagMany([...articleIds], flag, value), {
+        key: `bulk:${flag}`,
+        run: () => void setFlagForSelection(flag, value, articleIds),
+    });
+    if (changed === undefined) {
+        return;
+    }
+    if (flag === 'archived' && value) {
+        for (const articleId of changed) {
+            articlesStore.releaseHeld(articleId);
+        }
+    }
+    const message = t(BULK_DONE[flag][value ? 0 : 1], { count: changed.length });
+    if (changed.length === 0) {
+        toastStore.showToast(message, 'success');
+        return;
+    }
+    toastStore.showToast(message, 'success', {
+        action: { label: t('toast.undo'), run: () => undoBulk(changed, flag, value) },
+    });
 }
 
 /**
@@ -832,6 +919,17 @@ function selectNext(): void {
 }
 
 /**
+ * Shift+J/K (Shift+↓/↑ in the listbox): grows or shrinks the multi-selection
+ * by a row, paging more rows in at the window's end like j does.
+ */
+function extendSelection(direction: 'down' | 'up'): void {
+    const nearEnd = selectionStore.extendSelection(direction);
+    if (nearEnd && !searchStore.active) {
+        void articlesStore.current.loadMore();
+    }
+}
+
+/**
  * Promotes the selected article to a destination by NAME. Uses the chosen
  * default (or the sole destination); with no clear target it opens the
  * destinations panel to pick one. A raw path never crosses IPC — only the
@@ -919,7 +1017,16 @@ function openSelected(): void {
     }
 }
 
-function withSelected(action: (articleId: number) => Promise<void>): void {
+/**
+ * Runs a single-article toggle on the selected row — or, over a
+ * multi-selection, the bulk bar's action for the same flag (one batch call),
+ * so `s`/`l`/`m`/`e` always do what the bar's button does.
+ */
+function withSelected(action: (articleId: number) => Promise<void>, flag: ArticleFlagDto): void {
+    if (selectionStore.multiActive) {
+        void setFlagForSelection(flag, bulkValue(flag));
+        return;
+    }
     const articleId = selectionStore.selectedArticleId;
     if (articleId !== null) {
         void action(articleId);
@@ -963,6 +1070,12 @@ export function handleShortcut(id: ShortcutId): void {
         case 'nav.previousArticle':
             selectionStore.selectPreviousArticle();
             break;
+        case 'nav.extendDown':
+            extendSelection('down');
+            break;
+        case 'nav.extendUp':
+            extendSelection('up');
+            break;
         case 'nav.nextUnread':
             void goToNextUnread();
             break;
@@ -986,16 +1099,16 @@ export function handleShortcut(id: ShortcutId): void {
             openSelected();
             break;
         case 'article.toggleStar':
-            withSelected(toggleStar);
+            withSelected(toggleStar, 'starred');
             break;
         case 'article.toggleReadLater':
-            withSelected(toggleReadLater);
+            withSelected(toggleReadLater, 'read_later');
             break;
         case 'article.toggleRead':
-            withSelected(toggleRead);
+            withSelected(toggleRead, 'read');
             break;
         case 'article.toggleArchived':
-            withSelected(toggleArchived);
+            withSelected(toggleArchived, 'archived');
             break;
         case 'view.markAllRead':
             void markViewRead();

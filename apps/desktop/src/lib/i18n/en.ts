@@ -625,4 +625,25 @@ export const en = {
     'recovery.recovered.title': 'Curio is ready',
     'recovery.recovered.body': 'Your library opened.',
     'recovery.recovered.setAside': 'The previous database was moved to {path}.',
+
+    'bulk.toolbar': 'Selection actions',
+    'bulk.count': '{count, plural, one {# selected} other {# selected}}',
+    'bulk.clear': 'Clear selection',
+    'reader.multiSelected': '{count, plural, one {# article selected} other {# articles selected}}',
+    'reader.multiSelected.hint':
+        'Use the bar at the bottom of the list, or press Esc to clear the selection.',
+    'toast.bulk.unread': '{count, plural, one {Marked # unread} other {Marked # unread}}',
+    'toast.bulk.starred': '{count, plural, one {Starred # article} other {Starred # articles}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {Unstarred # article} other {Unstarred # articles}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {Added # to read later} other {Added # to read later}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {Removed # from read later} other {Removed # from read later}}',
+    'toast.bulk.archived': '{count, plural, one {Archived # article} other {Archived # articles}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {Unarchived # article} other {Unarchived # articles}}',
+    'toast.bulk.undone': '{count, plural, one {Restored # article} other {Restored # articles}}',
+    'shortcut.extendDown': 'Extend the selection down',
+    'shortcut.extendUp': 'Extend the selection up',
 } as const;

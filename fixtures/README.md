@@ -57,20 +57,23 @@ Current layout:
   XML, an entity bomb, stored-XSS payloads (`<script>`, `onerror=`,
   `javascript:`), entry links with parseable custom schemes (the content
   base a feed author controls — `custom-scheme-links.xml`, the first
-  `feed_parse` fuzz find), and a hostile Reddit listing.
+  `feed_parse` fuzz find), an entry nested 900 levels deep
+  (`deep-nesting.xml`: the depth that aborted an export, #244), and a
+  hostile Reddit listing.
   `crates/curio-core/tests/nasty_corpus.rs` pins each file (with
   `feeds/`) to its expected outcome — parses with N entries, or rejected —
   and **a new file here must be added to its `SEEDS` table**
   (`committed_seeds_are_all_pinned` fails otherwise). The corpus itself,
   over 1000 inputs, is generated from these seeds at test time,
   deterministically: byte-level encoding variants (BOMs, UTF-16, Latin-1,
-  lying declarations, control characters), size/shape extremes (deep
-  nesting, a ~700 KB entry, thousands of items, attribute floods) and
-  seeded mutants. That is why nothing large is committed. Every input must
-  end in a classified outcome with no panic, and everything it stores must
-  pass the inertness audit (`tests/common/inert.rs`). The same files seed
-  the `fuzz/` targets (`just fuzz`, nightly), and a crash a fuzz target
-  finds is pinned back here as a new seed.
+  lying declarations, control characters), size/shape extremes (HTML
+  nested 10 000 levels deep, a ~700 KB entry, thousands of items,
+  attribute floods) and seeded mutants. That is why nothing large is
+  committed. Every input must end in a classified outcome with no panic,
+  and everything it stores must pass the inertness audit
+  (`tests/common/inert.rs`). The same files seed the `fuzz/` targets
+  (`just fuzz`, nightly), and a crash a fuzz target finds is pinned back
+  here as a new seed.
 
 - `html/` — article HTML → sanitize → extract → CommonMark cases, pinned to
   insta snapshots; `xss-corpus.html` is the stored-XSS regression gate.

@@ -238,3 +238,52 @@ fn html_from(elements: &'static [&'static str]) -> impl Strategy<Value = String>
             })
     })
 }
+
+/// Wrappers a hostile feed can nest without limit, as (open, close) pairs:
+/// every one survives sanitization, and each is walked by its own htmd
+/// handler (lists and quotes cost the most stack a level).
+const NESTING: &[(&str, &str)] = &[
+    ("<div>", "</div>"),
+    ("<section>", "</section>"),
+    ("<article>", "</article>"),
+    ("<aside>", "</aside>"),
+    ("<blockquote>", "</blockquote>"),
+    ("<ul><li>", "</li></ul>"),
+    ("<ol><li>", "</li></ol>"),
+    ("<dl><dd>", "</dd></dl>"),
+    ("<table><tr><td>", "</td></tr></table>"),
+    ("<span>", "</span>"),
+    ("<em>", "</em>"),
+    ("<strong>", "</strong>"),
+];
+
+/// Pathologically deep HTML (#244): 1000–1500 random wrappers from
+/// [`NESTING`] — past the depth that overflowed a 2 MB stack in htmd's
+/// walk for every mix — with lowercase words scattered through the levels
+/// and `needle` innermost. Yields the HTML and every word it carries.
+pub fn deep_html() -> impl Strategy<Value = (String, Vec<String>)> {
+    prop::collection::vec(
+        (
+            prop::sample::select(NESTING),
+            prop::option::weighted(0.05, "[a-z]{3,8}"),
+        ),
+        1000..1500,
+    )
+    .prop_map(|levels| {
+        let mut html = String::new();
+        let mut words = Vec::new();
+        for ((open, _), word) in &levels {
+            html.push_str(open);
+            if let Some(word) = word {
+                write!(html, "{word} ").unwrap();
+                words.push(word.clone());
+            }
+        }
+        html.push_str("needle");
+        words.push("needle".to_owned());
+        for ((_, close), _) in levels.iter().rev() {
+            html.push_str(close);
+        }
+        (html, words)
+    })
+}

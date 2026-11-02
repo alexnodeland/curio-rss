@@ -37,8 +37,10 @@ const MUTANTS_PER_SEED: u64 = 24;
 /// The acceptance floor: the corpus test iterates at least this many inputs.
 const MIN_INPUTS: usize = 500;
 
-/// Nesting depth of the deep-HTML extreme (see `structural_variants`).
-const DEEP_HTML_LEVELS: usize = 250;
+/// Nesting depth of the deep-HTML extremes (see `structural_variants`):
+/// far past the ~1000 levels that used to overflow a 2 MB stack in
+/// `to_markdown` and abort the process (#244).
+const DEEP_HTML_LEVELS: usize = 10_000;
 
 /// What an input is pinned to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +64,7 @@ const SEEDS: &[(&str, Expect)] = &[
     ("nasty/atom-sloppy.atom", Expect::Parses(3)),
     ("nasty/billion-laughs.xml", Expect::Parses(1)),
     ("nasty/custom-scheme-links.xml", Expect::Parses(3)),
+    ("nasty/deep-nesting.xml", Expect::Parses(1)),
     ("nasty/duplicate-guids.xml", Expect::Parses(3)),
     ("nasty/empty-channel.xml", Expect::Parses(0)),
     ("nasty/html-served-as-feed.html", Expect::Rejects),
@@ -468,14 +471,19 @@ fn structural_variants() -> Vec<Input> {
     // (to 65_535 levels, where quick-xml's u16 namespace-depth counter
     // overflows — issue #246).
     let deep_xml = format!("{}{}", "<x>".repeat(5_000), "</x>".repeat(5_000));
-    // Deep *HTML* is capped well below htmd's recursion limit: ~1000 levels
-    // overflow a 2 MB stack in `to_markdown` (debug build) and abort the
-    // process, and a 1 MB stack overflows at ~600 (issue #244 — raise this
-    // to 10_000 with that fix).
+    // Deep *HTML*: htmd's walk recurses per level, so `to_markdown` caps
+    // the nesting it hands htmd (#244). Divs are the slow shape to parse
+    // (html5ever scans the open elements for every start tag); table
+    // cells are scope boundaries, so the tables reach 40 000 levels fast.
     let deep_html_body = format!(
         "{}deep{}",
         "<div>".repeat(DEEP_HTML_LEVELS),
         "</div>".repeat(DEEP_HTML_LEVELS)
+    );
+    let deep_tables_body = format!(
+        "{}deep{}",
+        "<table><tr><td>".repeat(DEEP_HTML_LEVELS),
+        "</td></tr></table>".repeat(DEEP_HTML_LEVELS)
     );
     let huge_entry = format!(
         "<item><guid>huge</guid><title>Huge</title><description><![CDATA[{}]]></description></item>",
@@ -507,6 +515,13 @@ fn structural_variants() -> Vec<Input> {
             label: "shape/deep-html-content".into(),
             bytes: rss_with_items(&format!(
                 "<item><guid>deep-html</guid><description><![CDATA[{deep_html_body}]]></description></item>"
+            ))
+            .into_bytes(),
+        },
+        Input {
+            label: "shape/deep-html-tables".into(),
+            bytes: rss_with_items(&format!(
+                "<item><guid>deep-tables</guid><description><![CDATA[{deep_tables_body}]]></description></item>"
             ))
             .into_bytes(),
         },
@@ -940,6 +955,43 @@ fn a_custom_scheme_entry_link_plants_no_link_in_stored_content() {
         first.html
     );
     assert!(!first.html.contains("relative/ok"), "{}", first.html);
+}
+
+#[test]
+fn deep_html_exports_with_its_text() {
+    // The gate proves no depth aborts the export; this pins that the text
+    // under 40 000 levels of nesting reaches the markdown too (#244). The
+    // tables extreme parses fast; the divs' text is pinned in
+    // `content::markdown`'s unit tests and the `props` deep-nesting suite.
+    let input = structural_variants()
+        .into_iter()
+        .find(|input| input.label == "shape/deep-html-tables")
+        .unwrap();
+    let feed = parse_feed(&input.bytes, Some(BASE)).unwrap();
+    let processed = process(&feed.entries[0].content_html, Some(BASE));
+    assert_eq!(processed.text, "deep");
+    let markdown = to_markdown(&processed.html).unwrap();
+    assert!(markdown.contains("deep"), "{markdown}");
+}
+
+#[test]
+fn the_deep_nesting_seed_exports_every_word() {
+    // The committed regression seed: 900 levels of mixed wrappers (lists,
+    // quotes, sections), past the depth that aborted an uncapped export.
+    let feed = parse("nasty/deep-nesting.xml");
+    let processed = process(
+        &feed.entries[0].content_html,
+        feed.entries[0].link.as_deref(),
+    );
+    let markdown = to_markdown(&processed.html).unwrap();
+    inert::audit_markdown(&markdown).unwrap();
+    let words: Vec<&str> = processed.text.split_whitespace().collect();
+    assert_eq!(words.len(), 12, "{words:?}");
+    for word in words {
+        assert!(markdown.contains(word), "lost {word:?}:\n{markdown}");
+    }
+    assert!(markdown.starts_with("Before the nesting."), "{markdown}");
+    assert!(markdown.ends_with("After the nesting."), "{markdown}");
 }
 
 #[test]

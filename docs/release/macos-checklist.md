@@ -87,6 +87,15 @@ at 15 minutes, and notifications on (Settings → General / Notifications).
 - [ ] **Launch-only, started offline** — interval set to Off, Refresh on launch on: launch with Wi-Fi off (the badge appears), then turn Wi-Fi on: within about a minute the skipped launch refresh runs.
 - [ ] **Badge by keyboard** — while offline, Tab to the badge: the "No network — background refresh is paused" hint appears with a focus ring.
 
+## Maintenance and retention (do each on the built .app)
+
+Use a throwaway profile with a few feeds that have refreshed at least once.
+
+- [ ] **Runs at launch** — on a fresh profile, wait about two minutes after launch: `logs/curio.log.*` gains one `scheduled maintenance finished` line. Relaunch straight away and wait again: no second line (a pass ran less than a day ago).
+- [ ] **Retention applies** — Settings → Data → Article retention → Keep per feed: Newest 100 (with a feed holding more), Keep unread off, then Settings → Advanced → Run maintenance: the toast counts the removed articles, the feed's count drops to 100, and starred / read-later / tagged articles of that feed are all still there. `curio --profile "$CURIO_PROFILE" retention` prints the same policy.
+- [ ] **Orphan purge asks first** — unsubscribe from a feed (let the undo toast lapse), then Settings → Advanced → Delete articles of removed feeds…: a confirmation appears; Cancel deletes nothing, Delete removes that feed's unstarred articles and the toast counts them.
+- [ ] **Search index repair** — quit, desync the index (`sqlite3 "$CURIO_PROFILE/curio.db" "INSERT INTO articles_fts(rowid, title, content_text) VALUES (999999, 'ghost', 'ghost')"`), relaunch: Check search index fails; Rebuild search index succeeds; Check search index then passes.
+
 ## Language and diagnostics (do each on the built .app)
 
 - [ ] **Menu follows the language** — Settings → Language → Deutsch: the menu bar relabels at once (Ablage, Bearbeiten, Darstellung, Gehe zu, Hilfe; "Curio beenden" in the app menu) with no relaunch, the shortcuts still work, and it is still German after a relaunch. Back to English relabels it again.

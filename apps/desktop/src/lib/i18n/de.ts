@@ -376,6 +376,19 @@ export const de: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Reddit-API-Zugangsdaten im Schlüsselbund gespeichert',
     'settings.redditApi.removed': 'Reddit-API-Zugangsdaten entfernt',
     'settings.redditApi.create': 'Kostenlose App auf reddit.com/prefs/apps anlegen',
+    'settings.retention.title': 'Artikel aufbewahren',
+    'settings.retention.hint':
+        'Curio behält jeden Artikel, bis du ein Limit setzt. Markierte, für später gemerkte, getaggte und exportierte Artikel werden nie gelöscht.',
+    'settings.retention.maxAge': 'Artikel löschen, die länger gespeichert sind als',
+    'settings.retention.maxAge.off': 'Nie',
+    'settings.retention.days': '{count, plural, one {# Tag} other {# Tage}}',
+    'settings.retention.maxPerFeed': 'Pro Feed behalten',
+    'settings.retention.maxPerFeed.off': 'Alle Artikel',
+    'settings.retention.newest': '{count, plural, one {Neuester #} other {Neueste #}}',
+    'settings.retention.keepUnread': 'Ungelesene Artikel behalten',
+    'settings.retention.keepUnread.hint': 'Ungelesene Artikel werden nie gelöscht, egal wie alt.',
+    'settings.retention.schedule':
+        'Limits greifen kurz nach dem Start und einmal täglich. Um sie sofort anzuwenden, nutze „Wartung ausführen“ unter Erweitert.',
     'settings.allowRemoteFavicon.hint':
         'Wenn eine Website kein Favicon angibt, auf Googles Favicon-Dienst zurückgreifen. Standardmäßig aus – es verrät Google, welche Seiten du ansiehst (siehe PRIVACY.md).',
     'settings.section.appearance': 'Darstellung',
@@ -459,6 +472,23 @@ export const de: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Datenbank: {path}',
     'doctor.check.integrity': 'Integritätsprüfung',
     'doctor.check.fts': 'Suchindexprüfung',
+    'doctor.rebuildFts': 'Suchindex neu aufbauen',
+    'doctor.rebuiltFts': 'Suchindex neu aufgebaut',
+    'doctor.maintenance': 'Wartung ausführen',
+    'doctor.maintenance.clean': 'Wartung abgeschlossen: Es gab nichts zu entfernen',
+    'doctor.maintenance.done':
+        'Wartung abgeschlossen: {articles, plural, one {# Artikel} other {# Artikel}}, {tags, plural, one {# ungenutzter Tag} other {# ungenutzte Tags}} und {logs, plural, one {# alte Protokolldatei} other {# alte Protokolldateien}} entfernt',
+    'doctor.maintenance.reapSkipped':
+        'Es wurden keine Artikel gelöscht: Die Notizen eines Ziels konnten nicht gelesen werden ({reason}). Verbinde es erneut und führe die Wartung noch einmal aus.',
+    'doctor.maintenance.partial':
+        'Ein Teil der Datenbankpflege wurde übersprungen; sie läuft beim nächsten Mal erneut.',
+    'doctor.purgeOrphans': 'Artikel entfernter Feeds löschen…',
+    'doctor.purgeOrphans.confirm':
+        'Die Artikel abbestellter Feeds löschen? Markierte, für später gemerkte, getaggte und exportierte bleiben erhalten.',
+    'doctor.purgeOrphans.delete': 'Löschen',
+    'doctor.purgeOrphans.cancel': 'Abbrechen',
+    'doctor.purged':
+        '{count, plural, one {# Artikel entfernter Feeds gelöscht} other {# Artikel entfernter Feeds gelöscht}}',
 
     'legacy.title': 'Bibliotheken aus früheren Versionen',
     'legacy.notice.moved':

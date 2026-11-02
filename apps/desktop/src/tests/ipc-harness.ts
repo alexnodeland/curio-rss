@@ -23,10 +23,12 @@ import type {
     FetchRecordDto,
     ImportOutcomeDto,
     LegacyProfileDto,
+    MaintenanceReportDto,
     OpmlImportOutcomeDto,
     PathTokenDto,
     RecoveryOutcomeDto,
     RefreshOutcomeDto,
+    RetentionPolicyDto,
     SaveOutcomeDto,
     StartupFailureDto,
     UnreadCountsDto,
@@ -313,6 +315,28 @@ export function dbStatsFixture(overrides: Partial<DbStatsDto> = {}): DbStatsDto 
         article_count: 42,
         schema_version: 1,
         db_path: '/home/user/.local/share/curio/curio.db',
+        ...overrides,
+    };
+}
+
+export function retentionPolicyFixture(
+    overrides: Partial<RetentionPolicyDto> = {},
+): RetentionPolicyDto {
+    return { max_age_days: null, max_per_feed: null, keep_unread: true, ...overrides };
+}
+
+export function maintenanceReportFixture(
+    overrides: Partial<MaintenanceReportDto> = {},
+): MaintenanceReportDto {
+    return {
+        articles_reaped: 0,
+        orphans_purged: 0,
+        tags_dropped: 0,
+        fetch_log_trimmed: 0,
+        event_files_removed: 0,
+        reap_skipped: null,
+        event_sweep_skipped: null,
+        upkeep_skipped: null,
         ...overrides,
     };
 }

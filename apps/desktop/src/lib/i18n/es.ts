@@ -374,6 +374,21 @@ export const es: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Credenciales de la API de Reddit guardadas en el llavero',
     'settings.redditApi.removed': 'Credenciales de la API de Reddit eliminadas',
     'settings.redditApi.create': 'Crea una app gratuita en reddit.com/prefs/apps',
+    'settings.retention.title': 'Conservación de artículos',
+    'settings.retention.hint':
+        'Curio conserva todos los artículos hasta que fijes un límite. Los artículos destacados, para leer después, etiquetados y exportados nunca se eliminan.',
+    'settings.retention.maxAge': 'Eliminar artículos guardados hace más de',
+    'settings.retention.maxAge.off': 'Nunca',
+    'settings.retention.days': '{count, plural, one {# día} other {# días}}',
+    'settings.retention.maxPerFeed': 'Conservar por fuente',
+    'settings.retention.maxPerFeed.off': 'Todos los artículos',
+    'settings.retention.newest':
+        '{count, plural, one {El # más reciente} other {Los # más recientes}}',
+    'settings.retention.keepUnread': 'Conservar artículos no leídos',
+    'settings.retention.keepUnread.hint':
+        'Los artículos no leídos nunca se eliminan, por antiguos que sean.',
+    'settings.retention.schedule':
+        'Los límites se aplican poco después de abrir la app y una vez al día. Para aplicarlos ahora, usa Ejecutar mantenimiento en Avanzado.',
     'settings.allowRemoteFavicon.hint':
         'Cuando un sitio no declara favicon, recurre al servicio de favicons de Google. Desactivado por defecto: revela a Google qué sitios previsualizas (consulta PRIVACY.md).',
     'settings.section.appearance': 'Apariencia',
@@ -456,6 +471,23 @@ export const es: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Base de datos: {path}',
     'doctor.check.integrity': 'Comprobación de integridad',
     'doctor.check.fts': 'Comprobación del índice de búsqueda',
+    'doctor.rebuildFts': 'Reconstruir índice de búsqueda',
+    'doctor.rebuiltFts': 'Índice de búsqueda reconstruido',
+    'doctor.maintenance': 'Ejecutar mantenimiento',
+    'doctor.maintenance.clean': 'Mantenimiento terminado: no había nada que eliminar',
+    'doctor.maintenance.done':
+        'Mantenimiento terminado: se eliminaron {articles, plural, one {# artículo} other {# artículos}}, {tags, plural, one {# etiqueta sin uso} other {# etiquetas sin uso}} y {logs, plural, one {# archivo de registro antiguo} other {# archivos de registro antiguos}}',
+    'doctor.maintenance.reapSkipped':
+        'No se eliminó ningún artículo: no se pudieron leer las notas de un destino ({reason}). Vuelve a conectarlo y ejecuta el mantenimiento de nuevo.',
+    'doctor.maintenance.partial':
+        'Se omitió parte del mantenimiento de la base de datos; se ejecutará la próxima vez.',
+    'doctor.purgeOrphans': 'Eliminar artículos de fuentes eliminadas…',
+    'doctor.purgeOrphans.confirm':
+        '¿Eliminar los artículos de las fuentes a las que cancelaste la suscripción? Se conservan los destacados, para leer después, etiquetados y exportados.',
+    'doctor.purgeOrphans.delete': 'Eliminar',
+    'doctor.purgeOrphans.cancel': 'Cancelar',
+    'doctor.purged':
+        '{count, plural, one {Se eliminó # artículo de fuentes eliminadas} other {Se eliminaron # artículos de fuentes eliminadas}}',
 
     'legacy.title': 'Bibliotecas de versiones anteriores',
     'legacy.notice.moved':

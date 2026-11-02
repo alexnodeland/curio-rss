@@ -349,6 +349,19 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Reddit API 凭据已保存到钥匙串',
     'settings.redditApi.removed': 'Reddit API 凭据已移除',
     'settings.redditApi.create': '在 reddit.com/prefs/apps 创建免费应用',
+    'settings.retention.title': '文章保留',
+    'settings.retention.hint':
+        '在你设置上限之前，Curio 会保留所有文章。已加星标、稍后阅读、带标签和已导出的文章永远不会被删除。',
+    'settings.retention.maxAge': '删除保存超过以下时长的文章',
+    'settings.retention.maxAge.off': '从不',
+    'settings.retention.days': '{count, plural, other {# 天}}',
+    'settings.retention.maxPerFeed': '每个订阅源保留',
+    'settings.retention.maxPerFeed.off': '所有文章',
+    'settings.retention.newest': '{count, plural, other {最新 # 篇}}',
+    'settings.retention.keepUnread': '保留未读文章',
+    'settings.retention.keepUnread.hint': '未读文章无论多旧都不会被删除。',
+    'settings.retention.schedule':
+        '上限会在启动后不久以及每天一次生效。要立即生效，请在“高级”中使用“运行维护”。',
     'settings.allowRemoteFavicon.hint':
         '当网站未声明图标时，回退到 Google 的图标服务。默认关闭——这会让 Google 得知你预览了哪些网站（见 PRIVACY.md）。',
     'settings.section.appearance': '外观',
@@ -428,6 +441,21 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': '数据库：{path}',
     'doctor.check.integrity': '完整性检查',
     'doctor.check.fts': '搜索索引检查',
+    'doctor.rebuildFts': '重建搜索索引',
+    'doctor.rebuiltFts': '搜索索引已重建',
+    'doctor.maintenance': '运行维护',
+    'doctor.maintenance.clean': '维护完成：没有需要移除的内容',
+    'doctor.maintenance.done':
+        '维护完成：移除了 {articles, plural, other {# 篇文章}}、{tags, plural, other {# 个未使用的标签}}和 {logs, plural, other {# 个旧日志文件}}',
+    'doctor.maintenance.reapSkipped':
+        '未删除任何文章：无法读取某个目标位置的笔记（{reason}）。请重新连接后再次运行维护。',
+    'doctor.maintenance.partial': '部分数据库维护已跳过，下次会再次运行。',
+    'doctor.purgeOrphans': '删除已移除订阅源的文章…',
+    'doctor.purgeOrphans.confirm':
+        '要删除你已取消订阅的订阅源中的文章吗？已加星标、稍后阅读、带标签和已导出的文章会被保留。',
+    'doctor.purgeOrphans.delete': '删除',
+    'doctor.purgeOrphans.cancel': '取消',
+    'doctor.purged': '{count, plural, other {已删除已移除订阅源的 # 篇文章}}',
 
     'legacy.title': '早期版本的资料库',
     'legacy.notice.moved': '已将早期版本 Curio 的资料库移至 {path}，命令行也会打开这里。',

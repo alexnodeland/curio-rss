@@ -376,6 +376,22 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Dane API Reddita zapisane w pęku kluczy',
     'settings.redditApi.removed': 'Dane API Reddita usunięte',
     'settings.redditApi.create': 'Utwórz darmową aplikację na reddit.com/prefs/apps',
+    'settings.retention.title': 'Przechowywanie artykułów',
+    'settings.retention.hint':
+        'Curio przechowuje każdy artykuł, dopóki nie ustawisz limitu. Artykuły oznaczone gwiazdką, odłożone na później, otagowane i wyeksportowane nigdy nie są usuwane.',
+    'settings.retention.maxAge': 'Usuwaj artykuły przechowywane dłużej niż',
+    'settings.retention.maxAge.off': 'Nigdy',
+    'settings.retention.days':
+        '{count, plural, one {# dzień} few {# dni} many {# dni} other {# dnia}}',
+    'settings.retention.maxPerFeed': 'Zachowuj na kanał',
+    'settings.retention.maxPerFeed.off': 'Wszystkie artykuły',
+    'settings.retention.newest':
+        '{count, plural, one {# najnowszy} few {# najnowsze} many {# najnowszych} other {# najnowszego}}',
+    'settings.retention.keepUnread': 'Zachowuj nieprzeczytane artykuły',
+    'settings.retention.keepUnread.hint':
+        'Nieprzeczytane artykuły nigdy nie są usuwane, niezależnie od wieku.',
+    'settings.retention.schedule':
+        'Limity są stosowane wkrótce po uruchomieniu i raz dziennie. Aby zastosować je od razu, użyj opcji Uruchom konserwację w sekcji Zaawansowane.',
     'settings.allowRemoteFavicon.hint':
         'Gdy witryna nie deklaruje favicony, użyj usługi favicon Google. Domyślnie wyłączone — ujawnia to Google, które witryny przeglądasz (zobacz PRIVACY.md).',
     'settings.section.appearance': 'Wygląd',
@@ -459,6 +475,23 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Baza danych: {path}',
     'doctor.check.integrity': 'Kontrola integralności',
     'doctor.check.fts': 'Kontrola indeksu wyszukiwania',
+    'doctor.rebuildFts': 'Odbuduj indeks wyszukiwania',
+    'doctor.rebuiltFts': 'Indeks wyszukiwania odbudowany',
+    'doctor.maintenance': 'Uruchom konserwację',
+    'doctor.maintenance.clean': 'Konserwacja zakończona: nie było nic do usunięcia',
+    'doctor.maintenance.done':
+        'Konserwacja zakończona: usunięto {articles, plural, one {# artykuł} few {# artykuły} many {# artykułów} other {# artykułu}}, {tags, plural, one {# nieużywany tag} few {# nieużywane tagi} many {# nieużywanych tagów} other {# nieużywanego tagu}} i {logs, plural, one {# stary plik dziennika} few {# stare pliki dziennika} many {# starych plików dziennika} other {# starego pliku dziennika}}',
+    'doctor.maintenance.reapSkipped':
+        'Nie usunięto żadnych artykułów: nie udało się odczytać notatek jednego z miejsc docelowych ({reason}). Połącz je ponownie i uruchom konserwację jeszcze raz.',
+    'doctor.maintenance.partial':
+        'Część konserwacji bazy danych została pominięta; zostanie wykonana następnym razem.',
+    'doctor.purgeOrphans': 'Usuń artykuły usuniętych kanałów…',
+    'doctor.purgeOrphans.confirm':
+        'Usunąć artykuły kanałów, których subskrypcję anulowano? Artykuły oznaczone gwiazdką, odłożone na później, otagowane i wyeksportowane zostaną zachowane.',
+    'doctor.purgeOrphans.delete': 'Usuń',
+    'doctor.purgeOrphans.cancel': 'Anuluj',
+    'doctor.purged':
+        '{count, plural, one {Usunięto # artykuł usuniętych kanałów} few {Usunięto # artykuły usuniętych kanałów} many {Usunięto # artykułów usuniętych kanałów} other {Usunięto # artykułu usuniętych kanałów}}',
 
     'legacy.title': 'Biblioteki z wcześniejszych wersji',
     'legacy.notice.moved':

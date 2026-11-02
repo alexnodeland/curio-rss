@@ -371,6 +371,20 @@ export const it: Partial<Record<MessageKey, string>> = {
     'settings.redditApi.saved': 'Credenziali dell’API di Reddit salvate nel portachiavi',
     'settings.redditApi.removed': 'Credenziali dell’API di Reddit rimosse',
     'settings.redditApi.create': 'Crea un’app gratuita su reddit.com/prefs/apps',
+    'settings.retention.title': 'Conservazione degli articoli',
+    'settings.retention.hint':
+        'Curio conserva ogni articolo finché non imposti un limite. Gli articoli preferiti, da leggere dopo, con tag ed esportati non vengono mai eliminati.',
+    'settings.retention.maxAge': 'Elimina gli articoli conservati da più di',
+    'settings.retention.maxAge.off': 'Mai',
+    'settings.retention.days': '{count, plural, one {# giorno} other {# giorni}}',
+    'settings.retention.maxPerFeed': 'Conserva per feed',
+    'settings.retention.maxPerFeed.off': 'Tutti gli articoli',
+    'settings.retention.newest': '{count, plural, one {Il # più recente} other {I # più recenti}}',
+    'settings.retention.keepUnread': 'Conserva gli articoli non letti',
+    'settings.retention.keepUnread.hint':
+        'Gli articoli non letti non vengono mai eliminati, per quanto vecchi.',
+    'settings.retention.schedule':
+        'I limiti si applicano poco dopo l’avvio e una volta al giorno. Per applicarli subito, usa Esegui manutenzione in Avanzate.',
     'settings.allowRemoteFavicon.hint':
         'Quando un sito non dichiara una favicon, ripiega sul servizio favicon di Google. Disattivato per impostazione predefinita: rivela a Google quali siti visualizzi in anteprima (vedi PRIVACY.md).',
     'settings.section.appearance': 'Aspetto',
@@ -454,6 +468,23 @@ export const it: Partial<Record<MessageKey, string>> = {
     'doctor.stats.db': 'Database: {path}',
     'doctor.check.integrity': 'Verifica integrità',
     'doctor.check.fts': 'Verifica indice di ricerca',
+    'doctor.rebuildFts': 'Ricostruisci indice di ricerca',
+    'doctor.rebuiltFts': 'Indice di ricerca ricostruito',
+    'doctor.maintenance': 'Esegui manutenzione',
+    'doctor.maintenance.clean': 'Manutenzione completata: niente da rimuovere',
+    'doctor.maintenance.done':
+        'Manutenzione completata: rimossi {articles, plural, one {# articolo} other {# articoli}}, {tags, plural, one {# tag inutilizzato} other {# tag inutilizzati}} e {logs, plural, one {# vecchio file di log} other {# vecchi file di log}}',
+    'doctor.maintenance.reapSkipped':
+        'Nessun articolo eliminato: non è stato possibile leggere le note di una destinazione ({reason}). Ricollegala ed esegui di nuovo la manutenzione.',
+    'doctor.maintenance.partial':
+        'Parte della manutenzione del database è stata saltata; verrà eseguita la prossima volta.',
+    'doctor.purgeOrphans': 'Elimina gli articoli dei feed rimossi…',
+    'doctor.purgeOrphans.confirm':
+        'Eliminare gli articoli dei feed da cui ti sei disiscritto? Quelli preferiti, da leggere dopo, con tag ed esportati vengono conservati.',
+    'doctor.purgeOrphans.delete': 'Elimina',
+    'doctor.purgeOrphans.cancel': 'Annulla',
+    'doctor.purged':
+        '{count, plural, one {Eliminato # articolo dei feed rimossi} other {Eliminati # articoli dei feed rimossi}}',
 
     'legacy.title': 'Librerie delle versioni precedenti',
     'legacy.notice.moved':

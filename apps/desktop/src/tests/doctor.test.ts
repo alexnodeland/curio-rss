@@ -1,7 +1,9 @@
 /**
  * The doctor panel runs the health/maintenance commands (integrity checks,
- * vacuum, retention sweep, diagnostics bundle) and shows the db/app facts.
- * Each button is a thin command call whose outcome becomes a toast.
+ * the search-index rebuild, vacuum, the maintenance pass and the orphan
+ * purge behind it, retention sweep, diagnostics bundle) and shows the
+ * db/app facts. Each button is a thin command call whose outcome becomes a
+ * toast.
  */
 import DoctorPanel from '$components/modals/DoctorPanel.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
@@ -15,6 +17,7 @@ import {
     flushIpc,
     installIpcHarness,
     legacyProfileFixture,
+    maintenanceReportFixture,
     pathTokenFixture,
 } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
@@ -25,6 +28,8 @@ function harnessResponders(overrides: Record<string, Responder> = {}): Record<st
         get_app_info: appInfoFixture(),
         integrity_check: null,
         fts_integrity_check: null,
+        rebuild_search_index: null,
+        run_maintenance: maintenanceReportFixture(),
         vacuum_db: null,
         sweep_event_retention: ['2026-03-01.jsonl', '2026-03-02.jsonl'],
         copy_diagnostics_bundle: pathTokenFixture({ path: '/cache/curio/diagnostics/bundle' }),
@@ -89,6 +94,146 @@ describe('DoctorPanel', () => {
 
         expect(harness.callsFor('integrity_check')).toHaveLength(1);
         expect(toastStore.toasts.at(-1)?.message).toBe('Integrity check passed');
+    });
+
+    it('rebuilds the search index — the repair for a failed index check', async () => {
+        harness = installIpcHarness(harnessResponders());
+        const { getByText } = render(DoctorPanel);
+        await flushIpc();
+
+        await fireEvent.click(getByText('Rebuild search index'));
+        await flushIpc();
+
+        expect(harness.callsFor('rebuild_search_index')).toHaveLength(1);
+        expect(toastStore.toasts.at(-1)?.message).toBe('Search index rebuilt');
+    });
+
+    it('runs the routine maintenance pass without purging, then reloads the stats', async () => {
+        harness = installIpcHarness(
+            harnessResponders({
+                run_maintenance: maintenanceReportFixture({
+                    articles_reaped: 2,
+                    event_files_removed: 1,
+                }),
+            }),
+        );
+        const { getByText } = render(DoctorPanel);
+        await flushIpc();
+        harness.respond('db_stats', dbStatsFixture({ article_count: 40 }));
+
+        await fireEvent.click(getByText('Run maintenance'));
+        await flushIpc();
+
+        expect(harness.callsFor('run_maintenance')).toEqual([{ purgeOrphans: false }]);
+        expect(toastStore.toasts.at(-1)?.message).toBe(
+            'Maintenance finished: removed 2 articles, 0 unused tags and 1 old log file',
+        );
+        expect(getByText('40 articles')).toBeTruthy();
+    });
+
+    it('purges orphaned articles only after a confirmation', async () => {
+        harness = installIpcHarness(
+            harnessResponders({ run_maintenance: maintenanceReportFixture({ orphans_purged: 5 }) }),
+        );
+        const { getByText, queryByText } = render(DoctorPanel);
+        await flushIpc();
+
+        await fireEvent.click(getByText('Delete articles of removed feeds…'));
+        expect(harness.callsFor('run_maintenance')).toHaveLength(0);
+        expect(getByText(/Starred, read-later, tagged and exported ones are kept/)).toBeTruthy();
+
+        // Cancel backs out without deleting anything.
+        await fireEvent.click(getByText('Cancel'));
+        expect(queryByText('Delete')).toBeNull();
+        expect(harness.callsFor('run_maintenance')).toHaveLength(0);
+
+        await fireEvent.click(getByText('Delete articles of removed feeds…'));
+        await fireEvent.click(getByText('Delete'));
+        await flushIpc();
+
+        expect(harness.callsFor('run_maintenance')).toEqual([{ purgeOrphans: true }]);
+        expect(toastStore.toasts.at(-1)?.message).toBe('Deleted 5 articles of removed feeds');
+        expect(queryByText('Delete')).toBeNull();
+    });
+
+    it('moves focus into the purge confirmation and back to its opener', async () => {
+        harness = installIpcHarness(
+            harnessResponders({ run_maintenance: maintenanceReportFixture({ orphans_purged: 1 }) }),
+        );
+        const { getByRole, getByText } = render(DoctorPanel);
+        await flushIpc();
+
+        const opener = getByText('Delete articles of removed feeds…');
+        opener.focus();
+        await fireEvent.click(opener);
+        await flushIpc();
+
+        // Focus lands on the safe choice, described by the question it answers.
+        const cancel = getByRole('button', { name: 'Cancel' });
+        expect(document.activeElement).toBe(cancel);
+        const prompt = getByText(/Starred, read-later, tagged and exported ones are kept/);
+        expect(cancel.getAttribute('aria-describedby')).toBe(prompt.id);
+        expect(getByRole('group', { name: prompt.textContent?.trim() })).toBeTruthy();
+
+        // Cancelling hands focus back to the opener.
+        await fireEvent.click(cancel);
+        await flushIpc();
+        const reopener = getByText('Delete articles of removed feeds…');
+        expect(document.activeElement).toBe(reopener);
+
+        // Confirming does too: the opener stays focusable (inert) while the purge runs.
+        await fireEvent.click(reopener);
+        await flushIpc();
+        await fireEvent.click(getByRole('button', { name: 'Delete' }));
+        await flushIpc();
+        const after = getByText('Delete articles of removed feeds…');
+        expect(document.activeElement).toBe(after);
+        expect(after.hasAttribute('disabled')).toBe(false);
+        expect(harness.callsFor('run_maintenance')).toEqual([{ purgeOrphans: true }]);
+    });
+
+    it('keeps the purge opener inert while another action runs', async () => {
+        let finish: (value: unknown) => void = () => undefined;
+        harness = installIpcHarness(
+            harnessResponders({
+                vacuum_db: () =>
+                    new Promise((resolve) => {
+                        finish = resolve;
+                    }),
+            }),
+        );
+        const { getByText, queryByText } = render(DoctorPanel);
+        await flushIpc();
+
+        await fireEvent.click(getByText('Compact database'));
+        const opener = getByText('Delete articles of removed feeds…');
+        expect(opener.getAttribute('aria-disabled')).toBe('true');
+        await fireEvent.click(opener);
+        await flushIpc();
+        expect(queryByText('Cancel')).toBeNull();
+
+        finish(null);
+        await flushIpc();
+        expect(getByText('Delete articles of removed feeds…').getAttribute('aria-disabled')).toBe(
+            'false',
+        );
+    });
+
+    it('warns instead of claiming success when the pass could not delete', async () => {
+        harness = installIpcHarness(
+            harnessResponders({
+                run_maintenance: maintenanceReportFixture({ reap_skipped: 'vault unmounted' }),
+            }),
+        );
+        const { getByText } = render(DoctorPanel);
+        await flushIpc();
+
+        await fireEvent.click(getByText('Run maintenance'));
+        await flushIpc();
+
+        const toast = toastStore.toasts.at(-1);
+        expect(toast?.tone).toBe('warning');
+        expect(toast?.message).toContain('vault unmounted');
     });
 
     it('sweeps event retention and reports the removed count', async () => {

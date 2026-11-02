@@ -1,10 +1,20 @@
 <script lang="ts">
 /**
  * The database doctor: the health/maintenance commands (integrity checks,
- * vacuum, event-log retention sweep) plus the redacted, zero-telemetry
- * diagnostics bundle and the about-box facts, plus what startup did with a
- * library from an earlier release. Every button is a thin call to a health
- * command; results surface as toasts, and the stats reload after a vacuum.
+ * the search-index rebuild that repairs a failed index check, vacuum, the
+ * maintenance pass, event-log retention sweep, and — behind a confirmation
+ * — deleting the articles of removed feeds) plus the redacted,
+ * zero-telemetry diagnostics bundle and the about-box facts, plus what
+ * startup did with a library from an earlier release. Every button is a
+ * thin call to a health command; results surface as toasts, and the stats
+ * reload after anything that can shrink the library.
+ *
+ * The purge confirmation manages focus as the startup recovery screen
+ * does: opening it moves focus onto its Cancel (the safe choice, described
+ * by the prompt so the question is announced), and closing it — cancelled
+ * or confirmed — hands focus back to the button that opened it, which
+ * stays focusable but inert (`aria-disabled`) while the purge runs, so
+ * focus is never dropped to the page.
  */
 import { type AppInfoDto, type DbStatsDto, type LegacyProfileDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
@@ -12,11 +22,17 @@ import { toastCommandError } from '$lib/state/actions';
 import type { CommandResult } from '$lib/state/query-cache.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { legacyProfileDetail, loadLegacyProfiles } from '$lib/utils/legacy-profiles';
+import { maintenanceToasts } from '$lib/utils/maintenance';
+import { tick } from 'svelte';
 
 let stats: DbStatsDto | null = $state(null);
 let info: AppInfoDto | null = $state(null);
 let legacy: LegacyProfileDto[] = $state([]);
 let running: string | null = $state(null);
+let confirmingPurge = $state(false);
+/** The purge's opener and its confirmation's Cancel, to move focus between them. */
+let purgeButton: HTMLButtonElement | undefined = $state();
+let cancelPurgeButton: HTMLButtonElement | undefined = $state();
 
 $effect(() => {
     void loadStats();
@@ -79,6 +95,10 @@ function ftsIntegrity(): void {
     );
 }
 
+function rebuildSearchIndex(): void {
+    void run('rebuild', () => commands.rebuildSearchIndex(), t('doctor.rebuiltFts'));
+}
+
 function vacuum(): void {
     void run('vacuum', () => commands.vacuumDb(), t('doctor.vacuumed'), loadStats);
 }
@@ -92,6 +112,49 @@ async function sweep(): Promise<void> {
             return;
         }
         toastStore.showToast(t('doctor.swept', { count: result.data.length }), 'success');
+    } catch {
+        toastStore.showToast(t('app.error.internal'), 'error');
+    } finally {
+        running = null;
+    }
+}
+
+/** Opens the purge confirmation, focus on its Cancel (inert while anything runs). */
+async function openPurge(): Promise<void> {
+    if (running !== null) {
+        return;
+    }
+    confirmingPurge = true;
+    await tick();
+    cancelPurgeButton?.focus();
+}
+
+/** Closes the purge confirmation and puts focus back on its opener. */
+async function closePurge(): Promise<void> {
+    confirmingPurge = false;
+    await tick();
+    purgeButton?.focus();
+}
+
+/** Runs the maintenance pass now — with `purgeOrphans`, the orphan purge too. */
+async function maintenance(purgeOrphans: boolean): Promise<void> {
+    if (running !== null) {
+        return;
+    }
+    running = purgeOrphans ? 'purge' : 'maintenance';
+    if (purgeOrphans) {
+        await closePurge();
+    }
+    try {
+        const result = await commands.runMaintenance(purgeOrphans);
+        if (result.status === 'error') {
+            toastCommandError(result.error);
+            return;
+        }
+        for (const toast of maintenanceToasts(result.data, purgeOrphans)) {
+            toastStore.showToast(toast.message, toast.tone);
+        }
+        await loadStats();
     } catch {
         toastStore.showToast(t('app.error.internal'), 'error');
     } finally {
@@ -150,8 +213,14 @@ async function diagnostics(): Promise<void> {
         <button type="button" onclick={ftsIntegrity} disabled={running !== null}>
             {running === 'fts' ? t('doctor.running') : t('doctor.ftsIntegrity')}
         </button>
+        <button type="button" onclick={rebuildSearchIndex} disabled={running !== null}>
+            {running === 'rebuild' ? t('doctor.running') : t('doctor.rebuildFts')}
+        </button>
         <button type="button" onclick={vacuum} disabled={running !== null}>
             {running === 'vacuum' ? t('doctor.running') : t('doctor.vacuum')}
+        </button>
+        <button type="button" onclick={() => void maintenance(false)} disabled={running !== null}>
+            {running === 'maintenance' ? t('doctor.running') : t('doctor.maintenance')}
         </button>
         <button type="button" onclick={() => void sweep()} disabled={running !== null}>
             {running === 'sweep' ? t('doctor.running') : t('doctor.sweep')}
@@ -160,6 +229,41 @@ async function diagnostics(): Promise<void> {
             {running === 'diagnostics' ? t('doctor.running') : t('doctor.diagnostics')}
         </button>
     </div>
+
+    <section class="purge" aria-label={t('doctor.purgeOrphans')}>
+        {#if confirmingPurge}
+            <div class="purge-confirm" role="group" aria-labelledby="doctor-purge-prompt">
+                <p id="doctor-purge-prompt" class="purge-prompt">
+                    {t('doctor.purgeOrphans.confirm')}
+                </p>
+                <div class="purge-actions">
+                    <button
+                        type="button"
+                        class="danger"
+                        aria-describedby="doctor-purge-prompt"
+                        aria-disabled={running !== null}
+                        onclick={() => void maintenance(true)}
+                        >{t('doctor.purgeOrphans.delete')}</button
+                    >
+                    <button
+                        type="button"
+                        aria-describedby="doctor-purge-prompt"
+                        bind:this={cancelPurgeButton}
+                        onclick={() => void closePurge()}>{t('doctor.purgeOrphans.cancel')}</button
+                    >
+                </div>
+            </div>
+        {:else}
+            <button
+                type="button"
+                bind:this={purgeButton}
+                aria-disabled={running !== null}
+                onclick={() => void openPurge()}
+            >
+                {running === 'purge' ? t('doctor.running') : t('doctor.purgeOrphans')}
+            </button>
+        {/if}
+    </section>
 </div>
 
 <style>
@@ -233,5 +337,70 @@ async function diagnostics(): Promise<void> {
     .doctor-actions button:hover:not(:disabled) {
         background: var(--hover);
         color: var(--fg);
+    }
+
+    /* Deleting articles sits apart from the routine actions, behind a
+       confirmation — the same shape as a feed's unsubscribe. */
+    .purge {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding-top: var(--space-3);
+        margin-top: var(--space-2);
+        border-top: 1px solid var(--hairline);
+    }
+
+    .purge-confirm {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .purge-prompt {
+        font-size: var(--text-sm);
+        line-height: 1.45;
+        color: var(--fg-muted);
+    }
+
+    .purge-actions {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .purge button {
+        align-self: flex-start;
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--fg-muted);
+        border: 1px solid var(--hairline-strong);
+        font-size: var(--text-sm);
+        font-weight: var(--weight-medium);
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease),
+            border-color var(--dur-fast) var(--ease);
+    }
+
+    .purge button:hover:not([aria-disabled='true']) {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
+    .purge .danger {
+        color: var(--error-text);
+        border-color: color-mix(in srgb, var(--error), transparent 40%);
+    }
+
+    /* Inert while anything runs, but still focusable (see the header). */
+    .purge button[aria-disabled='true'] {
+        cursor: not-allowed;
+        opacity: 0.5;
+    }
+
+    .purge .danger:hover:not([aria-disabled='true']) {
+        background: color-mix(in srgb, var(--error), transparent 88%);
+        border-color: var(--error);
+        color: var(--error-text);
     }
 </style>

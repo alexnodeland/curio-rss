@@ -378,6 +378,19 @@ export const en = {
     'settings.redditApi.saved': 'Reddit API credentials saved to the keychain',
     'settings.redditApi.removed': 'Reddit API credentials removed',
     'settings.redditApi.create': 'Create a free app at reddit.com/prefs/apps',
+    'settings.retention.title': 'Article retention',
+    'settings.retention.hint':
+        'Curio keeps every article until you set a limit. Starred, read-later, tagged and exported articles are never deleted.',
+    'settings.retention.maxAge': 'Delete articles kept longer than',
+    'settings.retention.maxAge.off': 'Never',
+    'settings.retention.days': '{count, plural, one {# day} other {# days}}',
+    'settings.retention.maxPerFeed': 'Keep per feed',
+    'settings.retention.maxPerFeed.off': 'All articles',
+    'settings.retention.newest': '{count, plural, one {Newest #} other {Newest #}}',
+    'settings.retention.keepUnread': 'Keep unread articles',
+    'settings.retention.keepUnread.hint': 'Unread articles are never deleted, however old.',
+    'settings.retention.schedule':
+        'Limits apply shortly after launch and once a day. To apply them now, use Run maintenance under Advanced.',
     'settings.allowRemoteFavicon.hint':
         "When a site declares no favicon, fall back to Google's favicon service. Off by default — it tells Google which sites you preview (see PRIVACY.md).",
     'settings.section.reading': 'Reading',
@@ -460,6 +473,22 @@ export const en = {
     'doctor.stats.db': 'Database: {path}',
     'doctor.check.integrity': 'Integrity check',
     'doctor.check.fts': 'Search index check',
+    'doctor.rebuildFts': 'Rebuild search index',
+    'doctor.rebuiltFts': 'Search index rebuilt',
+    'doctor.maintenance': 'Run maintenance',
+    'doctor.maintenance.clean': 'Maintenance finished: nothing needed removing',
+    'doctor.maintenance.done':
+        'Maintenance finished: removed {articles, plural, one {# article} other {# articles}}, {tags, plural, one {# unused tag} other {# unused tags}} and {logs, plural, one {# old log file} other {# old log files}}',
+    'doctor.maintenance.reapSkipped':
+        'No articles were deleted: a destination’s notes couldn’t be read ({reason}). Reconnect it and run maintenance again.',
+    'doctor.maintenance.partial': 'Some database upkeep was skipped; it runs again next time.',
+    'doctor.purgeOrphans': 'Delete articles of removed feeds…',
+    'doctor.purgeOrphans.confirm':
+        'Delete the articles of feeds you unsubscribed from? Starred, read-later, tagged and exported ones are kept.',
+    'doctor.purgeOrphans.delete': 'Delete',
+    'doctor.purgeOrphans.cancel': 'Cancel',
+    'doctor.purged':
+        '{count, plural, one {Deleted # article of removed feeds} other {Deleted # articles of removed feeds}}',
 
     'legacy.title': 'Libraries from earlier releases',
     'legacy.notice.moved':

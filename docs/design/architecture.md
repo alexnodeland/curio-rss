@@ -110,7 +110,10 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   during full-text hydration is `RateLimited`, which drops that feed's remaining queued
   pages. `fetch_log` keeps the newest 50 rows per feed.
 - **Maintenance** (`CoreHandle::maintenance`, `storage/repo/maintenance.rs`) is the
-  routine pass heads run (`curio maintenance`): the opt-in article-retention policy
+  routine pass heads run (`curio maintenance`; the desktop's `maintenance_scheduler`
+  two minutes after launch when a day has passed, then hourly-checked daily, on a
+  wall-clock stamp in `ui.maintenance.last-at` — never with the orphan purge, which
+  stays the doctor's confirmed action): the opt-in article-retention policy
   (age and/or per-feed count, stored as the facade-owned `retention.policy` setting)
   reaps feed articles but never a starred, read-later, tagged or exported one, nor an
   unread one unless configured. "Exported" is the `article_exports` table: an export

@@ -1,16 +1,17 @@
-//! Doctor-panel commands: integrity checks, vacuum, stats, event-log
-//! retention sweep. All read the storage escape hatch except the sweep,
-//! which is facade-owned (single-writer event log — the head must never
-//! open its own `EventLog`).
+//! Doctor-panel commands: integrity checks, the search-index rebuild,
+//! vacuum, stats, event-log retention sweep. The sweep is facade-owned
+//! (single-writer event log — the head must never open its own
+//! `EventLog`). The maintenance pass lives in [`super::maintenance`].
 
 use std::sync::Arc;
 
 use curio_core::CoreHandle;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
 use crate::dto::{DbStatsDto, LegacyProfileDto};
 use crate::error::CommandError;
+use crate::events::{ArticlesChanged, emit_or_log};
 use crate::paths::LegacyProfiles;
 
 /// `PRAGMA integrity_check` — `Ok(())` or an internal error with detail.
@@ -30,6 +31,24 @@ pub async fn fts_integrity_check(core: State<'_, SharedCore>) -> Result<(), Comm
         fts_integrity_check_impl(&core)
     })
     .await
+}
+
+/// Rebuilds the full-text search index from the stored articles — the
+/// repair for a failed [`fts_integrity_check`]. Emits `ArticlesChanged` so
+/// cached search results refetch against the repaired index.
+#[tauri::command]
+#[specta::specta]
+pub async fn rebuild_search_index(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+) -> Result<(), CommandError> {
+    let core = Arc::clone(core.inner());
+    run_blocking("rebuild_search_index", move || {
+        rebuild_search_index_impl(&core)
+    })
+    .await?;
+    emit_or_log(&app, &ArticlesChanged::rows(None));
+    Ok(())
 }
 
 /// `VACUUM` — reclaims space after bulk deletes.
@@ -83,6 +102,10 @@ fn fts_integrity_check_impl(core: &CoreHandle) -> Result<(), CommandError> {
     Ok(core.fts_integrity_check()?)
 }
 
+fn rebuild_search_index_impl(core: &CoreHandle) -> Result<(), CommandError> {
+    Ok(core.rebuild_search_index()?)
+}
+
 fn vacuum_db_impl(core: &CoreHandle) -> Result<(), CommandError> {
     Ok(core.vacuum()?)
 }
@@ -116,6 +139,26 @@ mod tests {
         integrity_check_impl(&core).unwrap();
         fts_integrity_check_impl(&core).unwrap();
         vacuum_db_impl(&core).unwrap();
+    }
+
+    #[test]
+    fn rebuilding_repairs_a_desynced_search_index() {
+        let (_dir, core) = temp_core();
+        seed_article(&core, "indexed");
+        // Desync the index behind the engine's back: an index entry with
+        // no article behind it.
+        rusqlite::Connection::open(core.db_path())
+            .unwrap()
+            .execute(
+                "INSERT INTO articles_fts (rowid, title, content_text) VALUES (9999, 'ghost', 'ghost')",
+                [],
+            )
+            .unwrap();
+        assert!(fts_integrity_check_impl(&core).is_err(), "desynced");
+
+        rebuild_search_index_impl(&core).unwrap();
+
+        fts_integrity_check_impl(&core).unwrap();
     }
 
     #[test]

@@ -2,13 +2,17 @@
  * DEV-ONLY in-browser IPC mock. When `npm run dev` runs the app in a plain
  * browser (no Tauri webview), this installs `@tauri-apps/api/mocks` with a
  * stateful responder over the preview dataset so the whole UI renders and
- * reacts — the substrate for visual design review. Guarded by
+ * reacts — the substrate for visual design review. Mutating handlers emit the
+ * `FeedsChanged` / `ArticlesChanged` invalidations the real commands emit, so
+ * the query cache refetches as it does in the app. Guarded by
  * `import.meta.env.DEV` + a no-real-Tauri check and dynamic-imported, so it is
  * absent from the production bundle and never runs inside the packaged app.
  */
 import type {
     ArticleStateDto,
     CommandError,
+    FeedDto,
+    NewFeedDto,
     StartupFailureClass,
     StartupFailureDto,
 } from '$lib/bindings';
@@ -129,16 +133,29 @@ tokens:
 `;
 
     const byId = (id: number) => articles.find((a) => a.summary.id === id);
+    // Mirrors core's `unread_counts`: archived items leave the reading flow
+    // (badge included), and an article whose feed is gone still counts
+    // toward the total, just under no feed.
     const unreadCounts = () => {
         const by = new Map<number, number>();
+        let total = 0;
         for (const a of articles) {
-            if (a.summary.feed_id != null && !a.state.read) {
+            if (a.state.read || a.state.archived) continue;
+            total += 1;
+            if (a.summary.feed_id != null) {
                 by.set(a.summary.feed_id, (by.get(a.summary.feed_id) ?? 0) + 1);
             }
         }
-        const total = [...by.values()].reduce((n, v) => n + v, 0);
         return { total, by_feed: [...by.entries()] };
     };
+    const feedById = (id: unknown) => feeds.find((f) => f.id === id);
+    const notFound = (entity: string): CommandError => ({
+        kind: 'user',
+        code: 'NOT_FOUND',
+        params: {},
+        message: `${entity} not found`,
+        recoverable: false,
+    });
 
     // A simulated refresh sweep: one feed every `SWEEP_STEP_MS`, emitting
     // `RefreshProgress` per feed and `RefreshFinished` at the end, so the
@@ -147,6 +164,37 @@ tokens:
     // `?fulltext=<n>` has n full-text pages load after the last feed, one
     // per step, to preview the "Loading full text" count.
     const { events } = await import('$lib/bindings');
+
+    // The invalidation events the real commands emit
+    // (src-tauri/src/commands/*.rs), so the query cache refetches — badges,
+    // lists, the sidebar — exactly as it does in the app. A handler emits
+    // after its change and before it resolves, like the command; where the
+    // command reports whether anything changed, only when something did.
+    const articlesChanged =
+        (feedId: number | null = null) =>
+        (): Promise<void> =>
+            events.articlesChanged.emit({ feed_id: feedId });
+    const feedsChanged = (): Promise<void> => events.feedsChanged.emit();
+    async function emitting<T>(
+        result: T,
+        changed: boolean,
+        ...emits: Array<() => Promise<void>>
+    ): Promise<T> {
+        if (changed) {
+            for (const emit of emits) await emit();
+        }
+        return result;
+    }
+    /** A feed-row write: applies `edit` to the feed, then `FeedsChanged`. */
+    function editFeed(feedId: unknown, edit: (feed: (typeof feeds)[number]) => void) {
+        const feed = feedById(feedId);
+        if (!feed) return Promise.reject(notFound('feed'));
+        edit(feed);
+        return emitting(null, true, feedsChanged);
+    }
+    /** The id the next `add_feed` hands out. */
+    let nextFeedId = Math.max(0, ...feeds.map((f) => f.id)) + 1;
+
     const SWEEP_STEP_MS = 350;
     let sweep: { cancelled: boolean } | null = null;
     let sweepId = 0;
@@ -217,6 +265,10 @@ tokens:
             cancelled: current.cancelled,
             outcomes,
         });
+        // The sweep's owner announces the data change (a joined sweep
+        // doesn't); the mock never joins one.
+        await feedsChanged();
+        await articlesChanged()();
         return outcomes;
     }
 
@@ -300,48 +352,44 @@ tokens:
                 case 'get_article_tags':
                     return structuredClone(byId(args.articleId as number)?.tags ?? []);
                 case 'mark_read':
-                    return flip(byId(args.articleId as number), 'read', args.read as boolean);
-                case 'mark_all_read':
+                    return flipOne(args.articleId, 'read', args.read);
+                case 'mark_all_read': {
                     // The ids actually flipped (the undo snapshot), ascending.
-                    return articles
-                        .filter((a) => args.feedId == null || a.summary.feed_id === args.feedId)
+                    const feedId = (args.feedId as number | null | undefined) ?? null;
+                    const flipped = articles
+                        .filter((a) => feedId === null || a.summary.feed_id === feedId)
                         .filter((a) => flip(a, 'read', true))
                         .map((a) => a.summary.id)
                         .sort((x, y) => x - y);
-                case 'mark_read_many':
-                    return (args.articleIds as number[]).filter((id) =>
+                    return emitting(flipped, flipped.length > 0, articlesChanged(feedId));
+                }
+                case 'mark_read_many': {
+                    const count = (args.articleIds as number[]).filter((id) =>
                         flip(byId(id), 'read', args.read as boolean),
                     ).length;
+                    return emitting(count, count > 0, articlesChanged());
+                }
                 case 'set_starred':
-                    return flip(byId(args.articleId as number), 'starred', args.starred as boolean);
+                    return flipOne(args.articleId, 'starred', args.starred);
                 case 'set_read_later':
-                    return flip(
-                        byId(args.articleId as number),
-                        'read_later',
-                        args.readLater as boolean,
-                    );
+                    return flipOne(args.articleId, 'read_later', args.readLater);
                 case 'set_archived':
-                    return flip(
-                        byId(args.articleId as number),
-                        'archived',
-                        args.archived as boolean,
-                    );
+                    return flipOne(args.articleId, 'archived', args.archived);
                 case 'record_opened':
                     return null;
                 case 'tag_article': {
                     const a = byId(args.articleId as number);
                     const tag = args.tag as string;
-                    if (a && !a.tags.includes(tag)) {
-                        a.tags.push(tag);
-                        return true;
-                    }
-                    return false;
+                    const added = a !== undefined && !a.tags.includes(tag);
+                    if (added) a.tags.push(tag);
+                    return emitting(added, added, articlesChanged());
                 }
                 case 'untag_article': {
                     const a = byId(args.articleId as number);
                     const before = a?.tags.length ?? 0;
                     if (a) a.tags = a.tags.filter((t) => t !== args.tag);
-                    return (a?.tags.length ?? 0) !== before;
+                    const removed = (a?.tags.length ?? 0) !== before;
+                    return emitting(removed, removed, articlesChanged());
                 }
                 case 'promote_article':
                     return {
@@ -359,9 +407,8 @@ tokens:
                     return true;
                 case 'get_feed_by_url':
                     return structuredClone(feeds.find((f) => f.url === args.url) ?? null);
-                case 'set_feed_status': {
-                    const f = feeds.find((x) => x.id === args.feedId);
-                    if (f) {
+                case 'set_feed_status':
+                    return editFeed(args.feedId, (f) => {
                         // Mirrors core: any explicit change ends an
                         // automatic pause; going active forgets the backoff.
                         f.status = args.status as typeof f.status;
@@ -370,26 +417,40 @@ tokens:
                             f.consecutive_failures = 0;
                             f.next_attempt_at = null;
                         }
-                    }
-                    return null;
-                }
-                case 'set_feed_title': {
-                    const f = feeds.find((x) => x.id === args.feedId);
-                    if (f) f.title = (args.title as string | null) ?? null;
-                    return null;
-                }
-                case 'set_feed_tags': {
-                    const f = feeds.find((x) => x.id === args.feedId);
-                    if (f) f.tags = (args.tags as string[] | undefined) ?? [];
-                    return null;
-                }
-                case 'set_feed_metadata': {
-                    const f = feeds.find((x) => x.id === args.feedId);
-                    if (f) {
+                    });
+                case 'set_feed_title':
+                    return editFeed(args.feedId, (f) => {
+                        f.title = (args.title as string | null) ?? null;
+                    });
+                case 'set_feed_tags':
+                    return editFeed(args.feedId, (f) => {
+                        f.tags = (args.tags as string[] | undefined) ?? [];
+                    });
+                case 'set_feed_metadata':
+                    return editFeed(args.feedId, (f) => {
                         f.site_url = (args.siteUrl as string | null) ?? null;
                         f.description = (args.description as string | null) ?? null;
-                    }
-                    return null;
+                    });
+                case 'update_feed_metadata':
+                    return editFeed(args.feedId, (f) => {
+                        f.title = (args.title as string | null) ?? null;
+                        f.site_url = (args.siteUrl as string | null) ?? null;
+                        f.description = (args.description as string | null) ?? null;
+                    });
+                case 'set_feed_full_text':
+                    return editFeed(args.feedId, (f) => {
+                        f.fetch_full_text = args.enabled as boolean;
+                    });
+                case 'reorder_feeds': {
+                    // Core stores each listed id's position and lists by it
+                    // (then id); a feed left out keeps its old place.
+                    const order = args.feedIds as number[];
+                    const rank = new Map(feeds.map((f, at) => [f.id, at]));
+                    for (const [at, id] of order.entries()) rank.set(id, at);
+                    feeds.sort(
+                        (x, y) => (rank.get(x.id) ?? 0) - (rank.get(y.id) ?? 0) || x.id - y.id,
+                    );
+                    return emitting(null, true, feedsChanged);
                 }
                 case 'recent_fetches':
                     return [
@@ -425,15 +486,20 @@ tokens:
                         },
                     ];
                 case 'refresh_feed':
-                    return {
-                        feed_id: args.feedId as number,
-                        status: 'ok',
-                        http_status: 200,
-                        new_articles: 0,
-                        updated_articles: 0,
-                        error: null,
-                        error_kind: null,
-                    };
+                    return emitting(
+                        {
+                            feed_id: args.feedId as number,
+                            status: 'ok',
+                            http_status: 200,
+                            new_articles: 0,
+                            updated_articles: 0,
+                            error: null,
+                            error_kind: null,
+                        },
+                        true,
+                        feedsChanged,
+                        articlesChanged(args.feedId as number),
+                    );
                 case 'cancel_refresh':
                     if (sweep === null) return false;
                     sweep.cancelled = true;
@@ -577,7 +643,7 @@ tokens:
                     // mentioning `nofeed` has no feed, one mentioning
                     // `offline` is unreachable — unless `validate: false`
                     // (the "use this URL directly" escape hatch).
-                    const newFeed = args.newFeed as { url: string; validate: boolean };
+                    const newFeed = args.newFeed as NewFeedDto;
                     if (newFeed.validate && /nofeed/i.test(newFeed.url)) {
                         throw {
                             kind: 'user',
@@ -594,12 +660,55 @@ tokens:
                             recoverable: true,
                         };
                     }
-                    return structuredClone(feeds[0]);
+                    if (feeds.some((f) => f.url === newFeed.url)) {
+                        const failure: CommandError = {
+                            kind: 'user',
+                            code: 'ALREADY_SUBSCRIBED',
+                            params: {},
+                            message: `already subscribed to ${newFeed.url}`,
+                            recoverable: false,
+                        };
+                        return Promise.reject(failure);
+                    }
+                    // Subscribed, not yet fetched: the real command's first
+                    // refresh runs in the background; the mock's never does.
+                    const feed: FeedDto = {
+                        id: nextFeedId++,
+                        url: newFeed.url,
+                        title: newFeed.title,
+                        site_url: null,
+                        description: null,
+                        status: 'active',
+                        added_at: new Date().toISOString(),
+                        last_fetched_at: null,
+                        last_error: null,
+                        last_error_kind: null,
+                        last_ok_at: null,
+                        tags: [...newFeed.tags],
+                        fetch_full_text: false,
+                        consecutive_failures: 0,
+                        next_attempt_at: null,
+                        auto_paused_at: null,
+                    };
+                    feeds.push(feed);
+                    return emitting(structuredClone(feed), true, feedsChanged);
                 }
-                case 'remove_feed':
+                case 'remove_feed': {
+                    const at = feeds.findIndex((f) => f.id === args.feedId);
+                    if (at < 0) return Promise.reject(notFound('feed'));
+                    feeds.splice(at, 1);
+                    // Core's `ON DELETE SET NULL`: the feed's articles stay
+                    // in the library, under no feed.
+                    for (const a of articles) {
+                        if (a.summary.feed_id === args.feedId) {
+                            a.summary.feed_id = null;
+                            a.full.feed_id = null;
+                        }
+                    }
+                    return emitting(null, true, feedsChanged, articlesChanged());
+                }
                 case 'stage_feed_removal':
                 case 'unstage_feed_removal':
-                case 'update_feed_metadata':
                     return null;
                 // Startup recovery: `?startup=<class>` (and `&backup=0` for
                 // no backup) previews the recovery screen. A retry still
@@ -630,5 +739,15 @@ tokens:
         const changed = a.state[key] !== value;
         a.state[key] = value;
         return changed;
+    }
+
+    /** One article's state flag: the command's "changed" bool, `ArticlesChanged` if so. */
+    function flipOne(
+        articleId: unknown,
+        key: keyof ArticleStateDto,
+        value: unknown,
+    ): Promise<boolean> {
+        const changed = flip(byId(articleId as number), key, value as boolean);
+        return emitting(changed, changed, articlesChanged());
     }
 }

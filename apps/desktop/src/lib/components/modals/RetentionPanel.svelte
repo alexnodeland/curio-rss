@@ -6,11 +6,20 @@
  * pass applies it shortly after launch and about daily (or right away
  * from the doctor's "Run maintenance"). Starred, read-later, tagged and
  * exported articles are never deleted, whatever the limits.
+ *
+ * The controls stay enabled while a change is being stored — disabling
+ * one would drop keyboard focus to the page after every arrow press on a
+ * select — so the saves are serialized instead: a change made while one
+ * is in flight is stored right after it, as the latest policy. A load that
+ * fails (a stored policy that no longer parses included) shows the error
+ * with a Retry rather than an empty section.
  */
+import ErrorState from '$components/common/ErrorState.svelte';
 import { type RetentionPolicyDto, commands } from '$lib/bindings';
 import { t } from '$lib/i18n';
 import { toastCommandError } from '$lib/state/actions';
 import { toastStore } from '$lib/state/toasts.svelte';
+import { commandErrorMessage } from '$lib/utils/errors';
 import {
     RETENTION_AGE_DAYS,
     RETENTION_PER_FEED,
@@ -18,13 +27,34 @@ import {
     parseLimit,
 } from '$lib/utils/maintenance';
 
+/** What the controls show: the stored policy plus any change not yet stored. */
 let policy = $state<RetentionPolicyDto | null>(null);
-let saving = $state(false);
+/** Why the policy could not be loaded, if it could not. */
+let loadError = $state<string | null>(null);
+let loading = $state(false);
+
+/** The policy as last stored — what the controls snap back to on a failed save. */
+let stored: RetentionPolicyDto | null = null;
+/** A save is in flight. */
+let saving = false;
+/** A change arrived while that save was in flight; store it next. */
+let queued = false;
 
 async function load(): Promise<void> {
-    const result = await commands.retentionPolicy();
-    if (result.status === 'ok') {
+    loading = true;
+    try {
+        const result = await commands.retentionPolicy();
+        if (result.status === 'error') {
+            loadError = commandErrorMessage(result.error);
+            return;
+        }
+        loadError = null;
+        stored = result.data;
         policy = result.data;
+    } catch {
+        loadError = t('app.error.internal');
+    } finally {
+        loading = false;
     }
 }
 void load();
@@ -32,28 +62,57 @@ void load();
 const ageChoices = $derived(limitChoices(RETENTION_AGE_DAYS, policy?.max_age_days ?? null));
 const perFeedChoices = $derived(limitChoices(RETENTION_PER_FEED, policy?.max_per_feed ?? null));
 
-/** Stores `change` on top of the current policy; on failure the controls snap back. */
+/**
+ * Applies `change` to the controls and stores the policy — at once, or
+ * right after the save already in flight (one more save then covers every
+ * change made meanwhile).
+ */
 async function update(change: Partial<RetentionPolicyDto>): Promise<void> {
     if (policy === null) {
         return;
     }
-    const previous = policy;
-    policy = { ...previous, ...change };
+    policy = { ...policy, ...change };
+    if (saving) {
+        queued = true;
+        return;
+    }
     saving = true;
     try {
-        const result = await commands.setRetentionPolicy(policy);
-        if (result.status === 'error') {
-            policy = { ...previous };
-            toastCommandError(result.error);
-            return;
-        }
-        policy = result.data;
-    } catch {
-        policy = { ...previous };
-        toastStore.showToast(t('app.error.internal'), 'error');
+        do {
+            queued = false;
+            await save(policy);
+        } while (queued && policy !== null);
     } finally {
         saving = false;
     }
+}
+
+/**
+ * Stores `next`. On success the controls take the stored form (a `0` limit
+ * reads back as none) unless another change is waiting; on failure they
+ * snap back to the last stored policy and any waiting change is dropped.
+ */
+async function save(next: RetentionPolicyDto): Promise<void> {
+    try {
+        const result = await commands.setRetentionPolicy(next);
+        if (result.status === 'error') {
+            snapBack();
+            toastCommandError(result.error);
+            return;
+        }
+        stored = result.data;
+        if (!queued) {
+            policy = result.data;
+        }
+    } catch {
+        snapBack();
+        toastStore.showToast(t('app.error.internal'), 'error');
+    }
+}
+
+function snapBack(): void {
+    queued = false;
+    policy = stored === null ? null : { ...stored };
 }
 </script>
 
@@ -67,7 +126,6 @@ async function update(change: Partial<RetentionPolicyDto>): Promise<void> {
             <select
                 class="field-select"
                 value={String(policy.max_age_days ?? '')}
-                disabled={saving}
                 onchange={(event) =>
                     void update({ max_age_days: parseLimit(event.currentTarget.value) })}
             >
@@ -83,7 +141,6 @@ async function update(change: Partial<RetentionPolicyDto>): Promise<void> {
             <select
                 class="field-select"
                 value={String(policy.max_per_feed ?? '')}
-                disabled={saving}
                 onchange={(event) =>
                     void update({ max_per_feed: parseLimit(event.currentTarget.value) })}
             >
@@ -98,7 +155,6 @@ async function update(change: Partial<RetentionPolicyDto>): Promise<void> {
             <input
                 type="checkbox"
                 checked={policy.keep_unread}
-                disabled={saving}
                 onchange={(event) => void update({ keep_unread: event.currentTarget.checked })}
             />
             <span class="toggle-text">
@@ -108,6 +164,8 @@ async function update(change: Partial<RetentionPolicyDto>): Promise<void> {
         </label>
 
         <p class="hint">{t('settings.retention.schedule')}</p>
+    {:else if loadError !== null}
+        <ErrorState message={loadError} busy={loading} onretry={() => void load()} />
     {/if}
 </section>
 

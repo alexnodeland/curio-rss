@@ -377,7 +377,7 @@ export const es: Partial<Record<MessageKey, string>> = {
     'settings.retention.title': 'Conservación de artículos',
     'settings.retention.hint':
         'Curio conserva todos los artículos hasta que fijes un límite. Los artículos destacados, para leer después, etiquetados y exportados nunca se eliminan.',
-    'settings.retention.maxAge': 'Eliminar artículos con más de',
+    'settings.retention.maxAge': 'Eliminar artículos guardados hace más de',
     'settings.retention.maxAge.off': 'Nunca',
     'settings.retention.days': '{count, plural, one {# día} other {# días}}',
     'settings.retention.maxPerFeed': 'Conservar por fuente',

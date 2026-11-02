@@ -352,7 +352,7 @@ export const zhHans: Partial<Record<MessageKey, string>> = {
     'settings.retention.title': '文章保留',
     'settings.retention.hint':
         '在你设置上限之前，Curio 会保留所有文章。已加星标、稍后阅读、带标签和已导出的文章永远不会被删除。',
-    'settings.retention.maxAge': '删除早于以下时间的文章',
+    'settings.retention.maxAge': '删除保存超过以下时长的文章',
     'settings.retention.maxAge.off': '从不',
     'settings.retention.days': '{count, plural, other {# 天}}',
     'settings.retention.maxPerFeed': '每个订阅源保留',

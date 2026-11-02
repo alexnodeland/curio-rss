@@ -71,6 +71,22 @@ describe('retention helpers', () => {
         ]);
     });
 
+    it('reports what the retention policy reaped during an orphan purge too', () => {
+        const report = maintenanceReportFixture({
+            orphans_purged: 2,
+            articles_reaped: 340,
+            tags_dropped: 1,
+        });
+        expect(maintenanceToasts(report, true)).toEqual([
+            { message: 'Deleted 2 articles of removed feeds', tone: 'success' },
+            {
+                message:
+                    'Maintenance finished: removed 340 articles, 1 unused tag and 0 old log files',
+                tone: 'success',
+            },
+        ]);
+    });
+
     it('warns when nothing could be deleted, and when upkeep is left over', () => {
         const report = maintenanceReportFixture({
             reap_skipped: 'manifest unreadable',
@@ -116,7 +132,7 @@ describe('RetentionPanel', () => {
         await flushIpc();
 
         expect(getByText('Article retention')).toBeTruthy();
-        expect(select('Delete articles older than', container).value).toBe('');
+        expect(select('Delete articles kept longer than', container).value).toBe('');
         expect(select('Keep per feed', container).value).toBe('');
         expect((getByLabelText(/Keep unread articles/) as HTMLInputElement).checked).toBe(true);
     });
@@ -138,7 +154,7 @@ describe('RetentionPanel', () => {
         const { container, getByLabelText } = render(RetentionPanel);
         await flushIpc();
 
-        await fireEvent.change(select('Delete articles older than', container), {
+        await fireEvent.change(select('Delete articles kept longer than', container), {
             target: { value: '90' },
         });
         await flushIpc();
@@ -163,7 +179,7 @@ describe('RetentionPanel', () => {
         const { container } = render(RetentionPanel);
         await flushIpc();
 
-        await fireEvent.change(select('Delete articles older than', container), {
+        await fireEvent.change(select('Delete articles kept longer than', container), {
             target: { value: '' },
         });
         await flushIpc();
@@ -171,6 +187,75 @@ describe('RetentionPanel', () => {
         expect(harness.callsFor('set_retention_policy')).toEqual([
             { policy: { max_age_days: null, max_per_feed: null, keep_unread: true } },
         ]);
+    });
+
+    it('keeps the controls enabled while saving and stores a change made meanwhile next', async () => {
+        const pending: ((value: unknown) => void)[] = [];
+        harness = installIpcHarness(
+            base({
+                set_retention_policy: (args: Record<string, unknown>) =>
+                    new Promise((resolve) => {
+                        pending.push(() => resolve(args.policy));
+                    }),
+            }),
+        );
+        const { container, getByLabelText } = render(RetentionPanel);
+        await flushIpc();
+
+        const age = select('Delete articles kept longer than', container);
+        const keepUnread = getByLabelText(/Keep unread articles/) as HTMLInputElement;
+        age.focus();
+        await fireEvent.change(age, { target: { value: '30' } });
+        await flushIpc();
+
+        // The first save is in flight: nothing is disabled, so focus stays put.
+        expect(age.disabled).toBe(false);
+        expect(keepUnread.disabled).toBe(false);
+        expect(document.activeElement).toBe(age);
+        await fireEvent.change(age, { target: { value: '90' } });
+        await fireEvent.click(keepUnread);
+        await flushIpc();
+        expect(harness.callsFor('set_retention_policy')).toHaveLength(1);
+
+        // One more save covers both waiting changes, after the first lands.
+        pending.shift()?.(undefined);
+        await flushIpc();
+        expect(age.value).toBe('90');
+        pending.shift()?.(undefined);
+        await flushIpc();
+
+        expect(harness.callsFor('set_retention_policy')).toEqual([
+            { policy: { max_age_days: 30, max_per_feed: null, keep_unread: true } },
+            { policy: { max_age_days: 90, max_per_feed: null, keep_unread: false } },
+        ]);
+        expect(age.value).toBe('90');
+        expect(keepUnread.checked).toBe(false);
+    });
+
+    it('shows why the policy could not be loaded, with a Retry', async () => {
+        let fail = true;
+        harness = installIpcHarness(
+            base({
+                retention_policy: () =>
+                    fail
+                        ? Promise.reject(
+                              commandErrorFixture({ kind: 'internal', code: 'INTERNAL' }),
+                          )
+                        : retentionPolicyFixture({ max_age_days: 180 }),
+            }),
+        );
+        const { container, getByRole, queryByLabelText } = render(RetentionPanel);
+        await flushIpc();
+
+        expect(getByRole('alert').textContent).toBeTruthy();
+        expect(queryByLabelText(/Keep unread articles/)).toBeNull();
+
+        fail = false;
+        await fireEvent.click(getByRole('button', { name: /Retry/ }));
+        await flushIpc();
+
+        expect(container.querySelector('[role="alert"]')).toBeNull();
+        expect(select('Delete articles kept longer than', container).value).toBe('180');
     });
 
     it('snaps back and explains when the change cannot be stored', async () => {
@@ -184,7 +269,7 @@ describe('RetentionPanel', () => {
         const { container } = render(RetentionPanel);
         await flushIpc();
 
-        const age = select('Delete articles older than', container);
+        const age = select('Delete articles kept longer than', container);
         await fireEvent.change(age, { target: { value: '365' } });
         await flushIpc();
 

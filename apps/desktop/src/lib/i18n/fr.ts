@@ -378,7 +378,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'settings.retention.title': 'Conservation des articles',
     'settings.retention.hint':
         'Curio garde chaque article tant que vous ne fixez pas de limite. Les articles favoris, à lire plus tard, étiquetés et exportés ne sont jamais supprimés.',
-    'settings.retention.maxAge': 'Supprimer les articles de plus de',
+    'settings.retention.maxAge': 'Supprimer les articles conservés depuis plus de',
     'settings.retention.maxAge.off': 'Jamais',
     'settings.retention.days': '{count, plural, one {# jour} other {# jours}}',
     'settings.retention.maxPerFeed': 'Garder par flux',

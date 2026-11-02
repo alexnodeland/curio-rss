@@ -381,7 +381,7 @@ export const en = {
     'settings.retention.title': 'Article retention',
     'settings.retention.hint':
         'Curio keeps every article until you set a limit. Starred, read-later, tagged and exported articles are never deleted.',
-    'settings.retention.maxAge': 'Delete articles older than',
+    'settings.retention.maxAge': 'Delete articles kept longer than',
     'settings.retention.maxAge.off': 'Never',
     'settings.retention.days': '{count, plural, one {# day} other {# days}}',
     'settings.retention.maxPerFeed': 'Keep per feed',

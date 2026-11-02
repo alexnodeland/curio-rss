@@ -379,7 +379,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'settings.retention.title': 'Przechowywanie artykułów',
     'settings.retention.hint':
         'Curio przechowuje każdy artykuł, dopóki nie ustawisz limitu. Artykuły oznaczone gwiazdką, odłożone na później, otagowane i wyeksportowane nigdy nie są usuwane.',
-    'settings.retention.maxAge': 'Usuwaj artykuły starsze niż',
+    'settings.retention.maxAge': 'Usuwaj artykuły przechowywane dłużej niż',
     'settings.retention.maxAge.off': 'Nigdy',
     'settings.retention.days':
         '{count, plural, one {# dzień} few {# dni} many {# dni} other {# dnia}}',

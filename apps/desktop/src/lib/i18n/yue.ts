@@ -353,7 +353,7 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'settings.retention.title': '文章保留',
     'settings.retention.hint':
         '你未設上限之前，Curio 會保留晒所有文章。已加星、稍後閱讀、有標籤同已匯出嘅文章永遠唔會刪。',
-    'settings.retention.maxAge': '刪除幾耐之前嘅文章',
+    'settings.retention.maxAge': '刪除儲存咗超過以下時間嘅文章',
     'settings.retention.maxAge.off': '永不',
     'settings.retention.days': '{count, plural, other {# 日}}',
     'settings.retention.maxPerFeed': '每個訂閱源保留',

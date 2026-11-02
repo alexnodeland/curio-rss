@@ -156,6 +156,69 @@ describe('DoctorPanel', () => {
         expect(queryByText('Delete')).toBeNull();
     });
 
+    it('moves focus into the purge confirmation and back to its opener', async () => {
+        harness = installIpcHarness(
+            harnessResponders({ run_maintenance: maintenanceReportFixture({ orphans_purged: 1 }) }),
+        );
+        const { getByRole, getByText } = render(DoctorPanel);
+        await flushIpc();
+
+        const opener = getByText('Delete articles of removed feeds…');
+        opener.focus();
+        await fireEvent.click(opener);
+        await flushIpc();
+
+        // Focus lands on the safe choice, described by the question it answers.
+        const cancel = getByRole('button', { name: 'Cancel' });
+        expect(document.activeElement).toBe(cancel);
+        const prompt = getByText(/Starred, read-later, tagged and exported ones are kept/);
+        expect(cancel.getAttribute('aria-describedby')).toBe(prompt.id);
+        expect(getByRole('group', { name: prompt.textContent?.trim() })).toBeTruthy();
+
+        // Cancelling hands focus back to the opener.
+        await fireEvent.click(cancel);
+        await flushIpc();
+        const reopener = getByText('Delete articles of removed feeds…');
+        expect(document.activeElement).toBe(reopener);
+
+        // Confirming does too: the opener stays focusable (inert) while the purge runs.
+        await fireEvent.click(reopener);
+        await flushIpc();
+        await fireEvent.click(getByRole('button', { name: 'Delete' }));
+        await flushIpc();
+        const after = getByText('Delete articles of removed feeds…');
+        expect(document.activeElement).toBe(after);
+        expect(after.hasAttribute('disabled')).toBe(false);
+        expect(harness.callsFor('run_maintenance')).toEqual([{ purgeOrphans: true }]);
+    });
+
+    it('keeps the purge opener inert while another action runs', async () => {
+        let finish: (value: unknown) => void = () => undefined;
+        harness = installIpcHarness(
+            harnessResponders({
+                vacuum_db: () =>
+                    new Promise((resolve) => {
+                        finish = resolve;
+                    }),
+            }),
+        );
+        const { getByText, queryByText } = render(DoctorPanel);
+        await flushIpc();
+
+        await fireEvent.click(getByText('Compact database'));
+        const opener = getByText('Delete articles of removed feeds…');
+        expect(opener.getAttribute('aria-disabled')).toBe('true');
+        await fireEvent.click(opener);
+        await flushIpc();
+        expect(queryByText('Cancel')).toBeNull();
+
+        finish(null);
+        await flushIpc();
+        expect(getByText('Delete articles of removed feeds…').getAttribute('aria-disabled')).toBe(
+            'false',
+        );
+    });
+
     it('warns instead of claiming success when the pass could not delete', async () => {
         harness = installIpcHarness(
             harnessResponders({

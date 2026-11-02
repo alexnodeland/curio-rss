@@ -957,7 +957,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     .reader-header {
         margin-bottom: var(--space-8);
         padding-bottom: var(--space-5);
-        border-bottom: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--reader-hairline);
     }
 
     .reader-kicker {

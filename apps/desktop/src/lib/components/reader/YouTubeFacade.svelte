@@ -105,9 +105,9 @@ function openOnYouTube(event: MouseEvent): void {
         aspect-ratio: 16 / 9;
         margin-bottom: var(--space-6);
         border-radius: var(--radius-lg);
-        border: 1px solid var(--hairline);
+        border: 1px solid var(--reader-hairline);
         overflow: hidden;
-        background: var(--surface-inset);
+        background: var(--reader-inset);
         box-shadow: var(--shadow-md);
     }
 

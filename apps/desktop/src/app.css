@@ -217,6 +217,51 @@ h6 {
        background-colored gap when a control sits on chrome/list/raised. The
        canonical focus treatment is the outline below. */
     --ring: 0 0 0 2px color-mix(in srgb, var(--accent), transparent 35%);
+
+    /* Skeleton placeholders: a raised bar with a hover-strength sheen. A
+       token pair so the reader can repaint them for its own ground. */
+    --skeleton-fill: var(--surface-raised);
+    --skeleton-sheen: var(--hover);
+}
+
+/* Reader-surface tokens. The reading themes (sepia, paper) repaint the ground
+   and the ink tokens on their own root — the reader's scroll surface and the
+   Settings preview, both marked [data-reading-theme] — but the --surface-*
+   and --hairline tokens follow the *app* theme, so a fill built from them is
+   a near-black box under dark sepia ink on a dark app theme. These tints are
+   mixed over a transparent ground — from the reading ink, or a shade for the
+   recessed inset — so they follow whichever ground the reader shows.
+
+   A custom property resolves its var() references on the element that
+   declares it and inherits the computed colour, so a :root-only declaration
+   would carry the *app* ink into the reader. They are therefore re-declared
+   on every [data-reading-theme] root, where the reading theme's --ink is in
+   force. Inside the reader, fills and hairlines use these, never --surface-*
+   or --hairline (reader-surface-tokens.test.ts holds that line). */
+:root,
+[data-reading-theme] {
+    /* A whisper of ink: table header rows, the lazy-image placeholder. */
+    --reader-tint: color-mix(in srgb, transparent, var(--ink) 5%);
+    /* A raised chip: tag chips, the images-off hint, Reddit action pills. */
+    --reader-tint-strong: color-mix(in srgb, transparent, var(--ink) 8%);
+    /* A recessed well — a shade of the ground itself, so a dark app theme
+       keeps its sunken code blocks and a sepia ground a deeper sepia. */
+    --reader-inset: color-mix(in srgb, transparent, #000 8%);
+    /* Table grid lines. */
+    --reader-rule: color-mix(in srgb, transparent, var(--ink) 14%);
+    /* The reader's own hairlines: a crisp line and a stronger one. */
+    --reader-hairline: color-mix(in srgb, transparent, var(--ink) 16%);
+    --reader-hairline-strong: color-mix(in srgb, transparent, var(--ink) 24%);
+}
+
+/* The rest of the interaction + placeholder tokens the reader body uses,
+   re-resolved against the reading theme's ink (the formulas match :root's, so
+   the default reading theme renders exactly as before). */
+[data-reading-theme] {
+    --hover: color-mix(in srgb, transparent, var(--fg) 6%);
+    --active: color-mix(in srgb, transparent, var(--fg) 10%);
+    --skeleton-fill: var(--reader-tint-strong);
+    --skeleton-sheen: var(--hover);
 }
 
 /* Dark Theme (Default) */
@@ -776,6 +821,14 @@ input[type="range"]:focus-visible::-moz-range-thumb {
         --hairline-strong: var(--fg-subtle);
         --fg-muted: var(--fg);
         --fg-subtle: var(--fg-muted);
+    }
+
+    /* The reader's own hairlines firm up the same way. */
+    :root,
+    [data-reading-theme] {
+        --reader-rule: color-mix(in srgb, transparent, var(--ink) 32%);
+        --reader-hairline: color-mix(in srgb, transparent, var(--ink) 32%);
+        --reader-hairline-strong: color-mix(in srgb, transparent, var(--ink) 48%);
     }
 }
 

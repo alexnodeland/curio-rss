@@ -32,9 +32,9 @@ let {
         display: block;
         background: linear-gradient(
             90deg,
-            var(--surface-raised) 25%,
-            var(--hover) 37%,
-            var(--surface-raised) 63%
+            var(--skeleton-fill) 25%,
+            var(--skeleton-sheen) 37%,
+            var(--skeleton-fill) 63%
         );
         background-size: 400% 100%;
         animation: skeleton-shimmer 1.4s ease-in-out infinite;
@@ -52,7 +52,7 @@ let {
     @media (prefers-reduced-motion: reduce) {
         .skeleton {
             animation: none;
-            background: var(--surface-raised);
+            background: var(--skeleton-fill);
         }
     }
 </style>

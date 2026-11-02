@@ -23,6 +23,13 @@ use super::{ExportError, contained_path, note, write_atomic};
 
 const MANIFEST_FILE: &str = "manifest.json";
 
+#[cfg(test)]
+thread_local! {
+    /// Manifest writes made on this thread, so a test can count what a
+    /// bulk export costs (an export runs on its caller's thread).
+    pub(crate) static WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Path of the manifest inside a destination root.
 #[must_use]
 pub fn manifest_path(root: &Path) -> PathBuf {
@@ -232,6 +239,8 @@ fn settle_contested_paths(root: &Path, manifest: &mut ManifestV1) {
 ///
 /// A filesystem error (sorted by [`ExportError::io`]) on write failures.
 pub fn write_manifest(root: &Path, manifest: &ManifestV1) -> Result<(), ExportError> {
+    #[cfg(test)]
+    WRITES.with(|writes| writes.set(writes.get() + 1));
     let path = manifest_path(root);
     write_atomic(root, &path, manifest.to_canonical_json().as_bytes())?;
     ensure_gitignore(root)

@@ -39,6 +39,7 @@
 //! this module reports the [`ExportDisposition`] the facade maps onto
 //! the contract events.
 
+mod batch;
 #[cfg(test)]
 mod golden_tests;
 mod lock;
@@ -51,17 +52,18 @@ mod target;
 mod write;
 pub mod yaml;
 
+pub use batch::{ExportBatch, StageError};
+#[cfg(test)]
+pub(crate) use manifest::WRITES as MANIFEST_WRITES;
 pub use manifest::{exported_ids, load_manifest, manifest_conflict_copies, write_manifest};
 pub use note::{NoteParts, render_note, split_note};
 pub use write::write_file_atomic;
 
 use std::path::{Path, PathBuf};
 
-use lock::DestinationLock;
-use target::{NoteWrite, recorded_target, unlocked_idempotency_hit, unrecorded_target};
 use write::{contained_path, write_atomic};
 
-use curio_types::{ArticleFrontmatter, Checksum, CurioId, Destination, ManifestEntry, Timestamp};
+use curio_types::{ArticleFrontmatter, Checksum, CurioId, Destination, Timestamp};
 use sha2::{Digest as _, Sha256};
 
 /// Everything the exporter needs to write one note. Storage-agnostic:
@@ -252,22 +254,14 @@ impl ExportError {
 /// the same destination (any thread, any process) waits for it. The pure
 /// idempotency hit writes nothing and takes no lock — an unchanged export
 /// still works on a read-only destination.
+///
+/// It is an [`ExportBatch`] of one note; a bulk export stages many notes
+/// into one batch and commits their manifest write once.
 #[derive(Debug)]
 #[must_use = "call commit() — the manifest write is still pending"]
 pub struct StagedExport {
     outcome: ExportOutcome,
-    pending: Option<PendingManifest>,
-    /// Held from the manifest load through the manifest commit; `None`
-    /// for the lock-free idempotency hit.
-    _lock: Option<DestinationLock>,
-}
-
-#[derive(Debug)]
-struct PendingManifest {
-    root: PathBuf,
-    manifest: curio_types::ManifestV1,
-    /// Conflict copies folded into `manifest`; removed once it is durable.
-    merged_copies: Vec<PathBuf>,
+    batch: ExportBatch,
 }
 
 impl StagedExport {
@@ -285,19 +279,7 @@ impl StagedExport {
     /// A filesystem error (sorted by [`ExportError::io`]) on manifest
     /// write failures.
     pub fn commit(self) -> Result<ExportOutcome, ExportError> {
-        if let Some(pending) = self.pending {
-            write_manifest(&pending.root, &pending.manifest)?;
-            for copy in pending.merged_copies {
-                // Its entries are in the durable manifest now; a copy
-                // that refuses to go is merged again (idempotently) next
-                // time, so this is worth a log line, not a failed export.
-                if let Err(err) = std::fs::remove_file(&copy)
-                    && err.kind() != std::io::ErrorKind::NotFound
-                {
-                    tracing::warn!(path = %copy.display(), %err, "could not remove a merged manifest conflict copy");
-                }
-            }
-        }
+        self.batch.commit()?;
         Ok(self.outcome)
     }
 }
@@ -328,89 +310,9 @@ pub fn stage_export_note(
     destination: &Destination,
     input: &ExportInput,
 ) -> Result<StagedExport, ExportError> {
-    // Neutralize managed-region marker literals smuggled in via feed
-    // content (e.g. inside a code fence): the bytes between the markers
-    // must never parse as a marker, or the next re-export's region
-    // surgery would truncate at the embedded marker. The checksum covers
-    // the neutralized bytes — exactly what lands on disk.
-    let body = note::neutralize_markers(input.markdown.trim_end());
-    let body = body.as_ref();
-    let checksum = region_checksum(body);
-    let root = &destination.root;
-    if let Some(outcome) = unlocked_idempotency_hit(root, input, checksum)? {
-        return Ok(StagedExport {
-            outcome,
-            pending: None,
-            _lock: None,
-        });
-    }
-    // One export per destination at a time, from the manifest load
-    // through the manifest commit — across threads and processes.
-    let lock = DestinationLock::acquire(root)?;
-    let mut manifest = load_manifest(root)?;
-    let merged_copies = manifest::merge_conflict_copies(root, &mut manifest)?;
-
-    let target = match manifest.notes.get(&input.curio_id) {
-        Some(entry) => recorded_target(root, &manifest, input, entry, checksum)?,
-        None => unrecorded_target(root, &manifest, input, ExportDisposition::Created)?,
-    };
-    // Every target but the idempotency hit (whose manifest entry already
-    // says exactly this) is (re-)recorded — also when the note on disk
-    // turns out to be current already and its write is skipped.
-    let record = target.write.is_some();
-    let outcome = ExportOutcome {
-        path: target.rel_path,
-        checksum,
-        disposition: target.disposition,
-    };
-
-    if let Some(write) = target.write {
-        // Build the note: fresh, or a managed-region/machine-key
-        // replacement that preserves user content byte-for-byte.
-        let abs_path = contained_path(root, &outcome.path)?;
-        let fm = frontmatter(input, checksum);
-        let (content, current) = match write {
-            NoteWrite::Replace(old) => {
-                let content = note::replace_managed(&old, &fm, body, &abs_path)?;
-                let current = content == old;
-                (content, current)
-            }
-            NoteWrite::Fresh => (render_note(&fm, body)?, false),
-        };
-        // Contract write ordering: note first (skipped when the note on
-        // disk already has exactly these bytes)…
-        if !current {
-            write_atomic(root, &abs_path, content.as_bytes())?;
-        }
-    }
-    if record {
-        // …manifest second — held back so the caller can stage its event
-        // intent between the two writes (see [`StagedExport`]).
-        manifest.notes.insert(
-            input.curio_id,
-            ManifestEntry {
-                path: outcome.path.clone(),
-                checksum,
-                exported_at: Timestamp::now(),
-            },
-        );
-    } else if merged_copies.is_empty() {
-        // The pure idempotency hit: nothing to write at all.
-        return Ok(StagedExport {
-            outcome,
-            pending: None,
-            _lock: Some(lock),
-        });
-    }
-    Ok(StagedExport {
-        outcome,
-        pending: Some(PendingManifest {
-            root: root.clone(),
-            manifest,
-            merged_copies,
-        }),
-        _lock: Some(lock),
-    })
+    let mut batch = ExportBatch::begin(destination)?;
+    let outcome = batch.stage(input)?;
+    Ok(StagedExport { outcome, batch })
 }
 
 /// Checks that a destination which has exported before is still there:

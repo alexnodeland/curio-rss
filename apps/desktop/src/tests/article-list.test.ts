@@ -147,7 +147,7 @@ describe('ArticleList', () => {
         harness = installIpcHarness({ list_articles: [], list_feeds: [] });
         const { getByText } = render(ArticleList);
         await flushIpc();
-        expect(getByText('No articles here')).toBeTruthy();
+        expect(getByText('No articles yet')).toBeTruthy();
     });
 
     it('surfaces user-tier list errors verbatim', async () => {

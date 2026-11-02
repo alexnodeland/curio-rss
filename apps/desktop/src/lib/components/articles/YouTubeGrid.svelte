@@ -19,6 +19,8 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { listDateLabel } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
+import ErrorState from '$components/common/ErrorState.svelte';
+import ListEmpty from './ListEmpty.svelte';
 import { untrack } from 'svelte';
 
 untrack(() => feedsStore.prime());
@@ -51,11 +53,11 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 
 <div class="yt-scroll" onscroll={onScroll}>
     {#if list.error !== null}
-        <p class="status error" role="alert">{listError}</p>
+        <ErrorState message={listError} busy={list.loading} onretry={() => void list.query.refetch()} />
     {:else if !list.loaded}
         <p class="status">{t('list.loading')}</p>
     {:else if list.items.length === 0}
-        <p class="status">{t('list.empty')}</p>
+        <ListEmpty />
     {:else}
         <div class="grid" role="listbox" aria-label={t('list.label')}>
             {#each list.items as article (article.id)}
@@ -102,6 +104,8 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 <style>
     .yt-scroll {
         flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
         min-height: 0;
         overflow-y: auto;
     }
@@ -117,9 +121,6 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         padding: var(--space-4);
         font-size: var(--text-md);
         color: var(--fg-muted);
-    }
-    .status.error {
-        color: var(--error-text);
     }
     .status.subtle {
         text-align: center;

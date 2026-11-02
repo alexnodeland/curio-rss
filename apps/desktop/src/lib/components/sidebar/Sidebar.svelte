@@ -12,7 +12,6 @@ import { type MessageKey, t } from '$lib/i18n';
 import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     activeView,
-    importFromFile,
     refreshAll,
     reorderFeedGroup,
     selectView,
@@ -340,7 +339,16 @@ function newFolder(): void {
                 >
             </div>
             {#if feedsStore.error !== null}
-                <p class="sidebar-status error" role="alert">{feedsError()}</p>
+                <div class="sidebar-status error">
+                    <p role="alert">{feedsError()}</p>
+                    <button
+                        class="state-action"
+                        type="button"
+                        disabled={feedsStore.loading}
+                        onclick={() => void feedsStore.reload()}
+                        ><Icon name="refresh" size={14} />{t('toast.retry')}</button
+                    >
+                </div>
             {:else if !feedsStore.loaded}
                 <div class="sidebar-skeleton" aria-hidden="true">
                     {#each SIDEBAR_SKELETON_WIDTHS as width (width)}
@@ -354,23 +362,6 @@ function newFolder(): void {
                         <Icon name="rss" size={22} strokeWidth={1.5} />
                     </div>
                     <p class="sidebar-empty-title">{t('shell.feeds.empty')}</p>
-                    <p class="sidebar-empty-hint">{t('emptyState.hint')}</p>
-                    <div class="sidebar-empty-actions">
-                        <button
-                            class="empty-action empty-action-primary"
-                            type="button"
-                            onclick={() => layoutStore.openModal('add-feed')}
-                        >
-                            {t('emptyState.addFeed')}
-                        </button>
-                        <button
-                            class="empty-action"
-                            type="button"
-                            onclick={() => void importFromFile('opml')}
-                        >
-                            {t('emptyState.importOpml')}
-                        </button>
-                    </div>
                 </div>
             {:else}
                 <ul
@@ -647,6 +638,10 @@ function newFolder(): void {
     }
 
     .sidebar-status.error {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
         color: var(--error-text);
     }
 
@@ -682,50 +677,6 @@ function newFolder(): void {
         font-size: var(--text-md);
         font-weight: 560;
         color: var(--fg);
-    }
-
-    .sidebar-empty-hint {
-        font-size: var(--text-sm);
-        color: var(--fg-subtle);
-        line-height: 1.45;
-    }
-
-    .sidebar-empty-actions {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        width: 100%;
-        margin-top: var(--space-2);
-    }
-
-    .empty-action {
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-md);
-        background: transparent;
-        color: var(--fg-muted);
-        border: 1px solid var(--hairline-strong);
-        font-size: var(--text-sm);
-        font-weight: 500;
-        cursor: pointer;
-        transition:
-            background var(--dur-fast) var(--ease),
-            color var(--dur-fast) var(--ease);
-    }
-
-    .empty-action:hover {
-        background: var(--hover);
-        color: var(--fg);
-    }
-
-    .empty-action-primary {
-        background: var(--accent);
-        color: var(--accent-fg);
-        border-color: transparent;
-    }
-
-    .empty-action-primary:hover {
-        background: var(--accent-hover);
-        color: var(--accent-fg);
     }
 
     .view-item {

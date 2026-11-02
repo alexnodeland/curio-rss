@@ -188,6 +188,11 @@ export class FeedsStore {
         this.#hiddenFeeds.delete(feedId);
     }
 
+    /** Re-runs the subscription list's load (the sidebar error's Retry). */
+    reload(): Promise<void> {
+        return this.#feedsQuery.refetch();
+    }
+
     get loading(): boolean {
         return this.#feedsQuery.loading;
     }

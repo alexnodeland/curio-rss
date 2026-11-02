@@ -12,6 +12,7 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import ErrorState from '$components/common/ErrorState.svelte';
 import EmptyState from '$components/common/EmptyState.svelte';
 import { ROW_HEIGHT } from './ArticleList.svelte';
 import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
@@ -83,7 +84,7 @@ function openSelectedMenu(): void {
 
 <div class="search-results">
     {#if searchStore.error !== null}
-        <p class="status error" role="alert">{resultsError}</p>
+        <ErrorState message={resultsError} busy={searchStore.loading} onretry={() => searchStore.retry()} />
     {:else if searchStore.results.length === 0 && !searchStore.settled}
         <!-- Debounce/in-flight gap: the query hasn't resolved, so show
              "Searching…" rather than flashing "No matches". -->
@@ -133,7 +134,4 @@ function openSelectedMenu(): void {
         color: var(--fg-muted);
     }
 
-    .status.error {
-        color: var(--error-text);
-    }
 </style>

@@ -543,6 +543,48 @@ button:disabled {
     opacity: 0.5;
 }
 
+/* The zero-state / error-state action: a quiet outlined button, with a filled
+   accent variant for the one primary action of a view (welcome, empty
+   states, Retry). */
+.state-action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--hairline-strong);
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.state-action:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--fg);
+}
+
+.state-action.primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--accent-fg);
+}
+
+.state-action.primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    color: var(--accent-fg);
+}
+
+/* The Retry inside a stale-while-revalidate error banner: inline, in the
+   banner's own colour, so the strip stays one quiet line. */
+.banner-action {
+    flex: 0 0 auto;
+    padding: 0 var(--space-1);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 /* Link Styles */
 a {
     color: var(--link);

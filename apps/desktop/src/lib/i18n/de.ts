@@ -61,10 +61,13 @@ export const de: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Zum Inhalt springen',
     'shell.feeds.loading': 'Abonnements werden geladen…',
     'shell.feeds.empty': 'Noch keine Abonnements',
-    'emptyState.hint':
-        'Abonniere einen Feed, um zu lesen, oder übernimm deine Abos aus einem anderen Reader.',
     'emptyState.addFeed': 'Ersten Feed hinzufügen',
-    'emptyState.importOpml': 'OPML importieren…',
+    'welcome.title': 'Willkommen bei Curio',
+    'welcome.intro':
+        'Websites, Kanäle und Newsletter abonnieren, die du liest. Curio sammelt sie in einer ruhigen Liste und bewahrt das Wichtige als schlichtes Markdown in deinen Notizen auf.',
+    'welcome.import': 'Von einer anderen App?',
+    'welcome.keys': 'Drei Tasten für den Anfang',
+    'welcome.keys.star': 'zum Markieren',
     'shell.feeds.count': '{count, plural, one {# Feed} other {# Feeds}}',
     'shell.unread.count': '{count, plural, one {# ungelesen} other {# ungelesen}}',
     'view.all': 'Alle Artikel',
@@ -102,6 +105,30 @@ export const de: Partial<Record<MessageKey, string>> = {
     'list.label': 'Artikel',
     'list.loading': 'Artikel werden geladen…',
     'list.empty': 'Keine Artikel vorhanden',
+    'list.empty.all': 'Noch keine Artikel',
+    'list.empty.all.hint': 'Neue Artikel erscheinen hier, sobald deine Feeds aktualisiert werden.',
+    'list.empty.unread': 'Alles gelesen',
+    'list.empty.showRead': 'Gelesene Artikel anzeigen',
+    'list.empty.starred': 'Keine markierten Artikel',
+    'list.empty.starred.hint':
+        '{key} auf einem Artikel drücken, um ihn zu markieren und hier zu behalten.',
+    'list.empty.readLater': 'Nichts für später gespeichert',
+    'list.empty.readLater.hint': '{key} auf einem Artikel drücken, um ihn für später zu speichern.',
+    'list.empty.archived': 'Nichts archiviert',
+    'list.empty.archived.hint':
+        '{key} auf einem erledigten Artikel drücken: Er landet hier und verlässt die anderen Ansichten.',
+    'list.empty.feed': 'Noch keine Artikel in diesem Feed',
+    'list.empty.feed.hint': 'Curio prüft ihn bei jeder Aktualisierung.',
+    'list.empty.refresh': 'Jetzt aktualisieren',
+    'list.empty.feedError': 'Curio konnte diesen Feed nicht abrufen',
+    'feedError.notAFeed':
+        'Diese Adresse liefert eine Webseite, keinen Feed. Bitte die Feed-URL prüfen.',
+    'feedError.parse': 'Der Feed ist nicht lesbar: Er ist kein gültiges RSS oder Atom.',
+    'feedError.gone': 'Die Website hat diesen Feed entfernt (HTTP 410).',
+    'feedError.http':
+        'Die Website hat mit einem Fehler geantwortet. Bitte die Feed-URL prüfen oder später erneut versuchen.',
+    'feedError.generic':
+        'Die letzte Aktualisierung ist fehlgeschlagen. Erneut versuchen oder den Feed-Zustand ansehen.',
     'list.view.home': 'Startansicht',
     'list.view.rows': 'Listenansicht',
     'list.filter.unreadOnly': 'Nur ungelesene anzeigen',

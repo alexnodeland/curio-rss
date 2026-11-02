@@ -15,8 +15,10 @@ use crate::dto::{MaintenanceReportDto, RetentionPolicyDto};
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, FeedsChanged, emit_or_log};
 
-/// The wall-clock time (Unix seconds) the last maintenance pass finished —
-/// the scheduler's daily clock, persisted so a relaunch remembers it.
+/// The wall-clock time (Unix seconds) the last maintenance pass started —
+/// the scheduler's daily clock, persisted so a relaunch remembers it. The
+/// start (the `now` a caller takes before the pass) is recorded, not the
+/// finish; a pass takes seconds, which a daily clock never notices.
 pub(crate) const LAST_RUN_KEY: &str = "ui.maintenance.last-at";
 
 /// The persisted article-retention policy (off until one is set).
@@ -79,8 +81,8 @@ fn set_retention_policy_impl(
     retention_policy_impl(core)
 }
 
-/// One maintenance pass, then its finish time recorded under
-/// [`LAST_RUN_KEY`] (best-effort: a failed write only means the next
+/// One maintenance pass, then `now` — the time the caller took just before
+/// it — recorded under [`LAST_RUN_KEY`] as when it ran (best-effort: a failed write only means the next
 /// scheduled pass comes sooner).
 pub(crate) fn run_maintenance_impl(
     core: &CoreHandle,
@@ -95,7 +97,7 @@ pub(crate) fn run_maintenance_impl(
     Ok(report.into())
 }
 
-/// When the last maintenance pass finished, if one was recorded (and the
+/// When the last maintenance pass started, if one was recorded (and the
 /// value parses).
 pub(crate) fn last_run(core: &CoreHandle) -> Option<SystemTime> {
     core.get_setting(LAST_RUN_KEY)

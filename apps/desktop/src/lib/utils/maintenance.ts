@@ -40,15 +40,20 @@ export interface MaintenanceToast {
 }
 
 /**
- * What a pass's report tells the user: a summary (the purge count for an
- * orphan purge; a plain "all tidy" when nothing went), or why nothing was deleted when the exported set could not
- * be read; plus a note when some upkeep is left for the next pass.
+ * What a pass's report tells the user: why nothing was deleted when the
+ * exported set could not be read; otherwise a summary — for an orphan purge
+ * its count, then whatever the routine part of the same pass removed (a
+ * purge applies the retention policy too, so those deletions are reported,
+ * never hidden behind the purge count); for a routine pass what it
+ * removed, or a plain "all tidy" when nothing went. Plus a note when some
+ * upkeep is left for the next pass.
  */
 export function maintenanceToasts(
     report: MaintenanceReportDto,
     purgedOrphans: boolean,
 ): MaintenanceToast[] {
     const toasts: MaintenanceToast[] = [];
+    const routine = report.articles_reaped + report.tags_dropped + report.event_files_removed;
     if (report.reap_skipped !== null) {
         toasts.push({
             message: t('doctor.maintenance.reapSkipped', { reason: report.reap_skipped }),
@@ -59,9 +64,10 @@ export function maintenanceToasts(
             message: t('doctor.purged', { count: report.orphans_purged }),
             tone: 'success',
         });
-    } else if (report.articles_reaped + report.tags_dropped + report.event_files_removed === 0) {
+    } else if (routine === 0) {
         toasts.push({ message: t('doctor.maintenance.clean'), tone: 'success' });
-    } else {
+    }
+    if (report.reap_skipped === null && routine > 0) {
         toasts.push({
             message: t('doctor.maintenance.done', {
                 articles: report.articles_reaped,

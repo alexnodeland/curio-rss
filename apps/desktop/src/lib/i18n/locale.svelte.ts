@@ -92,12 +92,14 @@ class LocaleStore {
         return localeDir(this.active);
     }
 
-    /** Adopts the persisted locale at startup (after `settingsStore.load()`). */
+    /**
+     * Adopts the persisted locale at startup — English when the profile has
+     * none (or an unknown id), so a re-run after `settingsStore.load()` also
+     * undoes a stale boot-mirror value the backend does not hold.
+     */
     init(): void {
         const persisted = settingsStore.get(SETTING_KEYS.locale);
-        if (isLocaleId(persisted)) {
-            this.#apply(persisted);
-        }
+        this.#apply(isLocaleId(persisted) ? persisted : 'en');
     }
 
     /**

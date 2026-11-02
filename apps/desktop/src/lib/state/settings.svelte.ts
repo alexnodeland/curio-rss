@@ -60,23 +60,26 @@ const ALL_KEYS: readonly SettingKey[] = Object.values(SETTING_KEYS);
 export const BOOT_MIRROR_STORAGE_KEY = 'curio-boot-settings';
 
 /**
- * The settings that shape the first paint — pane widths and collapse, the
- * list density and "home" layouts, favicons, reader typography and the
+ * The settings that shape the first paint — pane widths, collapse and focus
+ * mode, the list density and "home" layouts, reader typography and the
  * locale. They are mirrored to localStorage so the stores can adopt them
  * before the backend answers (the theme has its own pre-paint mirror in
  * app.html). The settings table stays the source of truth: every `load()`
  * rewrites the mirror, and every `set()` of one of these keys updates it.
+ *
+ * Only presentation belongs here. Behaviour and privacy opt-ins (remote
+ * favicons, media prefetch, mark-on-scroll) shape no layout, so they stay
+ * off until the backend answers rather than trusting an unauthoritative
+ * cache that could switch on a network fetch or a state change.
  */
 export const BOOT_KEYS: readonly SettingKey[] = [
     SETTING_KEYS.sidebarCollapsed,
+    SETTING_KEYS.focusMode,
     SETTING_KEYS.sidebarWidth,
     SETTING_KEYS.listWidth,
     SETTING_KEYS.homeYoutube,
     SETTING_KEYS.homeReddit,
     SETTING_KEYS.readingDensity,
-    SETTING_KEYS.faviconAllowRemote,
-    SETTING_KEYS.mediaPrefetch,
-    SETTING_KEYS.markOnScroll,
     SETTING_KEYS.fontSize,
     SETTING_KEYS.lineHeight,
     SETTING_KEYS.measure,

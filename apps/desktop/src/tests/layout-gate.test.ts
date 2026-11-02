@@ -95,6 +95,11 @@ describe('root layout startup gate', () => {
                 'ui.reading.density': 'compact',
                 'ui.typography.font-size': '19',
                 'ui.locale': 'de',
+                'ui.panes.focus-mode': 'true',
+                // Behaviour/privacy opt-ins are never trusted from the cache.
+                'ui.media.prefetch': 'true',
+                'ui.favicon.allow-remote': 'true',
+                'ui.reading.mark-on-scroll': 'true',
             }),
         );
         harness = installIpcHarness({ get_startup_failure: null });
@@ -106,9 +111,48 @@ describe('root layout startup gate', () => {
         expect(screen.getByTestId('reader')).toBeTruthy();
         expect(layoutStore.sidebarWidth).toBe(320);
         expect(layoutStore.listWidth).toBe(480);
+        expect(layoutStore.focusMode).toBe(true);
         expect(prefsStore.readingDensity).toBe('compact');
         expect(typographyStore.fontSize).toBe(19);
         expect(localeStore.active).toBe('de');
+        expect(prefsStore.mediaPrefetch).toBe(false);
+        expect(prefsStore.allowRemoteFavicon).toBe(false);
+        expect(prefsStore.markOnScroll).toBe(false);
+    });
+
+    it('undoes a stale mirrored value the backend does not hold once settings load', async () => {
+        window.localStorage.setItem(
+            BOOT_MIRROR_STORAGE_KEY,
+            JSON.stringify({
+                'ui.locale': 'de',
+                'ui.typography.font-family': 'mono',
+                'ui.typography.text-align': 'justify',
+                'ui.typography.reading-theme': 'sepia',
+                'ui.panes.sidebar-collapsed': 'true',
+                'ui.panes.focus-mode': 'true',
+                'ui.panes.list-width': '480',
+            }),
+        );
+        // The profile's settings table holds none of them (reset elsewhere,
+        // or a different profile): every store must land on its default.
+        harness = installIpcHarness({
+            get_startup_failure: null,
+            connectivity_online: true,
+            get_setting: null,
+        });
+        render(Layout, { children: reader });
+        await flushIpc();
+
+        expect(settingsStore.loaded).toBe(true);
+        expect(localeStore.active).toBe('en');
+        expect(typographyStore.fontFamily).toBe('serif');
+        expect(typographyStore.textAlign).toBe('left');
+        expect(typographyStore.readingTheme).toBe('default');
+        expect(layoutStore.sidebarCollapsed).toBe(false);
+        expect(layoutStore.focusMode).toBe(false);
+        expect(layoutStore.listWidth).toBe(360);
+        // …and the mirror now matches the backend, so the next boot agrees.
+        expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBe('{}');
     });
 
     it('mounts nothing while the gate check is still pending', () => {

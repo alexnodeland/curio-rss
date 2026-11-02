@@ -86,10 +86,7 @@ export class LayoutStore {
      * Unparseable or out-of-range values fall back to the defaults.
      */
     initLayout(): void {
-        const collapsed = settingsStore.get(SETTING_KEYS.sidebarCollapsed);
-        if (collapsed !== undefined) {
-            this.sidebarCollapsed = collapsed === 'true';
-        }
+        this.sidebarCollapsed = settingsStore.get(SETTING_KEYS.sidebarCollapsed) === 'true';
         this.focusMode = settingsStore.get(SETTING_KEYS.focusMode) === 'true';
         this.sidebarWidth = readWidth(SETTING_KEYS.sidebarWidth, PANE_LIMITS.sidebar, 280);
         this.listWidth = readWidth(SETTING_KEYS.listWidth, PANE_LIMITS.list, 360);

@@ -4,6 +4,7 @@ import {
     copyLink,
     markAllRead,
     openInBrowser,
+    shareLink,
     toggleArchived,
     toggleRead,
     toggleReadLater,
@@ -13,6 +14,7 @@ import { feedsStore } from '$lib/state/feeds.svelte';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { isLinkless } from '$lib/utils/article';
 import { isApplePlatform } from '$lib/utils/platform';
+import { canShareLinks } from '$lib/utils/share';
 
 /**
  * The DOM id of the row for one article — the listbox points at it through
@@ -47,8 +49,9 @@ export function selectGesture(
 
 /**
  * The context-menu items for one article row — star, read, read-later, archive,
- * open-in-browser and copy-link (both omitted for a link-less entry, whose only
- * "source" is the feed XML), and mark-all-read-in-feed. Labels flip on the live state
+ * open-in-browser, copy-link and share (all omitted for a link-less entry, whose
+ * only "source" is the feed XML; share also where the webview has no share
+ * sheet), and mark-all-read-in-feed. Labels flip on the live state
  * (from the per-article state query). Shared by the row's own right-click and
  * the list's keyboard menu key so both surfaces stay identical.
  */
@@ -93,6 +96,13 @@ export function buildArticleMenu(
             labelKey: 'reader.action.copyLink',
             onSelect: () => void copyLink(article.source_url),
         });
+        if (canShareLinks()) {
+            items.push({
+                id: 'share',
+                labelKey: 'reader.action.share',
+                onSelect: () => void shareLink(article.source_url, article.title),
+            });
+        }
     }
     const feedId = article.feed_id;
     if (feedId !== null) {

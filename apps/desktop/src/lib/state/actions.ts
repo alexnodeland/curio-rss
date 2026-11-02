@@ -24,6 +24,7 @@ import { isLinkless } from '$lib/utils/article';
 import { copyText } from '$lib/utils/clipboard';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { isOpenableUrl, openExternal } from '$lib/utils/external';
+import { shareUrl } from '$lib/utils/share';
 import {
     ALL_ARTICLES,
     type ArticleFilters,
@@ -930,6 +931,17 @@ export async function copyLink(url: string): Promise<void> {
         t(copied ? 'toast.linkCopied' : 'toast.linkCopyFailed'),
         copied ? 'success' : 'error',
     );
+}
+
+/**
+ * Opens the OS share sheet for the article's source URL (see `utils/share`).
+ * Closing the sheet unused is not an error; only a sheet that could not open
+ * is toasted. Like Copy link, never offered for a link-less entry.
+ */
+export async function shareLink(url: string, title: string): Promise<void> {
+    if ((await shareUrl(url, title)) === 'failed') {
+        toastStore.showToast(t('toast.shareFailed'), 'error');
+    }
 }
 
 /**

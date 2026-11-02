@@ -36,7 +36,10 @@ export type IconName =
     | 'chevron'
     | 'article'
     | 'alert'
-    | 'wifi-off';
+    | 'wifi-off'
+    | 'sidebar'
+    | 'focus'
+    | 'focus-exit';
 </script>
 
 <script lang="ts">
@@ -184,5 +187,11 @@ let { name, size = 18, strokeWidth = 1.75, class: className = '' }: {
         /><path d="M19 12.86a10 10 0 0 0-2-1.52" /><path
             d="M2 8.82a15 15 0 0 1 4.18-2.64"
         /><path d="M22 8.82a15 15 0 0 0-11.29-3.76" /><path d="m2 2 20 20" />
+    {:else if name === 'sidebar'}
+        <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" />
+    {:else if name === 'focus'}
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    {:else if name === 'focus-exit'}
+        <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
     {/if}
 </svg>

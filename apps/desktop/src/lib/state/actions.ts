@@ -970,7 +970,11 @@ export function handleShortcut(id: ShortcutId): void {
             focusReader();
             break;
         case 'nav.focusList':
-            selectionStore.focusList();
+            // Focus mode hides the list: ← / Esc keep the reader rather than
+            // aim the keyboard at a pane that is not on screen.
+            if (layoutStore.listVisible) {
+                selectionStore.focusList();
+            }
             break;
         case 'reader.pageDown':
             pageReader('down');
@@ -1028,7 +1032,15 @@ export function handleShortcut(id: ShortcutId): void {
             break;
         case 'view.feeds':
             searchStore.clear();
+            // The tree can only take the keyboard once it is on screen.
+            void layoutStore.revealSidebar();
             selectionStore.focusSidebar();
+            break;
+        case 'view.toggleSidebar':
+            void layoutStore.toggleSidebar();
+            break;
+        case 'view.toggleFocusMode':
+            void layoutStore.toggleFocusMode();
             break;
         case 'help.toggle':
             toggleHelp();

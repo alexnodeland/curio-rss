@@ -91,6 +91,8 @@ pub(crate) struct ArticleView {
     pub(crate) archived: bool,
     pub(crate) tags: Vec<String>,
     pub(crate) word_count: Option<u32>,
+    /// How far through the body the desktop reader last was, `0`–`1`.
+    pub(crate) progress: f64,
 }
 
 impl ArticleView {
@@ -121,6 +123,7 @@ impl ArticleView {
             archived: state.archived,
             tags,
             word_count: article.word_count,
+            progress: state.progress.fraction(),
         })
     }
 

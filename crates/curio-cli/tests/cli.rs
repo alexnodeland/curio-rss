@@ -357,6 +357,47 @@ async fn state_flips_emit_negations_and_fold_correctly() {
     assert_eq!(starred.as_array().unwrap().len(), 0);
 }
 
+/// #153: `list --json` carries the reading position the desktop reader
+/// saved (a second engine handle on the profile stands in for the app).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn list_json_exposes_the_reading_progress() {
+    let server = fixture_server().await;
+    let profile = tempfile::tempdir().unwrap();
+    seed(profile.path(), &server);
+    let curio_id = article_id_by_title(profile.path(), "With a guid");
+
+    let progress_of = |profile: &std::path::Path| -> Vec<(String, f64)> {
+        stdout_json(&curio(profile).args(["list", "--json"]).assert().success())
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| {
+                let id = a["curio_id"].as_str().unwrap().to_owned();
+                (id, a["progress"].as_f64().unwrap())
+            })
+            .collect()
+    };
+    assert!(
+        progress_of(profile.path()).iter().all(|(_, p)| *p == 0.0),
+        "never read: the top"
+    );
+
+    let desktop = curio_core::CoreHandle::open(profile.path()).unwrap();
+    let article = desktop
+        .list_articles(curio_core::storage::ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .find(|a| a.curio_id.to_string() == curio_id)
+        .unwrap();
+    let halfway = curio_core::model::ReadProgress::from_fraction(0.42);
+    assert!(desktop.set_read_progress(article.id, halfway).unwrap());
+
+    for (id, progress) in progress_of(profile.path()) {
+        let expected = if id == curio_id { 0.42 } else { 0.0 };
+        assert!((progress - expected).abs() < 1e-9, "{id}: {progress}");
+    }
+}
+
 #[test]
 fn opml_import_export_round_trips() {
     let profile = tempfile::tempdir().unwrap();

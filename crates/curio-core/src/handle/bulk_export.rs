@@ -8,9 +8,13 @@
 //! index and rewrite the whole manifest, and fsync the event log, once per
 //! note: quadratic in the size of the destination.
 //!
-//! A note that fails is reported and skipped; only a failure of the
-//! destination itself (its folder gone, its lock or manifest unusable) or
-//! of the profile's storage ends the run early.
+//! A note that fails — its content does not convert, or its file cannot be
+//! written — is reported and skipped. A failure of the destination itself
+//! (its folder gone, its lock or manifest unusable) or of the profile's
+//! storage ends the run early: every further note would fail the same way.
+//! A storage failure partway through a batch drops that batch before its
+//! intents and manifest write, exactly like a crash there; the next export
+//! reconciles the notes it had already written.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -63,7 +67,9 @@ impl BulkSaveOutcome {
     }
 
     fn fail(&mut self, article: &Article, error: &CoreError) {
-        tracing::warn!(curio_id = %article.curio_id, %error, "bulk export skipped an article");
+        // Reported to the caller in the outcome (and so by every head), not
+        // a warning of its own; past the detail cap this is the record.
+        tracing::debug!(curio_id = %article.curio_id, %error, "bulk export skipped an article");
         self.failed += 1;
         if self.failures.len() < MAX_BULK_SAVE_FAILURES {
             self.failures.push(BulkSaveFailure {
@@ -172,8 +178,9 @@ impl CoreHandle {
     /// [`CoreError::UnknownDestination`], and a destination that is
     /// missing ([`crate::export::ExportError::DestinationMissing`]) or
     /// whose lock or manifest is unusable — checked before anything is
-    /// walked, and again by every batch. Storage errors walking the
-    /// articles or staging a batch's events end the run too. Batches
+    /// walked, and again by every batch. [`CoreError::Storage`] from any
+    /// read or write of the profile (walking the articles, an article's
+    /// feed or tags, staging a batch's events) ends the run too. Batches
     /// committed before the error stay exported.
     pub fn save_all_to_destination_with(
         &self,
@@ -182,17 +189,12 @@ impl CoreHandle {
         cancel: &BulkSaveCancel,
         mut on_progress: impl FnMut(BulkSaveProgress),
     ) -> Result<BulkSaveOutcome, CoreError> {
-        // Fail on an unknown or vanished destination before walking
-        // anything.
         let root = load_roots(&self.storage)?
             .remove(destination)
             .ok_or_else(|| CoreError::UnknownDestination {
                 name: destination.to_string(),
             })?;
         let mut marked = load_exported(&self.storage)?.contains(destination);
-        if marked {
-            export::require_marker(&root)?;
-        }
         let dest = Destination {
             name: destination.clone(),
             root,
@@ -204,10 +206,26 @@ impl CoreHandle {
         let mut feeds = HashMap::new();
         let mut outcome = BulkSaveOutcome::default();
         loop {
+            // A destination that has exported must still be there — before
+            // the first batch, and before every later one: a volume
+            // unmounted or a vault removed mid-run leaves an empty folder
+            // at the old path, which must be refused, not filled. (Neither
+            // the batch nor the export lock checks for the marker; the
+            // lock would create `.curio/` again.)
+            if marked {
+                export::require_marker(&dest.root)?;
+            }
             let page = self.storage.list_articles(page_filter.clone())?;
             let Some(last) = page.last() else {
                 break;
             };
+            // Checked here too, not only per note: a cancel that landed
+            // after the last note of a full page stops the run without
+            // starting another batch (or reporting the same progress twice).
+            if cancel.is_cancelled() {
+                outcome.cancelled = true;
+                break;
+            }
             page_filter.before = Some(last.id);
             let full = page.len() == BULK_SAVE_BATCH as usize;
             self.export_batch(&dest, page, &mut feeds, cancel, &mut outcome)?;
@@ -248,18 +266,18 @@ impl CoreHandle {
             let feed = match article.feed_id {
                 Some(feed_id) => match feeds.get(&feed_id) {
                     Some(feed) => feed.clone(),
-                    None => match self.storage.get_feed(feed_id) {
-                        Ok(feed) => feeds.entry(feed_id).or_insert(feed).clone(),
-                        Err(err) => {
-                            outcome.fail(&article, &err.into());
-                            continue;
-                        }
-                    },
+                    // A storage error is the profile's, not this article's:
+                    // it ends the run (see the module docs).
+                    None => feeds
+                        .entry(feed_id)
+                        .or_insert(self.storage.get_feed(feed_id)?)
+                        .clone(),
                 },
                 None => None,
             };
             let input = match self.export_input(&article, feed.as_ref()) {
                 Ok(input) => input,
+                Err(err @ CoreError::Storage(_)) => return Err(err),
                 Err(err) => {
                     outcome.fail(&article, &err);
                     continue;
@@ -323,7 +341,7 @@ mod tests {
 
     use super::*;
     use crate::events::read_all;
-    use crate::export::{MANIFEST_WRITES, load_manifest};
+    use crate::export::{ExportError, MANIFEST_WRITES, load_manifest};
     use crate::model::{ArticleContent, NewArticle};
 
     /// What exporting 5,000 notes may take, end to end, in this unoptimized
@@ -373,6 +391,30 @@ mod tests {
 
     fn vault_name() -> DestinationName {
         "vault".parse().unwrap()
+    }
+
+    /// A second connection to the profile database, to break it under a
+    /// running export.
+    fn raw_db(profile: &tempfile::TempDir) -> rusqlite::Connection {
+        let db = rusqlite::Connection::open(profile.path().join(crate::paths::DB_FILE)).unwrap();
+        db.busy_timeout(Duration::from_secs(10)).unwrap();
+        db
+    }
+
+    /// Markdown notes under `root`, outside `.curio/`.
+    fn notes_on_disk(root: &std::path::Path) -> usize {
+        std::fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| !path.ends_with(".curio"))
+            .map(|path| {
+                if path.is_dir() {
+                    notes_on_disk(&path)
+                } else {
+                    usize::from(path.extension().is_some_and(|ext| ext == "md"))
+                }
+            })
+            .sum()
     }
 
     #[test]
@@ -451,16 +493,19 @@ mod tests {
         assert_eq!(none.total(), 0);
 
         // Cancelled from the first progress step: the first batch stays
-        // exported and recorded; the run stops before the second batch's
-        // first note.
+        // exported and recorded; the run stops before the second batch
+        // begins, so the first step is the only one reported.
         let cancel = BulkSaveCancel::new();
         let canceller = cancel.clone();
+        let mut steps = 0;
         let outcome = core
             .save_all_to_destination_with(&ListArticles::default(), &vault_name(), &cancel, |_| {
+                steps += 1;
                 canceller.cancel();
             })
             .unwrap();
         assert!(outcome.cancelled);
+        assert_eq!(steps, 1);
         assert_eq!(outcome.created, u64::from(BULK_SAVE_BATCH));
         assert_eq!(load_manifest(vault.path()).unwrap().notes.len(), batch);
 
@@ -472,5 +517,116 @@ mod tests {
             (rest.created, rest.unchanged, rest.cancelled),
             (10, u64::from(BULK_SAVE_BATCH), false)
         );
+    }
+
+    #[test]
+    fn a_destination_that_vanishes_between_batches_ends_the_run() {
+        let batch = BULK_SAVE_BATCH as usize;
+        let (_profile, vault, core) = vault_core(batch + 10);
+
+        // After the first batch the vault is unmounted, leaving an empty
+        // folder at its path — once, so a run that carried on would leave
+        // its second batch behind for the asserts below.
+        let mut unmounted = false;
+        let err = core
+            .save_all_to_destination_with(
+                &ListArticles::default(),
+                &vault_name(),
+                &BulkSaveCancel::new(),
+                |_| {
+                    if !unmounted {
+                        std::fs::remove_dir_all(vault.path()).unwrap();
+                        std::fs::create_dir(vault.path()).unwrap();
+                        unmounted = true;
+                    }
+                },
+            )
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                CoreError::Export(ExportError::DestinationMissing { .. })
+            ),
+            "{err:?}"
+        );
+        assert!(unmounted);
+        assert!(
+            !vault.path().join(".curio").exists(),
+            "the marker is never recreated"
+        );
+        assert_eq!(
+            notes_on_disk(vault.path()),
+            0,
+            "nothing is written into the empty folder"
+        );
+    }
+
+    #[test]
+    fn a_storage_failure_ends_the_run_instead_of_failing_each_article() {
+        let batch = BULK_SAVE_BATCH as usize;
+        let (profile, vault, core) = vault_core(batch + 10);
+        let db = raw_db(&profile);
+
+        // After the first batch, reading an article's tags starts failing:
+        // the profile's failure, not the second batch's articles'.
+        let mut broken = false;
+        let err = core
+            .save_all_to_destination_with(
+                &ListArticles::default(),
+                &vault_name(),
+                &BulkSaveCancel::new(),
+                |_| {
+                    if !broken {
+                        db.execute_batch("DROP TABLE article_tags").unwrap();
+                        broken = true;
+                    }
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(err, CoreError::Storage(_)), "{err:?}");
+        // The batch committed before the failure stays exported.
+        assert_eq!(load_manifest(vault.path()).unwrap().notes.len(), batch);
+    }
+
+    /// The per-batch crash ordering, on the real bulk path: when staging a
+    /// batch's event intents fails, its manifest write never happens — the
+    /// notes are on disk with no entry, and the next run announces each.
+    #[test]
+    fn a_batch_whose_intents_fail_to_stage_never_writes_its_manifest() {
+        let (profile, vault, core) = vault_core(3);
+        let db = raw_db(&profile);
+        db.execute_batch(
+            "CREATE TRIGGER refuse_intents BEFORE INSERT ON event_intents \
+             BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+        )
+        .unwrap();
+
+        let err = core
+            .save_all_to_destination(&ListArticles::default(), &vault_name())
+            .unwrap_err();
+
+        assert!(matches!(err, CoreError::Storage(_)), "{err:?}");
+        assert_eq!(notes_on_disk(vault.path()), 3, "the notes were written");
+        assert!(
+            load_manifest(vault.path()).unwrap().notes.is_empty(),
+            "no manifest entry outruns its event"
+        );
+
+        // With the intents back, the next run finds each note on disk and
+        // announces it — no event is lost to the failed batch.
+        db.execute_batch("DROP TRIGGER refuse_intents").unwrap();
+        let outcome = core
+            .save_all_to_destination(&ListArticles::default(), &vault_name())
+            .unwrap();
+        assert_eq!((outcome.created, outcome.updated), (0, 3));
+        assert_eq!(load_manifest(vault.path()).unwrap().notes.len(), 3);
+        let updated = read_all(&profile.path().join(".curio/events"))
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e.event, EventPayload::ArticleUpdated(_)))
+            .count();
+        assert_eq!(updated, 3);
     }
 }

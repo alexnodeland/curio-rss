@@ -101,6 +101,12 @@ Open** (macOS 12–14) or **System Settings → Privacy & Security → Open Anyw
 xattr -dr com.apple.quarantine "/Applications/Curio.app"
 ```
 
+With no subscriptions yet, Curio opens on a welcome screen: add a feed, start
+from a popular source (a subreddit, a YouTube channel, a Mastodon account,
+GitHub releases, Hacker News), or bring a library over from OPML, Pocket,
+Instapaper or Readwise Reader. Every empty view then says what fills it, and
+a load that fails offers **Retry** in place.
+
 After first launch Curio keeps itself current — **Settings → General → Check
 for updates**, or let it auto-check. Updates are downloaded, signature-verified,
 and installed in place from the GitHub release feed, then relaunch on a click.

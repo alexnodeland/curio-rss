@@ -2,7 +2,8 @@
 //! deletion and content replacement.
 
 use super::listing::{
-    Projection, RawListed, UNREAD_COUNTS, list_articles_query, raw_listed, search_articles_query,
+    Projection, RawListed, UNREAD_COUNTS, count_articles_query, list_articles_query, raw_listed,
+    search_articles_query,
 };
 use super::maintenance::is_tombstoned;
 use super::rows::{RawArticle, article_by_id, parse_ts, raw_article, scoped_dedupe_key};
@@ -344,6 +345,24 @@ impl Storage {
                     (feed, u64::try_from(n).unwrap_or_default())
                 })
                 .collect())
+        })
+    }
+
+    /// How many articles [`Self::list_articles`] would walk with `params`
+    /// across every page: its filters and `before` cursor apply, its
+    /// `limit` does not.
+    ///
+    /// # Errors
+    ///
+    /// Database errors.
+    pub fn count_listed_articles(&self, params: ListArticles) -> Result<u64, StorageError> {
+        self.read(move |conn| {
+            let (sql, binds) = count_articles_query(&params);
+            let n: i64 = conn.prepare_cached(&sql)?.query_row(
+                rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                |row| row.get(0),
+            )?;
+            Ok(u64::try_from(n).unwrap_or_default())
         })
     }
 

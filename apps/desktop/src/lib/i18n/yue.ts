@@ -225,6 +225,8 @@ export const yue: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll': '全部匯出',
     'destinations.exportAll.running': '匯出緊…',
     'destinations.exportAll.done': '已經匯出 {written} 篇筆記；{unchanged} 篇已經係最新',
+    'destinations.exportAll.partial':
+        '已經匯出 {written} 篇筆記；{unchanged} 篇已經係最新；{failed} 篇匯出唔到（第一篇：「{title}」）',
     'destinations.needNameAndFolder': '請先輸入名稱同揀個資料夾。',
     'toast.promote.saved': '已儲存到 {name}',
     'toast.linkCopied': '已經複製連結',

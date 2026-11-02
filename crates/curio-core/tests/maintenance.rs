@@ -814,6 +814,32 @@ fn recording_an_export_of_a_deleted_article_reports_it_gone() {
     assert_eq!(exports(storage), 0);
 }
 
+/// A bulk export records its whole batch at once: already-recorded
+/// articles stay recorded once, and only the deleted ones are reported.
+#[test]
+fn recording_a_batch_of_exports_reports_only_the_deleted_articles() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let storage = core.storage();
+    let feed = add_feed(&core, "https://example.com/feed.xml");
+    let ids = ingest(storage, feed, &["recorded", "fresh", "gone"]);
+    let now = Timestamp::now();
+    assert!(storage.mark_article_exported(ids[0], now).unwrap());
+    storage.delete_article(ids[2]).unwrap();
+
+    let gone = storage.mark_articles_exported(&ids, now).unwrap();
+    assert_eq!(gone, BTreeSet::from([ids[2]]));
+    assert_eq!(exports(storage), 2);
+    // All recorded: nothing to write, nothing gone.
+    assert!(
+        storage
+            .mark_articles_exported(&ids[..2], now)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(exports(storage), 2);
+}
+
 /// Export protection outlives the destination: removing it, or
 /// re-rooting it at a fresh folder, does not expose what was exported.
 #[test]

@@ -741,6 +741,35 @@ fn list_articles_filters_by_read_state_flags() {
         }),
         [] as [std::string::String; 0]
     );
+
+    // The count walks the same filters, across every page: `limit` and
+    // the page it would cut play no part.
+    let count = |params: ListArticles| storage.count_listed_articles(params).unwrap();
+    assert_eq!(count(ListArticles::default()), 4);
+    assert_eq!(
+        count(ListArticles {
+            read: Some(false),
+            limit: 1,
+            ..ListArticles::default()
+        }),
+        3
+    );
+    assert_eq!(
+        count(ListArticles {
+            read: Some(true),
+            starred: Some(true),
+            ..ListArticles::default()
+        }),
+        1
+    );
+    assert_eq!(
+        count(ListArticles {
+            before: Some(k1),
+            ..ListArticles::default()
+        }),
+        1,
+        "the cursor applies: only k0 sits below k1"
+    );
 }
 
 #[test]

@@ -373,7 +373,7 @@ impl From<Article> for ArticleDto {
 }
 
 /// Mirror of [`curio_core::BulkSaveOutcome`] — what a bulk note export did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct BulkSaveOutcomeDto {
     /// Notes written for the first time.
     pub created: u64,
@@ -381,6 +381,12 @@ pub struct BulkSaveOutcomeDto {
     pub updated: u64,
     /// Idempotency hits — already exported and unchanged.
     pub unchanged: u64,
+    /// Articles that could not be exported; the export carried on past
+    /// them (the engine logs why).
+    pub failed: u64,
+    /// The first failed articles, in export order (`failed` stays exact
+    /// past the cap).
+    pub failures: Vec<BulkSaveFailureDto>,
 }
 
 impl From<curio_core::BulkSaveOutcome> for BulkSaveOutcomeDto {
@@ -389,6 +395,35 @@ impl From<curio_core::BulkSaveOutcome> for BulkSaveOutcomeDto {
             created: outcome.created,
             updated: outcome.updated,
             unchanged: outcome.unchanged,
+            failed: outcome.failed,
+            failures: outcome
+                .failures
+                .into_iter()
+                .map(BulkSaveFailureDto::from)
+                .collect(),
+        }
+    }
+}
+
+/// Mirror of [`curio_core::BulkSaveFailure`] — one article a bulk export
+/// skipped. The engine's error text stays in the log: the webview names
+/// the article, never the engine message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct BulkSaveFailureDto {
+    /// The article's row id.
+    pub article_id: i64,
+    /// The article's identity.
+    pub curio_id: String,
+    /// The article's title.
+    pub title: String,
+}
+
+impl From<curio_core::BulkSaveFailure> for BulkSaveFailureDto {
+    fn from(failure: curio_core::BulkSaveFailure) -> Self {
+        Self {
+            article_id: failure.article_id.0,
+            curio_id: failure.curio_id.to_string(),
+            title: failure.title,
         }
     }
 }

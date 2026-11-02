@@ -42,8 +42,9 @@ pub mod storage;
 
 pub use curio_types as types;
 pub use handle::{
-    BulkSaveOutcome, CoreError, CoreHandle, CoreOptions, DEFAULT_HYDRATE_CONCURRENCY,
-    DEFAULT_REFRESH_CONCURRENCY, ImportOutcome, MAX_REJECTED_DETAILS, MaintenanceOptions,
+    BULK_SAVE_BATCH, BulkSaveCancel, BulkSaveFailure, BulkSaveOutcome, BulkSaveProgress, CoreError,
+    CoreHandle, CoreOptions, DEFAULT_HYDRATE_CONCURRENCY, DEFAULT_REFRESH_CONCURRENCY,
+    ImportOutcome, MAX_BULK_SAVE_FAILURES, MAX_REJECTED_DETAILS, MaintenanceOptions,
     MaintenanceReport, OpmlImportOutcome, RedditAuthReason, RefreshOptions, RefreshOutcome,
     RefreshPolicy, SaveOutcome, SavedUrl, SweepProgress, SweepReport,
 };

@@ -492,6 +492,30 @@ tokens:
                         checksum: `sha256:${'0'.repeat(64)}`,
                         disposition: 'created',
                     };
+                case 'promote_all':
+                    // `?export=partial` previews a bulk export that had to
+                    // skip some articles (a note edited out of shape).
+                    if (new URLSearchParams(window.location.search).get('export') === 'partial') {
+                        return {
+                            created: 9,
+                            updated: 2,
+                            unchanged: 40,
+                            failed: 2,
+                            failures: [
+                                {
+                                    article_id: 7,
+                                    curio_id: '01900000-0000-7000-8000-000000000007',
+                                    title: 'Why the borrow checker is your friend',
+                                },
+                                {
+                                    article_id: 9,
+                                    curio_id: '01900000-0000-7000-8000-000000000009',
+                                    title: 'Weekly links',
+                                },
+                            ],
+                        };
+                    }
+                    return { created: 9, updated: 2, unchanged: 40, failed: 0, failures: [] };
                 case 'get_setting':
                     return settings.get(args.key as string) ?? null;
                 case 'set_setting':

@@ -240,6 +240,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll': 'Tout exporter',
     'destinations.exportAll.running': 'Export en cours…',
     'destinations.exportAll.done': '{written} note(s) exportée(s) ; {unchanged} déjà à jour',
+    'destinations.exportAll.partial':
+        '{written} note(s) exportée(s) ; {unchanged} déjà à jour ; {failed} impossible(s) à exporter (la première : « {title} »)',
     'destinations.needNameAndFolder': 'Saisissez d’abord un nom et choisissez un dossier.',
     'toast.promote.saved': 'Enregistré dans {name}',
     'toast.linkCopied': 'Lien copié',

@@ -1,13 +1,16 @@
 //! Moving things across the boundary: save-to-destination, destination
 //! registry, OPML import/export.
 
+use std::io::IsTerminal as _;
 use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Context as _, anyhow};
 use curio_core::export::{ExportDisposition, write_file_atomic};
 use curio_core::import::read_import_file;
-use curio_core::{ImportKind, RejectReason, Rejected};
+use curio_core::{
+    BulkSaveCancel, BulkSaveFailure, BulkSaveProgress, ImportKind, RejectReason, Rejected,
+};
 use curio_types::DestinationName;
 use serde::Serialize;
 
@@ -46,7 +49,29 @@ struct BulkSaveView {
     created: u64,
     updated: u64,
     unchanged: u64,
+    /// Articles exported or already up to date (failed ones excluded).
     total: u64,
+    /// Articles that could not be exported; the run carried on past them.
+    failed: u64,
+    /// The first failures in detail (`failed` stays exact past the cap).
+    failures: Vec<BulkSaveFailureView>,
+}
+
+#[derive(Debug, Serialize)]
+struct BulkSaveFailureView {
+    curio_id: String,
+    title: String,
+    error: String,
+}
+
+impl From<&BulkSaveFailure> for BulkSaveFailureView {
+    fn from(failure: &BulkSaveFailure) -> Self {
+        Self {
+            curio_id: failure.curio_id.to_string(),
+            title: failure.title.clone(),
+            error: failure.error.clone(),
+        }
+    }
 }
 
 pub(crate) fn save(app: &App, request: SaveRequest) -> anyhow::Result<ExitCode> {
@@ -89,7 +114,23 @@ fn save_bulk(app: &App, request: SaveRequest, name: &DestinationName) -> anyhow:
         tag: request.tag,
         ..curio_core::storage::ListArticles::default()
     };
-    let outcome = app.core.save_all_to_destination(&filter, name)?;
+    // The progress line is for a person watching: only on a terminal.
+    let mut progress = std::io::stderr()
+        .is_terminal()
+        .then(|| ProgressLine::new(std::io::stderr()));
+    let result =
+        app.core
+            .save_all_to_destination_with(&filter, name, &BulkSaveCancel::new(), |step| {
+                if let Some(line) = progress.as_mut() {
+                    line.update(step);
+                }
+            });
+    // Cleared before anything else is printed — the summary, or the error
+    // of a run that ended early.
+    if let Some(line) = progress.as_mut() {
+        line.finish();
+    }
+    let outcome = result?;
     if app.json {
         emit_json(&BulkSaveView {
             destination: name.to_string(),
@@ -97,10 +138,18 @@ fn save_bulk(app: &App, request: SaveRequest, name: &DestinationName) -> anyhow:
             updated: outcome.updated,
             unchanged: outcome.unchanged,
             total: outcome.total(),
+            failed: outcome.failed,
+            failures: outcome.failures.iter().map(Into::into).collect(),
         })?;
     } else {
+        warn_failed(&outcome.failures, outcome.failed);
+        let failed = if outcome.failed > 0 {
+            format!(", {} failed", outcome.failed)
+        } else {
+            String::new()
+        };
         println!(
-            "exported {} note(s) to {:?} — {} created, {} updated, {} unchanged",
+            "exported {} note(s) to {:?} — {} created, {} updated, {} unchanged{failed}",
             outcome.total(),
             name.as_str(),
             outcome.created,
@@ -108,7 +157,62 @@ fn save_bulk(app: &App, request: SaveRequest, name: &DestinationName) -> anyhow:
             outcome.unchanged
         );
     }
-    Ok(ExitCode::SUCCESS)
+    // A note that could not be exported is a failed run for a script,
+    // though everything else was exported.
+    Ok(if outcome.failed > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// Prints each article a bulk save skipped to stderr, so stdout stays the
+/// summary.
+fn warn_failed(failures: &[BulkSaveFailure], failed: u64) {
+    for failure in failures {
+        eprintln!("could not export {:?}: {}", failure.title, failure.error);
+    }
+    let unlisted = failed.saturating_sub(failures.len() as u64);
+    if unlisted > 0 {
+        eprintln!("…and {unlisted} more (each is logged with RUST_LOG=curio_core=debug)");
+    }
+}
+
+/// A bulk save's one-line progress, redrawn in place on a terminal.
+struct ProgressLine<W: std::io::Write> {
+    out: W,
+    drawn: bool,
+}
+
+impl<W: std::io::Write> ProgressLine<W> {
+    fn new(out: W) -> Self {
+        Self { out, drawn: false }
+    }
+
+    fn update(&mut self, step: BulkSaveProgress) {
+        let failed = if step.failed > 0 {
+            format!(", {} failed", step.failed)
+        } else {
+            String::new()
+        };
+        // A progress line that cannot be drawn is not worth failing the
+        // export over.
+        let _ = write!(
+            self.out,
+            "\r\x1b[2Kexporting… {}/{}{failed}",
+            step.done, step.total
+        );
+        let _ = self.out.flush();
+        self.drawn = true;
+    }
+
+    /// Clears the line, so the summary prints on a clean one.
+    fn finish(&mut self) {
+        if self.drawn {
+            let _ = write!(self.out, "\r\x1b[2K");
+            let _ = self.out.flush();
+        }
+    }
 }
 
 fn save_one(app: &App, id: &str, name: &DestinationName) -> anyhow::Result<ExitCode> {
@@ -324,4 +428,31 @@ pub(crate) fn opml(app: &App, command: OpmlCommand) -> anyhow::Result<ExitCode> 
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_progress_line_redraws_in_place_and_clears_itself() {
+        let mut line = ProgressLine::new(Vec::new());
+        line.finish();
+        assert!(line.out.is_empty(), "nothing drawn, nothing to clear");
+        line.update(BulkSaveProgress {
+            done: 200,
+            total: 450,
+            failed: 0,
+        });
+        line.update(BulkSaveProgress {
+            done: 400,
+            total: 450,
+            failed: 2,
+        });
+        line.finish();
+        assert_eq!(
+            String::from_utf8(line.out).unwrap_or_default(),
+            "\r\x1b[2Kexporting… 200/450\r\x1b[2Kexporting… 400/450, 2 failed\r\x1b[2K"
+        );
+    }
 }

@@ -147,7 +147,7 @@ const cases: { [K in CommandName]: ContractCase<K> } = {
                 feed_tag: null,
             },
         ],
-        response: { created: 2, updated: 1, unchanged: 3 },
+        response: { created: 2, updated: 1, unchanged: 3, failed: 0, failures: [] },
     },
     importOpml: { args: ['01JZ0000000000000000000000'], response: opmlImportOutcomeFixture() },
     importFile: {

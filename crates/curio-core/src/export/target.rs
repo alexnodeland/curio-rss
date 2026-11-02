@@ -1,20 +1,73 @@
 //! Where an export writes: the occupant of each candidate note path (a
 //! blank note reads as vacant), the target decision for recorded and
-//! unrecorded articles, the lock-free idempotency hit, and the
-//! deterministic candidate paths.
+//! unrecorded articles, the lock-free idempotency hit, the deterministic
+//! candidate paths, and the path index their collision checks consult.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use icu_normalizer::ComposingNormalizerBorrowed;
 
-use curio_types::{Checksum, CurioId, ManifestEntry};
+use curio_types::{Checksum, CurioId, ManifestEntry, ManifestV1};
 
 use super::slug::slugify;
 use super::write::contained_path;
-use super::{
-    ExportDisposition, ExportError, ExportInput, ExportOutcome, load_manifest,
-    manifest_conflict_copies, note,
-};
+use super::{ExportDisposition, ExportError, ExportInput, ExportOutcome, note};
+
+/// The manifest's note paths, NFC-normalized, mapped to the articles that
+/// claim them — the collision check of [`unique_note_path`] in one lookup
+/// instead of a scan of every entry (which made a bulk export quadratic).
+///
+/// Manifests written before slugs were normalized can hold an NFD spelling
+/// that names the same file on APFS/HFS+, so keys are normalized. A path
+/// normally has one claimant; a hand-edited manifest can give it several,
+/// and every one of them counts.
+#[derive(Debug, Default)]
+pub(super) struct PathIndex(BTreeMap<String, BTreeSet<CurioId>>);
+
+impl PathIndex {
+    /// Indexes every entry of `manifest`.
+    pub(super) fn build(manifest: &ManifestV1) -> Self {
+        let mut index = Self::default();
+        for (id, entry) in &manifest.notes {
+            index.insert(*id, &entry.path);
+        }
+        index
+    }
+
+    /// Whether the manifest gives `path` (already NFC) to an article other
+    /// than `id`.
+    fn held_by_other(&self, path: &str, id: CurioId) -> bool {
+        self.0
+            .get(path)
+            .is_some_and(|ids| ids.iter().any(|other| *other != id))
+    }
+
+    /// Moves `id`'s claim from `old` (its previous manifest path, if any)
+    /// to `new` — mirroring a manifest entry being (re-)recorded.
+    pub(super) fn record(&mut self, id: CurioId, old: Option<&str>, new: &str) {
+        if let Some(old) = old {
+            let key = normalize(old);
+            if let Some(ids) = self.0.get_mut(&key) {
+                ids.remove(&id);
+                if ids.is_empty() {
+                    self.0.remove(&key);
+                }
+            }
+        }
+        self.insert(id, new);
+    }
+
+    fn insert(&mut self, id: CurioId, path: &str) {
+        self.0.entry(normalize(path)).or_default().insert(id);
+    }
+}
+
+fn normalize(path: &str) -> String {
+    ComposingNormalizerBorrowed::new_nfc()
+        .normalize(path)
+        .into_owned()
+}
 /// What occupies a candidate note path.
 enum Occupant {
     /// Nothing — or a blank file (empty, whitespace-only, the NUL fill a
@@ -71,7 +124,7 @@ pub(super) enum NoteWrite {
 /// Decides the target for an article the manifest already records.
 pub(super) fn recorded_target(
     root: &Path,
-    manifest: &curio_types::ManifestV1,
+    paths: &PathIndex,
     input: &ExportInput,
     entry: &ManifestEntry,
     checksum: Checksum,
@@ -99,7 +152,7 @@ pub(super) fn recorded_target(
         // A stale manifest: the recorded path now holds another
         // article's note. Never touch it — move to a free path.
         Occupant::OtherArticle => {
-            return unrecorded_target(root, manifest, input, ExportDisposition::Updated);
+            return unrecorded_target(root, paths, input, ExportDisposition::Updated);
         }
     };
     Ok(Target {
@@ -125,11 +178,11 @@ pub(super) fn recorded_target(
 /// idempotently. Either way the manifest records the note again.
 pub(super) fn unrecorded_target(
     root: &Path,
-    manifest: &curio_types::ManifestV1,
+    paths: &PathIndex,
     input: &ExportInput,
     fresh: ExportDisposition,
 ) -> Result<Target, ExportError> {
-    let (rel_path, existing) = unique_note_path(root, manifest, input)?;
+    let (rel_path, existing) = unique_note_path(root, paths, input)?;
     let (disposition, write) = match existing {
         None => (fresh, Some(NoteWrite::Fresh)),
         Some(old) => (ExportDisposition::Updated, Some(NoteWrite::Replace(old))),
@@ -145,32 +198,41 @@ pub(super) fn unrecorded_target(
 /// nothing, so it needs no serialization (manifest and note are replaced
 /// by atomic renames — a concurrent reader sees one version or the
 /// other), and it keeps working where the lock cannot be taken (a
-/// read-only destination). Anything short of a clean hit — no entry, a
-/// changed checksum, a moved or missing note, pending conflict copies —
-/// is `None`, and the caller redoes the decision under the lock.
+/// read-only destination). `manifest` is the destination's manifest as
+/// read without the lock, with no conflict copies pending (the caller
+/// checks). Anything short of a clean hit — no entry, a changed checksum,
+/// a moved or missing note — is `None`, and the caller redoes the
+/// decision under the lock.
+///
+/// # Errors
+///
+/// The note at the recorded path cannot be read, or cannot be accounted
+/// for: even with an unchanged checksum, such a note is never reported as
+/// exported (see [`recorded_target`]).
 pub(super) fn unlocked_idempotency_hit(
     root: &Path,
+    manifest: &ManifestV1,
     input: &ExportInput,
     checksum: Checksum,
 ) -> Result<Option<ExportOutcome>, ExportError> {
-    if !root.is_dir() {
-        // The locked path reports the missing destination.
-        return Ok(None);
-    }
-    let manifest = load_manifest(root)?;
     let Some(entry) = manifest.notes.get(&input.curio_id) else {
         return Ok(None);
     };
-    if entry.checksum != checksum || !manifest_conflict_copies(root)?.is_empty() {
+    if entry.checksum != checksum {
         return Ok(None);
     }
-    let target = recorded_target(root, &manifest, input, entry, checksum)?;
-    let hit = target.write.is_none() && target.rel_path == entry.path;
-    Ok(hit.then_some(ExportOutcome {
-        path: target.rel_path,
-        checksum,
-        disposition: ExportDisposition::Unchanged,
-    }))
+    // Exactly the hit arm of `recorded_target`: only the article's own
+    // note at the recorded path is a hit; an unaccountable file there is
+    // the same refusal; anything else needs a write, under the lock.
+    match occupant(&contained_path(root, &entry.path)?, input.curio_id)? {
+        Occupant::Ours(_) => Ok(Some(ExportOutcome {
+            path: entry.path.clone(),
+            checksum,
+            disposition: ExportDisposition::Unchanged,
+        })),
+        Occupant::Unaccountable(err) => Err(err),
+        Occupant::Vacant | Occupant::OtherArticle => Ok(None),
+    }
 }
 
 /// `curio/<slug>.md`, deduplicated by suffixing a `curio_id` prefix, then
@@ -181,17 +243,15 @@ pub(super) fn unlocked_idempotency_hit(
 /// is not a Curio note at all. Returns the path plus, when it holds this
 /// article's note already (a lost manifest), that note's current bytes.
 ///
-/// Manifest paths compare NFC-normalized: manifests written before slugs
-/// were normalized can hold an NFD spelling that names the same file on
-/// APFS/HFS+. The disk check catches every other way two byte-distinct
-/// names can resolve to one file (case folding the slug's lowercasing
-/// does not cover, a manifest lost or rolled back by a sync tool).
+/// Manifest paths compare NFC-normalized (see [`PathIndex`]). The disk
+/// check catches every other way two byte-distinct names can resolve to
+/// one file (case folding the slug's lowercasing does not cover, a
+/// manifest lost or rolled back by a sync tool).
 fn unique_note_path(
     root: &Path,
-    manifest: &curio_types::ManifestV1,
+    paths: &PathIndex,
     input: &ExportInput,
 ) -> Result<(String, Option<String>), ExportError> {
-    let nfc = ComposingNormalizerBorrowed::new_nfc();
     let slug = slugify(&input.title, &input.curio_id);
     let id = input.curio_id.to_string();
     let short = id.get(..8).unwrap_or(&id);
@@ -200,14 +260,8 @@ fn unique_note_path(
         format!("curio/{slug}-{short}.md"),
         format!("curio/{slug}-{id}.md"),
     ];
-    let recorded_for_other = |path: &str| {
-        manifest
-            .notes
-            .iter()
-            .any(|(other, entry)| *other != input.curio_id && nfc.normalize(&entry.path) == path)
-    };
     for candidate in &candidates {
-        if recorded_for_other(candidate) {
+        if paths.held_by_other(candidate, input.curio_id) {
             continue;
         }
         match occupant(&contained_path(root, candidate)?, input.curio_id)? {
@@ -326,8 +380,37 @@ mod tests {
         ] {
             std::fs::write(dir.path().join("curio").join(name), "mine\n").unwrap();
         }
-        let err =
-            unique_note_path(dir.path(), &curio_types::ManifestV1::new(), &input).unwrap_err();
+        let err = unique_note_path(dir.path(), &PathIndex::default(), &input).unwrap_err();
         assert!(matches!(err, ExportError::PathsTaken { .. }), "{err}");
+    }
+
+    #[test]
+    fn the_path_index_follows_recorded_claims_across_spellings() {
+        let mut manifest = ManifestV1::new();
+        let legacy = CurioId::new();
+        manifest.notes.insert(
+            legacy,
+            ManifestEntry {
+                path: "curio/cafe\u{301}.md".to_owned(),
+                checksum: region_checksum("b"),
+                exported_at: curio_types::Timestamp::now(),
+            },
+        );
+        let mut index = PathIndex::build(&manifest);
+        let other = CurioId::new();
+        // An NFD manifest path claims the NFC candidate — but not from
+        // its own article.
+        assert!(index.held_by_other("curio/caf\u{e9}.md", other));
+        assert!(!index.held_by_other("curio/caf\u{e9}.md", legacy));
+        // Re-recording moves the claim: the old path is free again.
+        index.record(legacy, Some("curio/cafe\u{301}.md"), "curio/new.md");
+        assert!(!index.held_by_other("curio/caf\u{e9}.md", other));
+        assert!(index.held_by_other("curio/new.md", other));
+        // Two claimants of one path both count, and leave one by one.
+        index.record(other, None, "curio/new.md");
+        assert!(index.held_by_other("curio/new.md", CurioId::new()));
+        index.record(legacy, Some("curio/new.md"), "curio/elsewhere.md");
+        assert!(index.held_by_other("curio/new.md", legacy));
+        assert!(!index.held_by_other("curio/new.md", other));
     }
 }

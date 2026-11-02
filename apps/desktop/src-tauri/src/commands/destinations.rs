@@ -134,7 +134,19 @@ fn promote_all_impl(
     filter: ListArticlesDto,
 ) -> Result<BulkSaveOutcomeDto, CommandError> {
     let name: DestinationName = destination.parse()?;
-    Ok(core.save_all_to_destination(&filter.into(), &name)?.into())
+    let outcome = core.save_all_to_destination(&filter.into(), &name)?;
+    // The webview names the skipped articles, never the engine's message:
+    // that goes to the log, for a bug report.
+    for failure in &outcome.failures {
+        tracing::warn!(curio_id = %failure.curio_id, error = %failure.error, "export all skipped an article");
+    }
+    if outcome.failed > outcome.failures.len() as u64 {
+        tracing::warn!(
+            unlisted = outcome.failed - outcome.failures.len() as u64,
+            "export all skipped more articles than it lists"
+        );
+    }
+    Ok(outcome.into())
 }
 
 #[cfg(test)]
@@ -238,6 +250,37 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::UnknownDestination);
+    }
+
+    #[test]
+    fn promote_all_reports_the_articles_it_could_not_export() {
+        let (dir, core) = temp_core();
+        let id = seed_article(&core, "garbled");
+        seed_article(&core, "fine");
+        add_destination_impl(&core, "notes", dir.path().join("notes")).unwrap();
+        let note = promote_article_impl(&core, id, "notes").unwrap().path;
+        std::fs::write(dir.path().join("notes").join(note), "not a note any more\n").unwrap();
+
+        let outcome = promote_all_impl(
+            &core,
+            "notes",
+            ListArticlesDto {
+                feed_id: None,
+                before: None,
+                limit: 0,
+                read: None,
+                starred: None,
+                read_later: None,
+                archived: None,
+                tag: None,
+                feed_tag: None,
+            },
+        )
+        .unwrap();
+        assert_eq!((outcome.created, outcome.failed), (1, 1));
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].article_id, id);
+        assert_eq!(outcome.failures[0].title, "garbled");
     }
 
     #[test]

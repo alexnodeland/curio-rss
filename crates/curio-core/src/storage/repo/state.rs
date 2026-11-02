@@ -349,6 +349,33 @@ impl Storage {
         self.stage_snapshot_event(EventPayload::ArticleUpdated(snapshot))
     }
 
+    /// Stages the `article.saved` / `article.updated` events of a whole
+    /// export batch in one transaction — all of them or none. Empty is a
+    /// no-op that touches nothing.
+    ///
+    /// # Errors
+    ///
+    /// Database or serialization errors.
+    pub fn record_article_exports(
+        &self,
+        payloads: Vec<EventPayload>,
+    ) -> Result<Vec<EventEnvelope>, StorageError> {
+        if payloads.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.write(move |conn| {
+            let tx = begin_write(conn)?;
+            let mut envelopes = Vec::with_capacity(payloads.len());
+            for payload in payloads {
+                let envelope = EventEnvelope::new(payload);
+                insert_intent(&tx, &envelope)?;
+                envelopes.push(envelope);
+            }
+            tx.commit()?;
+            Ok(envelopes)
+        })
+    }
+
     fn stage_snapshot_event(&self, payload: EventPayload) -> Result<EventEnvelope, StorageError> {
         self.write(move |conn| {
             let tx = begin_write(conn)?;

@@ -122,6 +122,49 @@ pub(super) fn list_articles_query(
     params: &ListArticles,
     projection: Projection,
 ) -> (String, Vec<Box<dyn ToSql>>) {
+    let cols = match projection {
+        Projection::Full => article_cols_prefixed("a"),
+        Projection::Listed => listed_cols(),
+    };
+    let Filtered {
+        from,
+        key,
+        filter,
+        mut binds,
+    } = filtered_articles(params, projection == Projection::Listed);
+    let sql = format!("SELECT {cols} FROM {from} WHERE {filter} ORDER BY {key} DESC LIMIT ?");
+    binds.push(Box::new(params.limit));
+    (sql, binds)
+}
+
+/// Compiles [`ListArticles`] into a `COUNT(*)` of every article its
+/// filters (and `before` cursor) keep across every page — `limit` plays no
+/// part. The same `FROM … WHERE` as [`list_articles_query`]'s whole
+/// articles, so the count is exactly what paging through it walks.
+pub(super) fn count_articles_query(params: &ListArticles) -> (String, Vec<Box<dyn ToSql>>) {
+    let Filtered {
+        from,
+        filter,
+        binds,
+        ..
+    } = filtered_articles(params, false);
+    (format!("SELECT COUNT(*) FROM {from} WHERE {filter}"), binds)
+}
+
+/// The `FROM` and `WHERE` a [`ListArticles`] compiles to, its binds, and
+/// the keyset column the list orders and pages by.
+struct Filtered {
+    from: String,
+    key: &'static str,
+    filter: String,
+    binds: Vec<Box<dyn ToSql>>,
+}
+
+/// The shared half of [`list_articles_query`] and
+/// [`count_articles_query`]: picks the query shape (see the former) and
+/// builds the filter clauses. `listed` says the select list needs the
+/// state flags, so `article_state` is joined even with no state filter.
+fn filtered_articles(params: &ListArticles, listed: bool) -> Filtered {
     let filter = params.filter();
     let state_filters = filter.state_flags();
     let membership = MEMBERSHIP_INDEXES.iter().find(|(column, _)| {
@@ -129,12 +172,7 @@ pub(super) fn list_articles_query(
             .iter()
             .any(|(filtered, want)| filtered == column && *want == Some(true))
     });
-    let cols = match projection {
-        Projection::Full => article_cols_prefixed("a"),
-        Projection::Listed => listed_cols(),
-    };
-    let needs_state =
-        projection == Projection::Listed || state_filters.iter().any(|(_, want)| want.is_some());
+    let needs_state = listed || state_filters.iter().any(|(_, want)| want.is_some());
     let (from, key) = match membership {
         Some((_, index)) => (
             format!(
@@ -148,7 +186,6 @@ pub(super) fn list_articles_query(
         ),
         None => ("articles a".to_owned(), "a.id"),
     };
-    let mut sql = format!("SELECT {cols} FROM {from}");
     let mut clauses = vec![format!("{key} < ?")];
     let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(params.before.map_or(i64::MAX, |id| id.0))];
     if let Some((column, _)) = membership {
@@ -162,13 +199,12 @@ pub(super) fn list_articles_query(
         &mut clauses,
         &mut binds,
     );
-    sql.push_str(" WHERE ");
-    sql.push_str(&clauses.join(" AND "));
-    sql.push_str(" ORDER BY ");
-    sql.push_str(key);
-    sql.push_str(" DESC LIMIT ?");
-    binds.push(Box::new(params.limit));
-    (sql, binds)
+    Filtered {
+        from,
+        key,
+        filter: clauses.join(" AND "),
+        binds,
+    }
 }
 
 /// The per-feed unread counts: one `feed_unread` row per feed (key 0 =

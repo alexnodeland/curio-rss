@@ -303,4 +303,21 @@ describe('dev mock IPC', () => {
             expect(recorded.articles).toEqual([{ feed_id: 3, flags: null }]);
         });
     });
+
+    describe('promote_all', () => {
+        afterEach(() => {
+            window.history.replaceState(null, '', '/');
+        });
+
+        it('exports cleanly, or previews skipped articles with ?export=partial', async () => {
+            await installMock();
+            const clean = ok(await commands.promoteAll('vault', listParams()));
+            expect(clean).toMatchObject({ failed: 0, failures: [] });
+
+            window.history.replaceState(null, '', '/?export=partial');
+            const partial = ok(await commands.promoteAll('vault', listParams()));
+            expect(partial.failed).toBe(partial.failures.length);
+            expect(partial.failures[0]?.title).toBeTruthy();
+        });
+    });
 });

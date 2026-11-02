@@ -243,6 +243,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'destinations.exportAll': 'Eksportuj wszystko',
     'destinations.exportAll.running': 'Eksportowanie…',
     'destinations.exportAll.done': 'Wyeksportowano {written} notatek; {unchanged} bez zmian',
+    'destinations.exportAll.partial':
+        'Wyeksportowano {written} notatek; {unchanged} bez zmian; nie udało się wyeksportować {failed} (pierwsza: „{title}”)',
     'destinations.needNameAndFolder': 'Najpierw wpisz nazwę i wybierz folder.',
     'toast.promote.saved': 'Zapisano w {name}',
     'toast.linkCopied': 'Skopiowano link',

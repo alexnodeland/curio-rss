@@ -463,11 +463,25 @@ rename. Export is idempotent on `(curio_id, checksum)`:
   with a parse error instead of claiming it is intact
 
 Bulk saves (`curio save --all --dest vault`, or a filter such as
-`--read-later`) run every article through the same steps and stop at the
-first one that fails — including a note that no longer parses, even if
-its content has not changed. Notes saved before it stay saved; repair or
-delete the offending note and re-run (already-exported notes come back
-`unchanged`).
+`--read-later`) run every article through the same steps, 200 notes at a
+time: each batch writes its notes, records their events, then updates the
+manifest once — so exporting a large library costs one manifest write per
+batch, not one per note, with the same crash safety. On a terminal a
+progress line (`exporting… 400/5000`) is redrawn on stderr as each batch
+lands.
+
+An article that fails — including a note that no longer parses, even if
+its content has not changed — is skipped, and the run carries on with the
+rest. Each one is named on stderr (`could not export "…": …`; the first
+100, then a count — `RUST_LOG=curio_core=debug` logs every one), the summary line ends with `N failed`, and the
+command exits with status 1. With `--json` the document carries `failed`
+and a `failures` list (`curio_id`, `title`, `error`). Repair or delete
+the offending note and re-run: already-exported notes come back
+`unchanged`. A destination that is missing (checked again before every
+batch, so a vault unmounted mid-run is never refilled at its old path),
+or whose manifest no longer parses, still stops the run with an error, as
+does a failure of the profile database — every later note would fail the
+same way; batches already written stay exported.
 
 Notes land at `curio/<slug>.md`, where the slug is the title lowercased,
 NFC-normalized and dash-separated, capped at 100 bytes so the name fits

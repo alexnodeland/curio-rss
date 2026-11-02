@@ -6,14 +6,18 @@
  * that live in the database that didn't open.
  */
 import { localeStore } from '$lib/i18n';
-import { settingsStore } from '$lib/state/settings.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
+import { BOOT_MIRROR_STORAGE_KEY, settingsStore } from '$lib/state/settings.svelte';
 import { startupStore } from '$lib/state/startup.svelte';
+import { typographyStore } from '$lib/state/typography.svelte';
 import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Layout from '../routes/+layout.svelte';
 import { type IpcHarness, flushIpc, installIpcHarness, startupFailureFixture } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 const reader = createRawSnippet(() => ({
     render: () => '<div data-testid="reader">reader</div>',
@@ -28,6 +32,11 @@ describe('root layout startup gate', () => {
         startupStore.reset();
         windowChromeStore.reset();
         localeStore.reset();
+        settingsStore.reset();
+        resetUiStores();
+        layoutStore.sidebarWidth = 280;
+        layoutStore.listWidth = 360;
+        window.localStorage.clear();
         harness?.teardown();
         harness = null;
     });
@@ -75,6 +84,31 @@ describe('root layout startup gate', () => {
         expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
         expect(load).toHaveBeenCalledOnce();
         expect(fromSystem).not.toHaveBeenCalled();
+    });
+
+    it('boots the shell at the mirrored layout before settings answer (no shift)', async () => {
+        window.localStorage.setItem(
+            BOOT_MIRROR_STORAGE_KEY,
+            JSON.stringify({
+                'ui.panes.sidebar-width': '320',
+                'ui.panes.list-width': '480',
+                'ui.reading.density': 'compact',
+                'ui.typography.font-size': '19',
+                'ui.locale': 'de',
+            }),
+        );
+        harness = installIpcHarness({ get_startup_failure: null });
+        // The backend never answers: everything the shell shows comes from the mirror.
+        vi.spyOn(settingsStore, 'load').mockReturnValue(new Promise(() => {}));
+        render(Layout, { children: reader });
+        await flushIpc();
+
+        expect(screen.getByTestId('reader')).toBeTruthy();
+        expect(layoutStore.sidebarWidth).toBe(320);
+        expect(layoutStore.listWidth).toBe(480);
+        expect(prefsStore.readingDensity).toBe('compact');
+        expect(typographyStore.fontSize).toBe(19);
+        expect(localeStore.active).toBe('de');
     });
 
     it('mounts nothing while the gate check is still pending', () => {

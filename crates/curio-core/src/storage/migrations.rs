@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, TransactionBehavior};
 
 use super::open::{OpenError, classifier};
-use super::{StorageError, backup};
+use super::{StorageError, backup, fts};
 
 /// One embedded migration step.
 #[derive(Debug, Clone, Copy)]
@@ -92,6 +92,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 15,
         sql: include_str!("migrations/0015_published_order.sql"),
     },
+    Migration {
+        version: 16,
+        sql: include_str!("migrations/0016_fts_cjk_segments.sql"),
+    },
 ];
 
 /// The schema version this build writes and expects.
@@ -159,6 +163,9 @@ fn apply_set(
         },
         typed => typed,
     };
+    // The steps call Curio's SQL functions (0016 rebuilds the search
+    // index through the CJK segmenter), whoever opened `conn`.
+    fts::register_functions(conn).map_err(|e| failed(e.into()))?;
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| failed(e.into()))?;
@@ -290,6 +297,45 @@ mod tests {
         apply(&mut conn, &path).unwrap();
         assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(article_count(&path), 1);
+    }
+
+    #[test]
+    fn migration_16_reindexes_existing_cjk_text_for_substring_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("curio.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            apply_set(&mut conn, &path, &MIGRATIONS[..15]).unwrap();
+            conn.execute_batch(
+                "INSERT INTO articles (curio_id, dedupe_key, title, source_url, saved_at,
+                                       modified_at, content_text)
+                 VALUES ('0197b2c4-8f3e-7cc1-a5d2-3e9f10aa4b6d', 'm:1', '東京都の天気',
+                         'https://a.example/1', '2026-07-01T00:00:00.000Z',
+                         '2026-07-01T00:00:00.000Z', '明日は晴れ');",
+            )
+            .unwrap();
+        }
+        // A plain connection, as a head opens it: the upgrade registers the
+        // segmenter its rebuild needs by itself.
+        let mut conn = Connection::open(&path).unwrap();
+        let hits = |conn: &Connection, expr: &str| -> i64 {
+            conn.query_row(
+                "SELECT count(*) FROM articles_fts WHERE articles_fts MATCH ?1",
+                [expr],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(hits(&conn, "\"天気\""), 0, "v15: one token per run");
+        apply(&mut conn, &path).unwrap();
+        assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
+        assert_eq!(hits(&conn, "\"天気\""), 1);
+        assert_eq!(hits(&conn, "\"晴れ\""), 1);
+        conn.execute(
+            "INSERT INTO articles_fts(articles_fts, rank) VALUES ('integrity-check', 1)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

@@ -76,7 +76,8 @@ regex = "1"
 # otherwise hand back an unparseable body). The policed client's body cap
 # counts decoded bytes, so a compression bomb still trips it.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "native-tls-vendored", "gzip", "brotli", "deflate"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+# `functions`: the CJK segmenter the search index's triggers call (#138).
+rusqlite = { version = "0.39", features = ["bundled", "functions"] }
 # Safe statfs(2) (Unix) for the network-filesystem guard. Already in the tree
 # via fs4 and tempfile.
 rustix = { version = "1.1", features = ["fs"] }

@@ -49,6 +49,7 @@ pub(crate) fn open_reader(path: &Path) -> Result<Connection, StorageError> {
     conn.busy_timeout(super::BUSY_TIMEOUT)?;
     // Defense in depth on top of the read-only open flag.
     conn.pragma_update(None, "query_only", true)?;
+    super::fts::register_functions(&conn)?;
     Ok(conn)
 }
 

@@ -252,6 +252,10 @@ impl ArticleFilter {
 /// - `a OR b` — either (upper-case `OR` only; `or` is a plain word). `OR`
 ///   binds tighter than the implicit AND: `rust OR go tutorial` is
 ///   `(rust OR go) AND tutorial`.
+/// - Chinese, Japanese and Korean text, written without spaces between
+///   words, matches anywhere inside a run: `天気` finds `東京都の天気`, and
+///   a single character finds every occurrence (the index stores CJK runs
+///   as bigrams — see `storage::fts`).
 ///
 /// Every other FTS5 operator (`AND`, `NOT`, `NEAR`, `^`, `title:` …) is
 /// matched literally. Results rank by BM25 with a title hit weighted above

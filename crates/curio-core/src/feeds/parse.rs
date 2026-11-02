@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use curio_types::Timestamp;
-use feed_rs::model::{Entry, Feed, Link, MediaObject};
+use feed_rs::model::{Entry, Feed, MediaObject};
 use url::Url;
 
 use crate::fetch::FetchResponse;
@@ -13,13 +13,15 @@ use crate::fetch::decode::feed_to_utf8;
 use super::dedupe_key;
 use super::image::feed_image;
 use super::keys::unique_keys;
+use super::link::{best_link, web_link};
 
 /// A feed's own metadata, as parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ParsedFeedMeta {
     /// Feed title.
     pub title: Option<String>,
-    /// The feed's website.
+    /// The feed's website: `None` or an absolute `http(s)` URL (see
+    /// [`ParsedEntry::link`] for the screen).
     pub site_url: Option<String>,
     /// Feed self-description.
     pub description: Option<String>,
@@ -45,8 +47,22 @@ pub struct ParsedEntry {
     pub guid: Option<String>,
     /// Entry title (`(untitled)` when the source omitted it).
     pub title: String,
-    /// Canonical entry URL, if any.
+    /// Canonical entry URL: `None` or an absolute `http(s)` URL with a host
+    /// and no userinfo — the policed client's own screen
+    /// ([`crate::fetch::screen_url`]), which the opener's scheme gate passes
+    /// too. A relative href was already resolved against `xml:base`, else
+    /// the feed URL, while parsing. Any other declared link (`javascript:`,
+    /// a custom scheme, a relative href with no base) is dropped, so the
+    /// entry takes the link-less path: the feed URL as its source and
+    /// content base. It never becomes the stored `source_url`, the reader's
+    /// source link or the base relative content resolves against.
     pub link: Option<String>,
+    /// The declared link before that screen, exactly as the feed gave it:
+    /// the identity the dedupe chain's link tiers are built from. Keying on
+    /// it keeps every key stable across the screen's introduction (#262) —
+    /// a `link:foo://…` row stored before it keeps matching its item — and
+    /// keeps items whose only link is a custom-scheme one apart.
+    pub(crate) key_link: Option<String>,
     /// First author name, if any.
     pub author: Option<String>,
     /// Publication time: the source's `published`, else its `updated`
@@ -140,7 +156,7 @@ fn parse_utf8_feed(bytes: &[u8], base_uri: Option<&str>) -> Result<ParsedFeed, F
 fn normalize(feed: Feed, base: Option<&Url>) -> ParsedFeed {
     let meta = ParsedFeedMeta {
         title: feed.title.map(|t| t.content),
-        site_url: best_link(&feed.links).map(ToOwned::to_owned),
+        site_url: best_link(&feed.links).and_then(web_link),
         description: feed.description.map(|t| t.content),
         refresh_hint: feed
             .ttl
@@ -167,7 +183,8 @@ fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
         .map(|t| t.content)
         .filter(|t| !t.trim().is_empty())
         .unwrap_or_else(|| "(untitled)".to_owned());
-    let link = best_link(&entry.links).map(ToOwned::to_owned);
+    let key_link = best_link(&entry.links).map(ToOwned::to_owned);
+    let link = key_link.as_deref().and_then(web_link);
     let author = entry
         .authors
         .into_iter()
@@ -199,12 +216,18 @@ fn normalize_entry(entry: Entry, feed_base: Option<&Url>) -> ParsedEntry {
     // The hash tier keeps hashing the source's own `published`: folding the
     // `updated` fallback in would re-key every date-less, link-less item —
     // once now, and again on each edit — duplicating it in the list.
-    let dedupe_key = dedupe_key(guid.as_deref(), link.as_deref(), &title, source_published);
+    let dedupe_key = dedupe_key(
+        guid.as_deref(),
+        key_link.as_deref(),
+        &title,
+        source_published,
+    );
     ParsedEntry {
         dedupe_key,
         guid,
         title,
         link,
+        key_link,
         author,
         published,
         updated,
@@ -239,16 +262,6 @@ fn escape_html_text(text: &str) -> String {
         }
     }
     out
-}
-
-/// The entry/site link: prefer an explicit `alternate` (or rel-less)
-/// link over `self`/`enclosure`/anything else.
-fn best_link(links: &[Link]) -> Option<&str> {
-    links
-        .iter()
-        .find(|link| link.rel.is_none() || link.rel.as_deref() == Some("alternate"))
-        .or_else(|| links.first())
-        .map(|link| link.href.as_str())
 }
 
 /// The syndication module's namespace.

@@ -7,7 +7,8 @@
 # webview-free). The frontend rewrite (WP2) added its own npm jobs:
 # desktop-lint (biome + eslint + svelte-check, zero warnings),
 # desktop-test (vitest + mockIPC with the 70% state/utils coverage
-# floor), and frontend-bans (the {@html} + raw-invoke greps).
+# floor), and frontend-bans (the {@html}, raw-invoke and raw
+# font-weight greps).
 # Two jobs widen the toolchain/OS axis: test-cross-os runs the headless
 # engine + CLI suite on macOS and Windows, and msrv builds every crate on
 # its declared rust-version (everything else floats on stable).
@@ -278,7 +279,8 @@ jobs:
 
   frontend-bans:
     # {@html} may appear only in the sanitized-render component; raw
-    # @tauri-apps/api/core imports only in the generated bindings.
+    # @tauri-apps/api/core imports only in the generated bindings; component
+    # font weights come from the --weight-* tokens, never a raw number.
     # Local mirror: `just frontend-bans` (also a lefthook pre-commit step).
     name: frontend bans ({@html} + raw invoke)
     runs-on: ubuntu-latest

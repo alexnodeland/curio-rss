@@ -1,6 +1,6 @@
 //! Per-article state: star, read-later, archive, read, opened, tags.
 
-use crate::model::{ArticleId, FeedId};
+use crate::model::{ArticleFlag, ArticleId, FeedId};
 
 use super::{CoreError, CoreHandle};
 
@@ -80,6 +80,25 @@ impl CoreHandle {
     /// Storage errors.
     pub fn mark_read_many(&self, ids: &[ArticleId], read: bool) -> Result<u64, CoreError> {
         Ok(self.storage.mark_read_many(ids, read)?)
+    }
+
+    /// Sets one flag on many articles at once — one transaction, staging
+    /// each changed article's event (none for read), then one emit. Unknown
+    /// ids are skipped; returns the ids that changed, which an undo hands
+    /// back with the opposite `value`.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors (nothing is written on error).
+    pub fn set_flag_many(
+        &self,
+        ids: &[ArticleId],
+        flag: ArticleFlag,
+        value: bool,
+    ) -> Result<Vec<ArticleId>, CoreError> {
+        let changed = self.storage.set_flag_many(ids, flag, value)?;
+        self.emit_if(flag != ArticleFlag::Read && !changed.is_empty());
+        Ok(changed)
     }
 
     /// Records an open-for-reading; emits `article.opened`.

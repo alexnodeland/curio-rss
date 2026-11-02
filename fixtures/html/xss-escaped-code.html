@@ -1,0 +1,28 @@
+<article>
+<h1>Escaped markup inside code</h1>
+<p>Every payload below is escaped text in the HTML, so it passes the sanitizer on purpose. Exported, it must stay code: never live raw HTML (#245).</p>
+<pre>&lt;img src=x onerror=alert(1)&gt;</pre>
+<pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre>
+<code>&lt;script&gt;alert(2)&lt;/script&gt;<p>A</p></code>
+<p>A span across a blank line: <code>first
+
+&lt;img src=x onerror=alert(3)&gt;</code> and a list marker: <code>x
+- &lt;svg onload=alert(4)&gt;</code>.</p>
+<p>A carriage return by reference: <code>x&#13;&#13;&lt;iframe src=javascript:alert(5)&gt;</code></p>
+<pre>```
+&lt;script&gt;alert(6)&lt;/script&gt;
+````
+&lt;img src=x onerror=alert(7)&gt;</pre>
+<p>Adjacent spans: <code>a</code><span><code>``&lt;script&gt;alert(8)&lt;/script&gt;</code></span></p>
+<p>Link syntax in code: <code>[x](javascript:alert(9))</code></p>
+<blockquote><pre>&lt;script&gt;alert(10)&lt;/script&gt;</pre></blockquote>
+<ul><li>step one<pre>&lt;img src=x onerror=alert(11)&gt;
+second line</pre></li></ul>
+<em><pre>&lt;script&gt;alert(12)&lt;/script&gt;</pre></em>
+<h2>A heading <pre>&lt;script&gt;alert(13)&lt;/script&gt;</pre></h2>
+<a href="https://example.com/code"><pre>&lt;img src=x onerror=alert(14)&gt;</pre></a>
+<table><tr><th>cell</th></tr><tr><td><pre>&lt;script&gt;alert(15)&lt;/script&gt;|&lt;b&gt;</pre></td></tr></table>
+<pre class="language-html"><code>&lt;div onclick="alert(16)"&gt;&lt;/div&gt;</code></pre>
+<pre>&lt;a href="javascript:alert(17)"&gt;x&lt;/a&gt;<br>&lt;script&gt;alert(18)&lt;/script&gt;</pre>
+<p>Legitimate <strong>content</strong> around the payloads survives.</p>
+</article>

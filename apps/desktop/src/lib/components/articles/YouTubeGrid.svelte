@@ -14,11 +14,14 @@ import Icon from '$components/common/Icon.svelte';
 import VideoPoster from '$components/common/VideoPoster.svelte';
 import { youTubeVideoId } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
+import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { listDateLabel } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
+import ErrorState from '$components/common/ErrorState.svelte';
+import ListEmpty from './ListEmpty.svelte';
 import { untrack } from 'svelte';
 
 untrack(() => feedsStore.prime());
@@ -51,15 +54,15 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 
 <div class="yt-scroll" onscroll={onScroll}>
     {#if list.error !== null}
-        <p class="status error" role="alert">{listError}</p>
+        <ErrorState message={listError} busy={list.loading} onretry={() => void list.query.refetch()} />
     {:else if !list.loaded}
         <p class="status">{t('list.loading')}</p>
     {:else if list.items.length === 0}
-        <p class="status">{t('list.empty')}</p>
+        <ListEmpty />
     {:else}
         <div class="grid" role="listbox" aria-label={t('list.label')}>
             {#each list.items as article (article.id)}
-                {@const date = listDateLabel(article)}
+                {@const date = listDateLabel(article, dayClock.now)}
                 <button
                     class="card"
                     class:selected={article.id === selectionStore.selectedArticleId}
@@ -102,6 +105,8 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 <style>
     .yt-scroll {
         flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
         min-height: 0;
         overflow-y: auto;
     }
@@ -117,9 +122,6 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
         padding: var(--space-4);
         font-size: var(--text-md);
         color: var(--fg-muted);
-    }
-    .status.error {
-        color: var(--error-text);
     }
     .status.subtle {
         text-align: center;
@@ -191,7 +193,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     .title {
         font-family: var(--font-family);
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         line-height: 1.3;
         /* Reserve both clamp lines so a 1-line title occupies the same height as
            a 2-line one — otherwise the channel/date row rides up and the grid's
@@ -203,7 +205,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
 
     .card.read .title {
         color: var(--fg-muted);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .sub {
@@ -228,7 +230,7 @@ function onScroll(event: Event & { currentTarget: HTMLElement }): void {
     .channel {
         flex-shrink: 1000;
         min-width: 1.5em; /* never collapses to a bare dot */
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-muted);
     }
 

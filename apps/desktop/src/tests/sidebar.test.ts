@@ -4,6 +4,7 @@
  * views (all / starred / read later) over those same filters.
  */
 import Sidebar from '$components/sidebar/Sidebar.svelte';
+import { localeStore } from '$lib/i18n';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { feedDnd } from '$lib/state/feed-dnd.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
@@ -210,6 +211,34 @@ describe('Sidebar — folder tree', () => {
         // Tech's roll-up = Rust (4) + SQLite (6); All shows the backend total.
         expect(getByText('10')).toBeTruthy();
         expect(getByText('15')).toBeTruthy();
+    });
+
+    it('writes every unread badge in the active locale’s number format', async () => {
+        harness = installIpcHarness({
+            list_feeds: [
+                feedFixture({ id: 1, title: 'Rust Blog', tags: ['Tech'] }),
+                feedFixture({ id: 2, title: 'Loose', url: 'https://loose.example/feed', tags: [] }),
+            ],
+            get_unread_counts: unreadCountsFixture({
+                total: 12_345,
+                by_feed: [
+                    [1, 2_500],
+                    [2, 9_845],
+                ],
+            }),
+        });
+        localeStore.active = 'de';
+        try {
+            const { getAllByText, getByText } = render(Sidebar);
+            await flushIpc();
+
+            // The feed badge and its folder's roll-up both read 2.500.
+            expect(getAllByText('2.500')).toHaveLength(2);
+            expect(getByText('9.845')).toBeTruthy(); // the ungrouped feed's badge
+            expect(getByText('12.345')).toBeTruthy(); // the total on All articles
+        } finally {
+            localeStore.reset();
+        }
     });
 
     it('the disclosure collapses a folder, hiding its subtree but not ungrouped feeds', async () => {

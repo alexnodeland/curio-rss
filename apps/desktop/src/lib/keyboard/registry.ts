@@ -6,8 +6,10 @@
  * prefix (`'Shift+Space'`) — a shifted printable key is already its own
  * character, so `Shift+R` is just `'R'` and `?` is `'?'` (a letter's case
  * is read from Shift, so Caps Lock never turns `r` into `R`). Ctrl/alt/meta
- * chords are deliberately absent from the v1 map (they belong to the native
- * menu). Two-key g-chords (`g` then `a`) ride a pending state with a timeout.
+ * chords mostly belong to the native menu; the one exception is a
+ * {@link ShortcutDef.commandKey} (⌘K on macOS, Ctrl+K elsewhere), which the
+ * shell matches ahead of the typing guard so it works from a text field too.
+ * Two-key g-chords (`g` then `a`) ride a pending state with a timeout.
  *
  * Global keys go through the shell's window matcher. Pane keys
  * ({@link ShortcutDef.paneKeys}) are the ARIA-pattern keys — the listbox's
@@ -18,12 +20,15 @@
  * actions) — the registry knows nothing about what a shortcut does.
  */
 import type { MessageKey } from '$lib/i18n';
+import { hasCommandModifier, isApplePlatform } from '$lib/utils/platform';
 
 /** Stable action ids — the currency between the registry and the shell. */
 export type ShortcutId =
     | 'nav.nextArticle'
     | 'nav.previousArticle'
     | 'nav.nextUnread'
+    | 'nav.extendDown'
+    | 'nav.extendUp'
     | 'nav.focusReader'
     | 'nav.focusList'
     | 'reader.pageDown'
@@ -43,8 +48,11 @@ export type ShortcutId =
     | 'view.readLater'
     | 'view.archived'
     | 'view.feeds'
+    | 'view.toggleSidebar'
+    | 'view.toggleFocusMode'
     | 'app.addFeed'
     | 'app.settings'
+    | 'app.commandPalette'
     | 'help.toggle';
 
 export type ShortcutCategory = 'navigation' | 'actions' | 'views' | 'app';
@@ -68,6 +76,13 @@ export interface ShortcutDef {
      * reach the global matcher.
      */
     readonly paneKeys?: { readonly scope: PaneScope; readonly keys: readonly string[] };
+    /**
+     * A letter pressed with the platform's command modifier (⌘ on macOS, Ctrl
+     * elsewhere) — `'k'` is ⌘K. Resolved by {@link commandShortcut} from
+     * anywhere, a text field included; the native menu carries the same
+     * accelerator.
+     */
+    readonly commandKey?: string;
     /** i18n key for the help overlay's description column. */
     readonly description: MessageKey;
     /** Help-overlay grouping. */
@@ -88,6 +103,20 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         keys: ['k'],
         paneKeys: { scope: 'list', keys: ['ArrowUp'] },
         description: 'shortcut.previousArticle',
+        category: 'navigation',
+    },
+    {
+        id: 'nav.extendDown',
+        keys: ['J'],
+        paneKeys: { scope: 'list', keys: ['Shift+ArrowDown'] },
+        description: 'shortcut.extendDown',
+        category: 'navigation',
+    },
+    {
+        id: 'nav.extendUp',
+        keys: ['K'],
+        paneKeys: { scope: 'list', keys: ['Shift+ArrowUp'] },
+        description: 'shortcut.extendUp',
         category: 'navigation',
     },
     {
@@ -177,8 +206,27 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
         category: 'views',
     },
     { id: 'view.feeds', keys: ['g', 'f'], description: 'shortcut.viewFeeds', category: 'views' },
+    {
+        id: 'view.toggleSidebar',
+        keys: ['\\'],
+        description: 'shortcut.toggleSidebar',
+        category: 'views',
+    },
+    {
+        id: 'view.toggleFocusMode',
+        keys: ['f'],
+        description: 'shortcut.toggleFocusMode',
+        category: 'views',
+    },
     { id: 'app.addFeed', keys: ['a'], description: 'shortcut.addFeed', category: 'app' },
     { id: 'app.settings', keys: [','], description: 'shortcut.settings', category: 'app' },
+    {
+        id: 'app.commandPalette',
+        keys: [],
+        commandKey: 'k',
+        description: 'shortcut.commandPalette',
+        category: 'app',
+    },
     { id: 'help.toggle', keys: ['?'], description: 'shortcut.help', category: 'app' },
 ] as const;
 
@@ -312,6 +360,49 @@ export function paneShortcut(scope: PaneScope, key: string): ShortcutId | null {
 }
 
 /**
+ * Resolves a command-modifier chord (⌘K on macOS, Ctrl+K elsewhere — see
+ * {@link ShortcutDef.commandKey}) to its action, or `null`. Any other
+ * modifier held alongside (Shift, Option/Alt, or the other of ⌘/Ctrl) makes
+ * it a different chord, which stays the platform's.
+ */
+export function commandShortcut(
+    event: KeyboardEvent,
+    apple: boolean = isApplePlatform(),
+): ShortcutId | null {
+    // Exactly the command modifier: ⌘ and Ctrl both held is neither chord.
+    const both = event.metaKey && event.ctrlKey;
+    if (!hasCommandModifier(event, apple) || both || event.altKey || event.shiftKey) {
+        return null;
+    }
+    const key = event.key.toLowerCase();
+    return SHORTCUTS.find((shortcut) => shortcut.commandKey === key)?.id ?? null;
+}
+
+/**
+ * The layout toggles: they change the frame, not a pane's content, so they
+ * stay live while the sidebar tree owns the keyboard (where every other
+ * global key is swallowed) — `\` can hide the very sidebar it is pressed in.
+ */
+const FRAME_SHORTCUTS: ReadonlySet<ShortcutId> = new Set<ShortcutId>([
+    'view.toggleSidebar',
+    'view.toggleFocusMode',
+]);
+
+/**
+ * Resolves a single key (an {@link eventKeyName} value) to a layout toggle,
+ * or `null` for any other key.
+ */
+export function frameShortcut(key: string): ShortcutId | null {
+    const shortcut = SHORTCUTS.find(
+        (candidate) =>
+            FRAME_SHORTCUTS.has(candidate.id) &&
+            candidate.keys.length === 1 &&
+            candidate.keys[0] === key,
+    );
+    return shortcut?.id ?? null;
+}
+
+/**
  * Roles whose Space activation belongs to the control, not to us. Listbox
  * options are absent on purpose: Space over a focused article row pages
  * the reader (options select on focus, they don't activate).
@@ -345,13 +436,23 @@ function isActivatable(target: HTMLElement): boolean {
 }
 
 /**
+ * Bound characters that some keyboard layouts can only type through Option
+ * (⌥): on the German, French, Spanish and Italian Mac layouts `\` is an
+ * Option chord (⌥⇧7 on German). An Option chord that types one of these is
+ * the character itself, not a modified key. Where `\` is a plain key (US),
+ * ⌥\ types `«` instead, so nothing collides.
+ */
+const OPTION_TYPED_KEYS: ReadonlySet<string> = new Set(['\\']);
+
+/**
  * Whether a keydown event should bypass shortcuts entirely: typing contexts
- * (inputs, textareas, contenteditable), any ctrl/alt/meta combination, and
- * Space on a control that Space activates all belong to the platform, not
- * to us.
+ * (inputs, textareas, contenteditable), any ctrl/meta combination, any alt
+ * combination except one that only types an {@link OPTION_TYPED_KEYS}
+ * character, and Space on a control that Space activates all belong to the
+ * platform, not to us.
  */
 export function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
-    if (event.ctrlKey || event.altKey || event.metaKey) {
+    if (event.ctrlKey || event.metaKey || (event.altKey && !OPTION_TYPED_KEYS.has(event.key))) {
         return true;
     }
     const target = event.target;

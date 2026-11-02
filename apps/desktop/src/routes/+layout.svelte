@@ -14,6 +14,7 @@ import { startupStore } from '$lib/state/startup.svelte';
 import { themeStore } from '$lib/state/theme.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { announceLegacyProfiles } from '$lib/utils/legacy-profiles';
 import { runStartupUpdateCheck } from '$lib/utils/updates';
 import type { Snippet } from 'svelte';
@@ -26,30 +27,54 @@ let { children }: { children: Snippet } = $props();
  */
 let phase: 'checking' | 'app' | 'recovery' = $state('checking');
 
+/** The stores that read the boot-mirrored keys (`BOOT_KEYS`) adopt them —
+ *  once from the mirror before the shell mounts, again from the backend. */
+function adoptBootSettings(): void {
+    localeStore.init();
+    layoutStore.initLayout();
+    typographyStore.initTypography();
+    prefsStore.initReading();
+}
+
 onMount(() => {
     const teardowns: Array<() => void> = [];
     let unmounted = false;
 
     void (async () => {
+        // The window chrome (macOS overlay title bar, #148) needs no core, so
+        // it is known before either screen renders: the header inset and
+        // drag regions are in place on the first paint.
+        const [failed, unlistenChrome] = await Promise.all([
+            startupStore.check(),
+            windowChromeStore.wire(),
+        ]);
+        if (unmounted) {
+            unlistenChrome();
+            return;
+        }
+        teardowns.push(unlistenChrome);
         // The profile may not have opened: then there are no settings to
         // load, and the recovery screen speaks the system language.
-        if (await startupStore.check()) {
+        if (failed) {
             localeStore.initFromSystem();
             phase = 'recovery';
             return;
         }
+        // The boot mirror before the shell mounts: the last-known pane
+        // widths, density, typography and locale apply on the first paint
+        // (the theme already did, from app.html), so nothing shifts when the
+        // backend's settings land below.
+        settingsStore.primeFromMirror();
+        adoptBootSettings();
         phase = 'app';
         // Settings first: the persisted theme wins over the preload's
         // localStorage mirror once the backend answers.
         await settingsStore.load();
-        localeStore.init();
         // Custom themes before initTheme: a custom preference must resolve
         // against a populated list and have its rule injected pre-paint.
         themeStore.initCustomThemes();
         themeStore.initTheme();
-        layoutStore.initLayout();
-        typographyStore.initTypography();
-        prefsStore.initReading();
+        adoptBootSettings();
         prefsStore.initRefresh();
         prefsStore.initNotifications();
         prefsStore.initUpdates();

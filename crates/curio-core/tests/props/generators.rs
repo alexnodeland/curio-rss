@@ -51,52 +51,6 @@ const ELEMENTS: &[&str] = &[
     "x-custom",
 ];
 
-/// [`ELEMENTS`] minus `pre` and `code`, for the export (markdown) suite
-/// only: htmd currently writes escaped text inside a `<pre>`, or a
-/// `<code>` that spans blocks, back out as *live* raw HTML (issue #245).
-/// Re-merge with [`ELEMENTS`] when that is fixed.
-const EXPORT_ELEMENTS: &[&str] = &[
-    "p",
-    "div",
-    "span",
-    "a",
-    "img",
-    "b",
-    "em",
-    "strong",
-    "ul",
-    "li",
-    "table",
-    "td",
-    "h1",
-    "h2",
-    "blockquote",
-    "br",
-    "article",
-    "nav",
-    "aside",
-    "footer",
-    "script",
-    "style",
-    "iframe",
-    "svg",
-    "math",
-    "form",
-    "input",
-    "button",
-    "object",
-    "embed",
-    "base",
-    "meta",
-    "link",
-    "noscript",
-    "template",
-    "video",
-    "audio",
-    "frame",
-    "x-custom",
-];
-
 /// URL-attribute values, weighted toward the ones the scheme allowlist
 /// exists for — including the case/whitespace/entity disguises.
 const URLS: &[&str] = &[
@@ -168,12 +122,70 @@ const SOUP: &[&str] = &[
     "\u{0}\u{1b}\u{202e}\u{feff}",
 ];
 
-/// Free text: printable unicode plus the characters markup cares about.
+/// Free text: printable unicode plus the characters markup cares about —
+/// backticks included, since code spans and fences are sized by the
+/// backtick runs in their text (#245).
 pub fn text() -> impl Strategy<Value = String> {
     prop_oneof![
-        "[a-zA-Z0-9 .,;:!?'\"()&<>/=\\-_日本語🎌]{0,24}",
+        "[a-zA-Z0-9 .,;:!?'\"()&<>/=\\-_`日本語🎌]{0,24}",
         "\\PC{0,16}",
     ]
+}
+
+/// Backtick runs next to an escaped payload: what makes the delimiters of
+/// adjacent code spans merge, or a fence close early, if any length or
+/// gap is misjudged (#245). Random text almost never lines them up.
+fn code_text() -> impl Strategy<Value = String> {
+    (
+        prop::sample::select(&["", "`", "``", "```", "````"][..]),
+        prop::sample::select(
+            &[
+                "",
+                "&lt;script&gt;alert(1)&lt;/script&gt;",
+                "&lt;img src=x onerror=alert(1)&gt;",
+                "x",
+            ][..],
+        ),
+        prop::sample::select(&["", "`", "``", "```", " ", "\n\n"][..]),
+    )
+        .prop_map(|(lead, payload, tail)| format!("{lead}{payload}{tail}"))
+}
+
+/// Containers that change how code renders: inline (a `<pre>` becomes a
+/// span), flattened into one line (heading, table cell, link), whole lines
+/// (quote, list item) and a footnote definition (#245).
+const CODE_CONTAINERS: &[(&str, &str)] = &[
+    ("", ""),
+    ("<div>", "</div>"),
+    ("<em>", "</em>"),
+    ("<h2>T ", "</h2>"),
+    ("<table><tr><td>", "</td></tr></table>"),
+    ("<a href=\"https://ok.example/\">", "</a>"),
+    ("<blockquote>", "</blockquote>"),
+    ("<ul><li>", "</li></ul>"),
+    (
+        "<p>x<a href=\"#fn1\">1</a></p><ol><li id=\"fn1\">",
+        "</li></ol>",
+    ),
+];
+
+/// Sibling `<code>` and `<pre>` elements around the blocks that render as
+/// nothing or as a line break, in one of [`CODE_CONTAINERS`]: the shapes
+/// where a span's gap or a fence's placement is decided (#245).
+fn code_siblings() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        2 => code_text().prop_map(|text| format!("<code>{text}</code>")),
+        1 => code_text().prop_map(|text| format!("<pre>{text}</pre>")),
+        1 => prop::sample::select(
+            &["<pre></pre>", "<ul></ul>", "<table></table>", "<p></p>", "<p>p</p>", "<br>", " ", "t"][..]
+        )
+        .prop_map(ToOwned::to_owned),
+    ];
+    (
+        prop::sample::select(CODE_CONTAINERS),
+        prop::collection::vec(piece, 1..5),
+    )
+        .prop_map(|((open, close), pieces)| format!("{open}{}{close}", pieces.concat()))
 }
 
 /// Escapes text for an XML/HTML text node or a double-quoted attribute.
@@ -210,15 +222,12 @@ pub fn hostile_html() -> impl Strategy<Value = String> {
     html_from(ELEMENTS)
 }
 
-/// [`hostile_html`] without the code elements issue #245 is about.
-pub fn exportable_html() -> impl Strategy<Value = String> {
-    html_from(EXPORT_ELEMENTS)
-}
-
 fn html_from(elements: &'static [&'static str]) -> impl Strategy<Value = String> {
     let leaf = prop_oneof![
         3 => text().prop_map(|text| escape(&text)),
         1 => text(),
+        1 => code_text(),
+        1 => code_siblings(),
         1 => prop::sample::select(SOUP).prop_map(ToOwned::to_owned),
     ];
     leaf.prop_recursive(4, 48, 6, move |inner| {
@@ -237,4 +246,89 @@ fn html_from(elements: &'static [&'static str]) -> impl Strategy<Value = String>
                 out
             })
     })
+}
+
+/// Wrappers a hostile feed can nest without limit, as (open, close, block)
+/// triples: every one survives sanitization, and each is walked by its own
+/// htmd handler (lists and quotes cost the most stack a level). `block`
+/// marks a word boundary: text on either side of a block tag is two words,
+/// while an inline tag joins what it separates.
+const NESTING: &[(&str, &str, bool)] = &[
+    ("<div>", "</div>", true),
+    ("<section>", "</section>", true),
+    ("<article>", "</article>", true),
+    ("<aside>", "</aside>", true),
+    ("<blockquote>", "</blockquote>", true),
+    ("<ul><li>", "</li></ul>", true),
+    ("<ol><li>", "</li></ol>", true),
+    ("<dl><dd>", "</dd></dl>", true),
+    ("<table><tr><td>", "</td></tr></table>", true),
+    ("<span>", "</span>", false),
+    ("<em>", "</em>", false),
+    ("<strong>", "</strong>", false),
+];
+
+/// The words of [`deep_html`] as it is written: a text run joins the word
+/// before it unless a block tag stands between them.
+#[derive(Default)]
+struct Words {
+    words: Vec<String>,
+    boundary: bool,
+}
+
+impl Words {
+    fn tag(&mut self, block: bool) {
+        self.boundary |= block;
+    }
+
+    fn text(&mut self, html: &mut String, run: &str) {
+        html.push_str(run);
+        match self.words.last_mut() {
+            Some(last) if !self.boundary => last.push_str(run),
+            _ => self.words.push(run.to_owned()),
+        }
+        self.boundary = false;
+    }
+}
+
+/// Pathologically deep HTML (#244): 1000–1500 random wrappers from
+/// [`NESTING`] — past the depth that overflowed a 2 MB stack in htmd's
+/// walk for every mix — with lowercase text after open and close tags
+/// alike, never with whitespace around it, and `needle` innermost. Yields
+/// the HTML and its words in document order, so only the tags decide where
+/// one word ends: joined across inline tags, split at block ones.
+///
+/// `spans: false` leaves `span` out of the mix. htmd's own `span` handler
+/// trims its content, so a block boundary just inside a span's edge joins
+/// the words around it at any depth (`<span><div>a</div></span>b` → `ab`);
+/// without spans the words are exactly what an export must keep apart.
+pub fn deep_html(spans: bool) -> impl Strategy<Value = (String, Vec<String>)> {
+    let wrappers: Vec<_> = NESTING
+        .iter()
+        .copied()
+        .filter(|(open, _, _)| spans || *open != "<span>")
+        .collect();
+    let text = || prop::option::weighted(0.05, "[a-z]{3,8}");
+    prop::collection::vec((prop::sample::select(wrappers), text(), text()), 1000..1500).prop_map(
+        |levels| {
+            let mut html = String::new();
+            let mut words = Words::default();
+            for ((open, _, block), after_open, _) in &levels {
+                html.push_str(open);
+                words.tag(*block);
+                if let Some(run) = after_open {
+                    words.text(&mut html, run);
+                }
+            }
+            words.text(&mut html, "needle");
+            for ((_, close, block), _, after_close) in levels.iter().rev() {
+                html.push_str(close);
+                words.tag(*block);
+                if let Some(run) = after_close {
+                    words.text(&mut html, run);
+                }
+            }
+            (html, words.words)
+        },
+    )
 }

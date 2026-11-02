@@ -1,3 +1,18 @@
+-- index idx_article_state_archived
+CREATE INDEX idx_article_state_archived ON article_state(article_id) WHERE is_archived = 1
+
+-- index idx_article_state_read_later
+CREATE INDEX idx_article_state_read_later ON article_state(article_id) WHERE is_read_later = 1
+
+-- index idx_article_state_starred
+CREATE INDEX idx_article_state_starred ON article_state(article_id) WHERE is_starred = 1
+
+-- index idx_article_tags_tag_id
+CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id)
+
+-- index idx_article_tombstones_feed_id
+CREATE INDEX idx_article_tombstones_feed_id ON article_tombstones(feed_id)
+
 -- index idx_articles_feed_id
 CREATE INDEX idx_articles_feed_id ON articles(feed_id)
 
@@ -22,6 +37,12 @@ CREATE INDEX idx_fetch_log_feed_id ON fetch_log(feed_id, id)
 -- index sqlite_autoindex_tags_1
 <internal>
 
+-- table article_exports
+CREATE TABLE article_exports (
+    article_id  INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+    recorded_at TEXT    NOT NULL
+)
+
 -- table article_state
 CREATE TABLE article_state (
     article_id    INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
@@ -37,6 +58,14 @@ CREATE TABLE article_tags (
     article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
     tag_id     INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
     PRIMARY KEY (article_id, tag_id)
+) WITHOUT ROWID
+
+-- table article_tombstones
+CREATE TABLE article_tombstones (
+    dedupe_key TEXT    PRIMARY KEY,
+    feed_id    INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+    source_url TEXT    NOT NULL,
+    seen_at    TEXT    NOT NULL
 ) WITHOUT ROWID
 
 -- table articles
@@ -96,6 +125,12 @@ CREATE TABLE event_intents_dead (
     envelope_json  TEXT NOT NULL,
     error          TEXT NOT NULL,
     quarantined_at TEXT NOT NULL
+)
+
+-- table feed_unread
+CREATE TABLE feed_unread (
+    feed_key INTEGER PRIMARY KEY,
+    unread   INTEGER NOT NULL
 )
 
 -- table feeds
@@ -163,4 +198,75 @@ BEGIN
     VALUES ('delete', old.id, old.title, old.content_text);
     INSERT INTO articles_fts(rowid, title, content_text)
     VALUES (new.id, new.title, new.content_text);
+END
+
+-- trigger feed_unread_article_ai
+CREATE TRIGGER feed_unread_article_ai AFTER INSERT ON articles
+WHEN NOT EXISTS (SELECT 1 FROM article_state s WHERE s.article_id = new.id
+                  AND (s.is_read <> 0 OR s.is_archived <> 0))
+BEGIN
+    INSERT INTO feed_unread (feed_key, unread)
+    SELECT COALESCE(new.feed_id, 0), 1 WHERE 1
+    ON CONFLICT (feed_key) DO UPDATE SET unread = unread + excluded.unread;
+END
+
+-- trigger feed_unread_article_au
+CREATE TRIGGER feed_unread_article_au AFTER UPDATE OF feed_id ON articles
+WHEN old.feed_id IS NOT new.feed_id
+ AND NOT EXISTS (SELECT 1 FROM article_state s WHERE s.article_id = new.id
+                  AND (s.is_read <> 0 OR s.is_archived <> 0))
+BEGIN
+    UPDATE feed_unread SET unread = unread - 1
+     WHERE feed_key = COALESCE(old.feed_id, 0);
+    INSERT INTO feed_unread (feed_key, unread)
+    SELECT COALESCE(new.feed_id, 0), 1 WHERE 1
+    ON CONFLICT (feed_key) DO UPDATE SET unread = unread + excluded.unread;
+END
+
+-- trigger feed_unread_article_bd
+CREATE TRIGGER feed_unread_article_bd BEFORE DELETE ON articles
+WHEN NOT EXISTS (SELECT 1 FROM article_state s WHERE s.article_id = old.id
+                  AND (s.is_read <> 0 OR s.is_archived <> 0))
+BEGIN
+    UPDATE feed_unread SET unread = unread - 1
+     WHERE feed_key = COALESCE(old.feed_id, 0);
+END
+
+-- trigger feed_unread_feed_ad
+CREATE TRIGGER feed_unread_feed_ad AFTER DELETE ON feeds
+BEGIN
+    DELETE FROM feed_unread WHERE feed_key = old.id;
+END
+
+-- trigger feed_unread_state_ad
+CREATE TRIGGER feed_unread_state_ad AFTER DELETE ON article_state
+WHEN old.is_read <> 0 OR old.is_archived <> 0
+BEGIN
+    INSERT INTO feed_unread (feed_key, unread)
+    SELECT COALESCE(a.feed_id, 0), 1 FROM articles a WHERE a.id = old.article_id
+    ON CONFLICT (feed_key) DO UPDATE SET unread = unread + excluded.unread;
+END
+
+-- trigger feed_unread_state_ai
+CREATE TRIGGER feed_unread_state_ai AFTER INSERT ON article_state
+WHEN new.is_read <> 0 OR new.is_archived <> 0
+BEGIN
+    UPDATE feed_unread SET unread = unread - 1
+     WHERE feed_key = (SELECT COALESCE(a.feed_id, 0) FROM articles a
+                        WHERE a.id = new.article_id);
+END
+
+-- trigger feed_unread_state_au
+CREATE TRIGGER feed_unread_state_au AFTER UPDATE OF is_read, is_archived ON article_state
+WHEN (old.is_read <> 0 OR old.is_archived <> 0)
+     IS NOT (new.is_read <> 0 OR new.is_archived <> 0)
+BEGIN
+    UPDATE feed_unread SET unread = unread - 1
+     WHERE (new.is_read <> 0 OR new.is_archived <> 0)
+       AND feed_key = (SELECT COALESCE(a.feed_id, 0) FROM articles a
+                        WHERE a.id = new.article_id);
+    INSERT INTO feed_unread (feed_key, unread)
+    SELECT COALESCE(a.feed_id, 0), 1 FROM articles a
+     WHERE a.id = new.article_id AND new.is_read = 0 AND new.is_archived = 0
+    ON CONFLICT (feed_key) DO UPDATE SET unread = unread + excluded.unread;
 END

@@ -1,8 +1,9 @@
 <script lang="ts">
 /**
- * The middle column: a header (search + destinations entry) over either the
- * filter list or the FTS results, chosen by whether a search is active. The
- * reader reacts to selection regardless of which list is showing.
+ * The middle column: a header (the sidebar toggle, search, the list tools)
+ * over either the filter list or the FTS results, chosen by whether a search
+ * is active. The reader reacts to selection regardless of which list is
+ * showing.
  */
 import ArticleList from '$components/articles/ArticleList.svelte';
 import RedditFeed from '$components/articles/RedditFeed.svelte';
@@ -12,12 +13,14 @@ import Icon from '$components/common/Icon.svelte';
 import SearchBar from '$components/common/SearchBar.svelte';
 import { tooltip } from '$lib/actions/tooltip';
 import { t } from '$lib/i18n';
+import { shortcutKbd } from '$lib/keyboard/labels';
 import { feedHomeType } from '$lib/reader/view-mode';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 
 // The home layout only applies when a single YouTube/Reddit-typed feed is
 // selected (not "All articles" — a mixed corpus has no one home page).
@@ -31,11 +34,34 @@ const homeType = $derived.by(() => {
 });
 
 const homeOn = $derived(homeType !== null && layoutStore.isHomeLayout(homeType));
+
+const sidebarLabel = $derived(
+    layoutStore.sidebarVisible ? t('pane.sidebar.hide') : t('pane.sidebar.show'),
+);
 </script>
 
 <div class="list-pane">
-    <div class="list-header">
-        <div class="search-slot">
+    <!-- Part of the macOS title bar (#148): it drags the window, and whenever
+         the sidebar is off screen (collapsed, or folded away by a narrow
+         window) it is the leftmost header, so it clears the traffic lights.
+         The sidebar toggle stays a control; the search field's frame is not a
+         drag handle. -->
+    <div
+        class="list-header"
+        class:leading={!layoutStore.sidebarVisible}
+        data-tauri-drag-region={windowChromeStore.dragRegion}
+    >
+        <button
+            class="list-tool"
+            type="button"
+            aria-expanded={layoutStore.sidebarVisible}
+            aria-label={sidebarLabel}
+            use:tooltip={{ text: sidebarLabel, kbd: shortcutKbd('view.toggleSidebar') }}
+            onclick={() => void layoutStore.toggleSidebar()}
+        >
+            <Icon name="sidebar" />
+        </button>
+        <div class="search-slot" data-tauri-drag-region={windowChromeStore.dragRegion && 'false'}>
             <SearchBar />
         </div>
         {#if !searchStore.active}
@@ -96,6 +122,12 @@ const homeOn = $derived(homeType !== null && layoutStore.isHomeLayout(homeType))
         height: var(--header-height);
         padding: 0 var(--space-3);
         border-bottom: 1px solid var(--hairline);
+    }
+
+    /* The leftmost header (sidebar off screen) keeps the traffic lights clear,
+       on the sidebar header's 16px leading edge. */
+    :global(:root[data-titlebar='overlay']) .list-header.leading {
+        padding-left: calc(var(--space-4) + var(--titlebar-inset));
     }
 
     .search-slot {

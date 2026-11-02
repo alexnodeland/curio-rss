@@ -19,7 +19,7 @@ import UpdatesPanel from '$components/modals/UpdatesPanel.svelte';
 import ReaderPreview from '$components/reader/ReaderPreview.svelte';
 import TypographyControls from '$components/reader/TypographyControls.svelte';
 import { LOCALES, type LocaleId, type MessageKey, localeStore, t } from '$lib/i18n';
-import { layoutStore } from '$lib/state/layout.svelte';
+import { SETTINGS_SECTIONS, SETTINGS_SECTION_LABELS, layoutStore } from '$lib/state/layout.svelte';
 import { REFRESH_INTERVAL_OPTIONS, type ReadingDensity, prefsStore } from '$lib/state/prefs.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 
@@ -41,26 +41,21 @@ const DENSITY_LABELS: Record<ReadingDensity, MessageKey> = {
     compact: 'settings.density.compact',
 };
 
-const TABS = [
-    { id: 'general', panelId: 'settings-panel-general', label: 'settings.section.general' },
-    {
-        id: 'appearance',
-        panelId: 'settings-panel-appearance',
-        label: 'settings.section.appearance',
-    },
-    { id: 'reading', panelId: 'settings-panel-reading', label: 'settings.section.reading' },
-    { id: 'media', panelId: 'settings-panel-media', label: 'settings.section.mediaPrivacy' },
-    {
-        id: 'notifications',
-        panelId: 'settings-panel-notifications',
-        label: 'settings.section.notifications',
-    },
-    { id: 'data', panelId: 'settings-panel-data', label: 'settings.section.data' },
-    { id: 'advanced', panelId: 'settings-panel-advanced', label: 'settings.section.advanced' },
-] as const;
+const TABS = SETTINGS_SECTIONS.map((id) => ({
+    id,
+    panelId: `settings-panel-${id}`,
+    label: SETTINGS_SECTION_LABELS[id],
+}));
 
 // Remembered across opens within a session (not persisted): a plain module var.
 let lastOpenTab = 0;
+
+// A caller that asked for a tab (the command palette) opens on it; otherwise
+// the modal comes back on the tab it was left on.
+const requestedTab = TABS.findIndex((tab) => tab.id === layoutStore.settingsSection);
+if (requestedTab !== -1) {
+    lastOpenTab = requestedTab;
+}
 
 let activeIndex = $state(lastOpenTab);
 const tabEls: (HTMLButtonElement | undefined)[] = $state([]);
@@ -444,7 +439,7 @@ function onKeydown(event: KeyboardEvent): void {
     .tablist button[role='tab'][aria-selected='true'] {
         background: var(--selected);
         color: var(--accent);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
     }
 
     .tablist button[role='tab']:focus-visible {

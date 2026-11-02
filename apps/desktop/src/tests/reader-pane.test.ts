@@ -12,7 +12,12 @@ import { keyLabel } from '$lib/keyboard/labels';
 import { SHORTCUTS } from '$lib/keyboard/registry';
 import { ALL_ARTICLES, articlesStore } from '$lib/state/articles.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher } from '$lib/state/prefetch';
-import { resetQueryCache, wireInvalidation } from '$lib/state/query-cache.svelte';
+import {
+    hasQuery,
+    queryKeys,
+    resetQueryCache,
+    wireInvalidation,
+} from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
@@ -397,9 +402,12 @@ describe('ReaderPane', () => {
 
             // The selected body first, then the neighbours: +1, -1, +2, -2.
             expect(fetchedIds()).toEqual([106, 105, 107, 104, 108]);
-            expect(harness.callsFor('get_article_state').map((a) => a.articleId)).toEqual(
-                expect.arrayContaining([105, 107, 104, 108]),
-            );
+            // The neighbours' flags came with the list rows: already cached,
+            // so prefetching them costs no state call.
+            for (const id of [105, 107, 104, 108]) {
+                expect(hasQuery(queryKeys.articleState(id))).toBe(true);
+            }
+            expect(harness.callsFor('get_article_state')).toEqual([]);
         });
 
         it('moving to a prefetched neighbour renders from cache with no loading state', async () => {
@@ -593,11 +601,27 @@ describe('ReaderPane — link-less and date-less feed entries', () => {
         expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
         expect(container.querySelector('.body-skeleton')).not.toBeNull();
         const date = container.querySelector('.reader-meta [data-first-seen]');
-        expect(date?.textContent).toMatch(/^First seen .*2026/);
+        expect(date?.textContent).toMatch(/^First seen: .*2026/);
         // Assistive tech gets the hint the pointer tooltip shows.
         expect(date?.querySelector('.sr-only')?.textContent).toContain(
             'The feed gave no publication date',
         );
+    });
+
+    it('a non-http(s) source is never a live link (#262)', async () => {
+        harness = installIpcHarness(
+            responders({ source_url: 'javascript:alert(1)', feed_id: null }),
+        );
+        selectionStore.selectedArticleId = 100;
+        const { container, getByRole, queryByRole } = render(ReaderPane);
+        await flushIpc();
+
+        const title = getByRole('heading', { level: 1 });
+        expect(title.textContent?.trim()).toBe('The article');
+        expect(container.querySelector('a[href^="javascript"]')).toBeNull();
+        expect(title.querySelector('a')).toBeNull();
+        expect(queryByRole('button', { name: 'Open in browser' })).toBeNull();
+        expect(queryByRole('button', { name: 'Load full article' })).toBeNull();
     });
 
     it('an entry with its own link keeps the link and both actions', async () => {
@@ -621,7 +645,7 @@ describe('ReaderPane — link-less and date-less feed entries', () => {
         await flushIpc();
 
         const date = container.querySelector('.reader-meta [data-first-seen]');
-        expect(date?.textContent).toMatch(/^First seen .*2026/);
+        expect(date?.textContent).toMatch(/^First seen: .*2026/);
     });
 
     it('a dated entry shows its publication date, unmarked', async () => {

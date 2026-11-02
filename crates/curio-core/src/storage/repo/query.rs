@@ -1,10 +1,5 @@
-//! The article list/search query compilers: [`ListArticles`] and
-//! [`SearchArticles`] into SQL + positional binds, sharing one
-//! [`ArticleFilter`] clause builder, and the search syntax's compiler into
-//! an escaped FTS5 expression.
-
-use super::{ARTICLE_COLS, ArticleFilter, ListArticles, SearchArticles};
-use rusqlite::types::ToSql;
+//! The search syntax's compiler: user input into an escaped FTS5
+//! expression (the SQL around it is compiled in `listing`).
 
 /// One searchable unit of a parsed query: a bare word or a quoted phrase.
 #[derive(Debug, PartialEq, Eq)]
@@ -15,8 +10,10 @@ struct Atom {
     prefix: bool,
     /// A `-` exclusion.
     negated: bool,
-    /// Came from `"…"` — never gets the implicit last-word prefix.
-    quoted: bool,
+    /// A phrase whose closing `"` was typed — it is finished, so it never
+    /// gets the implicit last-word prefix (an unterminated phrase is still
+    /// being typed and does).
+    closed: bool,
 }
 
 impl Atom {
@@ -41,6 +38,18 @@ enum Item {
 /// almost no narrowing.
 const IMPLICIT_PREFIX_MIN_CHARS: usize = 2;
 
+/// The length, in characters, of the token a trailing `*` on `text` would
+/// widen: its last run of letters and digits. FTS5's tokenizer splits on
+/// everything else, so the prefix lands on that token alone — `c++` and
+/// `C#` index as the one-letter token `c`, `write ahe` ends in `ahe`.
+fn last_token_chars(text: &str) -> usize {
+    text.chars()
+        .rev()
+        .skip_while(|c| !c.is_alphanumeric())
+        .take_while(|c| c.is_alphanumeric())
+        .count()
+}
+
 /// Splits user input into atoms and `OR`s (see [`super::SearchArticles`]
 /// for the syntax). Atoms without a single letter or digit are dropped —
 /// they hold no token the index could match, and an empty phrase would
@@ -60,9 +69,11 @@ fn lex_query(input: &str) -> Vec<Item> {
         let quoted = chars.next_if_eq(&'"').is_some();
         let mut text = String::new();
         let mut prefix = false;
+        let mut closed = false;
         if quoted {
             for c in chars.by_ref() {
                 if c == '"' {
+                    closed = true;
                     break;
                 }
                 text.push(c);
@@ -87,15 +98,17 @@ fn lex_query(input: &str) -> Vec<Item> {
                 text,
                 prefix,
                 negated,
-                quoted,
+                closed,
             }));
         }
     }
-    // Search-as-you-type: the word still being typed matches as a prefix.
+    // Search-as-you-type: the word still being typed — a bare word, or the
+    // last word of an unterminated phrase — matches as a prefix, unless the
+    // token it widens is too short to narrow anything.
     if let Some(Item::Atom(last)) = items.last_mut()
         && !last.negated
-        && !last.quoted
-        && last.text.chars().count() >= IMPLICIT_PREFIX_MIN_CHARS
+        && !last.closed
+        && last_token_chars(&last.text) >= IMPLICIT_PREFIX_MIN_CHARS
     {
         last.prefix = true;
     }
@@ -149,123 +162,12 @@ pub(super) fn fts_match_expr(input: &str) -> Option<String> {
     }
 }
 
-/// BM25 column weights for `articles_fts(title, content_text)`: a title
-/// hit outranks a body hit.
-const SEARCH_RANK: &str = "bm25(articles_fts, 10.0, 1.0)";
-
-/// Appends the [`ArticleFilter`] clauses (static fragments, every value a
-/// bind) over the `a` (articles) alias. Returns whether a clause reads the
-/// `s` (`article_state`) alias, so the caller adds that join only then; a
-/// missing state row defaults every flag to 0 via `COALESCE`.
-fn push_filter_clauses(
-    filter: &ArticleFilter,
-    clauses: &mut Vec<String>,
-    binds: &mut Vec<Box<dyn ToSql>>,
-) -> bool {
-    if let Some(feed) = filter.feed_id {
-        clauses.push("a.feed_id = ?".to_owned());
-        binds.push(Box::new(feed.0));
-    }
-    let state_filters = [
-        ("is_read", filter.read),
-        ("is_starred", filter.starred),
-        ("is_read_later", filter.read_later),
-        ("is_archived", filter.archived),
-    ];
-    let mut needs_state = false;
-    for (column, want) in state_filters {
-        if let Some(want) = want {
-            clauses.push(format!("COALESCE(s.{column}, 0) = ?"));
-            binds.push(Box::new(want));
-            needs_state = true;
-        }
-    }
-    if let Some(tag) = &filter.tag {
-        clauses.push(
-            "EXISTS (SELECT 1 FROM article_tags at JOIN tags t ON t.id = at.tag_id \
-             WHERE at.article_id = a.id AND t.name = ?)"
-                .to_owned(),
-        );
-        binds.push(Box::new(tag.trim().to_owned()));
-    }
-    if let Some(feed_tag) = &filter.feed_tag {
-        // Folder scope: the feed carries a path tag equal to `feed_tag` or
-        // nested beneath it (`Tech` → `Tech`, `Tech/Databases`, …). The
-        // subtree test is an exact, case-sensitive prefix compare — never
-        // `LIKE`, whose `%`/`_` wildcards would let folder `a_b` match
-        // `axb/…` and whose ASCII case folding the `=` branch lacks.
-        let feed_tag = feed_tag.trim().to_owned();
-        clauses.push(
-            "a.feed_id IN (SELECT f.id FROM feeds f, json_each(f.tags) je \
-             WHERE je.value = ? OR substr(je.value, 1, length(?) + 1) = ? || '/')"
-                .to_owned(),
-        );
-        binds.push(Box::new(feed_tag.clone()));
-        binds.push(Box::new(feed_tag.clone()));
-        binds.push(Box::new(feed_tag));
-    }
-    needs_state
-}
-
-/// Compiles [`ListArticles`] into SQL + positional binds. Static clause
-/// fragments only — no user input ever lands in the SQL string (the tag
-/// value is a bind). The `article_state` join appears only when a state
-/// filter asks for it, so the unfiltered hot path stays join-free.
-pub(super) fn list_articles_query(params: &ListArticles) -> (String, Vec<Box<dyn ToSql>>) {
-    let cols = article_cols_prefixed("a");
-    let mut clauses = vec!["a.id < ?".to_owned()];
-    let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(params.before.map_or(i64::MAX, |id| id.0))];
-    let needs_state = push_filter_clauses(&params.filter(), &mut clauses, &mut binds);
-    let join = if needs_state { STATE_JOIN } else { "" };
-    let sql = format!(
-        "SELECT {cols} FROM articles a{join} WHERE {} ORDER BY a.id DESC LIMIT ?",
-        clauses.join(" AND ")
-    );
-    binds.push(Box::new(params.limit));
-    (sql, binds)
-}
-
-/// The optional `article_state` join both compilers share.
-const STATE_JOIN: &str = " LEFT JOIN article_state s ON s.article_id = a.id";
-
-/// Compiles [`SearchArticles`] into SQL + positional binds — the FTS
-/// expression is the first bind, then the [`ArticleFilter`] clauses
-/// (exactly as [`list_articles_query`] applies them), ordered by the
-/// title-weighted BM25 rank with `id DESC` breaking ties. `None` when the
-/// query has nothing to match.
-pub(super) fn search_articles_query(
-    params: &SearchArticles,
-) -> Option<(String, Vec<Box<dyn ToSql>>)> {
-    let expr = fts_match_expr(&params.query)?;
-    let cols = article_cols_prefixed("a");
-    let mut clauses = vec!["articles_fts MATCH ?".to_owned()];
-    let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(expr)];
-    let needs_state = push_filter_clauses(&params.filter, &mut clauses, &mut binds);
-    let join = if needs_state { STATE_JOIN } else { "" };
-    let sql = format!(
-        "SELECT {cols} FROM articles_fts JOIN articles a ON a.id = articles_fts.rowid{join} \
-         WHERE {} ORDER BY {SEARCH_RANK}, a.id DESC LIMIT ?",
-        clauses.join(" AND ")
-    );
-    binds.push(Box::new(params.limit));
-    Some((sql, binds))
-}
-
-fn article_cols_prefixed(alias: &str) -> String {
-    ARTICLE_COLS
-        .split(',')
-        .map(|col| format!("{alias}.{}", col.trim()))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     // Test code: a panicking unwrap is the failure report.
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use crate::model::FeedId;
 
     #[test]
     fn fts_match_expr_quotes_every_token_and_prefixes_the_last() {
@@ -283,9 +185,14 @@ mod tests {
             "a phrase is one atom and never gets the implicit prefix"
         );
         assert_eq!(
-            fts_match_expr("\"unbalanced phrase"),
-            Some("\"unbalanced phrase\"".to_owned()),
-            "an unterminated quote runs to the end"
+            fts_match_expr("\"write ahe"),
+            Some("\"write ahe\"*".to_owned()),
+            "an unterminated quote runs to the end, its last word still being typed"
+        );
+        assert_eq!(
+            fts_match_expr("\"write a"),
+            Some("\"write a\"".to_owned()),
+            "a one-letter last word in an open phrase is not widened"
         );
         assert_eq!(
             fts_match_expr("\"hello wor\"*"),
@@ -314,6 +221,34 @@ mod tests {
             "a one-letter last word is not widened to a prefix"
         );
         assert_eq!(fts_match_expr("a*"), Some("\"a\"*".to_owned()));
+        for (input, expr) in [
+            ("c++", "\"c++\""),
+            ("C#", "\"C#\""),
+            ("a.", "\"a.\""),
+            ("learn c++", "\"learn\" AND \"c++\""),
+        ] {
+            assert_eq!(
+                fts_match_expr(input),
+                Some(expr.to_owned()),
+                "{input}: the tokenizer indexes a one-letter token, so no implicit prefix"
+            );
+        }
+        assert_eq!(
+            fts_match_expr("node.js"),
+            Some("\"node.js\"*".to_owned()),
+            "the prefix widens the last token, `js`"
+        );
+    }
+
+    #[test]
+    fn last_token_chars_counts_the_last_letter_or_digit_run() {
+        assert_eq!(last_token_chars("rust"), 4);
+        assert_eq!(last_token_chars("c++"), 1);
+        assert_eq!(last_token_chars("C#"), 1);
+        assert_eq!(last_token_chars("write ahe"), 3);
+        assert_eq!(last_token_chars("v2.0"), 1);
+        assert_eq!(last_token_chars("日本語"), 3);
+        assert_eq!(last_token_chars("--"), 0);
     }
 
     #[test]
@@ -366,109 +301,6 @@ mod tests {
         assert_eq!(fts_match_expr("   "), None);
         assert_eq!(fts_match_expr(""), None);
         assert_eq!(fts_match_expr("- * -- OR"), None);
-    }
-
-    #[test]
-    fn search_query_ranks_title_first_and_reuses_the_list_filters() {
-        let (sql, binds) = search_articles_query(&SearchArticles {
-            query: "rust".to_owned(),
-            filter: ArticleFilter {
-                feed_id: Some(FeedId(3)),
-                read: Some(false),
-                feed_tag: Some("Tech".to_owned()),
-                ..ArticleFilter::default()
-            },
-            limit: 20,
-        })
-        .unwrap();
-        assert!(sql.contains("articles_fts MATCH ?"));
-        assert!(sql.contains("a.feed_id = ?"));
-        assert!(sql.contains("LEFT JOIN article_state s"));
-        assert!(sql.contains("COALESCE(s.is_read, 0) = ?"));
-        assert!(
-            sql.ends_with("ORDER BY bm25(articles_fts, 10.0, 1.0), a.id DESC LIMIT ?"),
-            "{sql}"
-        );
-        assert_eq!(binds.len(), 7, "match + feed + read + feed_tag ×3 + limit");
-    }
-
-    #[test]
-    fn unscoped_search_query_stays_join_free() {
-        let (sql, binds) = search_articles_query(&SearchArticles::new("rust", 5)).unwrap();
-        assert!(!sql.contains("article_state"), "{sql}");
-        assert_eq!(binds.len(), 2, "match + limit");
-        assert!(search_articles_query(&SearchArticles::new(" - ", 5)).is_none());
-    }
-
-    #[test]
-    fn article_cols_prefixed_prefixes_every_column() {
-        let cols = article_cols_prefixed("a");
-        assert!(cols.starts_with("a.id, a.curio_id"));
-        assert!(cols.ends_with("a.lead_image"));
-        assert!(!cols.contains(" ,"));
-    }
-
-    #[test]
-    fn unfiltered_list_query_stays_join_free_with_keyset_order() {
-        let (sql, binds) = list_articles_query(&ListArticles::default());
-        assert!(!sql.contains("JOIN"), "no filters → no joins: {sql}");
-        assert!(sql.ends_with("ORDER BY a.id DESC LIMIT ?"));
-        assert_eq!(binds.len(), 2, "before + limit");
-    }
-
-    #[test]
-    fn state_filters_join_and_coalesce_missing_rows() {
-        let (sql, binds) = list_articles_query(&ListArticles {
-            feed_id: Some(FeedId(7)),
-            read: Some(false),
-            archived: Some(true),
-            ..ListArticles::default()
-        });
-        assert!(sql.contains("LEFT JOIN article_state s ON s.article_id = a.id"));
-        assert!(sql.contains("COALESCE(s.is_read, 0) = ?"));
-        assert!(sql.contains("COALESCE(s.is_archived, 0) = ?"));
-        assert!(sql.contains("a.feed_id = ?"));
-        assert!(!sql.contains("is_starred"), "unset filters stay out");
-        assert!(sql.ends_with("ORDER BY a.id DESC LIMIT ?"), "order fixed");
-        assert_eq!(binds.len(), 5, "before + feed + 2 flags + limit");
-    }
-
-    #[test]
-    fn tag_filter_binds_the_tag_instead_of_splicing_it() {
-        let (sql, binds) = list_articles_query(&ListArticles {
-            tag: Some("rust'; DROP TABLE articles; --".to_owned()),
-            ..ListArticles::default()
-        });
-        assert!(sql.contains("t.name = ?"));
-        assert!(!sql.contains("DROP TABLE"), "tag value never enters SQL");
-        assert!(
-            !sql.contains("article_state"),
-            "tag alone needs no state join"
-        );
-        assert_eq!(binds.len(), 3, "before + tag + limit");
-    }
-
-    #[test]
-    fn feed_tag_filter_matches_the_folder_subtree_via_bound_params() {
-        let (sql, binds) = list_articles_query(&ListArticles {
-            feed_tag: Some("Tech".to_owned()),
-            ..ListArticles::default()
-        });
-        assert!(sql.contains("json_each(f.tags)"));
-        assert!(
-            sql.contains("je.value = ? OR substr(je.value, 1, length(?) + 1) = ? || '/'"),
-            "matches the folder itself and its subtree: {sql}"
-        );
-        assert!(!sql.contains("LIKE"), "no wildcard matching: {sql}");
-        assert!(
-            !sql.contains("article_state"),
-            "feed_tag alone needs no state join"
-        );
-        assert_eq!(
-            binds.len(),
-            5,
-            "before + feed_tag (exact + subtree ×2) + limit"
-        );
     }
 
     /// Property suite for the FTS query builder (issues #133, #138): no

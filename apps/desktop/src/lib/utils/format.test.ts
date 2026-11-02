@@ -1,3 +1,4 @@
+import { localeStore } from '$lib/i18n';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     formatDate,
@@ -5,57 +6,9 @@ import {
     formatDuration,
     formatFileSize,
     formatNumber,
-    formatRelativeTime,
     stripHtml,
     truncateText,
 } from './format';
-
-describe('formatRelativeTime', () => {
-    beforeEach(() => {
-        vi.useFakeTimers();
-        vi.setSystemTime(new Date('2025-06-15T12:00:00Z'));
-    });
-
-    afterEach(() => {
-        vi.useRealTimers();
-    });
-
-    it('returns empty string for null input', () => {
-        expect(formatRelativeTime(null)).toBe('');
-    });
-
-    it('returns empty string for undefined input', () => {
-        expect(formatRelativeTime(undefined)).toBe('');
-    });
-
-    it('formats seconds ago as just now', () => {
-        expect(formatRelativeTime('2025-06-15T11:59:30Z')).toBe('just now');
-    });
-
-    it('formats minutes ago', () => {
-        expect(formatRelativeTime('2025-06-15T11:45:00Z')).toBe('15m ago');
-    });
-
-    it('formats hours ago', () => {
-        expect(formatRelativeTime('2025-06-15T08:00:00Z')).toBe('4h ago');
-    });
-
-    it('formats days ago', () => {
-        expect(formatRelativeTime('2025-06-13T12:00:00Z')).toBe('2d ago');
-    });
-
-    it('formats weeks ago', () => {
-        expect(formatRelativeTime('2025-06-01T12:00:00Z')).toBe('2w ago');
-    });
-
-    it('formats months ago', () => {
-        expect(formatRelativeTime('2025-03-15T12:00:00Z')).toBe('3mo ago');
-    });
-
-    it('formats years ago', () => {
-        expect(formatRelativeTime('2023-06-15T12:00:00Z')).toBe('2y ago');
-    });
-});
 
 describe('formatDate', () => {
     beforeEach(() => {
@@ -137,6 +90,15 @@ describe('formatNumber', () => {
     it('formats billions with B suffix', () => {
         expect(formatNumber(1200000000)).toBe('1.2B');
     });
+
+    it('follows the active locale', () => {
+        localeStore.active = 'de';
+        try {
+            expect(formatNumber(2500000)).toBe('2,5\u00a0Mio.');
+        } finally {
+            localeStore.reset();
+        }
+    });
 });
 
 describe('formatFileSize', () => {
@@ -158,6 +120,15 @@ describe('formatFileSize', () => {
 
     it('formats gigabytes', () => {
         expect(formatFileSize(1610612736)).toBe('1.5 GB');
+    });
+
+    it('writes the number in the active locale', () => {
+        localeStore.active = 'de';
+        try {
+            expect(formatFileSize(1536)).toBe('1,5 KB');
+        } finally {
+            localeStore.reset();
+        }
     });
 });
 

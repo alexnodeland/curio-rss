@@ -5,9 +5,11 @@
  * mirror, clamped into range.
  */
 import TypographyControls from '$components/reader/TypographyControls.svelte';
+import { localeStore } from '$lib/i18n';
 import { settingsStore } from '$lib/state/settings.svelte';
 import { TYPOGRAPHY_LIMITS, typographyStore } from '$lib/state/typography.svelte';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, flushIpc, installIpcHarness } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
@@ -18,6 +20,7 @@ describe('reader typography', () => {
     afterEach(() => {
         cleanup();
         resetUiStores();
+        localeStore.reset();
         settingsStore.reset();
         harness?.teardown();
         harness = null;
@@ -142,5 +145,54 @@ describe('reader typography', () => {
         expect(typographyStore.fontWeight).toBe(TYPOGRAPHY_LIMITS.fontWeight.default);
         expect(typographyStore.hyphenate).toBe(false);
         expect(typographyStore.readingTheme).toBe('default');
+    });
+
+    it("shows values in the active locale's number format (#155)", async () => {
+        harness = installIpcHarness({ get_setting: null, set_setting: null });
+        localeStore.active = 'de';
+        typographyStore.paragraphSpacing = 1.5;
+        typographyStore.letterSpacing = 0.025;
+        try {
+            const { container } = render(TypographyControls);
+            const values = [...container.querySelectorAll('.row-value')].map(
+                (node) => node.textContent,
+            );
+            // size, line height, width, spacing, weight, letter spacing.
+            expect(values).toEqual(['16\u00a0px', '1,6', '720\u00a0px', '1,5', '400', '0,025']);
+
+            // A language switch reformats in place.
+            localeStore.active = 'en';
+            await tick();
+            expect(container.querySelector('.row-value')?.textContent).toBe('16px');
+            expect(container.querySelectorAll('.row-value')[1]?.textContent).toBe('1.6');
+        } finally {
+            typographyStore.paragraphSpacing = TYPOGRAPHY_LIMITS.paragraphSpacing.default;
+            typographyStore.letterSpacing = TYPOGRAPHY_LIMITS.letterSpacing.default;
+        }
+    });
+
+    it('labels descriptive fonts from the catalog and keeps typeface names (#155)', async () => {
+        harness = installIpcHarness({ get_setting: null, set_setting: null });
+        localeStore.active = 'de';
+        const { getAllByRole } = render(TypographyControls);
+        const fontOptions = () =>
+            [...(getAllByRole('combobox')[0] as HTMLSelectElement).options].map(
+                (option) => option.textContent,
+            );
+        expect(fontOptions()).toEqual([
+            'Serifenlos',
+            'Mit Serifen',
+            'Festbreite',
+            'Humanistisch',
+            'Grotesk',
+            'Georgia',
+            'Charter',
+            'Gut lesbar',
+        ]);
+
+        localeStore.active = 'en';
+        await tick();
+        expect(fontOptions()[0]).toBe('Sans');
+        expect(fontOptions()[7]).toBe('Readable');
     });
 });

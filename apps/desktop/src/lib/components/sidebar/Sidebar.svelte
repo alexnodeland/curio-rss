@@ -8,11 +8,10 @@
 import Icon, { type IconName } from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { tooltip } from '$lib/actions/tooltip';
-import { type MessageKey, t } from '$lib/i18n';
+import { formatIntlNumber, type MessageKey, t } from '$lib/i18n';
 import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     activeView,
-    importFromFile,
     refreshAll,
     reorderFeedGroup,
     selectView,
@@ -28,6 +27,7 @@ import { folderPathsForTags } from '$lib/state/folder-ops';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { sidebarTreeStore } from '$lib/state/sidebar-tree.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
 import { untrack } from 'svelte';
 import FeedItem from './FeedItem.svelte';
@@ -240,10 +240,12 @@ function newFolder(): void {
 </script>
 
 <nav class="sidebar" aria-label={t('sidebar.label')}>
-    <div class="sidebar-brand">
+    <!-- The macOS title bar (#148): a press on the header drags the window and
+         a double-click zooms it; its buttons and the badge stay controls. -->
+    <div class="sidebar-brand" data-tauri-drag-region={windowChromeStore.dragRegion}>
         <div class="brand" class:offline={connectivityStore.offline}>
             <span class="brand-mark" aria-hidden="true"><Icon name="sparkle" size={16} /></span>
-            <span class="brand-name">Curio</span>
+            <span class="brand-name">{t('app.title')}</span>
             <!-- Offline (#123). In a narrow header the badge is a tile that takes
                  the brand mark's place (same footprint, so nothing reflows); with
                  room to spare it is a labelled pill after the name. It is a tab
@@ -316,7 +318,7 @@ function newFolder(): void {
                             <span class="truncate">{t(view.label)}</span>
                             {#if view.id === 'all' && feedsStore.unreadTotal > 0}
                                 <span class="view-count" aria-hidden="true"
-                                    >{feedsStore.unreadTotal}</span
+                                    >{formatIntlNumber(feedsStore.unreadTotal)}</span
                                 >
                                 <span class="sr-only"
                                     >{t('shell.unread.count', { count: feedsStore.unreadTotal })}</span
@@ -340,7 +342,16 @@ function newFolder(): void {
                 >
             </div>
             {#if feedsStore.error !== null}
-                <p class="sidebar-status error" role="alert">{feedsError()}</p>
+                <div class="sidebar-status error">
+                    <p role="alert">{feedsError()}</p>
+                    <button
+                        class="state-action"
+                        type="button"
+                        disabled={feedsStore.loading}
+                        onclick={() => void feedsStore.reload()}
+                        ><Icon name="refresh" size={14} />{t('toast.retry')}</button
+                    >
+                </div>
             {:else if !feedsStore.loaded}
                 <div class="sidebar-skeleton" aria-hidden="true">
                     {#each SIDEBAR_SKELETON_WIDTHS as width (width)}
@@ -354,23 +365,6 @@ function newFolder(): void {
                         <Icon name="rss" size={22} strokeWidth={1.5} />
                     </div>
                     <p class="sidebar-empty-title">{t('shell.feeds.empty')}</p>
-                    <p class="sidebar-empty-hint">{t('emptyState.hint')}</p>
-                    <div class="sidebar-empty-actions">
-                        <button
-                            class="empty-action empty-action-primary"
-                            type="button"
-                            onclick={() => layoutStore.openModal('add-feed')}
-                        >
-                            {t('emptyState.addFeed')}
-                        </button>
-                        <button
-                            class="empty-action"
-                            type="button"
-                            onclick={() => void importFromFile('opml')}
-                        >
-                            {t('emptyState.importOpml')}
-                        </button>
-                    </div>
                 </div>
             {:else}
                 <ul
@@ -458,7 +452,10 @@ function newFolder(): void {
         justify-content: space-between;
         gap: var(--space-2);
         height: var(--header-height);
-        padding: 0 var(--space-2) 0 var(--space-4);
+        /* Clears the traffic lights under the macOS overlay title bar. The
+           container queries below measure the content box, so they already
+           count the inset. */
+        padding: 0 var(--space-2) 0 calc(var(--space-4) + var(--titlebar-inset));
         border-bottom: 1px solid var(--hairline);
         container: sidebar-brand / inline-size;
     }
@@ -483,7 +480,7 @@ function newFolder(): void {
 
     .brand-name {
         font-size: var(--text-lg);
-        font-weight: 660;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-tight);
         color: var(--fg);
     }
@@ -503,7 +500,7 @@ function newFolder(): void {
         background: color-mix(in srgb, var(--warning), transparent 86%);
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning), transparent 58%);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         white-space: nowrap;
         cursor: default;
     }
@@ -511,6 +508,17 @@ function newFolder(): void {
     .brand.offline .brand-mark,
     .offline-label {
         display: none;
+    }
+
+    /* Too narrow for the name beside the mark and the toolbar — mark 26 +
+       gap 8 + name ~44 + gap 8 + toolbar 94 = 180px, plus slack for the
+       platform font (the narrowest sidebar, or a narrow one that also holds
+       the traffic lights): the mark carries the brand alone rather than the
+       name running under the buttons. */
+    @container sidebar-brand (max-width: 185.98px) {
+        .brand-name {
+            display: none;
+        }
     }
 
     /* Room for the word: the brand mark comes back and the tile becomes a
@@ -583,7 +591,7 @@ function newFolder(): void {
     .sidebar-heading {
         padding: 0 var(--space-3);
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -647,6 +655,10 @@ function newFolder(): void {
     }
 
     .sidebar-status.error {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
         color: var(--error-text);
     }
 
@@ -680,52 +692,8 @@ function newFolder(): void {
 
     .sidebar-empty-title {
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         color: var(--fg);
-    }
-
-    .sidebar-empty-hint {
-        font-size: var(--text-sm);
-        color: var(--fg-subtle);
-        line-height: 1.45;
-    }
-
-    .sidebar-empty-actions {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        width: 100%;
-        margin-top: var(--space-2);
-    }
-
-    .empty-action {
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-md);
-        background: transparent;
-        color: var(--fg-muted);
-        border: 1px solid var(--hairline-strong);
-        font-size: var(--text-sm);
-        font-weight: 500;
-        cursor: pointer;
-        transition:
-            background var(--dur-fast) var(--ease),
-            color var(--dur-fast) var(--ease);
-    }
-
-    .empty-action:hover {
-        background: var(--hover);
-        color: var(--fg);
-    }
-
-    .empty-action-primary {
-        background: var(--accent);
-        color: var(--accent-fg);
-        border-color: transparent;
-    }
-
-    .empty-action-primary:hover {
-        background: var(--accent-hover);
-        color: var(--accent-fg);
     }
 
     .view-item {
@@ -740,7 +708,7 @@ function newFolder(): void {
         color: var(--fg-muted);
         text-align: left;
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition: background var(--dur-fast) var(--ease);
     }
 
@@ -782,7 +750,7 @@ function newFolder(): void {
         background: var(--accent);
         color: var(--accent-fg);
         font-size: 0.7rem;
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.5;

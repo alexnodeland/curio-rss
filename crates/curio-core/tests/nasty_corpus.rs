@@ -27,6 +27,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use curio_core::content::{first_image, process, to_markdown};
 use curio_core::feeds::{ParsedFeed, parse_feed};
+use curio_core::fetch::screen_url;
 
 /// The fetch URL every corpus input is parsed against.
 const BASE: &str = "https://corpus.example.com/feed.xml";
@@ -37,8 +38,10 @@ const MUTANTS_PER_SEED: u64 = 24;
 /// The acceptance floor: the corpus test iterates at least this many inputs.
 const MIN_INPUTS: usize = 500;
 
-/// Nesting depth of the deep-HTML extreme (see `structural_variants`).
-const DEEP_HTML_LEVELS: usize = 250;
+/// Nesting depth of the deep-HTML extremes (see `structural_variants`):
+/// far past the ~1000 levels that used to overflow a 2 MB stack in
+/// `to_markdown` and abort the process (#244).
+const DEEP_HTML_LEVELS: usize = 10_000;
 
 /// What an input is pinned to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +65,7 @@ const SEEDS: &[(&str, Expect)] = &[
     ("nasty/atom-sloppy.atom", Expect::Parses(3)),
     ("nasty/billion-laughs.xml", Expect::Parses(1)),
     ("nasty/custom-scheme-links.xml", Expect::Parses(3)),
+    ("nasty/deep-nesting.xml", Expect::Parses(1)),
     ("nasty/duplicate-guids.xml", Expect::Parses(3)),
     ("nasty/empty-channel.xml", Expect::Parses(0)),
     ("nasty/html-served-as-feed.html", Expect::Rejects),
@@ -108,14 +112,24 @@ fn ingest(bytes: &[u8]) -> Result<Outcome, String> {
     Ok(Outcome::Parsed(feed.entries.len()))
 }
 
-/// Audits what one parsed feed would store. `entry.link` and
-/// `feed.meta.site_url` carry no policy yet. Both are stored unscreened
-/// (`javascript:` and custom schemes included; see `xss-feed.xml` and
-/// `custom-scheme-links.xml`), and #262 tracks screening them and asserting
-/// the result here. What this audit does cover is the dangerous half of the
-/// entry link: its use as the content base.
+/// Whether `url` is `None` or an absolute http(s) URL with a host and no
+/// userinfo: the only links ingest may store (#262).
+fn web_or_none(url: Option<&str>) -> bool {
+    url.is_none_or(|url| screen_url(url).is_ok())
+}
+
+/// Audits what one parsed feed would store: the entry and channel links
+/// (stored as `source_url` / `site_url`, rendered as the reader's source
+/// link) are web addresses or absent, and every entry's content is inert
+/// against the base it is stored with.
 fn audit_feed(feed: &ParsedFeed) -> Result<(), String> {
+    if !web_or_none(feed.meta.site_url.as_deref()) {
+        return Err(format!("non-http(s) site url {:?}", feed.meta.site_url));
+    }
     for entry in &feed.entries {
+        if !web_or_none(entry.link.as_deref()) {
+            return Err(format!("non-http(s) entry link {:?}", entry.link));
+        }
         if entry.dedupe_key.is_empty() {
             return Err(format!("entry {:?} has an empty dedupe key", entry.title));
         }
@@ -223,9 +237,9 @@ const HOSTILE_TOKENS: &[&[u8]] = &[
     b"</channel>",
     b"<guid></guid>",
     b"<link>javascript:alert(1)</link>",
-    // Parseable non-http(s) links: the entry link is the content base, so
-    // these reach the base-resolution path (cannot-be-a-base links like
-    // `javascript:` never do).
+    // Parseable non-http(s) links: the link screen must drop them before
+    // they become a stored source or the content base (`audit_feed` checks
+    // both).
     b"<link>foo://x/</link>",
     b"<link>httpsupdated://xss.example.com/one</link>",
     b"<link href=\"foo://x/dir/\"/>",
@@ -265,7 +279,8 @@ const TEXT_TOKENS: &[&str] = &[
     "🎌👍🏽 日本語",
     "javascript:alert(1)",
     // Spliced at the start of a `<link>`, these turn it into a parseable
-    // custom-scheme base; the relative URLs give that base work to do.
+    // custom-scheme link for the screen to drop; the relative URLs would
+    // give it work to do as a base.
     "foo://x/",
     "httpsupdated:",
     "&lt;img src=\"rel.png\"&gt;&lt;a href=\"rel/ok\"&gt;r&lt;/a&gt;&lt;a href=\"//cdn.example/p\"&gt;p&lt;/a&gt;",
@@ -468,14 +483,19 @@ fn structural_variants() -> Vec<Input> {
     // (to 65_535 levels, where quick-xml's u16 namespace-depth counter
     // overflows — issue #246).
     let deep_xml = format!("{}{}", "<x>".repeat(5_000), "</x>".repeat(5_000));
-    // Deep *HTML* is capped well below htmd's recursion limit: ~1000 levels
-    // overflow a 2 MB stack in `to_markdown` (debug build) and abort the
-    // process, and a 1 MB stack overflows at ~600 (issue #244 — raise this
-    // to 10_000 with that fix).
+    // Deep *HTML*: htmd's walk recurses per level, so `to_markdown` caps
+    // the nesting it hands htmd (#244). Divs are the slow shape to parse
+    // (html5ever scans the open elements for every start tag); table
+    // cells are scope boundaries, so the tables reach 40 000 levels fast.
     let deep_html_body = format!(
         "{}deep{}",
         "<div>".repeat(DEEP_HTML_LEVELS),
         "</div>".repeat(DEEP_HTML_LEVELS)
+    );
+    let deep_tables_body = format!(
+        "{}deep{}",
+        "<table><tr><td>".repeat(DEEP_HTML_LEVELS),
+        "</td></tr></table>".repeat(DEEP_HTML_LEVELS)
     );
     let huge_entry = format!(
         "<item><guid>huge</guid><title>Huge</title><description><![CDATA[{}]]></description></item>",
@@ -507,6 +527,13 @@ fn structural_variants() -> Vec<Input> {
             label: "shape/deep-html-content".into(),
             bytes: rss_with_items(&format!(
                 "<item><guid>deep-html</guid><description><![CDATA[{deep_html_body}]]></description></item>"
+            ))
+            .into_bytes(),
+        },
+        Input {
+            label: "shape/deep-html-tables".into(),
+            bytes: rss_with_items(&format!(
+                "<item><guid>deep-tables</guid><description><![CDATA[{deep_tables_body}]]></description></item>"
             ))
             .into_bytes(),
         },
@@ -851,6 +878,30 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "    ```\n<script>alert(1)</script>",
         // A fence closes only on the same marker.
         "~~~\nx\n```\n~~~\n<script>alert(1)</script>",
+        // #245: backticks straddling a blank line pair nothing — the
+        // paragraph ends between them.
+        "`<script>alert(1)</script>\n\nA`",
+        // An indented line cannot interrupt a paragraph: it continues it.
+        "text\n    <script>alert(1)</script>",
+        // A list marker inside "a span" starts a list item instead.
+        "`x\n- <img src=x onerror=alert(1)>`",
+        // A quoted line is prose unless a fence opened inside the quote.
+        "> <script>alert(1)</script>",
+        // GFM splits a table row on `|` before pairing backticks, so this
+        // span is live to every renderer with tables on.
+        "| a |\n| - |\n| `x|<script>alert(1)</script>` |",
+        // Destinations the `](` scan never sees: a reference definition
+        // and an autolink.
+        "[x][1]\n\n[1]: javascript:alert(1)",
+        "[1]: javascript:alert(1)",
+        "<javascript:alert(1)>",
+        // A link's text is prose; and with no link at all, a `](<` opens
+        // no destination.
+        "[<script>alert(1)</script>](https://x.example/)",
+        "foo](<script>alert(1)</script>",
+        // A tag name may carry hyphens, and any whitespace ends it.
+        "<x-custom onclick=alert(1)>",
+        "<x-custom\tonclick=alert(1)>",
     ] {
         assert!(
             inert::audit_markdown(live).is_err(),
@@ -862,11 +913,27 @@ fn the_inertness_audit_flags_live_payloads_only() {
         "`<script>` in a code span",
         "```html\n<script>alert(1)</script>\n```",
         "a < b and <3",
+        // No tag name starts with a digit, and the escaped `\<` opens
+        // nothing (the markdown property's find once its generator wrote
+        // escaped payloads next to arbitrary text).
+        "<0\\<img src=x onerror=alert(1)>",
+        "<unterminated\\<img src=x onerror=alert(1)>.",
+        // Without footnotes on, a one-span definition is a reference
+        // definition: its text is a destination, never rendered.
+        "x[^1]\n\n[^1]: `<script>alert(1)</script>`",
         "[ok](https://x.example/)",
         "``a ` <script>alert(1)</script> ``",
         "``a`<script>alert(1)</script>`",
         "   ```\n<script>alert(1)</script>\n```",
         "~~~~\n<script>alert(1)</script>\n~~~\n~~~~",
+        // Code inside containers (#245): a fence in a block quote or a
+        // list item, and a top-level indented code block.
+        "> ```\n> <script>alert(1)</script>\n> ```",
+        "*   step\n\n    ```\n    <img src=x onerror=alert(1)>\n    ```",
+        "para\n\n    <script>alert(1)</script>",
+        // An angle-bracketed destination is a destination, not a tag (the
+        // full-page form of `c0-control-urls.html`).
+        "[a](<https://x.example/ data:text/html,x>)",
     ] {
         assert!(
             inert::audit_markdown(inert_text).is_ok(),
@@ -883,6 +950,13 @@ fn html_served_as_a_feed_is_rejected_not_parsed() {
 #[test]
 fn the_xss_feed_stores_inert_content_and_keeps_the_story() {
     let feed = parse("nasty/xss-feed.xml");
+    // The channel's `javascript:` link is no site URL (#262); the entry's
+    // own http(s) link is kept.
+    assert_eq!(feed.meta.site_url, None);
+    assert_eq!(
+        feed.entries[0].link.as_deref(),
+        Some("https://xss.example.com/one")
+    );
     for entry in &feed.entries {
         let processed = process(&entry.content_html, entry.link.as_deref().or(Some(BASE)));
         inert::audit_html(&processed.html).unwrap();
@@ -902,13 +976,60 @@ fn the_xss_feed_stores_inert_content_and_keeps_the_story() {
 }
 
 /// The first `feed_parse` fuzz find, pinned: an entry link with a
-/// parseable custom scheme is the content base, and nothing relative may
-/// resolve onto it.
+/// parseable custom scheme. Ingest drops it (#262), so it is neither the
+/// stored source nor the content base, and the channel's `foo:` link is no
+/// site URL. The keys still name the declared links' items.
 #[test]
-fn a_custom_scheme_entry_link_plants_no_link_in_stored_content() {
+fn a_custom_scheme_entry_link_is_screened_out() {
     let feed = parse("nasty/custom-scheme-links.xml");
-    for entry in &feed.entries {
-        let base = entry.link.as_deref().unwrap_or(BASE);
+    assert_eq!(feed.meta.site_url, None);
+    let parsed: Vec<(&str, Option<&str>)> = feed
+        .entries
+        .iter()
+        .map(|entry| (entry.dedupe_key.as_str(), entry.link.as_deref()))
+        .collect();
+    assert_eq!(
+        parsed,
+        [
+            ("guid:scheme-1", None),
+            ("guid:scheme-2", None),
+            ("guid:scheme-3", None),
+        ]
+    );
+    // Stored the link-less way, the relative URLs resolve onto the feed URL.
+    let first = process(&feed.entries[0].content_html, Some(BASE));
+    inert::audit_html(&first.html).unwrap();
+    assert!(
+        first.html.contains("<strong>content</strong>"),
+        "{}",
+        first.html
+    );
+    assert!(
+        first
+            .html
+            .contains("href=\"https://corpus.example.com/relative/ok\""),
+        "{}",
+        first.html
+    );
+    assert!(
+        first.html.contains("href=\"https://ok.example/absolute\""),
+        "absolute http(s) links are unaffected:\n{}",
+        first.html
+    );
+}
+
+/// Defence in depth behind that screen: given the declared custom-scheme
+/// links as bases anyway, the sanitizer resolves nothing relative onto them.
+#[test]
+fn a_custom_scheme_base_plants_no_link_in_stored_content() {
+    let feed = parse("nasty/custom-scheme-links.xml");
+    let declared = [
+        "httpsupdated://xss.example.com/one",
+        "ftp://files.example/pub/two",
+        "foo://h/dir/three",
+    ];
+    assert_eq!(feed.entries.len(), declared.len());
+    for (entry, base) in feed.entries.iter().zip(declared) {
         let processed = process(&entry.content_html, Some(base));
         inert::audit_html(&processed.html).unwrap();
         let scheme = base.split(':').next().unwrap();
@@ -925,21 +1046,50 @@ fn a_custom_scheme_entry_link_plants_no_link_in_stored_content() {
             processed.html
         );
     }
-    let first = process(
-        &feed.entries[0].content_html,
-        feed.entries[0].link.as_deref(),
-    );
-    assert!(
-        first.html.contains("<strong>content</strong>"),
-        "{}",
-        first.html
-    );
+    let first = process(&feed.entries[0].content_html, Some(declared[0]));
     assert!(
         first.html.contains("href=\"https://ok.example/absolute\""),
         "absolute http(s) links are unaffected:\n{}",
         first.html
     );
     assert!(!first.html.contains("relative/ok"), "{}", first.html);
+}
+
+#[test]
+fn deep_html_exports_with_its_text() {
+    // The gate proves no depth aborts the export; this pins that the text
+    // under 40 000 levels of nesting reaches the markdown too (#244). The
+    // tables extreme parses fast; the divs' text is pinned in
+    // `content::markdown`'s unit tests and the `props` deep-nesting suite.
+    let input = structural_variants()
+        .into_iter()
+        .find(|input| input.label == "shape/deep-html-tables")
+        .unwrap();
+    let feed = parse_feed(&input.bytes, Some(BASE)).unwrap();
+    let processed = process(&feed.entries[0].content_html, Some(BASE));
+    assert_eq!(processed.text, "deep");
+    let markdown = to_markdown(&processed.html).unwrap();
+    assert!(markdown.contains("deep"), "{markdown}");
+}
+
+#[test]
+fn the_deep_nesting_seed_exports_every_word() {
+    // The committed regression seed: 900 levels of mixed wrappers (lists,
+    // quotes, sections), past the depth that aborted an uncapped export.
+    let feed = parse("nasty/deep-nesting.xml");
+    let processed = process(
+        &feed.entries[0].content_html,
+        feed.entries[0].link.as_deref(),
+    );
+    let markdown = to_markdown(&processed.html).unwrap();
+    inert::audit_markdown(&markdown).unwrap();
+    let words: Vec<&str> = processed.text.split_whitespace().collect();
+    assert_eq!(words.len(), 12, "{words:?}");
+    for word in words {
+        assert!(markdown.contains(word), "lost {word:?}:\n{markdown}");
+    }
+    assert!(markdown.starts_with("Before the nesting."), "{markdown}");
+    assert!(markdown.ends_with("After the nesting."), "{markdown}");
 }
 
 #[test]

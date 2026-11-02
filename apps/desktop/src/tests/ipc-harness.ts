@@ -163,6 +163,8 @@ export function articleSummaryFixture(
         lang: 'en',
         image: null,
         snippet: 'A short preview of the article body.',
+        state: { read: false, starred: false, read_later: false, archived: false },
+        tags: [],
         ...overrides,
     };
 }

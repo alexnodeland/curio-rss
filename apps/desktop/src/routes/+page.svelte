@@ -11,7 +11,9 @@ import Toasts from '$components/common/Toasts.svelte';
 import TooltipHost from '$components/common/TooltipHost.svelte';
 import ListPane from '$components/layout/ListPane.svelte';
 import ThreePane from '$components/layout/ThreePane.svelte';
+import WelcomeView from '$components/layout/WelcomeView.svelte';
 import AddFeedModal from '$components/modals/AddFeedModal.svelte';
+import CommandPalette from '$components/modals/CommandPalette.svelte';
 import DestinationsPanel from '$components/modals/DestinationsPanel.svelte';
 import EditFeedModal from '$components/modals/EditFeedModal.svelte';
 import HelpOverlay from '$components/modals/HelpOverlay.svelte';
@@ -20,18 +22,43 @@ import ReaderPane from '$components/reader/ReaderPane.svelte';
 import Sidebar from '$components/sidebar/Sidebar.svelte';
 import { t } from '$lib/i18n';
 import {
+    commandShortcut,
     createMatcher,
     eventKeyName,
+    frameShortcut,
     paneShortcut,
     shouldIgnoreKeyEvent,
 } from '$lib/keyboard/registry';
 import { handleShortcut } from '$lib/state/actions';
+import { articlesStore } from '$lib/state/articles.svelte';
+import { feedsStore } from '$lib/state/feeds.svelte';
 import { menuStore } from '$lib/state/menu.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { layoutStore } from '$lib/state/layout.svelte';
+import { shouldWelcome } from '$lib/utils/empty-states';
+import { untrack } from 'svelte';
 
 const matcher = createMatcher();
+
+// The list the welcome gate watches, created in init/derived — never from the
+// template (state created inside a render reaction is excluded from its deps).
+untrack(() => feedsStore.prime());
+const allList = $derived(articlesStore.current);
+
+/** First run: no subscriptions, nothing saved — the welcome view takes over. */
+const welcoming = $derived(
+    shouldWelcome({
+        feedsLoaded: feedsStore.loaded,
+        feedsFailed: feedsStore.error !== null,
+        feedCount: feedsStore.feeds.length,
+        filters: articlesStore.filters,
+        listLoaded: allList.loaded,
+        listFailed: allList.error !== null,
+        listCount: allList.items.length,
+        searching: searchStore.active,
+    }),
+);
 
 // While a modal owns the screen, the whole app frame behind it is `inert`
 // — removed from the tab order and hidden from assistive tech — so the
@@ -54,13 +81,17 @@ function handleModalKey(event: KeyboardEvent): boolean {
 }
 
 // Menu + modal Escape are handled earlier; here Escape steps back through the
-// shell so it is never a no-op — clear an active search, else deselect the open
-// article. Returns true when the event was an Escape (handled).
+// shell so it is never a no-op — drop a multi-selection back to its cursor row,
+// else clear an active search, else deselect the open article. Returns true
+// when the event was an Escape (handled).
 function handleEscapeStepback(event: KeyboardEvent): boolean {
     if (event.key !== 'Escape') {
         return false;
     }
-    if (searchStore.active) {
+    if (selectionStore.multiActive) {
+        event.preventDefault();
+        selectionStore.clearMulti();
+    } else if (searchStore.active) {
         event.preventDefault();
         searchStore.clear();
     } else if (selectionStore.selectedArticleId !== null) {
@@ -68,6 +99,26 @@ function handleEscapeStepback(event: KeyboardEvent): boolean {
         selectionStore.selectedArticleId = null;
     }
     matcher.reset();
+    return true;
+}
+
+/**
+ * While the sidebar tree owns the keyboard it handles its own navigation keys
+ * (which stopPropagation), so anything reaching here is a stray that must not
+ * fire an article-pane shortcut underneath the tree. Only the layout toggles
+ * get through: they move the frame, not a pane. Returns true when the sidebar
+ * owned the event.
+ */
+function handleSidebarKey(event: KeyboardEvent): boolean {
+    if (selectionStore.focus !== 'sidebar') {
+        return false;
+    }
+    matcher.reset();
+    const frameId = frameShortcut(eventKeyName(event));
+    if (frameId !== null) {
+        event.preventDefault();
+        handleShortcut(frameId);
+    }
     return true;
 }
 
@@ -98,14 +149,19 @@ function onKeydown(event: KeyboardEvent): void {
     if (handleModalKey(event)) {
         return;
     }
+    // ⌘K (Ctrl+K off macOS) works from anywhere outside a dialog — the
+    // search field included, so it is matched before the typing guard.
+    const commandId = commandShortcut(event);
+    if (commandId !== null) {
+        event.preventDefault();
+        matcher.reset();
+        handleShortcut(commandId);
+        return;
+    }
     if (shouldIgnoreKeyEvent(event)) {
         return;
     }
-    if (selectionStore.focus === 'sidebar') {
-        // The sidebar tree owns the keyboard: it handles its own navigation
-        // keys (which stopPropagation), so anything reaching here is a stray
-        // that must not fire an article-pane shortcut underneath the tree.
-        matcher.reset();
+    if (handleSidebarKey(event)) {
         return;
     }
     if (handleEscapeStepback(event)) {
@@ -134,8 +190,12 @@ function onKeydown(event: KeyboardEvent): void {
 
 <a class="skip-link" href="#main-content">{t('a11y.skipToContent')}</a>
 
+{#snippet welcomePane()}
+    <WelcomeView />
+{/snippet}
+
 <main id="main-content" class="app-main" tabindex="-1" inert={backgroundInert}>
-    <ThreePane>
+    <ThreePane welcome={welcoming ? welcomePane : undefined}>
         {#snippet sidebar()}
             <Sidebar />
         {/snippet}
@@ -150,6 +210,10 @@ function onKeydown(event: KeyboardEvent): void {
 
 {#if layoutStore.activeModal === 'help'}
     <HelpOverlay onclose={() => layoutStore.closeModal()} />
+{/if}
+
+{#if layoutStore.activeModal === 'palette'}
+    <CommandPalette onclose={() => layoutStore.closeModal()} />
 {/if}
 
 {#if layoutStore.activeModal === 'destinations'}

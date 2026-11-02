@@ -17,6 +17,7 @@ import Icon from '$components/common/Icon.svelte';
 import type { StartupFailureDto } from '$lib/bindings';
 import { type MessageKey, t } from '$lib/i18n';
 import { startupStore } from '$lib/state/startup.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { type RecoveryAction, fileName, recoveryCopy, recoveryPlan } from '$lib/utils/recovery';
 import { tick } from 'svelte';
 
@@ -114,7 +115,13 @@ function label(action: RecoveryAction): string {
     <p class="meta">{before}<code class="path">{value}</code>{after}</p>
 {/snippet}
 
-<main class="recovery" aria-labelledby="recovery-title">
+<!-- No pane headers here: under the macOS overlay title bar (#148) the
+     backdrop around the card is what drags the window. -->
+<main
+    class="recovery"
+    aria-labelledby="recovery-title"
+    data-tauri-drag-region={windowChromeStore.dragSurface}
+>
     <section class="card">
         {#if startupStore.recovered !== null}
             <div class="mark mark-ok" aria-hidden="true">
@@ -272,7 +279,7 @@ function label(action: RecoveryAction): string {
 
     .title {
         font-size: var(--text-xl);
-        font-weight: 620;
+        font-weight: var(--weight-semibold);
         letter-spacing: var(--tracking-tight);
         line-height: 1.25;
     }
@@ -310,7 +317,7 @@ function label(action: RecoveryAction): string {
         background: transparent;
         color: var(--fg);
         font-size: var(--text-md);
-        font-weight: 520;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);
@@ -405,7 +412,7 @@ function label(action: RecoveryAction): string {
     .link-btn {
         padding: var(--space-1) 0;
         font-size: var(--text-sm);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-muted);
     }
 

@@ -9,10 +9,12 @@
 //! `events::EventEmitter`).
 //!
 //! The functions are one `impl Storage` block per table family: `feeds`,
-//! `articles`, `state`, `tags`, `fetch_log`, `settings` and `intents`.
+//! `articles`, `state`, `tags`, `fetch_log`, `settings` and `intents`,
+//! plus `maintenance` (retention, housekeeping, index upkeep).
 //! `rows` holds the helpers they share (tag normalization, dedupe-key
-//! scoping, the raw-row parsers), `query` the list/search query
-//! compilers. This
+//! scoping, the raw-row parsers), `listing` the list/search query
+//! compilers and the list-row parser, and `query` the search syntax's
+//! compiler into an escaped FTS5 expression. This
 //! file holds the public parameter/outcome types, the column lists and
 //! [`begin_write`], the one way a mutation opens its transaction.
 
@@ -20,6 +22,8 @@ mod articles;
 mod feeds;
 mod fetch_log;
 mod intents;
+mod listing;
+mod maintenance;
 mod query;
 mod rows;
 mod settings;
@@ -27,6 +31,7 @@ mod state;
 mod tags;
 
 pub use fetch_log::FETCH_LOG_KEEP;
+pub use maintenance::{MaintenanceCounts, MaintenancePlan};
 pub(crate) use settings::SettingsTx;
 
 use curio_types::{EventEnvelope, Timestamp};
@@ -146,6 +151,18 @@ pub struct ArticleFilter {
     pub feed_tag: Option<String>,
 }
 
+impl ArticleFilter {
+    /// The state-flag dimensions as `(article_state column, wanted value)`.
+    fn state_flags(&self) -> [(&'static str, Option<bool>); 4] {
+        [
+            ("is_read", self.read),
+            ("is_starred", self.starred),
+            ("is_read_later", self.read_later),
+            ("is_archived", self.archived),
+        ]
+    }
+}
+
 /// Full-text search parameters: a query in Curio's small search syntax,
 /// scoped by the same filters as a listing.
 ///
@@ -154,9 +171,13 @@ pub struct ArticleFilter {
 ///
 /// - `word` — matches the word; the **last** bare word also matches as a
 ///   prefix (`prog` finds `programming`), so search-as-you-type hits while
-///   a word is still being typed. A trailing `*` asks for a prefix on any
-///   word (`sql* rust`).
-/// - `"two words"` — an exact phrase; an unterminated quote runs to the end.
+///   a word is still being typed — unless the token it would widen is a
+///   single letter or digit (`a`, or the `c` that `c++` and `C#` index
+///   as), which would match a large share of the library. A trailing `*`
+///   asks for a prefix on any word (`sql* rust`).
+/// - `"two words"` — an exact phrase. An unterminated quote runs to the
+///   end, and its last word matches as a prefix the same way (`"write ahe`
+///   finds `write ahead`); a closed phrase matches whole words only.
 /// - `-word` / `-"a phrase"` — excludes articles containing it. A query of
 ///   exclusions alone matches nothing (FTS has no "everything" to subtract
 ///   from).

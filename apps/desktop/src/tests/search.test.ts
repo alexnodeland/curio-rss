@@ -287,6 +287,40 @@ describe('SearchResults', () => {
         expect(harness.callsFor('search_articles')).toHaveLength(3);
     });
 
+    it('marks a count that hit the result cap as a lower bound', async () => {
+        harness = installIpcHarness({
+            search_articles: Array.from({ length: SEARCH_LIMIT }, (_, i) =>
+                articleSummaryFixture({ id: i + 1 }),
+            ),
+            get_article_state: articleStateFixture(),
+            list_feeds: [],
+        });
+        searchStore.setQuery('x', 0);
+        await flushIpc();
+        const { getByText, queryByText } = render(SearchResults);
+        await flushIpc();
+        expect(searchStore.capped).toBe(true);
+        expect(getByText(`${SEARCH_LIMIT}+ results`)).toBeTruthy();
+        expect(queryByText(`${SEARCH_LIMIT} results`)).toBeNull();
+    });
+
+    it('titles the view half of the scope switch with its full name', async () => {
+        const long = 'A feed title long enough to be cut off in the scope switch';
+        harness = installIpcHarness({
+            search_articles: [articleSummaryFixture({ id: 7 })],
+            get_article_state: articleStateFixture(),
+            list_feeds: [feedFixture({ id: 3, title: long })],
+        });
+        articlesStore.filters = { ...ALL_ARTICLES, feedId: 3 };
+        searchStore.setQuery('x', 0);
+        await flushIpc();
+        const { getByRole, getByText } = render(SearchResults);
+        await flushIpc();
+        expect(getByText('1 result')).toBeTruthy();
+        expect(searchStore.capped).toBe(false);
+        expect(getByRole('button', { name: long }).getAttribute('title')).toBe(long);
+    });
+
     it('names a built-in view when no feed or folder is selected', async () => {
         harness = installIpcHarness({ search_articles: [], list_feeds: [] });
         articlesStore.filters = { ...ALL_ARTICLES, starred: true };

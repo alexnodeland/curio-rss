@@ -5,6 +5,7 @@
  * the same binding.
  */
 import { t } from '$lib/i18n';
+import { isApplePlatform } from '$lib/utils/platform';
 import { SHORTCUTS, type ShortcutId } from './registry';
 
 const SYMBOLS: Readonly<Record<string, string>> = {
@@ -27,13 +28,27 @@ export function keyLabel(key: string): string {
 }
 
 /**
+ * The printed label for a command-modifier chord on `key`
+ * (`ShortcutDef.commandKey`): `⌘K` on macOS, `Ctrl+K` elsewhere.
+ */
+export function commandKeyLabel(key: string, apple: boolean = isApplePlatform()): string {
+    const letter = key.toUpperCase();
+    return apple ? `⌘${letter}` : `${t('key.ctrl')}+${letter}`;
+}
+
+/**
  * The tooltip `kbd` suffix for `id`: its global key sequence as the help
- * overlay prints it (`'a'`, `'R'`, `'g a'`), so a control's tooltip can never
- * name a different key than the one the registry binds. `undefined` for an
- * id with no global keys (pane-only actions), which renders no suffix.
+ * overlay prints it (`'a'`, `'R'`, `'g a'`, `'⌘K'`), so a control's tooltip
+ * can never name a different key than the one the registry binds.
+ * `undefined` for an id with no global keys (pane-only actions), which
+ * renders no suffix.
  */
 export function shortcutKbd(id: ShortcutId): string | undefined {
-    const keys = SHORTCUTS.find((candidate) => candidate.id === id)?.keys ?? [];
+    const shortcut = SHORTCUTS.find((candidate) => candidate.id === id);
+    if (shortcut?.commandKey !== undefined) {
+        return commandKeyLabel(shortcut.commandKey);
+    }
+    const keys = shortcut?.keys ?? [];
     return keys.length === 0 ? undefined : keys.map(keyLabel).join(' ');
 }
 

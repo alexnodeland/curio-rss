@@ -26,7 +26,7 @@ pub(super) fn unique_keys(entries: Vec<ParsedEntry>) -> Vec<ParsedEntry> {
             links_by_guid
                 .entry(guid)
                 .or_default()
-                .insert(entry.link.as_deref());
+                .insert(entry.key_link.as_deref());
         }
     }
     let reused: HashSet<String> = links_by_guid
@@ -39,7 +39,7 @@ pub(super) fn unique_keys(entries: Vec<ParsedEntry>) -> Vec<ParsedEntry> {
         .into_iter()
         .filter_map(|mut entry| {
             if let Some(guid) = entry.guid.as_deref().filter(|guid| reused.contains(*guid)) {
-                entry.dedupe_key = guid_link_key(guid, entry.link.as_deref());
+                entry.dedupe_key = guid_link_key(guid, entry.key_link.as_deref());
             }
             seen.insert(entry.dedupe_key.clone()).then_some(entry)
         })
@@ -59,7 +59,7 @@ enum GuidKey {
 fn alternate_key(entry: &ParsedEntry) -> Option<GuidKey> {
     let guid = entry.guid.as_deref()?;
     let plain = dedupe_key(Some(guid), None, "", None);
-    let reused = guid_link_key(guid, entry.link.as_deref());
+    let reused = guid_link_key(guid, entry.key_link.as_deref());
     if entry.dedupe_key == plain {
         Some(GuidKey::Plain(reused))
     } else if entry.dedupe_key == reused {
@@ -107,23 +107,45 @@ impl ParsedFeed {
     ///   plain key names just the guid, so the link says which item of the
     ///   group the row holds.
     ///
+    /// A stored row that more than one entry of the fetch would adopt is
+    /// adopted by none: its `source_url` cannot say which item it holds.
+    /// That happens when several items of a reused-guid group are stored
+    /// the link-less way — no link, or one the screen drops (#262), whose
+    /// older rows migration 0011 moved to the feed URL — and letting the
+    /// first one listed win could hand it another item's row, read/star
+    /// state and all.
+    ///
     /// Keys stay unique within the fetch.
     pub fn settle_keys<'s>(&mut self, feed_url: &str, stored: impl Fn(&str) -> Option<&'s str>) {
-        let mut taken: HashSet<String> = self
+        let adoptions: Vec<Option<String>> = self
             .entries
             .iter()
-            .map(|entry| entry.dedupe_key.clone())
-            .collect();
-        for entry in &mut self.entries {
-            let adopt = match alternate_key(entry) {
+            .map(|entry| match alternate_key(entry) {
                 Some(GuidKey::Plain(reused)) => stored(&reused).is_some().then_some(reused),
                 Some(GuidKey::Reused(plain)) if stored(&entry.dedupe_key).is_none() => {
                     let source = entry.link.as_deref().unwrap_or(feed_url);
                     (stored(&plain) == Some(source)).then_some(plain)
                 }
                 Some(GuidKey::Reused(_)) | None => None,
-            };
-            if let Some(key) = adopt.filter(|key| !taken.contains(key)) {
+            })
+            .collect();
+        let mut claims: HashMap<&str, usize> = HashMap::new();
+        for key in adoptions.iter().flatten() {
+            *claims.entry(key.as_str()).or_default() += 1;
+        }
+        let ambiguous: HashSet<String> = claims
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .map(|(key, _)| key.to_owned())
+            .collect();
+        let mut taken: HashSet<String> = self
+            .entries
+            .iter()
+            .map(|entry| entry.dedupe_key.clone())
+            .collect();
+        for (entry, adopt) in self.entries.iter_mut().zip(adoptions) {
+            let adopt = adopt.filter(|key| !taken.contains(key) && !ambiguous.contains(key));
+            if let Some(key) = adopt {
                 taken.remove(&entry.dedupe_key);
                 taken.insert(key.clone());
                 entry.dedupe_key = key;
@@ -215,6 +237,58 @@ mod tests {
             keys,
             ["guid+link:same\u{1f}https://example.com/a", "guid:same"]
         );
+    }
+
+    /// #262: an item whose link the screen drops is stored under the feed
+    /// URL (migration 0011 moved older rows there too), so that is the row
+    /// it adopts — while its key still names the declared link.
+    #[test]
+    fn a_screened_out_link_adopts_the_plain_row_stored_under_the_feed_url() {
+        let feed = rss(&[("same", A), ("same", "foo://h/b")]);
+        assert_eq!(feed.entries[1].link, None);
+        assert_eq!(feed.entries[1].dedupe_key, "guid+link:same\u{1f}foo://h/b");
+        let keys = settled(feed, &[("guid:same", FEED_URL)]);
+        assert_eq!(
+            keys,
+            ["guid+link:same\u{1f}https://example.com/a", "guid:same"]
+        );
+    }
+
+    /// #262: items of a reused-guid group whose links the screen drops all
+    /// match the plain row migration 0011 moved to the feed URL, so none
+    /// may take it — the first one listed need not be the item it holds.
+    #[test]
+    fn a_plain_row_several_link_less_items_match_is_adopted_by_none() {
+        let feed = rss(&[("same", "foo://h/1"), ("same", "foo://h/2")]);
+        assert!(feed.entries.iter().all(|entry| entry.link.is_none()));
+        let keys = settled(feed, &[("guid:same", FEED_URL)]);
+        assert_eq!(
+            keys,
+            [
+                "guid+link:same\u{1f}foo://h/1",
+                "guid+link:same\u{1f}foo://h/2"
+            ]
+        );
+        // A screened-out item beside a truly link-less one: just as
+        // ambiguous. The web-linked item never matched the row at all.
+        let keys = settled(
+            rss(&[("same", "javascript:void(0)"), ("same", ""), ("same", A)]),
+            &[("guid:same", FEED_URL)],
+        );
+        assert_eq!(
+            keys,
+            [
+                "guid+link:same\u{1f}javascript:void(0)",
+                "guid+link:same\u{1f}",
+                "guid+link:same\u{1f}https://example.com/a"
+            ]
+        );
+        // A row only one item matches is still adopted by it.
+        let keys = settled(
+            rss(&[("same", "foo://h/1"), ("same", A)]),
+            &[("guid:same", A)],
+        );
+        assert_eq!(keys, ["guid+link:same\u{1f}foo://h/1", "guid:same"]);
     }
 
     #[test]

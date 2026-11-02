@@ -153,7 +153,7 @@ const leave = { y: 8, duration: reducedMotion() ? 0 : 200 };
         background: transparent;
         color: var(--accent);
         font-size: var(--text-sm);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         white-space: nowrap;
         transition: background var(--dur-fast) var(--ease);
     }

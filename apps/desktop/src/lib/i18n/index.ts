@@ -1,10 +1,11 @@
 /**
  * String routing — `t()` resolves a typed message key against the active
  * locale's catalog, falling back to English for any key that locale has not
- * translated, and interpolates `{placeholder}` params. `t()` and the Intl
- * date helpers read the reactive `localeStore.active`, so switching language
- * re-renders every string that flows through them. English is the complete
- * base catalog; every key call site is typechecked against it.
+ * translated, and interpolates `{placeholder}` params (numbers in the locale's
+ * own format). `t()` and the Intl date/number helpers read the reactive
+ * `localeStore.active`, so switching language re-renders every string that
+ * flows through them. English is the complete base catalog; every key call
+ * site is typechecked against it.
  */
 import { de } from './de';
 import { en } from './en';
@@ -63,10 +64,14 @@ function interpolate(
         const chosen = byCategory.get(category) ?? byCategory.get('other') ?? '';
         return chosen.replace(/#/g, new Intl.NumberFormat(locale).format(count));
     });
-    // Then simple `{name}` placeholders.
+    // Then simple `{name}` placeholders. A number is written in the locale's
+    // own format (German `1.234`, French `1 234`); a string goes in verbatim.
     return withPlurals.replace(/\{(\w+)\}/g, (match, name: string) => {
         const value = p[name];
-        return value === undefined ? match : String(value);
+        if (value === undefined) {
+            return match;
+        }
+        return typeof value === 'number' ? new Intl.NumberFormat(locale).format(value) : value;
     });
 }
 
@@ -94,6 +99,36 @@ export function formatIntlDate(date: Date, now: Date = new Date()): string {
     }).format(date);
 }
 
+/** How many calendar days back the list says "yesterday" / "3 days ago"
+ *  instead of a date. */
+export const LIST_DATE_RELATIVE_DAYS = 6;
+
+/** Local calendar days from `date` to `now` (positive = `date` is earlier). */
+function calendarDaysBefore(date: Date, now: Date): number {
+    const startOf = (value: Date): number =>
+        new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+    // Rounded, so a DST day (23 or 25 hours) still counts as one.
+    return Math.round((startOf(now) - startOf(date)) / 86_400_000);
+}
+
+/** A list row's date, scaled to its age — in the active locale: the time of
+ *  day for today (`4:05 PM`), a relative day for the last
+ *  {@link LIST_DATE_RELATIVE_DAYS} days (`yesterday`, `3 days ago`), and the
+ *  {@link formatIntlDate} date otherwise (also for a future date, which a
+ *  feed's clock skew can produce on a later day). `''` when unparseable. */
+export function formatIntlListDate(date: Date, now: Date = new Date()): string {
+    if (Number.isNaN(date.getTime())) return '';
+    const locale = localeStore.active;
+    const days = calendarDaysBefore(date, now);
+    if (days === 0) {
+        return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date);
+    }
+    if (days > 0 && days <= LIST_DATE_RELATIVE_DAYS) {
+        return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-days, 'day');
+    }
+    return formatIntlDate(date, now);
+}
+
 /** Full date + time, e.g. `Jun 3, 2025, 4:05 PM` — in the active locale.
  *  Returns `''` for an unparseable date (see `formatIntlDate`). */
 export function formatIntlDateTime(date: Date): string {
@@ -105,4 +140,25 @@ export function formatIntlDateTime(date: Date): string {
         hour: 'numeric',
         minute: '2-digit',
     }).format(date);
+}
+
+/**
+ * `value` in the active locale's number format — decimal separator, digit
+ * grouping and numerals (German `1,6`, English `1.6`). A number the user sees
+ * never goes through `toFixed`: pass the fraction digits as `options` instead.
+ */
+export function formatIntlNumber(value: number, options?: Intl.NumberFormatOptions): string {
+    return new Intl.NumberFormat(localeStore.active, options).format(value);
+}
+
+/**
+ * A built-in choice's display name (a theme, a reader font): a message key for
+ * a descriptive name each locale translates ("Light", "Serif"), or a proper
+ * noun every locale shows verbatim ("Nord", "Georgia").
+ */
+export type DisplayName = { readonly key: MessageKey } | { readonly proper: string };
+
+/** The text for a {@link DisplayName} in the active locale. */
+export function displayName(name: DisplayName): string {
+    return 'key' in name ? t(name.key) : name.proper;
 }

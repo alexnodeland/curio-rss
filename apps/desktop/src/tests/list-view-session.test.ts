@@ -278,10 +278,13 @@ describe('list view sessions', () => {
         await openFeed(FEED_A);
 
         // A jump far down (scrollbar drag): only the rows that had been on
-        // screen at the top are marked — not the 32 rows skipped over. The
-        // opening screenful is rows 0..7 (600px over 84px rows).
+        // screen at the top are marked — not the rows skipped over. The
+        // opening screenful is the rows a 600px viewport shows at ROW_HEIGHT.
+        const screenful = Math.ceil(600 / ROW_HEIGHT);
         await scrollTo(container, ROW_HEIGHT * 40);
-        expect(markedIds(harness)).toEqual([1080, 1079, 1078, 1077, 1076, 1075, 1074, 1073]);
+        expect(markedIds(harness)).toEqual(
+            Array.from({ length: screenful }, (_, row) => 1080 - row),
+        );
     });
 
     it('unread view: opening an article keeps its row, still selected, until the view changes', async () => {

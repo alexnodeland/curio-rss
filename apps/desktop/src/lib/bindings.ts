@@ -215,8 +215,9 @@ export const commands = {
 	 */
 	connectivityOnline: () => typedError<boolean, CommandError>(__TAURI_INVOKE("connectivity_online")),
 	/**
-	 *  Lists article summaries. Filters and order are backend-owned — the
-	 *  frontend passes them through and never re-filters or re-sorts.
+	 *  Lists article summaries, each with its state flags and tags — one call
+	 *  renders a page. Filters and order are backend-owned — the frontend
+	 *  passes them through and never re-filters or re-sorts.
 	 */
 	listArticles: (params: ListArticlesDto) => typedError<ArticleSummaryDto[], CommandError>(__TAURI_INVOKE("list_articles", { params })),
 	/**  One full article (sanitized HTML included), if it exists. */
@@ -310,6 +311,15 @@ export const commands = {
 	 *  changed.
 	 */
 	setReadLater: (articleId: number, readLater: boolean) => typedError<boolean, CommandError>(__TAURI_INVOKE("set_read_later", { articleId, readLater })),
+	/**
+	 *  Sets one flag on many articles in one transaction — the batch behind
+	 *  the bulk actions (one IPC call, one commit, each changed article's event
+	 *  staged inside it). Ids that no longer exist are skipped. Returns the ids
+	 *  that changed, in the order given, which the UI keeps for an exact undo
+	 *  (the same call with the opposite `value`). Invalidates only if any
+	 *  changed.
+	 */
+	setFlagMany: (articleIds: number[], flag: ArticleFlagDto, value: boolean) => typedError<number[], CommandError>(__TAURI_INVOKE("set_flag_many", { articleIds, flag, value })),
 	/**  Tags an article. Returns whether anything changed (idempotent). */
 	tagArticle: (articleId: number, tag: string) => typedError<boolean, CommandError>(__TAURI_INVOKE("tag_article", { articleId, tag })),
 	/**  Untags an article. Returns whether anything changed (idempotent). */
@@ -507,6 +517,16 @@ export const commands = {
 	 *  between two file moves.
 	 */
 	quitApp: () => typedError<null, CommandError>(__TAURI_INVOKE("quit_app")),
+	/**
+	 *  The main window's chrome: overlay title bar or native, and fullscreen.
+	 * 
+	 *  # Errors
+	 * 
+	 *  Never — a fullscreen state the OS will not report reads as windowed
+	 *  (logged). The `Result` keeps the generated wrapper on the same typed
+	 *  `{ status, data | error }` shape as every other command.
+	 */
+	windowChrome: () => typedError<WindowChromeDto, CommandError>(__TAURI_INVOKE("window_chrome")),
 };
 
 /** Events */
@@ -514,6 +534,7 @@ export const events = {
 	articlesChanged: makeEvent<ArticlesChanged>("articles-changed"),
 	connectivityChanged: makeEvent<ConnectivityChanged>("connectivity-changed"),
 	feedsChanged: makeEvent<FeedsChanged>("feeds-changed"),
+	fullscreenChanged: makeEvent<FullscreenChanged>("fullscreen-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
 	refreshFinished: makeEvent<RefreshFinished>("refresh-finished"),
 	refreshProgress: makeEvent<RefreshProgress>("refresh-progress"),
@@ -565,6 +586,17 @@ export type ArticleDto = {
 	source_updated_at: string | null,
 };
 
+/**  Mirror of [`ArticleFlag`] — which flag a bulk action writes. */
+export type ArticleFlagDto = 
+/**  Read/unread. */
+"read" | 
+/**  Starred. */
+"starred" | 
+/**  In the read-later queue. */
+"read_later" | 
+/**  Archived. */
+"archived";
+
 /**  Mirror of [`ArticleState`] — the per-article flag projection. */
 export type ArticleStateDto = {
 	/**  Read/unread. */
@@ -578,8 +610,9 @@ export type ArticleStateDto = {
 };
 
 /**
- *  A list row: everything the article list renders, plus a short text
- *  preview — never the full content payload (that stays on [`ArticleDto`]).
+ *  A list row: everything the article list renders — a short text
+ *  preview, the state flags and the tags included — in one IPC reply;
+ *  never the full content payload (that stays on [`ArticleDto`]).
  */
 export type ArticleSummaryDto = {
 	/**  Row id (keyset cursor currency). */
@@ -608,10 +641,18 @@ export type ArticleSummaryDto = {
 	image: string | null,
 	/**
 	 *  A whitespace-normalized, length-bounded preview of the extracted
-	 *  text (up to `SNIPPET_MAX_CHARS`, `…`-suffixed when truncated).
+	 *  text (up to 200 characters, `…`-suffixed when the text runs on),
+	 *  built in the engine from the start of the text only.
 	 *  `None` when the article has no extracted text.
 	 */
 	snippet: string | null,
+	/**
+	 *  The article's flags, read with the row — the list renders read /
+	 *  starred / read-later / archived state without a call per row.
+	 */
+	state: ArticleStateDto,
+	/**  The article's tags, sorted. */
+	tags: string[],
 };
 
 /**
@@ -966,6 +1007,15 @@ export type FetchStatusDto =
 "not_modified" | 
 /**  Anything else (recorded, not raised). */
 "error";
+
+/**
+ *  The main window entered or left fullscreen. Fires on change only;
+ *  [`window_chrome`] answers the current state.
+ */
+export type FullscreenChanged = {
+	/**  Whether the window is now fullscreen. */
+	fullscreen: boolean,
+};
 
 /**  Mirror of [`ImportKind`] — what a dropped import row would have been. */
 export type ImportKindDto = 
@@ -1357,6 +1407,18 @@ export type UnreadCountsDto = {
 	total: number,
 	/**  Per-feed unread counts as `(feed_id, unread)` pairs. */
 	by_feed: ([number, number])[],
+};
+
+/**  What chrome the main window was built with, for the frontend's layout. */
+export type WindowChromeDto = {
+	/**
+	 *  The OS title bar is overlaid on the webview (macOS): the traffic
+	 *  lights sit inside the leading pane header, and the headers must act
+	 *  as the window's drag regions. `false` = native decorations.
+	 */
+	overlay_title_bar: boolean,
+	/**  The window is fullscreen (macOS hides the traffic lights there). */
+	fullscreen: boolean,
 };
 
 /* Tauri Specta runtime */

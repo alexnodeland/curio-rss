@@ -151,6 +151,24 @@ pub(crate) enum Command {
     Events(EventsCommand),
     /// Health checks: database integrity, FTS sync, events-log health.
     Doctor,
+    /// Routine upkeep: apply the article-retention policy (see `curio
+    /// retention`), drop unused tags, trim the fetch log, optimize the
+    /// database and search index, checkpoint the WAL and sweep expired
+    /// event logs. Starred, read-later, tagged and exported articles are
+    /// never deleted. Exits 3 when a destination could not be read, so
+    /// nothing was deleted.
+    Maintenance {
+        /// Also delete the articles of feeds you unsubscribed from
+        /// (except starred, read-later, tagged and exported ones).
+        #[arg(long)]
+        purge_orphans: bool,
+    },
+    /// Show or change the article-retention policy `curio maintenance`
+    /// applies. Off by default; with no flags, prints the current policy.
+    Retention(RetentionArgs),
+    /// Database repair.
+    #[command(subcommand)]
+    Db(DbCommand),
     /// Full-text search over stored articles (FTS5), best match first,
     /// title hits ranked above body hits. The last word matches as a
     /// prefix; `"a phrase"`, `word*`, `-excluded` and `a OR b` refine it.
@@ -186,7 +204,8 @@ pub(crate) enum FeedCommand {
     /// List every subscription.
     List,
     /// Unsubscribe a feed (by id, URL, or unique substring). Articles
-    /// keep their rows; emits the feed.removed negation.
+    /// keep their rows (`curio maintenance --purge-orphans` deletes them);
+    /// emits the feed.removed negation.
     Rm { feed: String },
     /// Pause a feed: refreshes skip it until it is resumed.
     Pause {
@@ -248,6 +267,27 @@ pub(crate) struct ListArgs {
     /// Maximum number of articles.
     #[arg(long, default_value_t = 20)]
     pub(crate) limit: u32,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RetentionArgs {
+    /// Delete feed articles first stored more than N days ago (0 = no
+    /// age limit).
+    #[arg(long, value_name = "N")]
+    pub(crate) max_age_days: Option<u32>,
+    /// Keep at most the newest N articles per feed (0 = no count limit).
+    #[arg(long, value_name = "N")]
+    pub(crate) max_per_feed: Option<u32>,
+    /// Never delete unread articles (`on` by default).
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub(crate) keep_unread: Option<OnOff>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum DbCommand {
+    /// Rebuild the full-text search index from the stored articles — the
+    /// repair when `curio doctor` reports the FTS index out of sync.
+    RebuildFts,
 }
 
 #[derive(Debug, Subcommand)]

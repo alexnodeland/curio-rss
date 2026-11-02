@@ -5,6 +5,7 @@ mod articles;
 mod feeds;
 mod init;
 mod inspect;
+mod maintenance;
 mod reddit;
 mod transfer;
 
@@ -69,6 +70,9 @@ fn dispatch(app: &mut App, command: Command) -> anyhow::Result<ExitCode> {
         Command::Reddit(command) => reddit::run(app, command),
         Command::Events(command) => inspect::events(app, &command),
         Command::Doctor => inspect::doctor(app),
+        Command::Maintenance { purge_orphans } => maintenance::run(app, purge_orphans),
+        Command::Retention(args) => maintenance::retention(app, &args),
+        Command::Db(command) => maintenance::db(app, &command),
         Command::Search { query, filters } => articles::search(app, &query, &filters),
     }
 }

@@ -11,9 +11,12 @@
  * inside the packaged app.
  */
 import type {
+    ArticleFlagDto,
     ArticleStateDto,
+    ArticleSummaryDto,
     CommandError,
     FeedDto,
+    FetchErrorKindDto,
     NewFeedDto,
     StartupFailureClass,
     StartupFailureDto,
@@ -96,13 +99,46 @@ export async function installDevMock(): Promise<void> {
     const { mockIPC } = await import('@tauri-apps/api/mocks');
     const { previewFeeds, previewArticles, previewDestinations } = await import('./preview-data');
 
-    const feeds = structuredClone(previewFeeds);
-    const articles = structuredClone(previewArticles);
+    // Preview scenarios for the zero/error states: `?library=empty` is the
+    // first run (no feeds, nothing saved); `?feedError=<kind>` adds a feed
+    // whose last fetch failed with that class; `?fail=<command>` (repeatable)
+    // fails that command's first call, so its error state and Retry show.
+    const scenario = new URLSearchParams(window.location.search);
+    const emptyLibrary = scenario.get('library') === 'empty';
+    const feeds = structuredClone(previewFeeds).filter(() => !emptyLibrary);
+    const articles = structuredClone(previewArticles).filter(() => !emptyLibrary);
+    const feedError = scenario.get('feedError') as FetchErrorKindDto | null;
+    if (feedError !== null && feeds.length > 0) {
+        // An extra, article-less feed whose fetches fail: its empty list
+        // shows the failing-feed state.
+        feeds.push({
+            ...structuredClone(feeds[0]),
+            id: Math.max(...feeds.map((feed) => feed.id)) + 1,
+            url: 'https://broken.example.org/feed.xml',
+            title: 'Broken feed',
+            tags: [],
+            last_error: `dev: ${feedError}`,
+            last_error_kind: feedError,
+            consecutive_failures: 3,
+        });
+    }
+    const failOnce = new Set(scenario.getAll('fail'));
+    const devFailure: CommandError = {
+        kind: 'user',
+        code: 'IO',
+        params: {},
+        message: 'The library could not be read (dev preview failure).',
+        recoverable: true,
+    };
     const destinations = structuredClone(previewDestinations);
     const settings = new Map<string, string>([
         ['ui.theme', 'dark'],
         ['ui.theme.mode', 'dark'],
     ]);
+    // `?sidebar=collapsed` previews the shell with the sidebar collapsed.
+    if (new URLSearchParams(window.location.search).get('sidebar') === 'collapsed') {
+        settings.set('ui.panes.sidebar-collapsed', 'true');
+    }
 
     // A canned custom theme the dev mock "reads" on import, so the theme
     // import flow can be exercised in the plain-browser visual loop.
@@ -151,6 +187,13 @@ tokens:
             .filter((a) => (p.tag == null ? true : a.tags.includes(p.tag as string)))
             .filter((a) => (folder == null ? true : inFolder(a.summary.feed_id)));
     };
+    // A list row as the engine returns it: the summary with the article's
+    // current flags and tags joined in.
+    const row = (a: (typeof articles)[number]): ArticleSummaryDto => ({
+        ...structuredClone(a.summary),
+        state: { ...a.state },
+        tags: [...a.tags],
+    });
     // Mirrors core's `unread_counts`: archived items leave the reading flow
     // (badge included), and an article whose feed is gone still counts
     // toward the total, just under no feed.
@@ -294,6 +337,9 @@ tokens:
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a flat 1:1 IPC dispatch table for the dev mock; splitting it would obscure the mapping
         (cmd, raw) => {
             const args = (raw ?? {}) as Record<string, unknown>;
+            if (failOnce.delete(cmd)) {
+                return Promise.reject(devFailure);
+            }
             switch (cmd) {
                 case 'list_feeds':
                     return structuredClone(feeds);
@@ -341,9 +387,7 @@ tokens:
                     let rows = filtered(p).sort((x, y) => y.summary.id - x.summary.id);
                     if (p.before != null)
                         rows = rows.filter((a) => a.summary.id < (p.before as number));
-                    return rows
-                        .slice(0, (p.limit as number) ?? 50)
-                        .map((a) => structuredClone(a.summary));
+                    return rows.slice(0, (p.limit as number) ?? 50).map(row);
                 }
                 case 'search_articles': {
                     // Same filters as the list; a naive title-substring match
@@ -359,7 +403,7 @@ tokens:
                             words.every((word) => a.summary.title.toLowerCase().includes(word)),
                         )
                         .slice(0, (p.limit as number) ?? 20)
-                        .map((a) => structuredClone(a.summary));
+                        .map(row);
                 }
                 case 'get_article':
                     return structuredClone(byId(args.articleId as number)?.full ?? null);
@@ -387,6 +431,13 @@ tokens:
                 }
                 case 'set_starred':
                     return flipOne(args.articleId, 'starred', args.starred);
+                case 'set_flag_many': {
+                    // The ids actually flipped, in the order given (the undo set).
+                    const flipped = (args.articleIds as number[]).filter((id) =>
+                        flip(byId(id), args.flag as ArticleFlagDto, args.value as boolean),
+                    );
+                    return emitting(flipped, flipped.length > 0, articlesChanged());
+                }
                 case 'set_read_later':
                     return flipOne(args.articleId, 'read_later', args.readLater);
                 case 'set_archived':
@@ -528,6 +579,16 @@ tokens:
                 // `?offline=1` previews the sidebar's "Offline" badge.
                 case 'connectivity_online':
                     return new URLSearchParams(window.location.search).get('offline') !== '1';
+                // `?titlebar=overlay` previews the macOS overlay title bar's
+                // header inset (the browser draws no traffic lights);
+                // `&fullscreen=1` its fullscreen state, where the inset is off.
+                case 'window_chrome': {
+                    const query = new URLSearchParams(window.location.search);
+                    return {
+                        overlay_title_bar: query.get('titlebar') === 'overlay',
+                        fullscreen: query.get('fullscreen') === '1',
+                    };
+                }
                 case 'get_app_info':
                     return {
                         version: '0.6.0',

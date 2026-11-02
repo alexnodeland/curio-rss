@@ -3,7 +3,7 @@
 
 use super::begin_write;
 use super::rows::{article_tags_tx, insert_intent, require_article, set_flag};
-use crate::model::{ArticleId, ArticleState, FeedId};
+use crate::model::{ArticleFlag, ArticleId, ArticleState, FeedId};
 use crate::storage::{Storage, StorageError};
 use curio_types::{ArticleSnapshot, CurioId, EventEnvelope, EventPayload, Timestamp};
 use rusqlite::OptionalExtension as _;
@@ -115,6 +115,71 @@ impl Storage {
                 if set_flag(&tx, id.0, "is_read", read)? {
                     changed += 1;
                 }
+            }
+            tx.commit()?;
+            Ok(changed)
+        })
+    }
+
+    /// Sets one flag on many articles in one transaction — the batch behind
+    /// the desktop's bulk actions. Each article that actually changes stages
+    /// the same event its single flip would (`article.starred` with tags,
+    /// `article.archived`, … — read stays DB-local), all inside the one
+    /// transaction, so a 500-row bulk archive commits (or fails) as a whole.
+    /// Ids that no longer exist are skipped, not errors, and an id repeated
+    /// in `ids` changes once. Returns the ids actually changed, in input
+    /// order — exactly what an undo hands back with the opposite `value`.
+    ///
+    /// # Errors
+    ///
+    /// Database or serialization errors; nothing is committed on error.
+    pub fn set_flag_many(
+        &self,
+        ids: &[ArticleId],
+        flag: ArticleFlag,
+        value: bool,
+    ) -> Result<Vec<ArticleId>, StorageError> {
+        let ids = ids.to_vec();
+        let column = flag_column(flag);
+        self.write(move |conn| {
+            let tx = begin_write(conn)?;
+            let mut changed = Vec::new();
+            for id in ids {
+                let curio_id = match require_article(&tx, id.0) {
+                    Ok(curio_id) => curio_id,
+                    Err(StorageError::NotFound { .. }) => continue,
+                    Err(error) => return Err(error),
+                };
+                if !set_flag(&tx, id.0, column, value)? {
+                    continue;
+                }
+                let payload = match (flag, value) {
+                    (ArticleFlag::Read, _) => None,
+                    (ArticleFlag::Starred, true) => Some(EventPayload::ArticleStarred {
+                        curio_id,
+                        tags: article_tags_tx(&tx, id.0)?,
+                    }),
+                    (ArticleFlag::Starred, false) => {
+                        Some(EventPayload::ArticleUnstarred { curio_id })
+                    }
+                    (ArticleFlag::ReadLater, true) => Some(EventPayload::ReadLaterAdded {
+                        curio_id,
+                        tags: article_tags_tx(&tx, id.0)?,
+                    }),
+                    (ArticleFlag::ReadLater, false) => {
+                        Some(EventPayload::ReadLaterRemoved { curio_id })
+                    }
+                    (ArticleFlag::Archived, true) => {
+                        Some(EventPayload::ArticleArchived { curio_id })
+                    }
+                    (ArticleFlag::Archived, false) => {
+                        Some(EventPayload::ArticleUnarchived { curio_id })
+                    }
+                };
+                if let Some(payload) = payload {
+                    insert_intent(&tx, &EventEnvelope::new(payload))?;
+                }
+                changed.push(id);
             }
             tx.commit()?;
             Ok(changed)
@@ -274,5 +339,15 @@ impl Storage {
             tx.commit()?;
             Ok(envelope)
         })
+    }
+}
+
+/// The `article_state` column behind a flag (a compile-time constant).
+fn flag_column(flag: ArticleFlag) -> &'static str {
+    match flag {
+        ArticleFlag::Read => "is_read",
+        ArticleFlag::Starred => "is_starred",
+        ArticleFlag::ReadLater => "is_read_later",
+        ArticleFlag::Archived => "is_archived",
     }
 }

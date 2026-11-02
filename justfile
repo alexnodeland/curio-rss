@@ -104,7 +104,7 @@ desktop-dev:
 desktop-test:
     cargo test -p curio-desktop
 
-# Frontend bans: {@html} only in SanitizedHtml.svelte, raw invoke imports only in bindings.ts
+# Frontend bans: {@html} only in SanitizedHtml.svelte, raw invoke imports only in bindings.ts, no raw font weights in components
 frontend-bans:
     bash scripts/check-frontend-bans.sh
 
@@ -153,6 +153,12 @@ fixtures *ARGS:
 # fixture (target < 1.5s). Generates the fixture once, then times the open.
 bench-cold-start:
     cargo bench -p curio-fixtures --bench cold_start
+
+# List read-path bench on the 100k fixture: the default view's first page,
+# the Starred page and the unread counts (budget: p95 < 10ms each; the
+# p50/p95 pass prints to stderr before criterion runs).
+bench-list:
+    cargo bench -p curio-fixtures --bench list_queries
 
 # The nightly `bench` job's run, locally: bencher output from a stateless
 # criterion (fresh CRITERION_HOME, --discard-baseline), written to

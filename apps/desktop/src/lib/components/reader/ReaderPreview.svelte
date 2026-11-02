@@ -71,7 +71,8 @@ const sampleHtml = $derived(
         overflow-y: auto;
         border-radius: var(--radius-md);
         border: 1px solid var(--hairline);
-        background: var(--bg);
+        /* The chosen reading-surface tint (app.css), else the theme ground. */
+        background: var(--reading-surface, var(--bg));
         color: var(--ink);
     }
 
@@ -88,27 +89,5 @@ const sampleHtml = $derived(
 
     .preview-article.hyphenate :global(.sanitized-content) {
         hyphens: auto;
-    }
-
-    /* Mirrors ReaderPane's reading-surface tints so the control previews. The
-       ink tokens are forced directly (`--ink` is a :root color-mix that
-       inherits its computed value, so overriding `--fg` alone wouldn't repaint
-       the prose). */
-    .preview-surface[data-reading-theme='sepia'] {
-        background: #f1e5cf;
-        --ink: #43392b;
-        --ink-soft: #6b5b45;
-        --fg: #43392b;
-        --fg-muted: #5c4f3b;
-        --fg-subtle: #7a6a52;
-    }
-
-    .preview-surface[data-reading-theme='paper'] {
-        background: #faf6ee;
-        --ink: #2b2b2b;
-        --ink-soft: #555555;
-        --fg: #2b2b2b;
-        --fg-muted: #4a4a4a;
-        --fg-subtle: #6b6b6b;
     }
 </style>

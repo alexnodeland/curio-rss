@@ -18,6 +18,7 @@ import {
 } from '$lib/bindings';
 import type { ArticleFilters } from './articles.svelte';
 import type { CommandResult } from './query-cache.svelte';
+import { landRowDetails } from './row-details';
 
 /** FTS result cap — enough to scan, small enough to render without paging. */
 export const SEARCH_LIMIT = 100;
@@ -105,6 +106,14 @@ export class SearchStore {
     }
 
     /**
+     * The result window hit {@link SEARCH_LIMIT}: more articles may match
+     * than are shown, so a count of the window is a lower bound.
+     */
+    get capped(): boolean {
+        return this.results.length >= SEARCH_LIMIT;
+    }
+
+    /**
      * The results window is settled: nothing is pending or in flight, so an
      * empty `results` genuinely means "no matches" rather than "hasn't run
      * yet". Gates the empty state so it never flashes during the debounce gap.
@@ -176,6 +185,11 @@ export class SearchStore {
         }, debounceMs);
     }
 
+    /** Re-runs the current query now (the error state's Retry). */
+    retry(): void {
+        void this.#run();
+    }
+
     async #run(): Promise<void> {
         const query = this.query.trim();
         if (query.length === 0) {
@@ -198,6 +212,7 @@ export class SearchStore {
         if (result.status === 'ok') {
             this.results = result.data;
             this.error = null;
+            landRowDetails(result.data);
         } else {
             this.error = result.error;
         }

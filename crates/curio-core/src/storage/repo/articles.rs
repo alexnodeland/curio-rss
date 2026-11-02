@@ -1,10 +1,15 @@
 //! Articles: batch upsert, lookup, keyset listing, unread counts, search,
 //! deletion and content replacement.
 
-use super::query::{list_articles_query, search_articles_query};
+use super::listing::{
+    Projection, RawListed, UNREAD_COUNTS, list_articles_query, raw_listed, search_articles_query,
+};
+use super::maintenance::is_tombstoned;
 use super::rows::{RawArticle, article_by_id, parse_ts, raw_article, scoped_dedupe_key};
 use super::{ARTICLE_COLS, ListArticles, SearchArticles, UpsertOutcome, begin_write};
-use crate::model::{Article, ArticleContent, ArticleId, ContentOrigin, FeedId, NewArticle};
+use crate::model::{
+    Article, ArticleContent, ArticleId, ContentOrigin, FeedId, ListedArticle, NewArticle,
+};
 use crate::storage::{Storage, StorageError};
 use curio_types::{CurioId, Timestamp};
 use rusqlite::OptionalExtension as _;
@@ -48,6 +53,11 @@ impl Storage {
     /// - a row whose columns already hold the incoming values is not
     ///   written at all (no `modified_at` bump, no FTS reindex), so
     ///   [`UpsertOutcome::updated`] counts rows that *actually changed*.
+    ///
+    /// A feed entry whose key the retention policy reaped (a tombstone —
+    /// see [`Self::run_maintenance`]) is skipped, not re-inserted: a feed
+    /// that keeps listing a reaped item never brings it back as a new
+    /// unread article. The skip counts as neither inserted nor updated.
     ///
     /// A `published_at` later than the article's first-seen time
     /// (`saved_at`; *now* for an insert) is clamped to it: nothing is
@@ -125,6 +135,9 @@ impl Storage {
                         ))?
                     };
                     outcome.updated += u64::try_from(changed).unwrap_or_default();
+                } else if article.feed_id.is_some() && is_tombstoned(&tx, &dedupe_key, now_ts)? {
+                    // Reaped by retention while the feed still lists it:
+                    // it stays gone (see `Storage::run_maintenance`).
                 } else {
                     let origin = if article.feed_id.is_some() {
                         ContentOrigin::Feed
@@ -221,6 +234,11 @@ impl Storage {
     /// read for a whole fetch. Refresh settles reused-guid keys with it
     /// ([`crate::feeds::ParsedFeed::settle_keys`]).
     ///
+    /// A key retention reaped counts as stored, with the reaped row's
+    /// `source_url` (see [`Self::run_maintenance`]): the item then settles
+    /// on the tombstoned key whichever form this fetch gave it, and stays
+    /// gone instead of coming back under the other form.
+    ///
     /// # Errors
     ///
     /// Database errors.
@@ -230,8 +248,12 @@ impl Storage {
         dedupe_keys: Vec<String>,
     ) -> Result<HashMap<String, String>, StorageError> {
         self.read(move |conn| {
-            let mut stmt =
-                conn.prepare_cached("SELECT source_url FROM articles WHERE dedupe_key = ?1")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT source_url FROM articles WHERE dedupe_key = ?1 \
+                 UNION ALL \
+                 SELECT source_url FROM article_tombstones WHERE dedupe_key = ?1 \
+                 LIMIT 1",
+            )?;
             let mut found = HashMap::new();
             for key in dedupe_keys {
                 let scoped = scoped_dedupe_key(feed_id, &key);
@@ -246,15 +268,18 @@ impl Storage {
         })
     }
 
-    /// Keyset-paginated listing, newest row id first. See [`ListArticles`]
-    /// for the filter semantics; filters never change the order.
+    /// Keyset-paginated listing of whole articles (body included), newest
+    /// row id first — for walks that need the content, such as a bulk
+    /// export. A list a head renders reads [`Self::list_article_rows`]
+    /// instead. See [`ListArticles`] for the filter semantics; filters
+    /// never change the order.
     ///
     /// # Errors
     ///
     /// Database or stored-value corruption errors.
     pub fn list_articles(&self, params: ListArticles) -> Result<Vec<Article>, StorageError> {
         self.read(move |conn| {
-            let (sql, binds) = list_articles_query(&params);
+            let (sql, binds) = list_articles_query(&params, Projection::Full);
             let mut stmt = conn.prepare_cached(&sql)?;
             let raws = stmt
                 .query_map(
@@ -266,34 +291,58 @@ impl Storage {
         })
     }
 
-    /// Unread-article counts, grouped by feed (`GROUP BY feed_id` in
-    /// SQL — counts are backend-owned, never client badge math). The
-    /// `None` key counts articles that belong to no feed (manual saves,
-    /// rows orphaned by a feed removal); the total unread count is the
-    /// sum of the map's values. An article with no `article_state` row
-    /// has never been touched and counts as unread; starred and read-later
-    /// do not affect unreadness, but **archived articles are excluded** —
+    /// [`Self::list_articles`] as list rows: the same filters, order and
+    /// keyset, but each row carries its state flags, tags and a bounded
+    /// text preview instead of the body — one read renders a page.
+    ///
+    /// # Errors
+    ///
+    /// Database or stored-value corruption errors.
+    pub fn list_article_rows(
+        &self,
+        params: ListArticles,
+    ) -> Result<Vec<ListedArticle>, StorageError> {
+        self.read(move |conn| {
+            let (sql, binds) = list_articles_query(&params, Projection::Listed);
+            let mut stmt = conn.prepare_cached(&sql)?;
+            let raws = stmt
+                .query_map(
+                    rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                    raw_listed,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            raws.into_iter().map(RawListed::into_listed).collect()
+        })
+    }
+
+    /// Unread-article counts per feed (backend-owned, never client badge
+    /// math). The `None` key counts articles that belong to no feed
+    /// (manual saves, rows orphaned by a feed removal); the total unread
+    /// count is the sum of the map's values, and a feed with nothing
+    /// unread is absent. An article with no `article_state` row has never
+    /// been touched and counts as unread; starred and read-later do not
+    /// affect unreadness, but **archived articles are excluded** —
     /// archiving takes an item out of the reading flow, badge included.
+    ///
+    /// Read from the `feed_unread` counters that migration 0012's triggers
+    /// keep in step with every write, so the cost is one row per feed, not
+    /// a scan of the articles.
     ///
     /// # Errors
     ///
     /// Database errors.
     pub fn unread_counts(&self) -> Result<BTreeMap<Option<FeedId>, u64>, StorageError> {
         self.read(|conn| {
-            let mut stmt = conn.prepare_cached(
-                "SELECT a.feed_id, COUNT(*) FROM articles a \
-                 LEFT JOIN article_state s ON s.article_id = a.id \
-                 WHERE COALESCE(s.is_read, 0) = 0 AND COALESCE(s.is_archived, 0) = 0 \
-                 GROUP BY a.feed_id",
-            )?;
+            let mut stmt = conn.prepare_cached(UNREAD_COUNTS)?;
             let rows = stmt
-                .query_map([], |row| {
-                    Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?))
-                })?
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(feed_id, n)| (feed_id.map(FeedId), u64::try_from(n).unwrap_or_default()))
+                .map(|(key, n)| {
+                    let feed = (key != 0).then_some(FeedId(key));
+                    (feed, u64::try_from(n).unwrap_or_default())
+                })
                 .collect())
         })
     }
@@ -334,7 +383,7 @@ impl Storage {
     /// Database or stored-value corruption errors.
     pub fn search(&self, params: SearchArticles) -> Result<Vec<Article>, StorageError> {
         self.read(move |conn| {
-            let Some((sql, binds)) = search_articles_query(&params) else {
+            let Some((sql, binds)) = search_articles_query(&params, Projection::Full) else {
                 return Ok(Vec::new());
             };
             let mut stmt = conn.prepare_cached(&sql)?;
@@ -345,6 +394,31 @@ impl Storage {
                 )?
                 .collect::<Result<Vec<_>, _>>()?;
             raws.into_iter().map(RawArticle::into_article).collect()
+        })
+    }
+
+    /// [`Self::search`] as list rows (see [`Self::list_article_rows`]):
+    /// the same query syntax, scope and ranking, best match first.
+    ///
+    /// # Errors
+    ///
+    /// Database or stored-value corruption errors.
+    pub fn search_article_rows(
+        &self,
+        params: SearchArticles,
+    ) -> Result<Vec<ListedArticle>, StorageError> {
+        self.read(move |conn| {
+            let Some((sql, binds)) = search_articles_query(&params, Projection::Listed) else {
+                return Ok(Vec::new());
+            };
+            let mut stmt = conn.prepare_cached(&sql)?;
+            let raws = stmt
+                .query_map(
+                    rusqlite::params_from_iter(binds.iter().map(Box::as_ref)),
+                    raw_listed,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            raws.into_iter().map(RawListed::into_listed).collect()
         })
     }
 

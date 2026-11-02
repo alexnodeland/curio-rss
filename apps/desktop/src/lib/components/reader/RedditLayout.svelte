@@ -125,7 +125,7 @@ function linkHost(url: string): string {
         gap: var(--space-3);
         padding-bottom: var(--space-4);
         margin-bottom: var(--space-5);
-        border-bottom: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--reader-hairline);
     }
 
     .sub-avatar {
@@ -150,7 +150,7 @@ function linkHost(url: string): string {
     .subreddit {
         font-family: var(--font-family);
         font-size: var(--text-md);
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         color: var(--fg);
     }
 
@@ -164,7 +164,7 @@ function linkHost(url: string): string {
         margin-left: auto;
         font-family: var(--font-family);
         font-size: var(--text-xs);
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         letter-spacing: var(--tracking-wide);
         color: #ff4500;
         opacity: 0.85;
@@ -179,8 +179,8 @@ function linkHost(url: string): string {
         margin-bottom: var(--space-5);
         padding: var(--space-3) var(--space-4);
         border-radius: var(--radius-lg);
-        background: var(--surface-inset);
-        border: 1px solid var(--hairline);
+        background: var(--reader-inset);
+        border: 1px solid var(--reader-hairline);
         color: var(--fg);
         text-align: left;
         transition:
@@ -190,7 +190,7 @@ function linkHost(url: string): string {
 
     .link-card:hover {
         background: var(--hover);
-        border-color: var(--hairline-strong);
+        border-color: var(--reader-hairline-strong);
     }
 
     .link-card-icon {
@@ -215,7 +215,7 @@ function linkHost(url: string): string {
     .link-card-host {
         font-family: var(--font-family);
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
     }
 
     .link-card-url {
@@ -235,7 +235,7 @@ function linkHost(url: string): string {
         gap: var(--space-2);
         margin-top: var(--space-6);
         padding-top: var(--space-4);
-        border-top: 1px solid var(--hairline);
+        border-top: 1px solid var(--reader-hairline);
     }
 
     .post-action {
@@ -244,12 +244,12 @@ function linkHost(url: string): string {
         gap: var(--space-2);
         padding: var(--space-2) var(--space-4);
         border-radius: var(--radius-pill);
-        background: var(--surface-raised);
-        border: 1px solid var(--hairline);
+        background: var(--reader-tint-strong);
+        border: 1px solid var(--reader-hairline);
         color: var(--fg-muted);
         font-family: var(--font-family);
         font-size: var(--text-sm);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);

@@ -463,7 +463,7 @@ function closeWithFlush(): void {
 
     .feed-name {
         font-size: var(--text-base);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         letter-spacing: var(--tracking-snug);
         min-width: 0;
         color: var(--fg);
@@ -477,7 +477,7 @@ function closeWithFlush(): void {
         padding: 3px var(--space-3);
         border-radius: var(--radius-pill);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         background: var(--surface-raised);
         border: 1px solid var(--hairline);
         color: var(--fg-muted);
@@ -518,7 +518,7 @@ function closeWithFlush(): void {
 
     .field-label {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -568,7 +568,7 @@ function closeWithFlush(): void {
         border: 1px solid var(--hairline-strong);
         color: var(--fg-muted);
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);
@@ -616,7 +616,7 @@ function closeWithFlush(): void {
 
     .health h3 {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -624,7 +624,7 @@ function closeWithFlush(): void {
 
     .recent h4 {
         font-size: 0.6875rem;
-        font-weight: 650;
+        font-weight: var(--weight-heading);
         letter-spacing: var(--tracking-caps);
         text-transform: uppercase;
         color: var(--fg-subtle);
@@ -653,7 +653,7 @@ function closeWithFlush(): void {
         color: var(--fg-muted);
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);
@@ -708,7 +708,7 @@ function closeWithFlush(): void {
 
     .fetch-new {
         color: var(--accent);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .schedule {
@@ -768,7 +768,7 @@ function closeWithFlush(): void {
         background: transparent;
         border: 1px solid var(--hairline-strong);
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         color: var(--fg-muted);
         transition:
             background var(--dur-fast) var(--ease),

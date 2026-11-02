@@ -41,13 +41,16 @@ import {
 } from '$lib/state/actions';
 import { articlesStore } from '$lib/state/articles.svelte';
 import { feedsStore } from '$lib/state/feeds.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
 import { PREFETCH_SETTLE_MS, articlePrefetcher, neighbourIds } from '$lib/state/prefetch';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { typographyStore } from '$lib/state/typography.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { articleDate, isLinkless } from '$lib/utils/article';
 import { commandErrorMessage } from '$lib/utils/errors';
 import EmptyState from '$components/common/EmptyState.svelte';
+import ErrorState from '$components/common/ErrorState.svelte';
 import Icon from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { dismissable } from '$lib/actions/dismissable';
@@ -57,12 +60,28 @@ import TypographyControls from './TypographyControls.svelte';
 import ViewModeDispatch from './ViewModeDispatch.svelte';
 import { untrack } from 'svelte';
 
+type HintPart = { readonly ids: readonly ShortcutId[]; readonly label: MessageKey };
+
 /** The empty-state hint, as registry actions: each part prints its bound keys. */
-const HINT: readonly { readonly ids: readonly ShortcutId[]; readonly label: MessageKey }[] = [
+const HINT: readonly HintPart[] = [
     { ids: ['nav.previousArticle', 'nav.nextArticle'], label: 'reader.hint.move' },
     { ids: ['nav.focusReader'], label: 'reader.hint.read' },
     { ids: ['help.toggle'], label: 'reader.hint.help' },
 ];
+
+/** Focus mode hides the toolbar's way out along with the article, so the
+ *  empty reader names the key that leaves it. */
+const FOCUS_HINT: readonly HintPart[] = [
+    ...HINT.slice(0, 2),
+    { ids: ['view.toggleFocusMode'], label: 'reader.hint.exitFocus' },
+    ...HINT.slice(2),
+];
+
+const hintParts = $derived(layoutStore.focusMode ? FOCUS_HINT : HINT);
+
+const focusModeLabel = $derived(
+    layoutStore.focusMode ? t('reader.action.exitFocusMode') : t('reader.action.focusMode'),
+);
 
 /**
  * What the header needs — carried by both the full `ArticleDto` and the list
@@ -225,6 +244,11 @@ function failureMessage(): string {
     return error === null ? '' : commandErrorMessage(error);
 }
 
+/** Re-runs the selected article's load (the error states' Retry). */
+function retryArticle(): void {
+    void articleQuery?.refetch();
+}
+
 /** The header source: the full article once loaded, else the list row. */
 function head(): ReaderHead | null {
     return article() ?? selectionStore.selectedArticle;
@@ -278,6 +302,10 @@ function dateLabel(current: ReaderHead): { text: string; firstSeen: boolean } {
 let lastOpenedId: number | null = null;
 $effect(() => {
     const articleId = selectionStore.selectedArticleId;
+    // A multi-selection shows no article, so it marks none read.
+    if (selectionStore.multiActive) {
+        return;
+    }
     if (articleId !== null && articleId !== lastOpenedId && articleQuery?.data != null) {
         lastOpenedId = articleId;
         void markReadOnOpen(articleId);
@@ -329,11 +357,47 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
 <svelte:window onfocusin={onWindowFocusIn} />
 
+<!-- With no toolbar (nothing selected, a failed or missing article) the
+     macOS title bar (#148) still needs a handle over the reader: a bare strip
+     the header's height, which only drags (its content stays inert). -->
+{#snippet dragStrip()}
+    {#if windowChromeStore.dragSurface !== undefined}
+        <div class="drag-strip" data-tauri-drag-region={windowChromeStore.dragSurface}></div>
+    {/if}
+{/snippet}
+
+<!-- Focus mode can be the launch layout, and with no article open the
+     toolbar's toggle is absent: the empty reader carries a pointer way back
+     to the list. The hint above it already names the key, so it carries no
+     tooltip repeating its own label. -->
+{#snippet exitFocusAction()}
+    <button type="button" class="exit-focus" onclick={() => void layoutStore.toggleFocusMode()}>
+        <Icon name="focus-exit" size={16} />
+        {focusModeLabel}
+    </button>
+{/snippet}
+
 <div class="reader">
-    {#if selectedId === null}
-        <EmptyState icon="sparkle" title={t('reader.empty')}>
+    {#if selectionStore.multiActive}
+        <!-- Several rows selected: no one article is "open"; the bulk bar acts. -->
+        {@render dragStrip()}
+        <EmptyState
+            icon="rows"
+            title={t('reader.multiSelected', { count: selectionStore.selectedIds.length })}
+        >
             {#snippet hint()}
-                {#each HINT as part, index (part.label)}
+                {t('reader.multiSelected.hint')}
+            {/snippet}
+        </EmptyState>
+    {:else if selectedId === null}
+        {@render dragStrip()}
+        <EmptyState
+            icon="sparkle"
+            title={t('reader.empty')}
+            actions={layoutStore.focusMode ? exitFocusAction : undefined}
+        >
+            {#snippet hint()}
+                {#each hintParts as part, index (part.label)}
                     {#if index > 0}
                         <span class="hint-sep" aria-hidden="true">·</span>
                     {/if}
@@ -355,24 +419,36 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         {@const header = head()}
         {#if current === null && failure() !== null}
             <!-- No article to preserve: the load itself failed. -->
-            <div class="reader-status">
-                <p class="error" role="alert">{failureMessage()}</p>
-            </div>
+            {@render dragStrip()}
+            <ErrorState message={failureMessage()} busy={articleQuery?.loading ?? false} onretry={retryArticle} />
         {:else if current === null && articleLoaded()}
+            {@render dragStrip()}
             <div class="reader-status">
                 <p>{t('reader.missing')}</p>
             </div>
         {:else}
-            {#if current !== null && failure() !== null}
-                <!-- Stale-while-revalidate: a refetch failed but the article is
-                     still in hand — keep showing it under a non-destructive
-                     banner instead of blanking a populated reader (parity with
-                     the article list's refetch banner). -->
-                <p class="reader-banner" role="alert">{failureMessage()}</p>
-            {/if}
             <!-- Mounted for the whole selection — including while the body is
-                 still loading — so j/k never unmounts it or resets its state. -->
-            <div class="reader-toolbar" role="toolbar" aria-label={t('reader.toolbar')}>
+                 still loading — so j/k never unmounts it or resets its state.
+                 Always the pane's top row: it is the title bar's drag region
+                 under the macOS overlay (#148), level with the other headers. -->
+            <div
+                class="reader-toolbar"
+                class:leading={!layoutStore.listVisible}
+                role="toolbar"
+                aria-label={t('reader.toolbar')}
+                data-tauri-drag-region={windowChromeStore.dragRegion}
+            >
+                <button
+                    class="tool"
+                    class:on={layoutStore.focusMode}
+                    aria-pressed={layoutStore.focusMode}
+                    aria-label={focusModeLabel}
+                    use:tooltip={{ text: focusModeLabel, kbd: shortcutKbd('view.toggleFocusMode') }}
+                    onclick={() => void layoutStore.toggleFocusMode()}
+                >
+                    <Icon name={layoutStore.focusMode ? 'focus-exit' : 'focus'} />
+                </button>
+                <span class="toolbar-divider" aria-hidden="true"></span>
                 <button
                     class="tool"
                     class:on={flags()?.read === true}
@@ -459,6 +535,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                             role="dialog"
                             aria-label={t('reader.action.typography')}
                             tabindex="-1"
+                            data-tauri-drag-region={windowChromeStore.dragRegion && 'false'}
                             use:dismissable={{
                                 onclose: () => {
                                     showTypography = false;
@@ -500,6 +577,21 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
                     </button>
                 {/if}
             </div>
+            {#if current !== null && failure() !== null}
+                <!-- Stale-while-revalidate: a refetch failed but the article is
+                     still in hand — keep showing it under a non-destructive
+                     banner instead of blanking a populated reader (parity with
+                     the article list's refetch banner, also under its header). -->
+                <div class="reader-banner">
+                    <p role="alert">{failureMessage()}</p>
+                    <button
+                        class="banner-action"
+                        type="button"
+                        disabled={articleQuery?.loading ?? false}
+                        onclick={retryArticle}>{t('toast.retry')}</button
+                    >
+                </div>
+            {/if}
             <!-- Key on the selection so switching articles remounts the
                  scroll body at the top instead of inheriting the previous scroll
                  offset; the body landing within one selection does not. -->
@@ -618,11 +710,19 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
 
 <style>
     .reader {
+        position: relative;
         flex: 1 1 auto;
         display: flex;
         flex-direction: column;
         min-height: 0;
         background: var(--surface-app);
+    }
+
+    /* Out of flow, so the centred empty/status content does not move. */
+    .drag-strip {
+        position: absolute;
+        inset: 0 0 auto;
+        height: var(--header-height);
     }
 
     .reader-status {
@@ -634,19 +734,23 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         font-size: 0.9375rem;
     }
 
-    .reader-status .error {
-        color: var(--error-text);
-    }
-
     /* Non-destructive refetch-failure strip above the retained article. */
     .reader-banner {
         flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
         padding: var(--space-2) var(--space-4);
         margin: var(--space-2) var(--space-3) 0;
         border-radius: var(--radius-md);
         background: var(--error-bg);
         color: var(--error-text);
         font-size: var(--text-xs);
+    }
+
+    .reader-banner p {
+        flex: 1 1 auto;
+        min-width: 0;
     }
 
     /* Empty-state hint: one unbreakable group per action. */
@@ -662,6 +766,30 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         font-size: var(--text-xs);
     }
 
+    /* A quiet secondary button: the hint above names the key, this is the
+       pointer route. */
+    .exit-focus {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--hairline-strong);
+        background: transparent;
+        color: var(--fg-muted);
+        font-size: var(--text-sm);
+        font-weight: var(--weight-medium);
+        cursor: pointer;
+        transition:
+            background var(--dur-fast) var(--ease),
+            color var(--dur-fast) var(--ease);
+    }
+
+    .exit-focus:hover {
+        background: var(--hover);
+        color: var(--fg);
+    }
+
     .reader-toolbar {
         flex: 0 0 auto;
         display: flex;
@@ -673,8 +801,25 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         background: color-mix(in srgb, var(--surface-app), var(--surface-chrome) 45%);
     }
 
+    /* In focus mode the toolbar is the leftmost header: under the macOS
+       overlay title bar it keeps the traffic lights clear of its first
+       button (the focus-mode toggle), like the list header does with the
+       sidebar off screen. */
+    :global(:root[data-titlebar='overlay']) .reader-toolbar.leading {
+        padding-left: calc(var(--space-4) + var(--titlebar-inset));
+    }
+
     .toolbar-spring {
         flex: 1 1 auto;
+    }
+
+    /* Sets the layout toggle apart from the article's own actions. */
+    .toolbar-divider {
+        flex: 0 0 1px;
+        align-self: center;
+        height: 18px;
+        margin: 0 var(--space-1);
+        background: var(--hairline);
     }
 
     .tool {
@@ -732,6 +877,9 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
            cut. A body already in cache mounts with it and rides this fade
            alone — stacking a second one would multiply the opacities. */
         animation: reader-fade-in var(--dur-fast) var(--ease);
+        /* The reading-surface tint (sepia/paper), when one is chosen — the
+           tokens live with the [data-reading-theme] rules in app.css. */
+        background: var(--reading-surface, transparent);
     }
 
     /* A body that lands over its skeleton, later in the same selection,
@@ -801,29 +949,6 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         hyphens: auto;
     }
 
-    /* Reading-surface tints, independent of the app theme: a warm paper ground
-       with dark ink so long reads stay comfortable on any theme. The tint sits
-       on the scroll surface; the ink tokens are forced directly (`--ink` is a
-       :root color-mix that inherits its computed value, so overriding `--fg`
-       alone would not repaint the prose) while links keep their accent. */
-    .reader-scroll[data-reading-theme='sepia'] {
-        background: #f1e5cf;
-        --ink: #43392b;
-        --ink-soft: #6b5b45;
-        --fg: #43392b;
-        --fg-muted: #5c4f3b;
-        --fg-subtle: #7a6a52;
-    }
-
-    .reader-scroll[data-reading-theme='paper'] {
-        background: #faf6ee;
-        --ink: #2b2b2b;
-        --ink-soft: #555555;
-        --fg: #2b2b2b;
-        --fg-muted: #4a4a4a;
-        --fg-subtle: #6b6b6b;
-    }
-
     .reader-article {
         margin: 0 auto;
         padding: var(--space-10) var(--space-8) var(--space-12);
@@ -832,7 +957,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     .reader-header {
         margin-bottom: var(--space-8);
         padding-bottom: var(--space-5);
-        border-bottom: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--reader-hairline);
     }
 
     .reader-kicker {
@@ -851,7 +976,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
         border-radius: var(--radius-sm);
         font-family: var(--font-family);
         font-size: 0.72rem;
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         color: hsl(var(--mono-hue) 65% 82%);
         background: hsl(var(--mono-hue) 45% 32% / 0.5);
         box-shadow: inset 0 0 0 1px hsl(var(--mono-hue) 55% 60% / 0.35);
@@ -860,7 +985,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     .feed-name {
         font-family: var(--font-family);
         font-size: var(--text-sm);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         letter-spacing: var(--tracking-wide);
         color: var(--fg-muted);
     }
@@ -868,7 +993,7 @@ function openSource(event: MouseEvent, current: ReaderHead): void {
     .reader-title {
         font-family: var(--font-family);
         font-size: var(--text-2xl);
-        font-weight: 680;
+        font-weight: var(--weight-bold);
         line-height: 1.16;
         letter-spacing: var(--tracking-tight);
         text-wrap: balance;

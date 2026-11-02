@@ -9,7 +9,7 @@
 import type { FeedDto } from '$lib/bindings';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
-import { t } from '$lib/i18n';
+import { formatIntlNumber, t } from '$lib/i18n';
 import {
     markAllRead,
     moveFeed,
@@ -300,7 +300,7 @@ function hue(text: string): number {
             <span class="feed-title truncate" use:tooltip={label}>{label}</span>
         </button>
         {#if unread > 0}
-            <span class="unread-badge" aria-hidden="true">{unread}</span>
+            <span class="unread-badge" aria-hidden="true">{formatIntlNumber(unread)}</span>
             <span class="sr-only">{t('shell.unread.count', { count: unread })}</span>
         {/if}
         <button
@@ -411,7 +411,7 @@ function hue(text: string): number {
         height: 20px;
         border-radius: var(--radius-sm);
         font-size: 0.68rem;
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         color: hsl(var(--mono-hue) 60% 80%);
         background: hsl(var(--mono-hue) 45% 34% / 0.5);
         box-shadow: inset 0 0 0 1px hsl(var(--mono-hue) 50% 58% / 0.3);
@@ -434,7 +434,7 @@ function hue(text: string): number {
         background: var(--surface-raised);
         color: var(--fg-muted);
         font-size: 0.7rem;
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.5;

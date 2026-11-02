@@ -6,11 +6,13 @@
  * crosses IPC (asserted the way opml.test.ts does).
  */
 import ThemePicker from '$components/common/ThemePicker.svelte';
+import { localeStore } from '$lib/i18n';
 import { settingsStore } from '$lib/state/settings.svelte';
 import { themeStore } from '$lib/state/theme.svelte';
 import { toastStore } from '$lib/state/toasts.svelte';
 import { CURIO_BASE_TOKENS, type CustomTheme, serializeTheme } from '$lib/utils/theme-format';
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type IpcHarness, flushIpc, installIpcHarness, pathTokenFixture } from './ipc-harness';
 import { resetUiStores } from './ui-stores';
@@ -33,6 +35,7 @@ describe('ThemePicker', () => {
     afterEach(() => {
         cleanup();
         resetUiStores();
+        localeStore.reset();
         settingsStore.reset();
         harness?.teardown();
         harness = null;
@@ -44,6 +47,31 @@ describe('ThemePicker', () => {
         expect(getAllByLabelText(/^Use the .+ theme$/)).toHaveLength(10);
         expect(getByText('Import theme…')).toBeTruthy();
         expect(getByText('Export as YAML…')).toBeTruthy();
+    });
+
+    it('translates the descriptive theme names and keeps the proper nouns (#155)', async () => {
+        harness = installIpcHarness({});
+        const { container, getByLabelText } = render(ThemePicker);
+        const names = () =>
+            [...container.querySelectorAll('.theme-grid .name')].map((node) => node.textContent);
+        expect(names().slice(0, 4)).toEqual(['System', 'Light', 'Dark', 'Nord']);
+
+        // A language switch relabels the swatches in place.
+        localeStore.active = 'de';
+        await tick();
+        expect(names()).toEqual([
+            'System',
+            'Hell',
+            'Dunkel',
+            'Nord',
+            'Catppuccin Mocha',
+            'Dracula',
+            'Gruvbox Dark',
+            'Tokyo Night',
+            'Solarized Dark',
+            'Solarized Light',
+        ]);
+        expect(getByLabelText('Design Dunkel verwenden')).toBeTruthy();
     });
 
     it('selecting a theme persists it and applies the DOM attribute', async () => {

@@ -16,7 +16,9 @@ future head.
 - Errors exit non-zero with a one-line `error: …` on stderr: status **75**
   (`EX_TEMPFAIL`) when another Curio process — the desktop app, another cron
   job — kept the profile busy past the wait (nothing is wrong; retry later),
-  **1** for every other failure.
+  **1** for every other failure. `curio maintenance` also exits **3** when it
+  ran but deleted nothing because a destination could not be read (see
+  [Maintenance and retention](#maintenance-and-retention)).
 - The CLI and the desktop app can run on one profile at the same time: state
   changes and the event log are serialized between them (an event is never
   lost, and lines never interleave; a rare duplicate line can appear, which
@@ -48,6 +50,9 @@ future head.
 | `curio reddit login\|status\|logout` | Manage the optional BYO Reddit API credentials (OS keychain, per profile) |
 | `curio events tail [-n N]` | Watch the behavioral event stream |
 | `curio doctor` | DB integrity, FTS sync, events-log health |
+| `curio maintenance [--purge-orphans]` | Routine upkeep: article retention, unused tags, fetch log, index + WAL, expired event logs |
+| `curio retention [--max-age-days N] [--max-per-feed N] [--keep-unread on\|off]` | Show / set the article-retention policy (off by default) |
+| `curio db rebuild-fts` | Rebuild the full-text search index (the repair for a failed FTS-sync check) |
 
 A typical reading loop:
 
@@ -234,7 +239,9 @@ Email newsletters can be subscribed as feeds too: see
 [newsletters as feeds](newsletters.md).
 
 `feed add` emits `feed.added` (with the tags — tags-in-payload rule);
-`feed rm` emits the `feed.removed` negation and keeps the articles.
+`feed rm` emits the `feed.removed` negation and keeps the articles
+(`curio maintenance --purge-orphans` deletes them later — see
+[Maintenance and retention](#maintenance-and-retention)).
 
 ```sh
 curio fetch                 # refresh every feed that is due
@@ -387,9 +394,10 @@ never raw FTS5, so no input is a syntax error:
 
 | Query | Matches |
 |---|---|
-| `sqlite wal` | both words, anywhere; the **last** word also as a prefix (`wal` → `walrus`), so a half-typed word already hits |
+| `sqlite wal` | both words, anywhere; the **last** word also as a prefix (`wal` → `walrus`), so a half-typed word already hits — unless it is a single letter or digit (also `c++` or `C#`, which search as the letter `c`) |
 | `sql* wal` | `*` makes any word a prefix |
 | `"write ahead log"` | the exact phrase |
+| `"write ahe` | an unterminated phrase runs to the end, its last word as a prefix (`ahe` → `ahead`) |
 | `rust -async` | `rust`, but not articles mentioning `async` (also `-"a phrase"`) |
 | `rust OR go tutorial` | (`rust` or `go`) and `tutorial` — upper-case `OR` only |
 
@@ -538,6 +546,55 @@ keeps the events staged until it is writable again), and quarantined intents
 (`dead-intents`: staged rows whose envelope no longer decoded — they are
 moved to `curio.db`'s `event_intents_dead` table so they stop blocking
 every open and emit, and their events never reached the log).
+
+When the FTS-sync check fails, the search index has drifted from the
+stored articles; `curio db rebuild-fts` rebuilds it from them (nothing
+else changes) and verifies the result.
+
+## Maintenance and retention
+
+```sh
+curio maintenance [--purge-orphans] [--json]
+curio retention [--max-age-days N] [--max-per-feed N] [--keep-unread on|off] [--json]
+```
+
+Curio keeps every article until you set a limit. `curio retention` with
+no flags prints the policy; each flag changes one part of it (`0` turns a
+limit off):
+
+- `--max-age-days N` — delete feed articles Curio first stored more than
+  `N` days ago;
+- `--max-per-feed N` — keep only the newest `N` articles of each feed;
+- `--keep-unread on|off` — whether unread articles are spared (`on` by
+  default).
+
+`curio maintenance` applies the policy. It **never** deletes a starred,
+read-later or tagged article, an unread one while `--keep-unread` is on, a
+feedless save (`curio clip`, imports), or one you ever exported. Curio
+remembers every export in its database, so an exported article stays
+protected after its destination is removed or re-rooted elsewhere, and an
+export running while maintenance does is never lost. Exports made by Curio
+0.6 and earlier are picked up from each registered destination's
+`.curio/manifest.json` (sync conflict copies included) on the first run —
+so run `curio maintenance` once with your destinations in place before
+removing or moving one. If a destination that has exported cannot be read
+— an unmounted vault, a manifest that does not parse — it deletes nothing
+that run, says why, and exits with status **3** (`--json` still prints the
+report, with `reap_skipped` set), so a scheduled run notices. A deleted
+article stays deleted while its feed keeps listing it; it is not fetched
+back as new. Deleting articles emits no event: `curio.events.v1` has no
+deletion event, and exported notes are untouched.
+
+Every run also drops tags no article carries, trims each feed's fetch
+log to its newest 50 attempts, compacts a bounded slice of the search
+index after deletions, optimizes the database, checkpoints and truncates
+the write-ahead log, and deletes event-log files past the 90-day retention
+window. If another Curio process holds the database too long for that
+upkeep, the deletions stand and the run warns (`upkeep_skipped` in
+`--json`); the next run catches up. With `--purge-orphans` it also
+deletes the articles of feeds you unsubscribed from (`curio feed rm`
+keeps them), with the same protections. A scheduled `curio maintenance`
+(cron, launchd) once a day is plenty.
 
 ## Upgrades and backups
 

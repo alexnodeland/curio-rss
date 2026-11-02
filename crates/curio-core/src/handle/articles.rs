@@ -10,7 +10,8 @@ use curio_types::Timestamp;
 use crate::content;
 use crate::fetch::{FetchKind, FetchRequest};
 use crate::model::{
-    Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, NewArticle,
+    Article, ArticleContent, ArticleId, ArticleState, ContentOrigin, FeedId, ListedArticle,
+    NewArticle,
 };
 use crate::storage::{ListArticles, SearchArticles};
 
@@ -19,13 +20,27 @@ use super::sweep::{RefreshCancel, until_cancelled};
 use super::{CoreError, CoreHandle, SavedUrl};
 
 impl CoreHandle {
-    /// Keyset-paginated article listing.
+    /// Keyset-paginated listing of whole articles, body included — for
+    /// walks that need the content. A list a head renders reads
+    /// [`Self::list_article_rows`].
     ///
     /// # Errors
     ///
     /// Storage errors.
     pub fn list_articles(&self, params: ListArticles) -> Result<Vec<Article>, CoreError> {
         Ok(self.storage.list_articles(params)?)
+    }
+
+    /// Keyset-paginated list rows: what a list renders — summary columns,
+    /// a bounded text preview, the state flags and the tags — in one read,
+    /// with no body. Same filters, order and keyset as
+    /// [`Self::list_articles`].
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn list_article_rows(&self, params: ListArticles) -> Result<Vec<ListedArticle>, CoreError> {
+        Ok(self.storage.list_article_rows(params)?)
     }
 
     /// One article by row id.
@@ -493,6 +508,19 @@ impl CoreHandle {
     /// Storage errors.
     pub fn search(&self, params: SearchArticles) -> Result<Vec<Article>, CoreError> {
         Ok(self.storage.search(params)?)
+    }
+
+    /// [`Self::search`] as list rows (see [`Self::list_article_rows`]),
+    /// best match first.
+    ///
+    /// # Errors
+    ///
+    /// Storage errors.
+    pub fn search_article_rows(
+        &self,
+        params: SearchArticles,
+    ) -> Result<Vec<ListedArticle>, CoreError> {
+        Ok(self.storage.search_article_rows(params)?)
     }
 
     /// How many articles are stored in total.

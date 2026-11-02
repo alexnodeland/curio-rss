@@ -6,13 +6,18 @@
  * that live in the database that didn't open.
  */
 import { localeStore } from '$lib/i18n';
-import { settingsStore } from '$lib/state/settings.svelte';
+import { layoutStore } from '$lib/state/layout.svelte';
+import { prefsStore } from '$lib/state/prefs.svelte';
+import { BOOT_MIRROR_STORAGE_KEY, settingsStore } from '$lib/state/settings.svelte';
 import { startupStore } from '$lib/state/startup.svelte';
+import { typographyStore } from '$lib/state/typography.svelte';
+import { windowChromeStore } from '$lib/state/window-chrome.svelte';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Layout from '../routes/+layout.svelte';
 import { type IpcHarness, flushIpc, installIpcHarness, startupFailureFixture } from './ipc-harness';
+import { resetUiStores } from './ui-stores';
 
 const reader = createRawSnippet(() => ({
     render: () => '<div data-testid="reader">reader</div>',
@@ -25,7 +30,13 @@ describe('root layout startup gate', () => {
         cleanup();
         vi.restoreAllMocks();
         startupStore.reset();
+        windowChromeStore.reset();
         localeStore.reset();
+        settingsStore.reset();
+        resetUiStores();
+        layoutStore.sidebarWidth = 280;
+        layoutStore.listWidth = 360;
+        window.localStorage.clear();
         harness?.teardown();
         harness = null;
     });
@@ -42,8 +53,24 @@ describe('root layout startup gate', () => {
         expect(screen.getByRole('heading', { level: 1 })).toBeTruthy();
         expect(fromSystem).toHaveBeenCalledOnce();
         expect(load).not.toHaveBeenCalled();
-        // Nothing but the gate check reached the backend.
-        expect(harness.calls.map((call) => call.cmd)).toEqual(['get_startup_failure']);
+        // Nothing but the gate check and the window chrome (which needs no
+        // core) reached the backend.
+        expect(harness.calls.map((call) => call.cmd).sort()).toEqual([
+            'get_startup_failure',
+            'window_chrome',
+        ]);
+    });
+
+    it('knows the window chrome before either screen renders', async () => {
+        harness = installIpcHarness({
+            get_startup_failure: startupFailureFixture(),
+            window_chrome: { overlay_title_bar: true, fullscreen: false },
+        });
+        render(Layout, { children: reader });
+        await flushIpc();
+
+        expect(document.documentElement.dataset.titlebar).toBe('overlay');
+        expect(screen.getByRole('main').getAttribute('data-tauri-drag-region')).toBe('true');
     });
 
     it('mounts the reader and loads settings on a normal start', async () => {
@@ -57,6 +84,75 @@ describe('root layout startup gate', () => {
         expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
         expect(load).toHaveBeenCalledOnce();
         expect(fromSystem).not.toHaveBeenCalled();
+    });
+
+    it('boots the shell at the mirrored layout before settings answer (no shift)', async () => {
+        window.localStorage.setItem(
+            BOOT_MIRROR_STORAGE_KEY,
+            JSON.stringify({
+                'ui.panes.sidebar-width': '320',
+                'ui.panes.list-width': '480',
+                'ui.reading.density': 'compact',
+                'ui.typography.font-size': '19',
+                'ui.locale': 'de',
+                'ui.panes.focus-mode': 'true',
+                // Behaviour/privacy opt-ins are never trusted from the cache.
+                'ui.media.prefetch': 'true',
+                'ui.favicon.allow-remote': 'true',
+                'ui.reading.mark-on-scroll': 'true',
+            }),
+        );
+        harness = installIpcHarness({ get_startup_failure: null });
+        // The backend never answers: everything the shell shows comes from the mirror.
+        vi.spyOn(settingsStore, 'load').mockReturnValue(new Promise(() => {}));
+        render(Layout, { children: reader });
+        await flushIpc();
+
+        expect(screen.getByTestId('reader')).toBeTruthy();
+        expect(layoutStore.sidebarWidth).toBe(320);
+        expect(layoutStore.listWidth).toBe(480);
+        expect(layoutStore.focusMode).toBe(true);
+        expect(prefsStore.readingDensity).toBe('compact');
+        expect(typographyStore.fontSize).toBe(19);
+        expect(localeStore.active).toBe('de');
+        expect(prefsStore.mediaPrefetch).toBe(false);
+        expect(prefsStore.allowRemoteFavicon).toBe(false);
+        expect(prefsStore.markOnScroll).toBe(false);
+    });
+
+    it('undoes a stale mirrored value the backend does not hold once settings load', async () => {
+        window.localStorage.setItem(
+            BOOT_MIRROR_STORAGE_KEY,
+            JSON.stringify({
+                'ui.locale': 'de',
+                'ui.typography.font-family': 'mono',
+                'ui.typography.text-align': 'justify',
+                'ui.typography.reading-theme': 'sepia',
+                'ui.panes.sidebar-collapsed': 'true',
+                'ui.panes.focus-mode': 'true',
+                'ui.panes.list-width': '480',
+            }),
+        );
+        // The profile's settings table holds none of them (reset elsewhere,
+        // or a different profile): every store must land on its default.
+        harness = installIpcHarness({
+            get_startup_failure: null,
+            connectivity_online: true,
+            get_setting: null,
+        });
+        render(Layout, { children: reader });
+        await flushIpc();
+
+        expect(settingsStore.loaded).toBe(true);
+        expect(localeStore.active).toBe('en');
+        expect(typographyStore.fontFamily).toBe('serif');
+        expect(typographyStore.textAlign).toBe('left');
+        expect(typographyStore.readingTheme).toBe('default');
+        expect(layoutStore.sidebarCollapsed).toBe(false);
+        expect(layoutStore.focusMode).toBe(false);
+        expect(layoutStore.listWidth).toBe(360);
+        // …and the mirror now matches the backend, so the next boot agrees.
+        expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBe('{}');
     });
 
     it('mounts nothing while the gate check is still pending', () => {

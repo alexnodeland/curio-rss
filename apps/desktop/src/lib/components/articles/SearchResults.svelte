@@ -17,6 +17,7 @@ import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { searchStore } from '$lib/state/search.svelte';
 import { selectionStore } from '$lib/state/selection.svelte';
 import { commandErrorMessage } from '$lib/utils/errors';
+import ErrorState from '$components/common/ErrorState.svelte';
 import EmptyState from '$components/common/EmptyState.svelte';
 import { ROW_HEIGHT } from './ArticleList.svelte';
 import ArticleRow, { articleOptionId, buildArticleMenu } from './ArticleRow.svelte';
@@ -117,13 +118,16 @@ function openSelectedMenu(): void {
     <div class="scope-bar">
         <span class="scope-count">
             {#if searchStore.settled && searchStore.error === null && searchStore.results.length > 0}
-                {t('search.results', { count: searchStore.results.length })}
+                {t(searchStore.capped ? 'search.resultsCapped' : 'search.results', {
+                    count: searchStore.results.length,
+                })}
             {/if}
         </span>
         <div class="scope-switch" role="group" aria-label={t('search.scope.label')}>
             <button
                 class="scope-option truncate"
                 type="button"
+                title={scopeName}
                 aria-pressed={!searchStore.everywhere}
                 onclick={() => searchStore.setEverywhere(false)}>{scopeName}</button
             >
@@ -137,7 +141,7 @@ function openSelectedMenu(): void {
         </div>
     </div>
     {#if searchStore.error !== null}
-        <p class="status error" role="alert">{resultsError}</p>
+        <ErrorState message={resultsError} busy={searchStore.loading} onretry={() => searchStore.retry()} />
     {:else if searchStore.results.length === 0 && !searchStore.settled}
         <!-- Debounce/in-flight gap: the query hasn't resolved, so show
              "Searching…" rather than flashing "No matches". -->
@@ -197,7 +201,7 @@ function openSelectedMenu(): void {
     .scope-count {
         flex: 0 0 auto;
         color: var(--fg-muted);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         font-variant-numeric: tabular-nums;
     }
 
@@ -220,7 +224,7 @@ function openSelectedMenu(): void {
         background: transparent;
         color: var(--fg-muted);
         font-size: var(--text-xs);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition:
             background var(--dur-fast) var(--ease),
             color var(--dur-fast) var(--ease);
@@ -247,7 +251,4 @@ function openSelectedMenu(): void {
         color: var(--fg-muted);
     }
 
-    .status.error {
-        color: var(--error-text);
-    }
 </style>

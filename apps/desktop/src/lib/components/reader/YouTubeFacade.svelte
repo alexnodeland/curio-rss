@@ -105,9 +105,9 @@ function openOnYouTube(event: MouseEvent): void {
         aspect-ratio: 16 / 9;
         margin-bottom: var(--space-6);
         border-radius: var(--radius-lg);
-        border: 1px solid var(--hairline);
+        border: 1px solid var(--reader-hairline);
         overflow: hidden;
-        background: var(--surface-inset);
+        background: var(--reader-inset);
         box-shadow: var(--shadow-md);
     }
 
@@ -182,7 +182,7 @@ function openOnYouTube(event: MouseEvent): void {
         color: #fff;
         font-family: var(--font-family);
         font-size: 0.6875rem;
-        font-weight: 700;
+        font-weight: var(--weight-bold);
         letter-spacing: 0.01em;
     }
 
@@ -236,7 +236,7 @@ function openOnYouTube(event: MouseEvent): void {
     .poster-title {
         font-family: var(--font-family);
         font-size: var(--text-lg);
-        font-weight: 640;
+        font-weight: var(--weight-heading);
         line-height: 1.25;
         letter-spacing: var(--tracking-snug);
         text-shadow: 0 1px 3px rgb(0 0 0 / 45%);
@@ -252,7 +252,7 @@ function openOnYouTube(event: MouseEvent): void {
     }
 
     .poster-channel {
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
     }
 
     .poster-channel::after {

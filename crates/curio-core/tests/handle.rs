@@ -13,7 +13,7 @@ use curio_core::events::{FoldedState, read_all};
 use curio_core::export::{ExportDisposition, ExportInput, stage_export_note};
 use curio_core::fetch::FetchConfig;
 use curio_core::model::{
-    ArticleContent, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
+    ArticleContent, ArticleFlag, FeedStatus, FetchErrorKind, FetchStatus, NewArticle, NewFeed,
 };
 use curio_core::storage::{ListArticles, StorageError};
 use curio_core::{CoreHandle, CoreOptions, ImportSource};
@@ -1473,6 +1473,63 @@ fn mark_all_read_round_trips_through_mark_read_many() {
     assert!(core.article_state(articles[0].id).unwrap().read);
 }
 
+/// A bulk flip through the facade lands every changed article's event in
+/// the JSONL log (one emit), so the fold sees the whole batch; the undo's
+/// negations fold it back out.
+#[test]
+fn set_flag_many_emits_each_change_and_folds_back_on_undo() {
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    core.storage()
+        .upsert_articles(vec![
+            manual_article("b1", "One"),
+            manual_article("b2", "Two"),
+            manual_article("b3", "Three"),
+        ])
+        .unwrap();
+    let ids: Vec<_> = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .into_iter()
+        .map(|article| article.id)
+        .collect();
+    assert!(core.set_archived(ids[0], true).unwrap());
+
+    let changed = core
+        .set_flag_many(&ids, ArticleFlag::Archived, true)
+        .unwrap();
+    assert_eq!(changed, ids[1..], "the archived one is unchanged");
+    assert!(
+        core.storage().pending_intents().unwrap().is_empty(),
+        "emitted"
+    );
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert_eq!(folded.archived.len(), 3);
+
+    assert_eq!(
+        core.set_flag_many(&changed, ArticleFlag::Archived, false)
+            .unwrap(),
+        changed
+    );
+    let folded = FoldedState::fold(read_all(&profile.path().join(".curio/events")).unwrap());
+    assert_eq!(folded.archived.len(), 1, "only the single flip remains");
+
+    // Read is DB-local: it flips but writes nothing to the log.
+    let logged = read_all(&profile.path().join(".curio/events"))
+        .unwrap()
+        .len();
+    assert_eq!(
+        core.set_flag_many(&ids, ArticleFlag::Read, true).unwrap(),
+        ids
+    );
+    assert_eq!(
+        read_all(&profile.path().join(".curio/events"))
+            .unwrap()
+            .len(),
+        logged
+    );
+}
+
 #[tokio::test]
 async fn hydrate_article_replaces_the_excerpt_with_the_extracted_full_body() {
     let server = MockServer::start().await;
@@ -2253,6 +2310,69 @@ async fn a_link_less_item_is_never_hydrated_against_the_feed_url() {
 
     let after = core.hydrate_article(article.id).await.unwrap();
     assert_eq!(after.content, article.content, "nothing to load: unchanged");
+    server.verify().await;
+}
+
+/// #262: a `javascript:` / custom-scheme entry link never becomes the
+/// stored source URL — the entry is stored the link-less way, under the feed
+/// URL, and never hydrated — and the channel's `javascript:` link is no site
+/// URL. A row an earlier build stored under such a link keeps its key, so
+/// the refresh rewrites it in place (read state kept) instead of
+/// duplicating it.
+#[tokio::test]
+async fn a_non_web_entry_link_is_stored_link_less_and_keeps_its_row() {
+    let server = MockServer::start().await;
+    let feed_xml = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+        <title>Hostile</title><link>javascript:alert(1)</link>
+        <item><title>Script</title><link>javascript:alert(1)</link>
+          <description>&lt;a href="rel/ok"&gt;rel&lt;/a&gt;</description></item>
+        <item><guid>g2</guid><title>Custom</title><link>foo://h/two</link>
+          <description>The custom one.</description></item>
+        </channel></rss>"#;
+    // expect(1): full-text mode must not hydrate either entry.
+    Mock::given(method("GET"))
+        .and(path("/feed.xml"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(feed_xml, "application/rss+xml"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = tempfile::tempdir().unwrap();
+    let core = open_core(profile.path());
+    let feed_url = format!("{}/feed.xml", server.uri());
+    let feed = subscribe(&core, &feed_url);
+    core.set_feed_full_text(feed.id, true).unwrap();
+    // What an earlier build stored for the first item: keyed by its link,
+    // with that link as its source.
+    let mut stale = manual_article("link:javascript:alert(1)", "Script");
+    stale.feed_id = Some(feed.id);
+    stale.source_url = "javascript:alert(1)".to_owned();
+    core.storage().upsert_articles(vec![stale]).unwrap();
+    let before = core
+        .list_articles(ListArticles::default())
+        .unwrap()
+        .remove(0);
+    core.mark_read(before.id, true).unwrap();
+
+    let outcome = core.refresh_feed(feed.id).await.unwrap();
+    assert_eq!((outcome.new_articles, outcome.updated_articles), (1, 1));
+    let articles = core.list_articles(ListArticles::default()).unwrap();
+    assert_eq!(articles.len(), 2);
+    for article in &articles {
+        assert_eq!(article.source_url, feed_url, "{}", article.title);
+    }
+    let script = articles.iter().find(|a| a.title == "Script").unwrap();
+    assert_eq!(script.id, before.id, "the stored row is the one rewritten");
+    assert!(core.article_state(script.id).unwrap().read);
+    assert!(
+        script
+            .content
+            .html
+            .contains(&format!("{}/rel/ok", server.uri())),
+        "relative content resolves against the feed URL: {}",
+        script.content.html
+    );
+    assert_eq!(core.get_feed(feed.id).unwrap().unwrap().site_url, None);
     server.verify().await;
 }
 

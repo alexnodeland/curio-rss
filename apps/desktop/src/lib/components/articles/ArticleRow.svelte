@@ -11,6 +11,7 @@ import {
 import { feedsStore } from '$lib/state/feeds.svelte';
 import type { MenuItem } from '$lib/state/menu.svelte';
 import { isLinkless } from '$lib/utils/article';
+import { isApplePlatform } from '$lib/utils/platform';
 
 /**
  * The DOM id of the row for one article — the listbox points at it through
@@ -19,6 +20,28 @@ import { isLinkless } from '$lib/utils/article';
  */
 export function articleOptionId(articleId: number): string {
     return `article-option-${articleId}`;
+}
+
+/**
+ * How a row click selects: a plain click selects just that row, Shift
+ * extends a range from the anchor, ⌘ (Ctrl off macOS) toggles the row in or
+ * out of a multi-selection.
+ */
+export type SelectGesture = 'single' | 'range' | 'toggle';
+
+/**
+ * The selection gesture a click's modifiers spell. On macOS ⌃-click is the
+ * secondary click (the context menu), so there only ⌘ toggles — whether or
+ * not the engine also delivers that ⌃-click as a `click`.
+ */
+export function selectGesture(
+    event: MouseEvent,
+    apple: boolean = isApplePlatform(),
+): SelectGesture {
+    if (event.shiftKey) {
+        return 'range';
+    }
+    return event.metaKey || (event.ctrlKey && !apple) ? 'toggle' : 'single';
 }
 
 /**
@@ -85,12 +108,16 @@ export function buildArticleMenu(
  * state query — cached, and refreshed by the Rust-emitted invalidation
  * events like every other read. The row applies `rowHeight` inline so its
  * height always equals the virtualizer's fixed row height (one source, no
- * drift). `compact` density drops the body preview and thumbnail.
+ * drift). Comfortable rows give the title up to two lines over a one-line
+ * preview and a thumbnail; `compact` density keeps a one-line title and drops
+ * the preview and thumbnail.
  */
 import { commands } from '$lib/bindings';
 import ArticleThumb from '$components/common/ArticleThumb.svelte';
+import Icon from '$components/common/Icon.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
 import { t } from '$lib/i18n';
+import { dayClock } from '$lib/state/clock';
 import { ensureQuery, queryKeys } from '$lib/state/query-cache.svelte';
 import { listDateLabel } from '$lib/utils/article';
 import { highlightSegments } from '$lib/utils/highlight';
@@ -102,6 +129,7 @@ let {
     compact,
     setsize,
     selected,
+    cursor = selected,
     onselect,
     highlight,
 }: {
@@ -110,8 +138,12 @@ let {
     rowHeight: number;
     compact: boolean;
     setsize: number;
+    /** Part of the selection (`aria-selected`, the selected background). */
     selected: boolean;
-    onselect: (articleId: number) => void;
+    /** The keyboard cursor's row (the accent spine) — the selected row, unless
+     *  several are selected. */
+    cursor?: boolean;
+    onselect: (articleId: number, gesture: SelectGesture) => void;
     /** Active search query — when set, its terms are `<mark>`-ed in title/snippet. */
     highlight?: string;
 } = $props();
@@ -134,8 +166,9 @@ function feedTitle(): string | null {
     return feed.title ?? feed.url;
 }
 
-/** The row's date — publication, or a labelled first-seen stand-in. */
-const date = $derived(listDateLabel(article));
+/** The row's date — publication, or a labelled first-seen stand-in — scaled
+ *  to its age against the day clock, so it moves on when the day turns. */
+const date = $derived(listDateLabel(article, dayClock.now));
 
 </script>
 
@@ -159,6 +192,7 @@ const date = $derived(listDateLabel(article));
     class="article-row"
     data-testid="article-row"
     class:selected
+    class:cursor
     class:compact
     class:unread={flags()?.read === false}
     style="height: {rowHeight}px"
@@ -167,7 +201,7 @@ const date = $derived(listDateLabel(article));
     aria-posinset={index + 1}
     aria-setsize={setsize}
     tabindex="-1"
-    onclick={() => onselect(article.id)}
+    onclick={(event) => onselect(article.id, selectGesture(event))}
     use:contextMenu={{ items: () => buildArticleMenu(article, flags()), ariaLabel: article.title }}
 >
     <span class="row-dot" aria-hidden="true"></span>
@@ -175,7 +209,7 @@ const date = $derived(listDateLabel(article));
         <span class="sr-only">{t('list.row.unread')}</span>
     {/if}
     <div class="row-main">
-        <span class="row-title truncate">{@render marked(article.title)}</span>
+        <span class="row-title" class:truncate={compact}>{@render marked(article.title)}</span>
         {#if !compact && article.snippet !== null}
             <span class="row-snippet truncate">{@render marked(article.snippet)}</span>
         {/if}
@@ -189,7 +223,7 @@ const date = $derived(listDateLabel(article));
         </span>
     </div>
     {#if flags()?.starred === true}
-        <span class="row-star" aria-hidden="true">★</span>
+        <span class="row-star" aria-hidden="true"><Icon name="star-filled" size={14} /></span>
         <span class="sr-only">{t('list.row.starred')}</span>
     {/if}
     {#if !compact}
@@ -210,6 +244,10 @@ const date = $derived(listDateLabel(article));
         border-radius: var(--radius-lg);
         cursor: pointer;
         transition: background var(--dur-fast) var(--ease);
+        /* Rows are picked, not text: a Shift-click extends the selection
+           instead of dragging a text selection across rows. */
+        -webkit-user-select: none;
+        user-select: none;
     }
 
     /* Hairline between rows, inset so it doesn't touch the rounded edges. */
@@ -236,8 +274,8 @@ const date = $derived(listDateLabel(article));
         background: var(--selected);
     }
 
-    /* Accent spine on the selected row. */
-    .article-row.selected::before {
+    /* Accent spine on the cursor's row. */
+    .article-row.cursor::before {
         content: '';
         position: absolute;
         left: 0;
@@ -272,15 +310,26 @@ const date = $derived(listDateLabel(article));
 
     .row-title {
         font-size: var(--text-base);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         line-height: 1.35;
         color: var(--fg-muted);
         letter-spacing: var(--tracking-snug);
     }
 
     .article-row.unread .row-title {
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         color: var(--fg);
+    }
+
+    /* Comfortable rows let a long title wrap onto a second line (then
+       ellipsize); the fixed row height in ArticleList budgets for both. */
+    .article-row:not(.compact) .row-title {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        overflow: hidden;
+        overflow-wrap: anywhere;
     }
 
     /* Compact rows tighten the title to a single visual line. */
@@ -313,7 +362,7 @@ const date = $derived(listDateLabel(article));
 
     .row-feed {
         color: var(--fg-muted);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
     }
 
     .row-meta .row-feed + span::before {
@@ -322,9 +371,10 @@ const date = $derived(listDateLabel(article));
         color: var(--fg-subtle);
     }
 
+    /* The same filled-star glyph the reader toolbar uses, in the status hue. */
     .row-star {
         flex: 0 0 auto;
+        display: inline-flex;
         color: var(--warning-text);
-        font-size: 0.8125rem;
     }
 </style>

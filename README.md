@@ -51,7 +51,7 @@ only thing that leaves your machine is fetching the feeds you subscribed to.
 | 📥 **Subscribe & refresh** | RSS/Atom with URL autodiscovery, per-feed & bulk refresh (feeds in parallel, a live "12 of 300" count with a Stop button, full-text pages loaded in their own queue), **background refresh on launch + a configurable interval** (it remembers the last refresh across relaunches, catches up shortly after the laptop wakes, and pauses with an "Offline" badge instead of logging errors while there's no network), health tracking + per-feed backoff that honours `Retry-After` and a feed's own `<ttl>`, with an auto-pause (and one-click resume) for feeds that keep failing |
 | ➕ **Add anything** | Smart-input add — paste a URL or bare domain, `r/subreddit`, `@user@instance` (Mastodon), a YouTube channel, a GitHub repo (its releases), a [newsletter inbox](docs/newsletters.md), or Hacker News; plus a Popular-sources quick-add row. Every subscribe is validated: a homepage subscribes to its feed, and a page without one is refused rather than added broken |
 | 🗂️ **Organize** | Create / rename / delete folders, drag feeds **into and out of** folders, drag- or **keyboard-reorder (`Alt`+↑/↓)**, inline rename, keyboard tree navigation, right-click menus, an edit-feed panel (URL visible + health), and a warning dot on any feed whose last refresh errored — **honest from a cold start** |
-| 📖 **Read** | Three-pane reader with **adjustable typography** (size, width, weight, line-height, letter-spacing, hyphenation) and **Sepia / Paper reading themes**, on-demand full-article readability, comfortable/compact list density, inline snippets, mark-on-open, opt-in mark-on-scroll (only rows you actually saw scroll by), read rows that stay put in the unread view until you leave it or refresh, a list that holds its place when rows come and go above you, a remembered scroll position per view, next-unread across feeds |
+| 📖 **Read** | Three-pane reader with **adjustable typography** (size, width, weight, line-height, letter-spacing, hyphenation) and **Sepia / Paper reading themes**, on-demand full-article readability, comfortable (two-line titles) / compact list density, list dates scaled to age (a time today, then "yesterday" / "3 days ago", then the date), inline snippets, mark-on-open, opt-in mark-on-scroll (only rows you actually saw scroll by), read rows that stay put in the unread view until you leave it or refresh, a list that holds its place when rows come and go above you, a remembered scroll position per view, next-unread across feeds |
 | ⭐ **State** | Read · star · read-later · archive — event-sourced with negation events; **Undo** on mark-all-read (feed, folder or library) and on unsubscribe, **Retry** on failed actions |
 | 🔎 **Search** | Full-text search (SQLite FTS5) in the current feed, folder or view — or everywhere — as you type: title hits rank first, with `"phrases"`, `-exclusions`, `OR` and **match highlighting** in results |
 | ↔️ **Import / export** | OPML in/out + Pocket, Instapaper & Readwise CSV importers |
@@ -101,6 +101,12 @@ Open** (macOS 12–14) or **System Settings → Privacy & Security → Open Anyw
 xattr -dr com.apple.quarantine "/Applications/Curio.app"
 ```
 
+With no subscriptions yet, Curio opens on a welcome screen: add a feed, start
+from a popular source (a subreddit, a YouTube channel, a Mastodon account,
+GitHub releases, Hacker News), or bring a library over from OPML, Pocket,
+Instapaper or Readwise Reader. Every empty view then says what fills it, and
+a load that fails offers **Retry** in place.
+
 After first launch Curio keeps itself current — **Settings → General → Check
 for updates**, or let it auto-check. Updates are downloaded, signature-verified,
 and installed in place from the GitHub release feed, then relaunch on a click.
@@ -122,6 +128,17 @@ command-key chords).
 | <kbd>o</kbd> | Open in browser | | <kbd>p</kbd> | Save to notes |
 | <kbd>Space</kbd> / <kbd>⇧ Space</kbd> | Page the article down / up — <kbd>Space</kbd> at the end opens the next unread | | <kbd>A</kbd> | Mark all read in the current view |
 | <kbd>g</kbd> then <kbd>a</kbd>/<kbd>s</kbd>/<kbd>l</kbd>/<kbd>e</kbd> | Go to All / Starred / Read-later / Archived | | <kbd>?</kbd> | Keyboard reference |
+| <kbd>&#92;</kbd> | Show / hide the sidebar | | <kbd>f</kbd> | Focus mode — the article alone |
+| <kbd>⌘K</kbd> (<kbd>Ctrl+K</kbd>) | Command palette | | | |
+
+<kbd>⌘K</kbd> (<kbd>Ctrl+K</kbd> on Linux and Windows, and **View → Command
+Palette…**) opens the **command palette**: type a few letters of anything —
+a command, a view, a feed, a folder, a settings tab or a theme — and
+<kbd>↑</kbd>/<kbd>↓</kbd> then <kbd>Enter</kbd> runs it. The match is fuzzy
+(`gts` finds *Go to starred*), each command shows the key that runs it
+directly, and a leading group word narrows the list (`theme nord`,
+`folder tech`). It works from the search box too; <kbd>Esc</kbd> closes it and
+puts focus back where it was.
 
 The article list is a standard listbox: <kbd>↑</kbd>/<kbd>↓</kbd> move like
 <kbd>j</kbd>/<kbd>k</kbd>, <kbd>Home</kbd>/<kbd>End</kbd>/<kbd>Page Up</kbd>/<kbd>Page Down</kbd>
@@ -129,13 +146,37 @@ jump, and <kbd>Enter</kbd> or <kbd>→</kbd> moves focus into the article so the
 arrow and page keys scroll it; <kbd>←</kbd> or <kbd>Esc</kbd> returns to the
 list. Reorder a feed inside its folder with <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
 
+The sidebar and focus mode are remembered across launches (the View menu has
+them as <kbd>⌥⌘S</kbd> / <kbd>⌥⌘F</kbd>, and each pane has a toolbar button). On
+layouts where <kbd>&#92;</kbd> is an Option chord (German, French, Spanish, Italian
+Macs) that chord works as the key. Focus mode steps aside on its own when you
+need a hidden pane: <kbd>g</kbd> <kbd>f</kbd> brings the feed tree back,
+<kbd>/</kbd> the search box, and with no article open the reader shows an
+**Exit focus mode** button. In a window 1000 px wide or less the sidebar folds
+away on its own so the list and the article keep their room; <kbd>&#92;</kbd>
+peeks it back open until the window is resized.
+
+Select several articles at once with <kbd>⇧</kbd>-click (a range),
+<kbd>⌘</kbd>-click (<kbd>Ctrl</kbd>-click off macOS) to add or remove one, or
+<kbd>⇧ J</kbd>/<kbd>⇧ K</kbd> (<kbd>⇧ ↓</kbd>/<kbd>⇧ ↑</kbd> in the list) to
+grow the range. A bar at the bottom of the list then marks the whole selection
+read or unread, stars it, queues it for later or archives it — in one step,
+with Undo — and <kbd>s</kbd>/<kbd>l</kbd>/<kbd>m</kbd>/<kbd>e</kbd> do the
+same as its buttons. Like a single press, each one toggles: when every selected
+article already has the flag (always so inside Starred, Read later or
+Archived) it takes the flag off instead. <kbd>Esc</kbd> goes back to a single
+article.
+
 A feed entry published without a link of its own has no page to open, so
 <kbd>o</kbd>, **Open in browser** and **Load full article** are absent for it
-and its title is plain text. An entry the feed gave no date is dated by the
-day Curio first saw it, labelled **First seen**.
+and its title is plain text. The same goes for an entry whose link is not a
+web address (`javascript:`, a custom scheme like `foo://`, `ftp://`): Curio
+keeps an entry's link only when it is an `http(s)` URL, and no longer takes
+any other kind of site link from a feed either. An entry the feed gave no
+date is dated by the day Curio first saw it, labelled **First seen**.
 
 macOS command chords (also in the menu bar):
-<kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·
+<kbd>⌘K</kbd> Command palette · <kbd>⌘N</kbd> Add feed · <kbd>⌘R</kbd> Refresh all · <kbd>⌘,</kbd> Settings ·
 <kbd>⌘1</kbd>–<kbd>⌘4</kbd> All / Starred / Read-later / Archived.
 
 ## Importers
@@ -170,6 +211,7 @@ curio dest add vault ~/notes/reading        # name a destination directory once
 curio save 3e9f10aa --dest vault            # export the note per curio.frontmatter.v1
 curio events tail -n 5                      # watch the curio.events.v1 stream
 curio doctor                                # db integrity, FTS sync, events-log health
+curio maintenance                           # retention (opt-in: curio retention), tidy-up, WAL checkpoint
 ```
 
 Full command walkthrough + `curio.toml` format: [docs/cli.md](docs/cli.md).

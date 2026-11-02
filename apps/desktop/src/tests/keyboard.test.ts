@@ -3,13 +3,15 @@
  * matcher state machine handles singles, Shift-cased keys, g-chords with a
  * timeout, and typing contexts.
  */
-import { shortcutKbd } from '$lib/keyboard/labels';
+import { commandKeyLabel, shortcutKbd } from '$lib/keyboard/labels';
 import {
     CHORD_TIMEOUT_MS,
     SHORTCUTS,
     type ShortcutId,
+    commandShortcut,
     createMatcher,
     eventKeyName,
+    frameShortcut,
     paneShortcut,
     shouldIgnoreKeyEvent,
 } from '$lib/keyboard/registry';
@@ -21,6 +23,8 @@ describe('shortcut table', () => {
         const expected: Record<ShortcutId, readonly string[]> = {
             'nav.nextArticle': ['j'],
             'nav.previousArticle': ['k'],
+            'nav.extendDown': ['J'],
+            'nav.extendUp': ['K'],
             'nav.nextUnread': ['n'],
             'nav.focusReader': [],
             'nav.focusList': [],
@@ -41,11 +45,51 @@ describe('shortcut table', () => {
             'view.readLater': ['g', 'l'],
             'view.archived': ['g', 'e'],
             'view.feeds': ['g', 'f'],
+            'view.toggleSidebar': ['\\'],
+            'view.toggleFocusMode': ['f'],
             'app.addFeed': ['a'],
             'app.settings': [','],
+            'app.commandPalette': [],
             'help.toggle': ['?'],
         };
         expect(Object.fromEntries(byId)).toEqual(expected);
+    });
+
+    it('binds ⌘K (Ctrl+K off macOS) to the command palette, and nothing else to a command chord', () => {
+        const chords = SHORTCUTS.filter((shortcut) => shortcut.commandKey !== undefined);
+        expect(chords.map((shortcut) => [shortcut.id, shortcut.commandKey])).toEqual([
+            ['app.commandPalette', 'k'],
+        ]);
+        const press = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+        // macOS: ⌘K, also with Caps Lock on; ⌃K is the platform's (emacs line kill).
+        expect(commandShortcut(press({ key: 'k', metaKey: true }), true)).toBe(
+            'app.commandPalette',
+        );
+        expect(commandShortcut(press({ key: 'K', metaKey: true }), true)).toBe(
+            'app.commandPalette',
+        );
+        expect(commandShortcut(press({ key: 'k', ctrlKey: true }), true)).toBeNull();
+        // Elsewhere: Ctrl+K; the Windows/Super key is not the command modifier.
+        expect(commandShortcut(press({ key: 'k', ctrlKey: true }), false)).toBe(
+            'app.commandPalette',
+        );
+        expect(commandShortcut(press({ key: 'k', metaKey: true }), false)).toBeNull();
+        // Another modifier alongside is a different chord; a bare k is just k.
+        expect(
+            commandShortcut(press({ key: 'k', metaKey: true, shiftKey: true }), true),
+        ).toBeNull();
+        expect(commandShortcut(press({ key: 'k', metaKey: true, altKey: true }), true)).toBeNull();
+        expect(commandShortcut(press({ key: 'k', metaKey: true, ctrlKey: true }), true)).toBeNull();
+        expect(commandShortcut(press({ key: 'j', metaKey: true }), true)).toBeNull();
+        expect(commandShortcut(press({ key: 'k' }), true)).toBeNull();
+    });
+
+    it('prints a command chord as the platform spells it', () => {
+        expect(commandKeyLabel('k', true)).toBe('⌘K');
+        expect(commandKeyLabel('k', false)).toBe('Ctrl+K');
+        // jsdom is no Mac: the tooltip suffix reads Ctrl+K there.
+        expect(shortcutKbd('app.commandPalette')).toBe('Ctrl+K');
+        expect(shortcutKbd('view.all')).toBe('g a');
     });
 
     it('binds the ARIA pane keys: listbox arrows / Enter, reader ← / Esc', () => {
@@ -58,6 +102,8 @@ describe('shortcut table', () => {
         expect(pane).toEqual({
             'nav.nextArticle': { scope: 'list', keys: ['ArrowDown'] },
             'nav.previousArticle': { scope: 'list', keys: ['ArrowUp'] },
+            'nav.extendDown': { scope: 'list', keys: ['Shift+ArrowDown'] },
+            'nav.extendUp': { scope: 'list', keys: ['Shift+ArrowUp'] },
             'nav.focusReader': { scope: 'list', keys: ['Enter', 'ArrowRight'] },
             'nav.focusList': { scope: 'reader', keys: ['ArrowLeft', 'Escape'] },
         });
@@ -73,12 +119,13 @@ describe('shortcut table', () => {
         expect(paneShortcut('list', 'j')).toBeNull();
     });
 
-    it('every action is reachable: a global sequence, pane keys, or both', () => {
+    it('every action is reachable: a global sequence, pane keys, a command chord, or several', () => {
         for (const shortcut of SHORTCUTS) {
             const global = shortcut.keys.length;
             const pane = shortcut.paneKeys?.keys.length ?? 0;
+            const chord = shortcut.commandKey === undefined ? 0 : 1;
             expect(global <= 2, shortcut.id).toBe(true);
-            expect(global + pane > 0, shortcut.id).toBe(true);
+            expect(global + pane + chord > 0, shortcut.id).toBe(true);
         }
     });
 
@@ -154,6 +201,14 @@ describe('matcher', () => {
         expect(matcher.handle('a', 1)).toEqual({ kind: 'match', id: 'app.addFeed' });
     });
 
+    it('f toggles focus mode alone, yet still completes g f', () => {
+        const matcher = createMatcher();
+        expect(matcher.handle('f', 0)).toEqual({ kind: 'match', id: 'view.toggleFocusMode' });
+        matcher.handle('g', 10);
+        expect(matcher.handle('f', 20)).toEqual({ kind: 'match', id: 'view.feeds' });
+        expect(matcher.handle('\\', 30)).toEqual({ kind: 'match', id: 'view.toggleSidebar' });
+    });
+
     it('unknown keys are none', () => {
         const matcher = createMatcher();
         expect(matcher.handle('z', 0)).toEqual({ kind: 'none' });
@@ -190,6 +245,16 @@ describe('eventKeyName', () => {
     });
 });
 
+describe('frameShortcut', () => {
+    it('resolves only the layout toggles — the keys the sidebar tree lets through', () => {
+        expect(frameShortcut('\\')).toBe('view.toggleSidebar');
+        expect(frameShortcut('f')).toBe('view.toggleFocusMode');
+        expect(frameShortcut('j')).toBeNull();
+        expect(frameShortcut('g')).toBeNull();
+        expect(frameShortcut('?')).toBeNull();
+    });
+});
+
 describe('shortcutKbd', () => {
     it('prints the global key the registry binds, as the help overlay does', () => {
         // Add feed is a plain a; A (Shift+a) is the bulk mark-view-read.
@@ -198,6 +263,8 @@ describe('shortcutKbd', () => {
         expect(shortcutKbd('app.refreshAll')).toBe('R');
         expect(shortcutKbd('article.toggleStar')).toBe('s');
         expect(shortcutKbd('view.all')).toBe('g a');
+        expect(shortcutKbd('view.toggleSidebar')).toBe('\\');
+        expect(shortcutKbd('view.toggleFocusMode')).toBe('f');
     });
 
     it('is undefined for a pane-only action (no tooltip suffix)', () => {
@@ -241,6 +308,24 @@ describe('shouldIgnoreKeyEvent', () => {
         expect(shouldIgnoreKeyEvent(eventOn(div, { metaKey: true }))).toBe(true);
         expect(shouldIgnoreKeyEvent(eventOn(div))).toBe(false);
         expect(shouldIgnoreKeyEvent(eventOn(div, { shiftKey: true }))).toBe(false);
+
+        div.remove();
+    });
+
+    it('passes an Option chord that only types a backslash (German / French Mac layouts)', () => {
+        const div = document.createElement('div');
+        document.body.append(div);
+
+        // ⌥⇧7 on the German Mac layout types `\`.
+        const typed = eventOn(div, { key: '\\', altKey: true, shiftKey: true });
+        expect(shouldIgnoreKeyEvent(typed)).toBe(false);
+        expect(frameShortcut(eventKeyName(typed))).toBe('view.toggleSidebar');
+        // The exemption is the character, not Option: ⌥ with any other key is
+        // still ignored, and ⌘ / ⌃ chords that type `\` stay the platform's.
+        expect(shouldIgnoreKeyEvent(eventOn(div, { key: '/', altKey: true }))).toBe(true);
+        expect(shouldIgnoreKeyEvent(eventOn(div, { key: '\\', metaKey: true }))).toBe(true);
+        const altGr = eventOn(div, { key: '\\', ctrlKey: true, altKey: true });
+        expect(shouldIgnoreKeyEvent(altGr)).toBe(true);
 
         div.remove();
     });

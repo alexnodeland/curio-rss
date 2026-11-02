@@ -234,7 +234,7 @@ async function exportAll(name: string): Promise<void> {
 
     .destination-name {
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         color: var(--fg);
     }
 
@@ -252,7 +252,7 @@ async function exportAll(name: string): Promise<void> {
         color: var(--accent);
         border: 1px solid color-mix(in srgb, var(--accent), transparent 70%);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
     }
 
     .link-button {
@@ -260,7 +260,7 @@ async function exportAll(name: string): Promise<void> {
         background: transparent;
         color: var(--accent);
         font-size: var(--text-xs);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition: color var(--dur-fast) var(--ease);
     }
 
@@ -342,7 +342,7 @@ async function exportAll(name: string): Promise<void> {
         padding: 0 var(--space-4);
         border-radius: var(--radius-md);
         font-size: var(--text-md);
-        font-weight: 560;
+        font-weight: var(--weight-emphasis);
         background: var(--accent);
         color: var(--accent-fg);
         transition: background var(--dur-fast) var(--ease);

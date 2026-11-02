@@ -57,6 +57,18 @@ impl FixtureSpec {
             articles: 50_000,
         }
     }
+
+    /// The list read-path fixture (#136): 1000 feeds / 100 000 articles —
+    /// the profile the "reads mid-refresh < 100 ms" target and the
+    /// list / starred / unread-count budgets are measured on.
+    #[must_use]
+    pub const fn perf_100k() -> Self {
+        Self {
+            seed: 0x0C51_9A11_C0FF_EE00,
+            feeds: 1_000,
+            articles: 100_000,
+        }
+    }
 }
 
 /// The result of a generation run.

@@ -55,6 +55,7 @@ mod sweep;
 mod work_queue;
 
 pub use hydrate::DEFAULT_HYDRATE_CONCURRENCY;
+pub use maintenance::{MaintenanceOptions, MaintenanceReport};
 pub use reddit_auth::RedditAuthReason;
 pub use schedule::RefreshPolicy;
 pub use sweep::{DEFAULT_REFRESH_CONCURRENCY, RefreshOptions, SweepProgress, SweepReport};
@@ -128,9 +129,12 @@ pub enum CoreError {
         name: String,
     },
     /// The settings key is owned by the facade (the `"destinations"`
-    /// registry, `"destinations.exported"`, `"destinations.seeded"`) and
-    /// cannot be read or written as a raw value.
-    #[error("the {key:?} settings key is facade-owned — use the destination operations")]
+    /// registry, `"destinations.exported"`, `"destinations.seeded"`, the
+    /// `"retention.policy"`) and cannot be read or written as a raw value.
+    #[error(
+        "the {key:?} settings key is facade-owned — use its typed operations (destinations, \
+         retention policy)"
+    )]
     ReservedSettingKey {
         /// The refused key.
         key: String,

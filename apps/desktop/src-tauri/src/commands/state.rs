@@ -11,6 +11,7 @@ use curio_core::model::{ArticleId, FeedId};
 use tauri::{AppHandle, State};
 
 use super::{SharedCore, run_blocking};
+use crate::dto::ArticleFlagDto;
 use crate::error::CommandError;
 use crate::events::{ArticlesChanged, emit_or_log};
 
@@ -151,6 +152,32 @@ pub async fn set_read_later(
     Ok(changed)
 }
 
+/// Sets one flag on many articles in one transaction — the batch behind
+/// the bulk actions (one IPC call, one commit, each changed article's event
+/// staged inside it). Ids that no longer exist are skipped. Returns the ids
+/// that changed, in the order given, which the UI keeps for an exact undo
+/// (the same call with the opposite `value`). Invalidates only if any
+/// changed.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_flag_many(
+    app: AppHandle,
+    core: State<'_, SharedCore>,
+    article_ids: Vec<i64>,
+    flag: ArticleFlagDto,
+    value: bool,
+) -> Result<Vec<i64>, CommandError> {
+    let core = Arc::clone(core.inner());
+    let changed = run_blocking("set_flag_many", move || {
+        set_flag_many_impl(&core, &article_ids, flag, value)
+    })
+    .await?;
+    if !changed.is_empty() {
+        emit_or_log(&app, &ArticlesChanged { feed_id: None });
+    }
+    Ok(changed)
+}
+
 // ------------------------------------------------------------------ impls
 
 fn mark_read_impl(core: &CoreHandle, article_id: i64, read: bool) -> Result<bool, CommandError> {
@@ -169,6 +196,17 @@ fn mark_read_many_impl(
 ) -> Result<u64, CommandError> {
     let ids: Vec<ArticleId> = article_ids.iter().copied().map(ArticleId).collect();
     Ok(core.mark_read_many(&ids, read)?)
+}
+
+fn set_flag_many_impl(
+    core: &CoreHandle,
+    article_ids: &[i64],
+    flag: ArticleFlagDto,
+    value: bool,
+) -> Result<Vec<i64>, CommandError> {
+    let ids: Vec<ArticleId> = article_ids.iter().copied().map(ArticleId).collect();
+    let changed = core.set_flag_many(&ids, flag.into(), value)?;
+    Ok(changed.into_iter().map(|id| id.0).collect())
 }
 
 fn record_opened_impl(
@@ -273,6 +311,46 @@ mod tests {
         // Unknown ids are skipped rather than failing the whole batch.
         assert_eq!(mark_read_many_impl(&core, &[424_242, b], true).unwrap(), 1);
         assert!(article_state_of(&core, b).read);
+    }
+
+    #[test]
+    fn set_flag_many_maps_each_flag_and_returns_the_changed_ids() {
+        let (_dir, core) = temp_core();
+        let a = seed_article(&core, "bulk-a");
+        let b = seed_article(&core, "bulk-b");
+        assert!(set_starred_impl(&core, a, true).unwrap());
+
+        let ids = [a, 424_242, b];
+        assert_eq!(
+            set_flag_many_impl(&core, &ids, ArticleFlagDto::Starred, true).unwrap(),
+            [b],
+            "a was starred already; the unknown id is skipped"
+        );
+        assert_eq!(
+            set_flag_many_impl(&core, &ids, ArticleFlagDto::Read, true).unwrap(),
+            [a, b]
+        );
+        assert_eq!(
+            set_flag_many_impl(&core, &ids, ArticleFlagDto::ReadLater, true).unwrap(),
+            [a, b]
+        );
+        assert_eq!(
+            set_flag_many_impl(&core, &ids, ArticleFlagDto::Archived, true).unwrap(),
+            [a, b]
+        );
+        let state = article_state_of(&core, b);
+        assert!(state.read && state.starred && state.read_later && state.archived);
+
+        // The undo: the changed ids with the opposite value.
+        assert_eq!(
+            set_flag_many_impl(&core, &[a, b], ArticleFlagDto::Archived, false).unwrap(),
+            [a, b]
+        );
+        assert!(!article_state_of(&core, a).archived);
+        assert_eq!(
+            set_flag_many_impl(&core, &[], ArticleFlagDto::Read, false).unwrap(),
+            [] as [i64; 0]
+        );
     }
 
     #[test]

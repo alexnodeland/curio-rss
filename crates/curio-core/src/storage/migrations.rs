@@ -72,6 +72,18 @@ const MIGRATIONS: &[Migration] = &[
         version: 10,
         sql: include_str!("migrations/0010_feed_schedule.sql"),
     },
+    Migration {
+        version: 11,
+        sql: include_str!("migrations/0011_screen_entry_links.sql"),
+    },
+    Migration {
+        version: 12,
+        sql: include_str!("migrations/0012_list_read_paths.sql"),
+    },
+    Migration {
+        version: 13,
+        sql: include_str!("migrations/0013_retention.sql"),
+    },
 ];
 
 /// The schema version this build writes and expects.

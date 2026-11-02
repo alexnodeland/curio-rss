@@ -59,10 +59,13 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'a11y.skipToContent': 'Przejdź do treści',
     'shell.feeds.loading': 'Ładowanie subskrypcji…',
     'shell.feeds.empty': 'Brak subskrypcji',
-    'emptyState.hint':
-        'Zasubskrybuj kanał, aby zacząć czytać, lub przenieś subskrypcje z innego czytnika.',
     'emptyState.addFeed': 'Dodaj pierwszy kanał',
-    'emptyState.importOpml': 'Importuj OPML…',
+    'welcome.title': 'Witaj w Curio',
+    'welcome.intro':
+        'Obserwuj strony, kanały i newslettery, które czytasz. Curio zbiera je w jedną spokojną listę i zachowuje to, co ważne, w Twoich notatkach jako zwykły markdown.',
+    'welcome.import': 'Przenosisz się z innej aplikacji?',
+    'welcome.keys': 'Trzy klawisze na start',
+    'welcome.keys.star': 'aby oznaczyć gwiazdką',
     'shell.feeds.count':
         '{count, plural, one {# kanał} few {# kanały} many {# kanałów} other {# kanału}}',
     'shell.unread.count':
@@ -102,6 +105,29 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'list.label': 'Artykuły',
     'list.loading': 'Ładowanie artykułów…',
     'list.empty': 'Brak artykułów',
+    'list.empty.all': 'Nie ma jeszcze artykułów',
+    'list.empty.all.hint': 'Nowe artykuły pojawią się tutaj, gdy kanały się odświeżą.',
+    'list.empty.unread': 'Wszystko przeczytane',
+    'list.empty.showRead': 'Pokaż przeczytane artykuły',
+    'list.empty.starred': 'Brak artykułów z gwiazdką',
+    'list.empty.starred.hint':
+        'Naciśnij {key} na artykule, aby oznaczyć go gwiazdką i mieć go tutaj.',
+    'list.empty.readLater': 'Nic nie odłożono na później',
+    'list.empty.readLater.hint': 'Naciśnij {key} na artykule, aby odłożyć go na później.',
+    'list.empty.archived': 'Archiwum jest puste',
+    'list.empty.archived.hint':
+        'Naciśnij {key} na skończonym artykule: trafi tutaj i zniknie z pozostałych widoków.',
+    'list.empty.feed': 'Ten kanał nie ma jeszcze artykułów',
+    'list.empty.feed.hint': 'Curio sprawdza go przy każdym odświeżeniu.',
+    'list.empty.refresh': 'Odśwież teraz',
+    'list.empty.feedError': 'Curio nie może pobrać tego kanału',
+    'feedError.notAFeed':
+        'Ten adres zwraca stronę internetową, a nie kanał. Sprawdź adres URL kanału.',
+    'feedError.parse': 'Nie można odczytać kanału: to nie jest poprawny RSS ani Atom.',
+    'feedError.gone': 'Witryna usunęła ten kanał (HTTP 410).',
+    'feedError.http': 'Witryna odpowiedziała błędem. Sprawdź adres URL kanału lub spróbuj później.',
+    'feedError.generic':
+        'Ostatnie odświeżenie się nie powiodło. Spróbuj ponownie lub sprawdź stan kanału.',
     'list.view.home': 'Widok główny',
     'list.view.rows': 'Widok listy',
     'list.filter.unreadOnly': 'Pokaż tylko nieprzeczytane',
@@ -112,6 +138,7 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.hint.move': 'aby się przesuwać',
     'reader.hint.read': 'aby czytać',
     'reader.hint.help': 'aby zobaczyć skróty',
+    'reader.hint.exitFocus': 'aby wyjść z trybu skupienia',
     'reader.imagesOff': 'Obrazy są wyłączone w tym artykule.',
     'reader.imagesOff.enable': 'Włącz',
     'reader.tableScroll': 'Przewijana tabela',
@@ -131,6 +158,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.action.loadFull': 'Wczytaj pełny artykuł',
     'reader.action.promote': 'Zapisz do notatek',
     'reader.action.typography': 'Typografia',
+    'reader.action.focusMode': 'Tryb skupienia',
+    'reader.action.exitFocusMode': 'Wyjdź z trybu skupienia',
     'reader.meta.words':
         '{count, plural, one {# słowo} few {# słowa} many {# słów} other {# słowa}}',
     'article.date.firstSeen': 'Zauważony po raz pierwszy: {date}',
@@ -146,6 +175,13 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'reader.reddit.openLink': 'Otwórz link',
     'typography.title': 'Typografia',
     'typography.font': 'Czcionka',
+    'typography.font.sans': 'Bezszeryfowa',
+    'typography.font.serif': 'Szeryfowa',
+    'typography.font.mono': 'O stałej szerokości',
+    'typography.font.humanist': 'Humanistyczna',
+    'typography.font.grotesque': 'Groteskowa',
+    'typography.font.readable': 'Czytelna',
+    'typography.pixels': '{value}\u00a0px',
     'typography.size': 'Rozmiar',
     'typography.lineHeight': 'Interlinia',
     'typography.measure': 'Szerokość',
@@ -184,6 +220,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'search.empty': 'Brak wyników',
     'search.results':
         '{count, plural, one {# wynik} few {# wyniki} many {# wyników} other {# wyniku}}',
+    'search.resultsCapped':
+        '{count, plural, one {#+ wynik} few {#+ wyniki} many {#+ wyników} other {#+ wyniku}}',
     'search.scope.label': 'Szukaj w',
     'search.scope.everywhere': 'Wszędzie',
     'destinations.title': 'Miejsca docelowe',
@@ -347,6 +385,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'settings.about.profile': 'Profil: {path}',
     'settings.about.schema': 'Schemat bazy danych v{version}',
     'theme.system': 'Systemowy',
+    'theme.name.light': 'Jasny',
+    'theme.name.dark': 'Ciemny',
     'theme.select': 'Użyj motywu {name}',
     'theme.active': 'Aktywny motyw: {name}',
     'theme.import': 'Importuj motyw…',
@@ -491,6 +531,8 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'connectivity.offline': 'Offline',
     'connectivity.offline.hint': 'Brak sieci — odświeżanie w tle wstrzymane',
     'pane.sidebar.resize': 'Zmień rozmiar paska bocznego',
+    'pane.sidebar.show': 'Pokaż pasek boczny',
+    'pane.sidebar.hide': 'Ukryj pasek boczny',
     'pane.list.resize': 'Zmień rozmiar listy artykułów',
     'toast.dismiss': 'Odrzuć',
     'toast.region': 'Powiadomienia',
@@ -528,7 +570,10 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'shortcut.pageUp': 'Strona w górę',
     'shortcut.toggleArchived': 'Archiwizuj / przywróć artykuł z archiwum',
     'shortcut.markAllRead': 'Oznacz wszystko w bieżącym widoku jako przeczytane',
+    'shortcut.toggleSidebar': 'Pokaż / ukryj pasek boczny',
+    'shortcut.toggleFocusMode': 'Tryb skupienia: tylko artykuł',
     'key.space': 'Spacja',
+    'key.ctrl': 'Ctrl',
 
     'recovery.title.corrupt': 'Curio nie może odczytać swojej bazy danych',
     'recovery.title.tooNew': 'Ta baza danych pochodzi z nowszego Curio',
@@ -585,4 +630,49 @@ export const pl: Partial<Record<MessageKey, string>> = {
     'recovery.recovered.title': 'Curio jest gotowe',
     'recovery.recovered.body': 'Twoja biblioteka została otwarta.',
     'recovery.recovered.setAside': 'Poprzednia baza danych została przeniesiona do {path}.',
+
+    'bulk.toolbar': 'Działania na zaznaczeniu',
+    'bulk.count':
+        '{count, plural, one {Zaznaczono #} few {Zaznaczono #} many {Zaznaczono #} other {Zaznaczono #}}',
+    'bulk.clear': 'Wyczyść zaznaczenie',
+    'reader.multiSelected':
+        '{count, plural, one {Zaznaczono # artykuł} few {Zaznaczono # artykuły} many {Zaznaczono # artykułów} other {Zaznaczono # artykułu}}',
+    'reader.multiSelected.hint':
+        'Użyj paska pod listą albo naciśnij Esc, aby wyczyścić zaznaczenie.',
+    'toast.bulk.unread':
+        '{count, plural, one {Oznaczono # jako nieprzeczytany} few {Oznaczono # jako nieprzeczytane} many {Oznaczono # jako nieprzeczytane} other {Oznaczono # jako nieprzeczytane}}',
+    'toast.bulk.starred':
+        '{count, plural, one {Oznaczono gwiazdką # artykuł} few {Oznaczono gwiazdką # artykuły} many {Oznaczono gwiazdką # artykułów} other {Oznaczono gwiazdką # artykułu}}',
+    'toast.bulk.unstarred':
+        '{count, plural, one {Usunięto gwiazdkę z # artykułu} few {Usunięto gwiazdkę z # artykułów} many {Usunięto gwiazdkę z # artykułów} other {Usunięto gwiazdkę z # artykułu}}',
+    'toast.bulk.readLater':
+        '{count, plural, one {Dodano # do listy Do przeczytania} few {Dodano # do listy Do przeczytania} many {Dodano # do listy Do przeczytania} other {Dodano # do listy Do przeczytania}}',
+    'toast.bulk.readLaterRemoved':
+        '{count, plural, one {Usunięto # z listy Do przeczytania} few {Usunięto # z listy Do przeczytania} many {Usunięto # z listy Do przeczytania} other {Usunięto # z listy Do przeczytania}}',
+    'toast.bulk.archived':
+        '{count, plural, one {Zarchiwizowano # artykuł} few {Zarchiwizowano # artykuły} many {Zarchiwizowano # artykułów} other {Zarchiwizowano # artykułu}}',
+    'toast.bulk.unarchived':
+        '{count, plural, one {Przywrócono z archiwum # artykuł} few {Przywrócono z archiwum # artykuły} many {Przywrócono z archiwum # artykułów} other {Przywrócono z archiwum # artykułu}}',
+    'toast.bulk.undone':
+        '{count, plural, one {Przywrócono # artykuł} few {Przywrócono # artykuły} many {Przywrócono # artykułów} other {Przywrócono # artykułu}}',
+    'shortcut.extendDown': 'Rozszerz zaznaczenie w dół',
+    'shortcut.extendUp': 'Rozszerz zaznaczenie w górę',
+    'toast.bulk.noChange': 'Nic do zmiany',
+    'shortcut.commandPalette': 'Paleta poleceń',
+    'palette.title': 'Paleta poleceń',
+    'palette.placeholder': 'Szukaj poleceń, kanałów, folderów, ustawień i motywów…',
+    'palette.results': 'Wyniki',
+    'palette.empty': 'Brak wyników',
+    'palette.resultCount':
+        '{count, plural, one {# wynik} few {# wyniki} many {# wyników} other {# wyniku}}',
+    'palette.group.command': 'Polecenie',
+    'palette.group.view': 'Widok',
+    'palette.group.feed': 'Kanał',
+    'palette.group.folder': 'Folder',
+    'palette.group.settings': 'Ustawienia',
+    'palette.group.theme': 'Motyw',
+    'palette.current': 'bieżący',
+    'palette.hint.move': 'przejdź',
+    'palette.hint.run': 'uruchom',
+    'palette.hint.close': 'zamknij',
 };

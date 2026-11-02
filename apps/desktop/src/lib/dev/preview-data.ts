@@ -13,7 +13,9 @@ import type {
 } from '$lib/bindings';
 
 export interface PreviewArticle {
-    summary: ArticleSummaryDto;
+    /** The list row minus its live `state`/`tags`, which the mock keeps
+     *  below (flips mutate them) and joins on every `list_articles` reply. */
+    summary: Omit<ArticleSummaryDto, 'state' | 'tags'>;
     full: ArticleDto;
     state: ArticleStateDto;
     tags: string[];
@@ -173,7 +175,7 @@ function mk(
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, 160) || null;
-    const summary: ArticleSummaryDto = {
+    const summary: PreviewArticle['summary'] = {
         id,
         feed_id: feedId,
         title,

@@ -34,7 +34,10 @@ Current layout:
   generator is deterministic: the same seed yields a **byte-identical**
   `curio.db` (hash-asserted by the crate's own tests), written through the
   real migrated schema. It powers the criterion cold-start bench
-  (`just bench-cold-start`) and can seed a profile for manual QA.
+  (`just bench-cold-start`), the list read-path bench on a 100k-article
+  profile (`just bench-list`: first page, Starred page and unread counts,
+  printing p50 / p95 against the 10 ms budget) and can seed a profile for
+  manual QA.
   `just bench-cold-start-ci` runs the bench the way the nightly `bench` job
   does — bencher output from a criterion that keeps no baseline of its own
   (the job's `github-action-benchmark` step owns the trailing baseline and
@@ -57,23 +60,29 @@ Current layout:
   XML, an entity bomb, stored-XSS payloads (`<script>`, `onerror=`,
   `javascript:`), entry links with parseable custom schemes (the content
   base a feed author controls — `custom-scheme-links.xml`, the first
-  `feed_parse` fuzz find), and a hostile Reddit listing.
+  `feed_parse` fuzz find), an entry nested 900 levels deep
+  (`deep-nesting.xml`: the depth that aborted an export, #244), and a
+  hostile Reddit listing.
   `crates/curio-core/tests/nasty_corpus.rs` pins each file (with
   `feeds/`) to its expected outcome — parses with N entries, or rejected —
   and **a new file here must be added to its `SEEDS` table**
   (`committed_seeds_are_all_pinned` fails otherwise). The corpus itself,
   over 1000 inputs, is generated from these seeds at test time,
   deterministically: byte-level encoding variants (BOMs, UTF-16, Latin-1,
-  lying declarations, control characters), size/shape extremes (deep
-  nesting, a ~700 KB entry, thousands of items, attribute floods) and
-  seeded mutants. That is why nothing large is committed. Every input must
-  end in a classified outcome with no panic, and everything it stores must
-  pass the inertness audit (`tests/common/inert.rs`). The same files seed
-  the `fuzz/` targets (`just fuzz`, nightly), and a crash a fuzz target
-  finds is pinned back here as a new seed.
+  lying declarations, control characters), size/shape extremes (HTML
+  nested 10 000 levels deep, a ~700 KB entry, thousands of items,
+  attribute floods) and seeded mutants. That is why nothing large is
+  committed. Every input must end in a classified outcome with no panic,
+  and everything it stores must pass the inertness audit
+  (`tests/common/inert.rs`). The same files seed the `fuzz/` targets
+  (`just fuzz`, nightly), and a crash a fuzz target finds is pinned back
+  here as a new seed.
 
 - `html/` — article HTML → sanitize → extract → CommonMark cases, pinned to
-  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate.
+  insta snapshots; `xss-corpus.html` is the stored-XSS regression gate, and
+  `xss-escaped-code.html` its export half: payloads that are escaped text
+  inside `<pre>`/`<code>` (kept by the sanitizer on purpose) must stay code
+  in the markdown, never live raw HTML (#245).
   They also seed the `content_pipeline` fuzz target, whose checks
   `content_golden.rs` replays over every file here, so a find pinned as a
   fixture (`c0-control-urls.html`, the first one) stays fixed

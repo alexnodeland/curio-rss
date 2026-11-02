@@ -40,20 +40,25 @@ impl std::fmt::Debug for ReadPool {
     }
 }
 
+/// Opens one read-only connection configured like the pool's.
+pub(crate) fn open_reader(path: &Path) -> Result<Connection, StorageError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_URI;
+    let conn = Connection::open_with_flags(path, flags)?;
+    conn.busy_timeout(super::BUSY_TIMEOUT)?;
+    // Defense in depth on top of the read-only open flag.
+    conn.pragma_update(None, "query_only", true)?;
+    Ok(conn)
+}
+
 impl ReadPool {
     /// Opens `size` read-only connections against the (already migrated)
     /// database at `path`.
     pub(crate) fn open(path: &Path, size: usize, timeout: Duration) -> Result<Self, StorageError> {
-        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_URI;
         let mut free = Vec::with_capacity(size);
         for _ in 0..size {
-            let conn = Connection::open_with_flags(path, flags)?;
-            conn.busy_timeout(super::BUSY_TIMEOUT)?;
-            // Defense in depth on top of the read-only open flag.
-            conn.pragma_update(None, "query_only", true)?;
-            free.push(conn);
+            free.push(open_reader(path)?);
         }
         Ok(Self {
             free: Mutex::new(free),

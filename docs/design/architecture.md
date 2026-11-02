@@ -109,6 +109,27 @@ One mandatory `PolicedClient` for **all** outbound requests (feeds, favicons, im
   the run; so does a successful manual refresh of an auto-paused feed. A page host's 429
   during full-text hydration is `RateLimited`, which drops that feed's remaining queued
   pages. `fetch_log` keeps the newest 50 rows per feed.
+- **Maintenance** (`CoreHandle::maintenance`, `storage/repo/maintenance.rs`) is the
+  routine pass heads run (`curio maintenance`): the opt-in article-retention policy
+  (age and/or per-feed count, stored as the facade-owned `retention.policy` setting)
+  reaps feed articles but never a starred, read-later, tagged or exported one, nor an
+  unread one unless configured. "Exported" is the `article_exports` table: an export
+  records its article there *before* writing the note (so a pass running alongside, in
+  any process, either sees the record inside its reap transaction or already deleted
+  the article and the export fails), and the record outlives the destination. Each pass
+  also records what every registered destination's manifest lists (exports from before
+  the table existed); an unreadable manifest cancels the reap. A reaped key leaves an
+  `article_tombstones` row (with the row's `source_url`, so reused-guid key settling
+  finds it under either key form) so a feed still listing the item does not resurrect
+  it; the row goes once a successful fetch more than a day after its last sighting no
+  longer lists it, or with its feed. The pass also purges orphans on request, drops
+  unused tags (untag drops a tag at its last use too) and trims the fetch log; after
+  its transaction, best effort (a failure is reported, never undoes the reap): a
+  bounded incremental FTS5 `merge` (2 000 pages; a full `optimize` rewrites the whole
+  index under the write lock), `PRAGMA optimize`, `wal_checkpoint(TRUNCATE)` (the
+  writer sets `journal_size_limit` = 64 MiB); then the event-retention sweep.
+  `PRAGMA integrity_check` runs on a fresh connection: a pooled reader's cached FTS5
+  structure goes stale when another connection merges segments.
 - **Refresh sweeps** (`handle/sweep.rs`) are the one multi-feed refresh path, used by
   both heads: 8 feeds in flight by default, so a few hung hosts cost about one request
   timeout between them. The slots are shared fairly between hosts: a politeness-paced
@@ -183,6 +204,15 @@ allowance carries a vector in `xss-corpus.html`):
   `language-*` class on `pre`/`code` (the exported fence language). When a
   whole-page feed item is extracted, direction set only on the winning container
   survives as a `<div dir lang>` wrapper.
+- **Code in exported markdown** — code text is the one thing export writes
+  unescaped, so it always lands where a renderer reads it as code: every `<pre>`
+  becomes a fence longer than any backtick run in it (an inline span where a fence
+  cannot stand on its own lines), every other `<code>` a single-line span, kept a
+  space apart from anything rendered before it on the same line so two spans'
+  delimiters never merge. A footnote definition that opens with a fence starts on
+  the line after its `[^n]:` label, where a renderer without footnotes reads it as
+  code too. Escaped `&lt;script&gt;` inside code therefore never becomes a live tag
+  in the note (#245).
 - **Embeds** — iframes from known media/content hosts (YouTube, Vimeo, Spotify,
   SoundCloud, CodePen, Bluesky) or with an embed-shaped URL (`/embed`, `/player`, …,
   e.g. Mastodon) become a plain "Embedded media/content (host) ↗" link; invisible
@@ -213,6 +243,16 @@ deletes `<noscript>` and every iframe outside its own short video-host list.
   `event_intents_dead` rather than failing every open.
 - Escaped FTS5 query builder (never raw `MATCH`); keyset pagination everywhere; counts
   computed in SQL.
+- The list read paths never carry the article bodies (#136). A list or search page reads
+  **list rows** (`ListedArticle`: the summary columns, a preview built from a bounded
+  `substr` of the text, the state flags and the tags) — one read renders a page, never
+  a state query per row. The bodies stay out of Rust and off the IPC wire; SQLite still
+  pages through each row's stored body (`substr` loads the whole value, and later
+  columns sit behind it), so a cold page cache still pays for those reads. The sparse membership views (Starred, Read later, Archived)
+  page newest-first through partial indexes on `article_state`, and per-feed unread
+  counts live in a `feed_unread` table that triggers on `articles`, `article_state`
+  and `feeds` keep equal to the scan they replace, so a badge refresh reads one row per
+  feed. `just bench-list` measures all three on the 100k fixture (budget: p95 < 10 ms).
 - Re-ingest is **change-aware and provenance-aware**: `articles.content_origin`
   (`feed | manual | full_text | enriched`) records where the stored body came from; a
   refresh upsert replaces only `feed`/`manual` bodies (hydrated or enriched text is never

@@ -9,7 +9,7 @@
 import Icon from '$components/common/Icon.svelte';
 import { contextMenu } from '$lib/actions/context-menu';
 import { tooltip } from '$lib/actions/tooltip';
-import { t } from '$lib/i18n';
+import { formatIntlNumber, t } from '$lib/i18n';
 import {
     deleteFolder,
     markFolderRead,
@@ -207,7 +207,7 @@ function onFolderDrop(event: DragEvent): void {
             >
                 <span class="folder-name truncate" use:tooltip={folder.name}>{folder.name}</span>
                 {#if unread > 0}
-                    <span class="folder-count" aria-hidden="true">{unread}</span>
+                    <span class="folder-count" aria-hidden="true">{formatIntlNumber(unread)}</span>
                     <span class="sr-only">{t('shell.unread.count', { count: unread })}</span>
                 {/if}
             </button>
@@ -307,7 +307,7 @@ function onFolderDrop(event: DragEvent): void {
         color: var(--fg-muted);
         text-align: left;
         font-size: var(--text-md);
-        font-weight: 500;
+        font-weight: var(--weight-medium);
         transition: background var(--dur-fast) var(--ease);
     }
 
@@ -362,7 +362,7 @@ function onFolderDrop(event: DragEvent): void {
         background: var(--surface-raised);
         color: var(--fg-muted);
         font-size: 0.7rem;
-        font-weight: 600;
+        font-weight: var(--weight-semibold);
         font-variant-numeric: tabular-nums;
         text-align: center;
         line-height: 1.5;

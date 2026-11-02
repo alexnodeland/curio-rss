@@ -241,6 +241,9 @@ describe('the palette catalogue', () => {
         expect(byId.get('settings:appearance')?.label).toBe('Appearance');
         expect(byId.get('theme:system')).toMatchObject({ label: 'System', current: true });
         expect(byId.get('theme:nord')?.current).toBe(false);
+        // A descriptive built-in name is translated; a proper noun is verbatim.
+        expect(byId.get('theme:dark')?.label).toBe('Dark');
+        expect(byId.get('theme:nord')?.label).toBe('Nord');
         expect(byId.get('command:app.settings')?.kbd).toBe(',');
 
         selectionStore.selectFeed(1);

@@ -10,7 +10,7 @@
  * {@link paletteItems} in a `$derived`, so a feed added while the palette is
  * open shows up in it.
  */
-import { type MessageKey, t } from '$lib/i18n';
+import { type MessageKey, displayName, t } from '$lib/i18n';
 import { shortcutKbd } from '$lib/keyboard/labels';
 import { SHORTCUTS, type ShortcutId } from '$lib/keyboard/registry';
 import { isLinkless } from '$lib/utils/article';
@@ -235,7 +235,7 @@ function settingsItems(): PaletteItem[] {
 function themeItems(): PaletteItem[] {
     const themes: { id: ThemePreference; name: string }[] = [
         { id: 'system', name: t('theme.system') },
-        ...THEMES.map((theme) => ({ id: theme.id, name: theme.name })),
+        ...THEMES.map((theme) => ({ id: theme.id, name: displayName(theme.name) })),
         ...themeStore.customThemes.map((theme) => ({
             id: `custom-${theme.id}` as const,
             name: theme.name,

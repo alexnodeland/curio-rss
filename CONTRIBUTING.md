@@ -94,16 +94,18 @@ and as lefthook hooks scoped to `apps/desktop/` changes.
   sections into submodules, never by raising the ceiling.
 - **Every UI word comes from a catalog.** Desktop copy lives in the 8
   locale catalogs under `apps/desktop/src/lib/i18n/` and renders through
-  `t()`; numbers go through `formatIntlNumber` (never `toFixed`) and dates
-  through the `Intl` date helpers, so German reads `1,6`. A built-in
+  `t()`; numbers go through `formatIntlNumber` (never `toFixed`), or into
+  `t()` as a numeric param, which formats itself — and dates through the
+  `Intl` date helpers, so German reads `1,6` and `1.234`. A built-in
   choice's name is a `DisplayName`: a catalog key when it is descriptive
   ("Light", "Serif"), a proper noun only when it is a name ("Nord",
   "Georgia"). The `curio/no-raw-text` ESLint rule (in `just desktop-lint`,
   source `apps/desktop/eslint-rules/`) fails on letters in a template text
-  node, on string literals rendered as text, and on static copy in
-  `aria-label`/`title`/`placeholder`/`alt`; its `allow` list in
-  `eslint.config.js` is for tokens that are not language (`HTTP`, `r/`),
-  each with its reason.
+  node, on string literals rendered as text, on copy in
+  `aria-label`/`title`/`placeholder`/`alt`, in a component's text props
+  (`label`, `title`, `message`, …) and in an action's argument
+  (`use:tooltip`); its `allow` list in `eslint.config.js` is for tokens
+  that are not language (`HTTP`, `r/`), each with its reason.
 - **No blobs.** No git object may exceed 1 MB. `just blob-guard` (part of
   `just ci`) checks the full local history before you push; CI runs the
   same guard server-side.

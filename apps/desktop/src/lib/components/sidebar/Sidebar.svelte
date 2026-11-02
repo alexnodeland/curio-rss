@@ -8,7 +8,7 @@
 import Icon, { type IconName } from '$components/common/Icon.svelte';
 import Skeleton from '$components/common/Skeleton.svelte';
 import { tooltip } from '$lib/actions/tooltip';
-import { type MessageKey, t } from '$lib/i18n';
+import { formatIntlNumber, type MessageKey, t } from '$lib/i18n';
 import { shortcutKbd } from '$lib/keyboard/labels';
 import {
     activeView,
@@ -318,7 +318,7 @@ function newFolder(): void {
                             <span class="truncate">{t(view.label)}</span>
                             {#if view.id === 'all' && feedsStore.unreadTotal > 0}
                                 <span class="view-count" aria-hidden="true"
-                                    >{feedsStore.unreadTotal}</span
+                                    >{formatIntlNumber(feedsStore.unreadTotal)}</span
                                 >
                                 <span class="sr-only"
                                     >{t('shell.unread.count', { count: feedsStore.unreadTotal })}</span

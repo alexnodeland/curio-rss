@@ -24,6 +24,24 @@ describe('t', () => {
         expect(t('shell.unread.count', { count: 0 })).toBe('0 unread');
     });
 
+    it('writes a numeric {placeholder} in the active locale, a string verbatim', () => {
+        try {
+            expect(t('refresh.inProgress', { done: 1234, total: 5678 })).toBe(
+                'Refreshing… 1,234 of 5,678',
+            );
+            localeStore.active = 'de';
+            expect(t('refresh.inProgress', { done: 1234, total: 5678 })).toBe(
+                'Wird aktualisiert… 1.234 von 5.678',
+            );
+            // A string param (an id, a path) is never reformatted.
+            expect(t('settings.redditApi.status.on', { clientId: '1234' })).toBe(
+                'Verbunden — Client-ID 1234',
+            );
+        } finally {
+            localeStore.reset();
+        }
+    });
+
     it('leaves unknown placeholders visible rather than eating them', () => {
         expect(t('reddit.postedBy', {})).toBe('Posted by u/{author}');
     });

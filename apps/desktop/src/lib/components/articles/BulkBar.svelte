@@ -21,7 +21,7 @@ export const BULK_BAR_INSET = 64;
 import type { ArticleFlagDto } from '$lib/bindings';
 import Icon, { type IconName } from '$components/common/Icon.svelte';
 import { tooltip } from '$lib/actions/tooltip';
-import { type MessageKey, t } from '$lib/i18n';
+import { formatIntlNumber, type MessageKey, t } from '$lib/i18n';
 import { keyLabel, shortcutKbd } from '$lib/keyboard/labels';
 import type { ShortcutId } from '$lib/keyboard/registry';
 import { bulkValue, setFlagForSelection } from '$lib/state/actions';
@@ -94,7 +94,7 @@ const count = $derived(selectionStore.selectedIds.length);
          persistent live region (it outlives this bar, so the first count is
          announced too) and is the bar's own visually hidden text. -->
     <span class="bulk-count" aria-hidden="true" use:tooltip={t('bulk.count', { count })}
-        >{count}</span
+        >{formatIntlNumber(count)}</span
     >
     <span class="sr-only">{t('bulk.count', { count })}</span>
     {#each buttons as button (button.id)}

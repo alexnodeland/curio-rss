@@ -11,6 +11,13 @@ export type ModalKind = 'add-feed' | 'settings' | 'help' | 'destinations' | 'edi
 /** Which section the edit-feed modal opens focused on. */
 export type EditFeedSection = 'details' | 'health';
 
+/** What the add-feed modal opens pre-filled with (a welcome-view preset). */
+export interface AddFeedSeed {
+    url: string;
+    /** A folder tag to suggest alongside it. */
+    tags: string;
+}
+
 /** Resize bounds per pane — ThreePane and `initLayout` share them. */
 export const PANE_LIMITS = {
     sidebar: { min: 200, max: 420 },
@@ -36,6 +43,9 @@ export class LayoutStore {
     editFeedId: number | null = $state(null);
     /** Which section the edit-feed modal scrolls to on open. */
     editFeedSection: EditFeedSection = $state('details');
+
+    /** The add-feed modal's pre-fill while it is open from a preset; else `null`. */
+    addFeedSeed: AddFeedSeed | null = $state(null);
 
     /**
      * Adopts persisted pane layout at startup (after `settingsStore.load()`).
@@ -76,6 +86,12 @@ export class LayoutStore {
         this.activeModal = modal;
     }
 
+    /** Opens the add-feed modal, pre-filled with a starter pattern or feed URL. */
+    openAddFeed(seed: AddFeedSeed | null = null): void {
+        this.addFeedSeed = seed;
+        this.activeModal = 'add-feed';
+    }
+
     /** Opens the edit-feed modal bound to one feed, optionally scrolled to a section. */
     openEditFeed(feedId: number, section: EditFeedSection = 'details'): void {
         this.editFeedId = feedId;
@@ -85,6 +101,7 @@ export class LayoutStore {
 
     closeModal(): void {
         this.activeModal = null;
+        this.addFeedSeed = null;
         this.editFeedId = null;
         this.editFeedSection = 'details';
     }
@@ -92,6 +109,7 @@ export class LayoutStore {
     /** Test isolation. */
     reset(): void {
         this.activeModal = null;
+        this.addFeedSeed = null;
         this.editFeedId = null;
         this.editFeedSection = 'details';
         this.sidebarCollapsed = false;

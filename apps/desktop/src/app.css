@@ -472,8 +472,15 @@ h6 {
    typography preview: each puts `data-reading-theme` on its scroll surface
    and paints `background: var(--reading-surface, …)`. The ink tokens are
    forced directly (`--ink` is a :root color-mix that inherits its computed
-   value, so overriding `--fg` alone would not repaint the prose); links keep
-   the theme's accent. */
+   value, so overriding `--fg` alone would not repaint the prose), and so is
+   the inherited text colour — otherwise text that sets none (the article
+   title) keeps the app theme's computed ink, light-on-paper on a dark theme.
+   Links keep the theme's accent. */
+[data-reading-theme="sepia"],
+[data-reading-theme="paper"] {
+    color: var(--fg);
+}
+
 [data-reading-theme="sepia"] {
     --reading-surface: #f1e5cf;
     --ink: #43392b;
